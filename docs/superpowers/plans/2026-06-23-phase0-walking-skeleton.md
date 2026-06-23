@@ -1004,7 +1004,7 @@ git commit -m "test: kill/resume idempotency proven (no step re-runs)"
 **Interfaces:**
 - Consumes: `Substrate.load_progress/save_progress` (the `detached` map), `models.Step`.
 - Produces:
-  - In `executor.py`: helpers `launch_detached(command: str) -> int` (spawns a shell process detached from the parent, returns its PID) and `is_running(pid: int) -> bool` (`os.kill(pid, 0)` probe).
+  - In `executor.py`: helpers `launch_detached(command: str) -> int` (spawns a shell process detached from the parent, returns its PID) and `is_running(pid: int) -> bool` (`os.kill(pid, 0)` probe, plus a `/proc/<pid>` zombie check — see Step 3 note).
   - In `worker.py`: a step whose `run` begins with the prefix `detached:` is treated as a long-running job — on first encounter the Worker launches it, records `progress.detached[step_id] = pid`, and returns `PROGRESSED` **without** marking the step complete. On later beats, if the step is in `detached` and its PID is still running, the Worker returns `PROGRESSED` (still waiting); once the PID is gone, it marks the step complete and removes it from `detached`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1083,13 +1083,29 @@ def launch_detached(command: str) -> int:
 
 
 def is_running(pid: int) -> bool:
-    """True if a process with this PID is alive."""
+    """True if a process with this PID is alive (and not a zombie).
+
+    NOTE (updated during implementation): `os.kill(pid, 0)` alone is
+    insufficient. A detached child reaped only after its parent (the beat
+    process) exits becomes a zombie, and `os.kill` reports a zombie as alive
+    forever — which would wedge the detached step. So after the kill probe we
+    also check `/proc/<pid>` state and treat `Z` (zombie) as dead. The /proc
+    read is guarded for the TOCTOU race and for non-Linux (no /proc), falling
+    back conservatively to "alive".
+    """
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True  # exists but not ours to signal
+    try:
+        with open(f"/proc/{pid}/status") as fh:
+            for line in fh:
+                if line.startswith("State:"):
+                    return line.split()[1] != "Z"
+    except OSError:
+        pass
     return True
 ```
 
@@ -1425,3 +1441,6 @@ git commit -m "feat: ClaudeCodeExecutor + Phase 0 manual acceptance runbook"
 - Checkpoint granularity is one step per beat; `progress.md` is committed per checkpoint (fine at PoC volume).
 - A single Worker processes the first eligible sprint; concurrency/assignment is Phase 1.
 - The `detached:` prefix is a Phase 0 convention; the scheduler/lease model (Phase 1) replaces ad-hoc PID tracking with proper leases.
+- **Launch-then-checkpoint is not atomic:** if the beat is killed in the window between `launch_detached` returning a PID and `save_progress` persisting it, the detached child is orphaned (it survives via `start_new_session`) but its PID is lost, so a resuming Worker re-launches the command — a non-idempotent detached job could run twice. Acceptable at PoC scale; the Phase 1 lease model (record-intent-before-launch) closes this.
+- **PID reuse is not guarded:** between a detached child exiting and the next beat observing it, the OS could recycle the PID onto an unrelated process, which `is_running` would read as still-alive. Low risk at PoC scale; superseded by Phase 1 leases (which track jobs, not raw PIDs).
+- Python runtime: the PoC venv ran on 3.11.0rc1 (host system Python was 3.10). Satisfies `>=3.11` functionally; pin to a stable 3.11.x/3.12 before Phase 1.

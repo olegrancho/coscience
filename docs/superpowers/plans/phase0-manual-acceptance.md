@@ -3,6 +3,10 @@
 Proves the walking skeleton runs end-to-end with a real Claude Code agent and
 survives a kill. Run on avatar (or any host with the `claude` CLI logged in).
 
+> **Runtime note:** the PoC venv was built on Python 3.11.0rc1 (avatar's system
+> Python is 3.10). This is fine for the walking skeleton, but pin to a stable
+> 3.11.x or 3.12 before Phase 1 — a release candidate is not a supported runtime.
+
 ## Setup
 1. Create a substrate repo:
    - `mkdir -p /tmp/coscience-demo && cd /tmp/coscience-demo && git init`
