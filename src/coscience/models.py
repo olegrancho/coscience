@@ -1,0 +1,60 @@
+"""Typed domain models for the Phase 0 substrate."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import StrEnum
+
+
+class SprintStatus(StrEnum):
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+    EXECUTING = "executing"
+    DONE = "done"
+    CANCELED = "canceled"
+
+
+class BeatOutcome(StrEnum):
+    IDLE = "idle"
+    PROGRESSED = "progressed"
+    COMPLETED = "completed"
+
+
+@dataclass
+class Step:
+    id: str
+    run: str
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Step":
+        return cls(id=str(d["id"]), run=str(d["run"]))
+
+
+@dataclass
+class StepResult:
+    step_id: str
+    completed: bool
+    output: str = ""
+
+
+@dataclass
+class Sprint:
+    id: str
+    status: SprintStatus
+    goals: str
+    plan: list[Step]
+    program: str | None = None
+    results: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Result:
+    id: str
+    sprint: str
+    summary: str
+
+
+@dataclass
+class ProgressState:
+    sprint_id: str
+    completed_steps: list[str] = field(default_factory=list)
+    detached: dict[str, int] = field(default_factory=dict)
