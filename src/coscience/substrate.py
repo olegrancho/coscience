@@ -1,10 +1,11 @@
 """Read/write the OKF substrate (a directory of markdown files)."""
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from coscience.frontmatter_io import parse, serialize
-from coscience.models import Sprint, SprintStatus, Step
+from coscience.models import Sprint, SprintStatus, Step, ProgressState, Result
 
 
 class Substrate:
@@ -53,3 +54,46 @@ class Substrate:
                 if status is None or sprint.status == status:
                     out.append(sprint)
         return out
+
+    # --- progress ---
+    def _progress_path(self, sprint_id: str) -> Path:
+        return self.sprint_dir(sprint_id) / "progress.md"
+
+    def load_progress(self, sprint_id: str) -> ProgressState:
+        path = self._progress_path(sprint_id)
+        if not path.is_file():
+            return ProgressState(sprint_id=sprint_id)
+        fm, _ = parse(path.read_text())
+        return ProgressState(
+            sprint_id=sprint_id,
+            completed_steps=list(fm.get("completed_steps", [])),
+            detached={str(k): int(v) for k, v in (fm.get("detached") or {}).items()},
+        )
+
+    def save_progress(self, progress: ProgressState) -> None:
+        fm = {
+            "completed_steps": progress.completed_steps,
+            "detached": progress.detached,
+        }
+        d = self.sprint_dir(progress.sprint_id)
+        d.mkdir(parents=True, exist_ok=True)
+        self._progress_path(progress.sprint_id).write_text(
+            serialize(fm, f"# Progress {progress.sprint_id}\n")
+        )
+
+    # --- results ---
+    def save_result(self, result: Result) -> None:
+        fm = {"type": "result", "sprint": result.sprint}
+        d = self.repo_root / "results"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{result.id}.md").write_text(serialize(fm, result.summary))
+
+    # --- git ---
+    def commit(self, message: str) -> None:
+        if not (self.repo_root / ".git").is_dir():
+            return
+        subprocess.run(["git", "-C", str(self.repo_root), "add", "-A"], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo_root), "commit", "-q", "-m", message],
+            check=False,  # tolerate "nothing to commit"
+        )

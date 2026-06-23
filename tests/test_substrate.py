@@ -1,4 +1,6 @@
-from coscience.models import Sprint, SprintStatus, Step
+import subprocess
+
+from coscience.models import Sprint, SprintStatus, Step, ProgressState, Result
 from coscience.substrate import Substrate
 from tests.conftest import write_raw_sprint
 
@@ -35,3 +37,39 @@ def test_iter_sprints_filters_by_status(substrate):
 
 def test_iter_sprints_empty_when_no_dir(substrate):
     assert substrate.iter_sprints() == []
+
+
+def test_load_progress_missing_returns_empty(substrate):
+    p = substrate.load_progress("sp1")
+    assert p == ProgressState(sprint_id="sp1")
+
+
+def test_save_then_load_progress_roundtrips(substrate):
+    p = ProgressState(sprint_id="sp1", completed_steps=["s1"], detached={"s2": 4242})
+    substrate.save_progress(p)
+    assert substrate.load_progress("sp1") == p
+
+
+def test_save_result_writes_file(substrate):
+    substrate.save_result(Result(id="r1", sprint="sp1", summary="found X"))
+    text = (substrate.repo_root / "results" / "r1.md").read_text()
+    assert "sprint: sp1" in text
+    assert "found X" in text
+
+
+def test_commit_is_noop_without_git(substrate):
+    # repo_root (tmp_path) is not a git repo; must not raise.
+    substrate.commit("nothing to see")
+
+
+def test_commit_records_changes_in_git(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    s = Substrate(tmp_path)
+    s.save_result(Result(id="r1", sprint="sp1", summary="x"))
+    s.commit("add result")
+    log = subprocess.run(
+        ["git", "log", "--oneline"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert "add result" in log
