@@ -1,7 +1,7 @@
 """The Worker: one bounded unit of work per heartbeat."""
 from __future__ import annotations
 
-from coscience.executor import StepExecutor
+from coscience.executor import StepExecutor, is_running, launch_detached
 from coscience.models import BeatOutcome, Result, SprintStatus
 from coscience.substrate import Substrate
 
@@ -46,6 +46,24 @@ class Worker:
             self.substrate.save_sprint(sprint)
             self.substrate.commit(f"sprint {sprint.id}: done, result {result.id}")
             return BeatOutcome.COMPLETED
+
+        if next_step.run.startswith("detached:"):
+            command = next_step.run[len("detached:"):].strip()
+            pid = progress.detached.get(next_step.id)
+            if pid is None:
+                # First encounter: launch and record the PID.
+                progress.detached[next_step.id] = launch_detached(command)
+                self.substrate.save_progress(progress)
+                self.substrate.commit(f"sprint {sprint.id}: step {next_step.id} launched")
+                return BeatOutcome.PROGRESSED
+            if is_running(pid):
+                return BeatOutcome.PROGRESSED  # still waiting; re-attach on next beat
+            # Job finished: mark complete, drop from detached.
+            progress.completed_steps.append(next_step.id)
+            del progress.detached[next_step.id]
+            self.substrate.save_progress(progress)
+            self.substrate.commit(f"sprint {sprint.id}: detached step {next_step.id} done")
+            return BeatOutcome.PROGRESSED
 
         step_result = self.executor.run(next_step)
         if step_result.completed:
