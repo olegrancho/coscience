@@ -1,5 +1,5 @@
 from coscience.executor import ShellStepExecutor
-from coscience.models import BeatOutcome, Sprint, SprintStatus, Step
+from coscience.models import BeatOutcome, Sprint, SprintStatus, Step, StepResult
 from coscience.worker import Worker
 
 
@@ -38,3 +38,32 @@ def test_beats_complete_the_sprint_and_write_result(substrate, tmp_path):
     assert substrate.load_sprint("sp1").status == SprintStatus.DONE
     result_text = (substrate.repo_root / "results" / "sp1-result.md").read_text()
     assert "sprint: sp1" in result_text
+
+
+class _FailingExecutor:
+    """Executor stub whose steps never complete (returncode != 0 case)."""
+    def __init__(self):
+        self.calls = 0
+
+    def run(self, step):
+        self.calls += 1
+        return StepResult(step_id=step.id, completed=False, output="boom")
+
+
+def test_failed_step_is_not_checkpointed_and_retries(substrate):
+    substrate.save_sprint(_approved_sprint("sp1", [
+        Step("s1", "irrelevant"),
+        Step("s2", "irrelevant"),
+    ]))
+    executor = _FailingExecutor()
+    worker = Worker(substrate, executor)
+
+    # Beat 1: runs s1, it fails -> not recorded, sprint executing, PROGRESSED.
+    assert worker.run_one_beat() == BeatOutcome.PROGRESSED
+    assert substrate.load_progress("sp1").completed_steps == []
+    assert substrate.load_sprint("sp1").status == SprintStatus.EXECUTING
+
+    # Beat 2: the SAME first step is retried (not skipped to s2).
+    worker.run_one_beat()
+    assert substrate.load_progress("sp1").completed_steps == []
+    assert executor.calls == 2  # s1 attempted again, not advanced to s2
