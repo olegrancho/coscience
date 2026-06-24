@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from coscience.executor import StepExecutor
+from coscience.executor import StepExecutor, is_running
 from coscience.ledger import Ledger
 from coscience.models import BeatOutcome, SprintStatus
 from coscience.resources import ResourcePool
@@ -24,6 +24,7 @@ class CycleReport:
     beaten: int = 0
     completed: int = 0
     waiting: int = 0
+    reconciled: int = 0
 
 
 class Dispatcher:
@@ -96,6 +97,18 @@ class Dispatcher:
                         cand.status = SprintStatus.EXECUTING
                         self.substrate.save_sprint(cand)
 
+        # --- reconcile: no lease => no running job ---
+        # Grants/preemption above re-adopted any leaseless running sprint that
+        # still fits; kill the detached jobs of those that remain leaseless
+        # (e.g. expired across a dispatcher outage) so physical use matches the
+        # ledger.
+        for sprint in eligible:
+            if self.ledger.lease_for(sprint.id) is None:
+                progress = self.substrate.load_progress(sprint.id)
+                if any(is_running(pid) for pid in progress.detached.values()):
+                    self.worker.stop_sprint(sprint)
+                    report.reconciled += 1
+
         # --- run one beat per leased, executing sprint ---
         for lease in self.ledger.all_leases():
             sprint = self.substrate.load_sprint(lease.sprint_id)
@@ -112,6 +125,6 @@ class Dispatcher:
         report.waiting = sum(
             1 for s in eligible if self.ledger.lease_for(s.id) is None)
         self._save_queue(queue)
-        if report.granted or report.completed or report.preempted:
+        if report.granted or report.completed or report.preempted or report.reconciled:
             self.substrate.commit("dispatch cycle")
         return report
