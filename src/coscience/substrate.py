@@ -101,6 +101,20 @@ class Substrate:
         d.mkdir(parents=True, exist_ok=True)
         (d / f"{result.id}.md").write_text(serialize(fm, result.summary))
 
+    def load_result(self, result_id: str) -> Result:
+        text = (self.repo_root / "results" / f"{result_id}.md").read_text()
+        fm, body = parse(text)
+        return Result(id=result_id, sprint=str(fm.get("sprint", "")), summary=body.strip())
+
+    def iter_results(self) -> list[Result]:
+        results_dir = self.repo_root / "results"
+        if not results_dir.is_dir():
+            return []
+        out = []
+        for path in sorted(results_dir.glob("*.md")):
+            out.append(self.load_result(path.stem))
+        return out
+
     # --- git ---
     def commit(self, message: str) -> None:
         if not (self.repo_root / ".git").is_dir():
