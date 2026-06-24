@@ -1,7 +1,7 @@
 """The Worker: one bounded unit of work per heartbeat."""
 from __future__ import annotations
 
-from coscience.executor import StepExecutor, is_running, launch_detached
+from coscience.executor import StepExecutor, is_running, launch_detached, terminate_detached
 from coscience.models import BeatOutcome, Result, Sprint, SprintStatus
 from coscience.substrate import Substrate
 
@@ -77,3 +77,16 @@ class Worker:
             self.substrate.save_progress(progress)
             self.substrate.commit(f"sprint {sprint.id}: step {next_step.id} done")
         return BeatOutcome.PROGRESSED
+
+    def stop_sprint(self, sprint: Sprint) -> list[str]:
+        """Terminate the sprint's running detached jobs and clear them so the
+        steps relaunch on a later beat. Returns the stopped step ids."""
+        progress = self.substrate.load_progress(sprint.id)
+        stopped = list(progress.detached.keys())
+        for _step_id, pid in list(progress.detached.items()):
+            terminate_detached(pid)
+        if stopped:
+            progress.detached = {}
+            self.substrate.save_progress(progress)
+            self.substrate.commit(f"sprint {sprint.id}: stopped detached jobs {stopped}")
+        return stopped
