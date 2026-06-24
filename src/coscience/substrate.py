@@ -27,6 +27,11 @@ class Substrate:
             plan=plan,
             program=fm.get("program"),
             results=list(fm.get("results", [])),
+            resources_required={
+                str(k): float(v) for k, v in (fm.get("resources_required") or {}).items()
+            },
+            priority=int(fm.get("priority", 0)),
+            preemptible=bool(fm.get("preemptible", True)),
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
@@ -39,6 +44,12 @@ class Substrate:
             fm["program"] = sprint.program
         if sprint.results:
             fm["results"] = sprint.results
+        if sprint.resources_required:
+            fm["resources_required"] = sprint.resources_required
+        if sprint.priority != 0:
+            fm["priority"] = sprint.priority
+        if not sprint.preemptible:
+            fm["preemptible"] = False
         d = self.sprint_dir(sprint.id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))

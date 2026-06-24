@@ -37,6 +37,17 @@ class StepResult:
 
 
 @dataclass
+class Lease:
+    id: str
+    sprint_id: str
+    amounts: dict[str, float]
+    granted_at: float
+    expires_at: float
+    priority: int = 0
+    preemptible: bool = True
+
+
+@dataclass
 class Sprint:
     id: str
     status: SprintStatus
@@ -44,6 +55,9 @@ class Sprint:
     plan: list[Step]
     program: str | None = None
     results: list[str] = field(default_factory=list)
+    resources_required: dict[str, float] = field(default_factory=dict)
+    priority: int = 0
+    preemptible: bool = True
 
 
 @dataclass
