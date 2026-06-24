@@ -56,6 +56,13 @@ restarts unless it checkpoints its own progress, so:
 > `preemptible: false` if its work must never be interrupted (it will then be
 > scheduled as a hard hold and never preempted).
 
-Not yet handled (planned for 1b-2): a lease that **expires** (e.g. after a
-dispatcher outage longer than the TTL) does not currently kill its job —
-expiry-driven reconciliation lands with the service layer.
+**Restart reconciliation (since 1b-2a):** if the dispatcher is down longer than
+a lease's TTL, leases expire but the detached jobs keep running. On the next
+cycle the dispatcher re-adopts the still-running jobs that fit (re-granting
+their lease) and kills the ones that no longer fit, so physical use is
+reconciled back to declared capacity. In steady operation leases are renewed
+every cycle, so this never triggers.
+
+Still deferred (1b-2b): a PID-reuse guard — termination trusts that a stored
+PID still maps to this job; storing a process-identity token to verify before
+signalling lands with the service layer.
