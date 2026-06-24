@@ -95,3 +95,29 @@ class Service:
                 "priority": lease.priority, "preemptible": lease.preemptible,
             },
         }
+
+    # --- results ---
+    def list_results(self) -> list[dict]:
+        return [{"id": r.id, "sprint": r.sprint, "summary": r.summary}
+                for r in self.substrate.iter_results()]
+
+    def get_result(self, result_id: str) -> dict:
+        if not (self.repo_root / "results" / f"{result_id}.md").is_file():
+            raise NotFoundError(result_id)
+        r = self.substrate.load_result(result_id)
+        return {"id": r.id, "sprint": r.sprint, "summary": r.summary}
+
+    # --- ledger ---
+    def ledger_status(self) -> dict:
+        ledger = self._ledger()
+        return {
+            "capacity": dict(self.pool.capacity),
+            "used": ledger.used(),
+            "available": ledger.available(),
+            "leases": [
+                {"id": l.id, "sprint_id": l.sprint_id, "amounts": l.amounts,
+                 "granted_at": l.granted_at, "expires_at": l.expires_at,
+                 "priority": l.priority, "preemptible": l.preemptible}
+                for l in ledger.all_leases()
+            ],
+        }
