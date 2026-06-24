@@ -86,3 +86,17 @@ class Ledger:
         if sprint_id in self._leases:
             del self._leases[sprint_id]
             self.save()
+
+    def renew(self, sprint_id, now, ttl) -> None:
+        lease = self._leases.get(sprint_id)
+        if lease is not None:
+            lease.expires_at = float(now) + float(ttl)
+            self.save()
+
+    def expire(self, now) -> list[Lease]:
+        stale = [l for l in self._leases.values() if l.expires_at <= float(now)]
+        for lease in stale:
+            del self._leases[lease.sprint_id]
+        if stale:
+            self.save()
+        return stale
