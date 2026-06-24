@@ -15,7 +15,7 @@ def test_submit_approve_flow_and_results(tmp_path):
     assert [r["id"] for r in svc.list_sprints(status="approved")] == ["sp1"]
 
     detail = svc.get_sprint("sp1")
-    assert detail["priority"] == 5 and detail["steps"] if "steps" in detail else True
+    assert detail["priority"] == 5
     assert len(detail["plan"]) == 2
 
     svc.substrate.save_result(Result(id="sp1-result", sprint="sp1", summary="done"))
