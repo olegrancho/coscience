@@ -17,7 +17,7 @@ def test_preempted_sprint_is_killed_then_resumes_and_both_complete(substrate):
                       ResourcePool({"gpu": 1.0}), SchedulerPolicy(aging_interval=0.0))
 
     disp.run_one_cycle(now=0.0)  # V launches its job
-    pid_v1 = substrate.load_progress("V").detached["job"]
+    assert "job" in substrate.load_progress("V").detached  # V's job is running
 
     substrate.save_sprint(Sprint(
         id="H", status=SprintStatus.APPROVED, goals="g",

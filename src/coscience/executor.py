@@ -71,6 +71,8 @@ def terminate_detached(pid: int, grace: float = 2.0) -> None:
     try:
         pgid = os.getpgid(pid)
     except (ProcessLookupError, PermissionError):
+        # ProcessLookupError: already gone. PermissionError: not our process
+        # (PID reused by another session) — deliberately leave it alone.
         return
     try:
         os.killpg(pgid, signal.SIGTERM)
