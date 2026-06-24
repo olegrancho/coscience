@@ -79,12 +79,14 @@ class Substrate:
             sprint_id=sprint_id,
             completed_steps=list(fm.get("completed_steps", [])),
             detached={str(k): int(v) for k, v in (fm.get("detached") or {}).items()},
+            outputs={str(k): str(v) for k, v in (fm.get("outputs") or {}).items()},
         )
 
     def save_progress(self, progress: ProgressState) -> None:
         fm = {
             "completed_steps": progress.completed_steps,
             "detached": progress.detached,
+            "outputs": progress.outputs,
         }
         d = self.sprint_dir(progress.sprint_id)
         d.mkdir(parents=True, exist_ok=True)

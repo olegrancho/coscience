@@ -28,17 +28,24 @@ class Worker:
         sprint = self._claim_sprint()
         if sprint is None:
             return BeatOutcome.IDLE
+        return self.run_sprint_beat(sprint)
 
+    def run_sprint_beat(self, sprint) -> BeatOutcome:
         progress = self.substrate.load_progress(sprint.id)
         next_step = next(
             (s for s in sprint.plan if s.id not in progress.completed_steps), None
         )
 
         if next_step is None:
+            lines = [f"Sprint {sprint.id} completed {len(sprint.plan)} steps.", ""]
+            for step in sprint.plan:
+                out = progress.outputs.get(step.id, "").strip()
+                if out:
+                    lines.append(f"## {step.id}\n\n{out}\n")
             result = Result(
                 id=f"{sprint.id}-result",
                 sprint=sprint.id,
-                summary=f"Sprint {sprint.id} completed {len(sprint.plan)} steps.",
+                summary="\n".join(lines).strip(),
             )
             self.substrate.save_result(result)
             sprint.status = SprintStatus.DONE
@@ -51,14 +58,12 @@ class Worker:
             command = next_step.run[len("detached:"):].strip()
             pid = progress.detached.get(next_step.id)
             if pid is None:
-                # First encounter: launch and record the PID.
                 progress.detached[next_step.id] = launch_detached(command)
                 self.substrate.save_progress(progress)
                 self.substrate.commit(f"sprint {sprint.id}: step {next_step.id} launched")
                 return BeatOutcome.PROGRESSED
             if is_running(pid):
-                return BeatOutcome.PROGRESSED  # still waiting; re-attach on next beat
-            # Job finished: mark complete, drop from detached.
+                return BeatOutcome.PROGRESSED
             progress.completed_steps.append(next_step.id)
             del progress.detached[next_step.id]
             self.substrate.save_progress(progress)
@@ -68,6 +73,7 @@ class Worker:
         step_result = self.executor.run(next_step)
         if step_result.completed:
             progress.completed_steps.append(next_step.id)
+            progress.outputs[next_step.id] = (step_result.output or "")[:2000]
             self.substrate.save_progress(progress)
             self.substrate.commit(f"sprint {sprint.id}: step {next_step.id} done")
         return BeatOutcome.PROGRESSED
