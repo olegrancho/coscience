@@ -87,6 +87,7 @@ class Dispatcher:
             if victims:
                 for v in victims:
                     self.ledger.release(v.sprint_id)
+                    self.worker.stop_sprint(self.substrate.load_sprint(v.sprint_id))
                     report.preempted += 1
                 if self.ledger.acquire(cand.id, cand.resources_required, now, ttl,
                                        priority=cand_eff, preemptible=cand.preemptible):
