@@ -41,16 +41,21 @@ Each cycle prints `granted=.. preempted=.. beaten=.. completed=.. waiting=..`.
 - A stuck sprint's lease expires (TTL) and is reclaimed automatically.
 - `.coscience/leases.json` / `queue.json` show live allocation.
 
-## Important caveat: leases are advisory; preemption does NOT kill running jobs
-The dispatcher only manages lease *accounting* — it never kills work. If a
-sprint holding a `detached:` job (e.g. `detached: python train.py`) is
-preempted, its lease is released and reassigned, but **the detached process
-keeps running and keeps using the real GPU**. For that window the physical
-resource is over-subscribed even though the ledger looks correct. Until a
-kill-hook lands (Phase 1b), the safe convention is:
+## Preemption stops running jobs (since 1b-1)
+When a higher-priority sprint preempts a lower-priority **preemptible** holder,
+the dispatcher now terminates the victim's running detached job (its whole
+process group, SIGTERM then SIGKILL), so the physical resource is genuinely
+freed before the new job starts — the capacity guarantee holds for real GPU
+use, not just lease accounting.
 
-> **Mark any sprint that launches a long detached job `preemptible: false`.**
+The preempted sprint stays `EXECUTING` (without a lease) and **relaunches its
+interrupted step from scratch** when it is later re-granted a lease. The job
+restarts unless it checkpoints its own progress, so:
 
-This makes the capacity guarantee hold for *physical* resources, not just
-lease accounting. Short, checkpoint-and-resume steps are fine to leave
-preemptible.
+> Trap SIGTERM in long jobs to checkpoint before exit, **or** mark a sprint
+> `preemptible: false` if its work must never be interrupted (it will then be
+> scheduled as a hard hold and never preempted).
+
+Not yet handled (planned for 1b-2): a lease that **expires** (e.g. after a
+dispatcher outage longer than the TTL) does not currently kill its job —
+expiry-driven reconciliation lands with the service layer.
