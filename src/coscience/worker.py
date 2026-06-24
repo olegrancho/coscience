@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from coscience.executor import StepExecutor, is_running, launch_detached
-from coscience.models import BeatOutcome, Result, SprintStatus
+from coscience.models import BeatOutcome, Result, Sprint, SprintStatus
 from coscience.substrate import Substrate
 
 
@@ -30,7 +30,7 @@ class Worker:
             return BeatOutcome.IDLE
         return self.run_sprint_beat(sprint)
 
-    def run_sprint_beat(self, sprint) -> BeatOutcome:
+    def run_sprint_beat(self, sprint: Sprint) -> BeatOutcome:
         progress = self.substrate.load_progress(sprint.id)
         next_step = next(
             (s for s in sprint.plan if s.id not in progress.completed_steps), None

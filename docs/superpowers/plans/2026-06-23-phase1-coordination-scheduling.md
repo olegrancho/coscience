@@ -421,6 +421,10 @@ class Ledger:
         self.pool = pool
         self.path = Path(path)
         self._leases: dict[str, Lease] = {}
+        # keys that have EVER been leased; used() reports these (incl. at 0.0
+        # after release) but NOT capacity keys that were never leased — this is
+        # what the task's tests require.
+        self._keys_ever_leased: set[str] = set()
 
     # --- persistence ---
     def load(self) -> None:
@@ -429,6 +433,8 @@ class Ledger:
             self._leases = {d["sprint_id"]: Lease(**d) for d in data}
         else:
             self._leases = {}
+        for lease in self._leases.values():
+            self._keys_ever_leased.update(lease.amounts.keys())
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -445,7 +451,7 @@ class Ledger:
         return self._leases.get(sprint_id)
 
     def used(self) -> dict[str, float]:
-        out = {k: 0.0 for k in self.pool.capacity}
+        out = {k: 0.0 for k in self._keys_ever_leased}
         for lease in self._leases.values():
             for k, v in lease.amounts.items():
                 out[k] = out.get(k, 0.0) + v
@@ -475,6 +481,7 @@ class Ledger:
             priority=int(priority),
             preemptible=bool(preemptible),
         )
+        self._keys_ever_leased.update(lease.amounts.keys())
         self._leases[sprint_id] = lease
         self.save()
         return lease

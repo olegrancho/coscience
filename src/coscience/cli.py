@@ -26,7 +26,7 @@ def _make_executor(name: str):
     return ShellStepExecutor()
 
 
-def dispatch_once(repo_root, executor_name: str = "shell") -> CycleReport:
+def dispatch_once(repo_root: Path, executor_name: str = "shell") -> CycleReport:
     disp = Dispatcher(
         Substrate(repo_root), _make_executor(executor_name),
         load_pool(repo_root), SchedulerPolicy(),
@@ -85,5 +85,4 @@ def main(argv: list[str] | None = None) -> int:
                 time.sleep(args.interval)
         return 0
 
-    parser.error("unknown command")
-    return 2
+    parser.error("unknown command")  # raises SystemExit
