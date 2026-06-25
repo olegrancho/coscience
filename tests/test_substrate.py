@@ -45,7 +45,7 @@ def test_load_progress_missing_returns_empty(substrate):
 
 
 def test_save_then_load_progress_roundtrips(substrate):
-    p = ProgressState(sprint_id="sp1", completed_steps=["s1"], detached={"s2": 4242})
+    p = ProgressState(sprint_id="sp1", completed_steps=["s1"], detached={"s2": "4242:123456"})
     substrate.save_progress(p)
     assert substrate.load_progress("sp1") == p
 

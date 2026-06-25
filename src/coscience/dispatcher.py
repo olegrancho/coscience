@@ -105,7 +105,7 @@ class Dispatcher:
         for sprint in eligible:
             if self.ledger.lease_for(sprint.id) is None:
                 progress = self.substrate.load_progress(sprint.id)
-                if any(is_running(pid) for pid in progress.detached.values()):
+                if any(is_running(tok) for tok in progress.detached.values()):
                     self.worker.stop_sprint(sprint)
                     report.reconciled += 1
 

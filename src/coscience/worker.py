@@ -56,13 +56,13 @@ class Worker:
 
         if next_step.run.startswith("detached:"):
             command = next_step.run[len("detached:"):].strip()
-            pid = progress.detached.get(next_step.id)
-            if pid is None:
+            token = progress.detached.get(next_step.id)
+            if token is None:
                 progress.detached[next_step.id] = launch_detached(command)
                 self.substrate.save_progress(progress)
                 self.substrate.commit(f"sprint {sprint.id}: step {next_step.id} launched")
                 return BeatOutcome.PROGRESSED
-            if is_running(pid):
+            if is_running(token):
                 return BeatOutcome.PROGRESSED
             progress.completed_steps.append(next_step.id)
             del progress.detached[next_step.id]
@@ -83,8 +83,8 @@ class Worker:
         steps relaunch on a later beat. Returns the stopped step ids."""
         progress = self.substrate.load_progress(sprint.id)
         stopped = list(progress.detached.keys())
-        for _step_id, pid in list(progress.detached.items()):
-            terminate_detached(pid)
+        for _step_id, token in list(progress.detached.items()):
+            terminate_detached(token)
         if stopped:
             progress.detached = {}
             self.substrate.save_progress(progress)

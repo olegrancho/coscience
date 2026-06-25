@@ -78,7 +78,7 @@ class Substrate:
         return ProgressState(
             sprint_id=sprint_id,
             completed_steps=list(fm.get("completed_steps", [])),
-            detached={str(k): int(v) for k, v in (fm.get("detached") or {}).items()},
+            detached={str(k): str(v) for k, v in (fm.get("detached") or {}).items()},
             outputs={str(k): str(v) for k, v in (fm.get("outputs") or {}).items()},
         )
 

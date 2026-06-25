@@ -29,17 +29,15 @@ class ShellStepExecutor:
         )
 
 
-def launch_detached(command: str) -> int:
-    """Start a shell command fully detached from this process; return its PID."""
+def launch_detached(command: str) -> str:
+    """Start a shell command fully detached from this process; return its
+    identity token '<pid>:<starttime>'."""
     proc = subprocess.Popen(
-        command,
-        shell=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,  # survives parent death
+        command, shell=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+        start_new_session=True,
     )
-    return proc.pid
+    return process_token(proc.pid)
 
 
 def _starttime(pid: int) -> str | None:

@@ -71,5 +71,5 @@ class Result:
 class ProgressState:
     sprint_id: str
     completed_steps: list[str] = field(default_factory=list)
-    detached: dict[str, int] = field(default_factory=dict)
+    detached: dict[str, str] = field(default_factory=dict)
     outputs: dict[str, str] = field(default_factory=dict)
