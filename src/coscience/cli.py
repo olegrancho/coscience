@@ -9,6 +9,8 @@ from coscience.claude_executor import ClaudeCodeExecutor
 from coscience.dispatcher import CycleReport, Dispatcher
 from coscience.executor import ShellStepExecutor
 from coscience.models import BeatOutcome, Program
+from coscience.pm_claude import ClaudeCodeReasoner
+from coscience.pm_runner import pm_loop, pm_run_once
 from coscience.resources import load_pool
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
@@ -24,6 +26,10 @@ def _make_executor(name: str):
     if name == "claude":
         return ClaudeCodeExecutor()
     return ShellStepExecutor()
+
+
+def _make_pm_reasoner():
+    return ClaudeCodeReasoner()
 
 
 def dispatch_once(repo_root: Path, executor_name: str = "shell") -> CycleReport:
@@ -63,6 +69,14 @@ def main(argv: list[str] | None = None) -> int:
     pgc.add_argument("--title", required=True)
     pgc.add_argument("--goals", required=True)
 
+    pm = sub.add_parser("pm", help="run the PM agent: propose sprints for active programs")
+    pm.add_argument("--repo", required=True, type=Path)
+    pmmode = pm.add_mutually_exclusive_group()
+    pmmode.add_argument("--once", action="store_true")
+    pmmode.add_argument("--loop", action="store_true")
+    pm.add_argument("--interval", type=float, default=5.0)
+    pm.add_argument("--max-rounds", type=int, default=None)
+
     args = parser.parse_args(argv)
 
     if args.command == "program":
@@ -98,6 +112,19 @@ def main(argv: list[str] | None = None) -> int:
             beats += 1
             if args.max_beats is None or beats < args.max_beats:
                 time.sleep(args.interval)
+        return 0
+
+    if args.command == "pm":
+        substrate = Substrate(args.repo)
+        reasoner = _make_pm_reasoner()
+        if args.once or not args.loop:
+            for summary in pm_run_once(substrate, reasoner):
+                print(f"{summary['program']}: cycle={summary['cycle']} "
+                      f"submitted={summary['submitted']}", flush=True)
+            return 0
+        rounds = pm_loop(substrate, reasoner, interval=args.interval,
+                         max_rounds=args.max_rounds)
+        print(f"pm ran {rounds} rounds", flush=True)
         return 0
 
     parser.error("unknown command")  # raises SystemExit
