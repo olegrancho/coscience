@@ -7,10 +7,13 @@ siblings over Service.
 """
 from __future__ import annotations
 
+import os
+
+import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from coscience.service import NotFoundError, Service
+from coscience.service import NotFoundError, Service, service_from_env
 
 
 class StepIn(BaseModel):
@@ -87,3 +90,15 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         return service.ledger_status()
 
     return app
+
+
+def create_app() -> FastAPI:
+    """uvicorn factory: build the app from the environment (COSCIENCE_REPO)."""
+    return build_app(service_from_env())
+
+
+def main() -> None:
+    """Console entry point: run the HTTP API under uvicorn."""
+    host = os.environ.get("COSCIENCE_HOST", "0.0.0.0")
+    port = int(os.environ.get("COSCIENCE_PORT", "8000"))
+    uvicorn.run(create_app(), host=host, port=port)

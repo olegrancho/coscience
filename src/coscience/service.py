@@ -5,12 +5,19 @@ can hand results straight to clients.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from coscience.ledger import Ledger
 from coscience.models import Sprint, SprintStatus, Step
 from coscience.resources import ResourcePool, load_pool
 from coscience.substrate import Substrate
+
+
+def service_from_env() -> "Service":
+    """Construct a Service from COSCIENCE_REPO (default: current directory)."""
+    repo_root = Path(os.environ.get("COSCIENCE_REPO", os.getcwd()))
+    return Service(repo_root)
 
 
 class NotFoundError(KeyError):
