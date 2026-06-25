@@ -90,7 +90,7 @@ class Service:
             "detached": progress.detached,
             "outputs": progress.outputs,
             "lease": None if lease is None else {
-                "id": lease.id, "amounts": lease.amounts,
+                "id": lease.id, "sprint_id": lease.sprint_id, "amounts": lease.amounts,
                 "granted_at": lease.granted_at, "expires_at": lease.expires_at,
                 "priority": lease.priority, "preemptible": lease.preemptible,
             },

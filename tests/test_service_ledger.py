@@ -30,3 +30,16 @@ def test_ledger_status_reflects_leases(tmp_path):
     assert status["capacity"] == {"gpu": 2.0}
     assert status["available"] == {"gpu": 1.0}
     assert [lease["sprint_id"] for lease in status["leases"]] == ["sp1"]
+
+
+def test_get_sprint_lease_includes_sprint_id(tmp_path):
+    pool = ResourcePool({"gpu": 2.0})
+    led = Ledger(pool, tmp_path / ".coscience" / "leases.json")
+    led.load()
+    led.acquire("sp1", {"gpu": 1.0}, now=100.0, ttl=60.0)
+
+    svc = Service(tmp_path, pool=pool)
+    svc.submit_sprint(id="sp1", goals="g", plan=[{"id": "s1", "run": "true"}])
+    lease = svc.get_sprint("sp1")["lease"]
+    assert lease is not None
+    assert lease["sprint_id"] == "sp1"
