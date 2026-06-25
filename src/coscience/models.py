@@ -5,6 +5,12 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 
+class ProgramStatus(StrEnum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    CLOSED = "closed"
+
+
 class SprintStatus(StrEnum):
     PROPOSED = "proposed"
     APPROVED = "approved"
@@ -73,3 +79,20 @@ class ProgressState:
     completed_steps: list[str] = field(default_factory=list)
     detached: dict[str, str] = field(default_factory=dict)
     outputs: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class Program:
+    id: str
+    title: str
+    goals: str
+    status: ProgramStatus = ProgramStatus.ACTIVE
+
+
+@dataclass
+class PMState:
+    program_id: str
+    cycle: int = 0
+    last_run: float | None = None
+    proposed_ids: list[str] = field(default_factory=list)
+    log: list[str] = field(default_factory=list)

@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 from coscience.frontmatter_io import parse, serialize
-from coscience.models import Sprint, SprintStatus, Step, ProgressState, Result
+from coscience.models import Sprint, SprintStatus, Step, ProgressState, Result, Program, ProgramStatus, PMState
 
 
 class Substrate:
@@ -114,6 +114,72 @@ class Substrate:
         for path in sorted(results_dir.glob("*.md")):
             out.append(self.load_result(path.stem))
         return out
+
+    # --- programs ---
+    def program_dir(self, program_id: str) -> Path:
+        return self.repo_root / "programs" / program_id
+
+    def load_program(self, program_id: str) -> Program:
+        text = (self.program_dir(program_id) / "program.md").read_text()
+        fm, body = parse(text)
+        return Program(
+            id=program_id,
+            title=str(fm.get("title", "")),
+            goals=body.strip(),
+            status=ProgramStatus(fm.get("status", "active")),
+        )
+
+    def save_program(self, program: Program) -> None:
+        fm = {"type": "program", "title": program.title, "status": str(program.status)}
+        d = self.program_dir(program.id)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "program.md").write_text(serialize(fm, program.goals.strip() + "\n"))
+
+    def iter_programs(self, status: ProgramStatus | None = None) -> list[Program]:
+        programs_dir = self.repo_root / "programs"
+        if not programs_dir.is_dir():
+            return []
+        out = []
+        for d in sorted(programs_dir.iterdir()):
+            if (d / "program.md").is_file():
+                p = self.load_program(d.name)
+                if status is None or p.status == status:
+                    out.append(p)
+        return out
+
+    def save_report(self, program_id: str, report: str) -> None:
+        d = self.program_dir(program_id)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "report.md").write_text(report.rstrip() + "\n")
+
+    def load_report(self, program_id: str) -> str:
+        path = self.program_dir(program_id) / "report.md"
+        return path.read_text() if path.is_file() else ""
+
+    def load_pm_state(self, program_id: str) -> PMState:
+        path = self.program_dir(program_id) / "pm.md"
+        if not path.is_file():
+            return PMState(program_id=program_id)
+        fm, _ = parse(path.read_text())
+        return PMState(
+            program_id=program_id,
+            cycle=int(fm.get("cycle", 0)),
+            last_run=fm.get("last_run"),
+            proposed_ids=list(fm.get("proposed_ids", [])),
+            log=list(fm.get("log", [])),
+        )
+
+    def save_pm_state(self, state: PMState) -> None:
+        fm = {
+            "type": "pm_state",
+            "cycle": state.cycle,
+            "last_run": state.last_run,
+            "proposed_ids": state.proposed_ids,
+            "log": state.log,
+        }
+        d = self.program_dir(state.program_id)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "pm.md").write_text(serialize(fm, f"# PM state {state.program_id}\n"))
 
     # --- git ---
     def commit(self, message: str) -> None:
