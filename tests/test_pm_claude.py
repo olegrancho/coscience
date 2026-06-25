@@ -77,3 +77,19 @@ def test_run_uses_injected_invoke():
     out = reasoner.run(_ctx())
     assert out.report == "ok"
     assert "cure cancer" in seen["prompt"]   # render_prompt was used
+
+
+def test_parse_response_handles_prose_with_braces_after_json():
+    text = ('```json\n{"report": "r", "proposals": '
+            '[{"suffix": "a", "goals": "g", "plan": [{"id": "s", "run": "true"}], '
+            '"resources_required": {"gpu": 1}}]}\n```\n'
+            'Note: consider {edge cases} later.')   # stray braces in trailing prose
+    out = parse_response(text)
+    assert out.proposals[0].suffix == "a"
+    assert out.proposals[0].resources_required == {"gpu": 1}   # nested object intact
+
+
+def test_parse_response_takes_first_of_multiple_blocks():
+    text = ('```json\n{"report": "real", "proposals": []}\n```\n'
+            'and an unrelated example:\n```json\n{"foo": "bar"}\n```')
+    assert parse_response(text).report == "real"

@@ -52,21 +52,25 @@ Propose 0 proposals if nothing new is warranted. Keep `plan` steps concrete and 
 """
 
 
-def _extract_json(text: str) -> str:
-    fence = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
-    if fence:
-        return fence.group(1)
-    start, end = text.find("{"), text.rfind("}")
-    if start == -1 or end == -1 or end < start:
+def _decode_json_object(text: str) -> dict:
+    # Skip an optional ```json fence opener, then raw_decode one object from the
+    # first '{' so trailing prose / closing fences / nested braces don't break it.
+    m = re.search(r"```(?:json)?\s*", text)
+    region = text[m.end():] if m else text
+    start = region.find("{")
+    if start == -1:
         raise PMReasonerError("no JSON object found in reasoner output")
-    return text[start:end + 1]
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(region[start:])
+    except json.JSONDecodeError as exc:
+        raise PMReasonerError(f"invalid reasoner JSON: {exc}") from exc
+    if not isinstance(obj, dict):
+        raise PMReasonerError("reasoner JSON is not an object")
+    return obj
 
 
 def parse_response(text: str) -> PMCycleOutput:
-    try:
-        data = json.loads(_extract_json(text))
-    except json.JSONDecodeError as exc:
-        raise PMReasonerError(f"invalid reasoner JSON: {exc}") from exc
+    data = _decode_json_object(text)
     proposals = []
     for p in data.get("proposals", []):
         try:
