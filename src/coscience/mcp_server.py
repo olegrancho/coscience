@@ -72,6 +72,19 @@ def build_server(service: Service, name: str = "coscience") -> FastMCP:
         """Current resource ledger: capacity, used, available, and active leases."""
         return service.ledger_status()
 
+    @server.tool()
+    def list_programs(status: str | None = None) -> list[dict]:
+        """List research programs, optionally filtered by status."""
+        return service.list_programs(status)
+
+    @server.tool()
+    def get_program(id: str) -> dict:
+        """Get one program's detail, including its report, cycle, and sprints."""
+        try:
+            return service.get_program(id)
+        except NotFoundError:
+            raise ToolError(f"program not found: {id}")
+
     return server
 
 

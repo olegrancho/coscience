@@ -89,6 +89,20 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def ledger_status() -> dict:
         return service.ledger_status()
 
+    @app.get("/programs")
+    def list_programs(status: str | None = Query(default=None)) -> list[dict]:
+        try:
+            return service.list_programs(status)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @app.get("/programs/{program_id}")
+    def get_program(program_id: str) -> dict:
+        try:
+            return service.get_program(program_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
     return app
 
 

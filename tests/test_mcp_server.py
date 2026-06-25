@@ -32,6 +32,7 @@ def test_lists_all_seven_tools(server):
     assert names == {
         "submit_sprint", "approve_sprint", "list_sprints", "get_sprint",
         "list_results", "get_result", "ledger_status",
+        "list_programs", "get_program",
     }
 
 
