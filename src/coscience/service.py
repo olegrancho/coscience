@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 from coscience.ledger import Ledger
-from coscience.models import Sprint, SprintStatus, Step
+from coscience.models import Sprint, SprintStatus, Step, Program, ProgramStatus
 from coscience.resources import ResourcePool, load_pool
 from coscience.substrate import Substrate
 
@@ -101,6 +101,26 @@ class Service:
                 "granted_at": lease.granted_at, "expires_at": lease.expires_at,
                 "priority": lease.priority, "preemptible": lease.preemptible,
             },
+        }
+
+    # --- programs (read-only) ---
+    def list_programs(self, status: str | None = None) -> list[dict]:
+        wanted = ProgramStatus(status) if status is not None else None
+        return [{"id": p.id, "title": p.title, "status": p.status.value, "goals": p.goals}
+                for p in self.substrate.iter_programs(status=wanted)]
+
+    def get_program(self, program_id: str) -> dict:
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        p = self.substrate.load_program(program_id)
+        pm = self.substrate.load_pm_state(program_id)
+        sprints = [s for s in self.substrate.iter_sprints() if s.program == program_id]
+        return {
+            "id": p.id, "title": p.title, "status": p.status.value, "goals": p.goals,
+            "report": self.substrate.load_report(program_id),
+            "cycle": pm.cycle,
+            "sprints": [{"id": s.id, "status": s.status.value, "goals": s.goals}
+                        for s in sprints],
         }
 
     # --- results ---
