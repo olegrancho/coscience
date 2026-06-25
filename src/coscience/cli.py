@@ -8,7 +8,7 @@ from pathlib import Path
 from coscience.claude_executor import ClaudeCodeExecutor
 from coscience.dispatcher import CycleReport, Dispatcher
 from coscience.executor import ShellStepExecutor
-from coscience.models import BeatOutcome
+from coscience.models import BeatOutcome, Program
 from coscience.resources import load_pool
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
@@ -55,7 +55,22 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--max-beats", type=int, default=None)
     d.add_argument("--executor", choices=["shell", "claude"], default="shell")
 
+    pg = sub.add_parser("program", help="manage research programs")
+    pgsub = pg.add_subparsers(dest="program_command", required=True)
+    pgc = pgsub.add_parser("create", help="create a program")
+    pgc.add_argument("--repo", required=True, type=Path)
+    pgc.add_argument("--id", required=True)
+    pgc.add_argument("--title", required=True)
+    pgc.add_argument("--goals", required=True)
+
     args = parser.parse_args(argv)
+
+    if args.command == "program":
+        if args.program_command == "create":
+            Substrate(args.repo).save_program(
+                Program(id=args.id, title=args.title, goals=args.goals))
+            print(args.id)
+            return 0
 
     if args.command == "worker":
         if args.once or not args.loop:
