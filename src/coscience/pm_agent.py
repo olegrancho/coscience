@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 
-from coscience.models import SprintStatus
+from coscience.models import Sprint, SprintStatus, Step
 from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint
 
 
@@ -85,3 +86,48 @@ def clear_staging(substrate, program_id: str) -> None:
     path = _staging_path(substrate, program_id)
     if path.is_file():
         path.unlink()
+
+
+def pm_beat(substrate, program_id: str, reasoner, now: float | None = None) -> dict:
+    """Run one bounded, kill-safe PM cycle for a program. Returns a summary."""
+    pm = substrate.load_pm_state(program_id)
+
+    staged = read_staging(substrate, program_id)
+    if staged is None:
+        cycle = pm.cycle
+        context = gather_context(substrate, program_id)
+        output = reasoner.run(context)                 # the ONE reasoner call
+        write_staging(substrate, program_id, cycle, output)   # COMMIT POINT
+        staged = StagedCycle(cycle=cycle, output=output)
+
+    cycle = staged.cycle
+    submitted: list[str] = []
+    proposed: list[str] = []
+    for prop in staged.output.proposals:
+        sid = proposal_id(program_id, cycle, prop.suffix)
+        proposed.append(sid)
+        already_proposed = sid in pm.proposed_ids
+        if not (substrate.sprint_dir(sid) / "sprint.md").is_file():
+            substrate.save_sprint(Sprint(
+                id=sid, status=SprintStatus.PROPOSED, goals=prop.goals,
+                plan=[Step.from_dict(s) for s in prop.plan],
+                program=program_id, priority=prop.priority,
+                resources_required={k: float(v)
+                                    for k, v in (prop.resources_required or {}).items()},
+            ))
+        if not already_proposed:
+            submitted.append(sid)                      # new this run
+
+    substrate.save_report(program_id, staged.output.report)
+
+    pm.cycle = cycle + 1
+    pm.last_run = time.time() if now is None else now
+    for sid in proposed:
+        if sid not in pm.proposed_ids:
+            pm.proposed_ids.append(sid)
+    pm.log.append(f"cycle {cycle}: proposed {proposed}")
+    substrate.save_pm_state(pm)
+
+    clear_staging(substrate, program_id)
+    return {"program": program_id, "cycle": cycle,
+            "submitted": submitted, "proposed": proposed}
