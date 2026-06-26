@@ -152,6 +152,14 @@ class Service:
                         for s in sprints],
         }
 
+    def set_program_status(self, program_id: str, status: str) -> None:
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        new_status = ProgramStatus(status)  # raises ValueError on a bad value
+        program = self.substrate.load_program(program_id)
+        program.status = new_status
+        self.substrate.save_program(program)
+
     # --- results ---
     def list_results(self) -> list[dict]:
         return [{"id": r.id, "sprint": r.sprint, "summary": r.summary}
