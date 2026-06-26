@@ -6,7 +6,9 @@ can hand results straight to clients.
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
+from uuid import uuid4
 
 from coscience.ledger import Ledger
 from coscience.models import Sprint, SprintStatus, Step, Program, ProgramStatus
@@ -159,6 +161,27 @@ class Service:
         program = self.substrate.load_program(program_id)
         program.status = new_status
         self.substrate.save_program(program)
+
+    def _require_program(self, program_id: str) -> None:
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+
+    def list_guidance(self, program_id: str) -> list[dict]:
+        self._require_program(program_id)
+        return self.substrate.load_guidance(program_id)
+
+    def add_guidance(self, program_id: str, text: str) -> dict:
+        self._require_program(program_id)
+        notes = self.substrate.load_guidance(program_id)
+        note = {"id": uuid4().hex[:8], "text": text, "added_at": time.time()}
+        notes.append(note)
+        self.substrate.save_guidance(program_id, notes)
+        return note
+
+    def remove_guidance(self, program_id: str, note_id: str) -> None:
+        self._require_program(program_id)
+        notes = [n for n in self.substrate.load_guidance(program_id) if n["id"] != note_id]
+        self.substrate.save_guidance(program_id, notes)
 
     # --- results ---
     def list_results(self) -> list[dict]:
