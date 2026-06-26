@@ -1,5 +1,6 @@
 import pytest
 
+from coscience.models import SprintStatus
 from coscience.service import NotFoundError, Service
 
 
@@ -48,3 +49,23 @@ def test_get_missing_raises_notfound(tmp_path):
 def test_approve_missing_raises_notfound(tmp_path):
     with pytest.raises(NotFoundError):
         Service(tmp_path).approve_sprint("nope")
+
+
+def test_reject_moves_proposed_to_canceled(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=[{"id": "s1", "run": "true"}])
+    svc.reject_sprint("sp1")
+    assert svc.get_sprint("sp1")["status"] == "canceled"
+
+
+def test_reject_non_proposed_raises(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=[{"id": "s1", "run": "true"}])
+    svc.approve_sprint("sp1")
+    with pytest.raises(ValueError):
+        svc.reject_sprint("sp1")
+
+
+def test_reject_missing_raises_notfound(tmp_path):
+    with pytest.raises(NotFoundError):
+        Service(tmp_path).reject_sprint("nope")

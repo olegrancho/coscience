@@ -67,6 +67,13 @@ class Service:
         sprint.status = SprintStatus.APPROVED
         self.substrate.save_sprint(sprint)
 
+    def reject_sprint(self, sprint_id: str) -> None:
+        sprint = self._load_sprint(sprint_id)
+        if sprint.status != SprintStatus.PROPOSED:
+            raise ValueError(f"can only reject a proposed sprint; {sprint_id} is {sprint.status.value}")
+        sprint.status = SprintStatus.CANCELED
+        self.substrate.save_sprint(sprint)
+
     def list_sprints(self, status: str | None = None) -> list[dict]:
         wanted = SprintStatus(status) if status is not None else None
         rows = []
