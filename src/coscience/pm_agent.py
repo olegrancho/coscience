@@ -31,10 +31,12 @@ def gather_context(substrate, program_id: str) -> PMContext:
         elif s.status in (SprintStatus.PROPOSED, SprintStatus.APPROVED,
                           SprintStatus.EXECUTING):
             open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals})
+    guidance = [n["text"] for n in substrate.load_guidance(program_id)]
     return PMContext(
         program_id=program_id, goals=program.goals, cycle=pm.cycle,
         open_sprints=open_sprints, completed=completed,
         prior_proposals=list(pm.proposed_ids),
+        human_guidance=guidance,
     )
 
 

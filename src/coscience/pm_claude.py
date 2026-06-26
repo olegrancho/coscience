@@ -26,11 +26,17 @@ def render_prompt(context: PMContext) -> str:
     done_block = _lines(context.completed,
                         lambda s: f"- {s['id']}: {s['goals']} -> result: {s['result']}")
     prior_block = ", ".join(context.prior_proposals) or "(none)"
+    guidance_block = ""
+    if context.human_guidance:
+        notes = "\n".join(f"- {g}" for g in context.human_guidance)
+        guidance_block = (
+            "\n\nHUMAN GUIDANCE (standing direction from the oversight committee "
+            "— weigh these in your proposals):\n" + notes)
     return f"""You are the PM agent for a research program. Propose the next sprint(s)
 and write a short status report. You only PROPOSE; humans approve.
 
 PROGRAM GOALS:
-{context.goals}
+{context.goals}{guidance_block}
 
 OPEN SPRINTS (already proposed/approved/running — do not duplicate these):
 {open_block}

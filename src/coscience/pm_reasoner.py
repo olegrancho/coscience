@@ -15,6 +15,7 @@ class PMContext:
     open_sprints: list[dict] = field(default_factory=list)
     completed: list[dict] = field(default_factory=list)
     prior_proposals: list[str] = field(default_factory=list)
+    human_guidance: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -93,3 +93,18 @@ def test_parse_response_takes_first_of_multiple_blocks():
     text = ('```json\n{"report": "real", "proposals": []}\n```\n'
             'and an unrelated example:\n```json\n{"foo": "bar"}\n```')
     assert parse_response(text).report == "real"
+
+
+def test_render_prompt_includes_guidance():
+    from coscience.pm_claude import render_prompt
+    from coscience.pm_reasoner import PMContext
+    ctx = PMContext(program_id="p1", goals="g", cycle=0,
+                    human_guidance=["focus on assays"])
+    assert "focus on assays" in render_prompt(ctx)
+
+
+def test_render_prompt_omits_guidance_when_empty():
+    from coscience.pm_claude import render_prompt
+    from coscience.pm_reasoner import PMContext
+    ctx = PMContext(program_id="p1", goals="g", cycle=0)
+    assert "HUMAN GUIDANCE" not in render_prompt(ctx)

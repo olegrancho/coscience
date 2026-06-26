@@ -28,3 +28,24 @@ def test_gather_context_done_without_result(substrate):
                                  plan=[Step("s", "true")], program="p1"))
     ctx = gather_context(substrate, "p1")
     assert ctx.completed == [{"id": "p1-d", "goals": "d", "result": ""}]
+
+
+def test_gather_context_includes_human_guidance(tmp_path):
+    from coscience.substrate import Substrate
+    from coscience.models import Program
+    from coscience.pm_agent import gather_context
+    sub = Substrate(tmp_path)
+    sub.save_program(Program(id="p1", title="t", goals="g"))
+    sub.save_guidance("p1", [{"id": "a", "text": "focus on assays", "added_at": 1.0},
+                             {"id": "b", "text": "avoid mice", "added_at": 2.0}])
+    ctx = gather_context(sub, "p1")
+    assert ctx.human_guidance == ["focus on assays", "avoid mice"]
+
+
+def test_gather_context_empty_guidance(tmp_path):
+    from coscience.substrate import Substrate
+    from coscience.models import Program
+    from coscience.pm_agent import gather_context
+    sub = Substrate(tmp_path)
+    sub.save_program(Program(id="p1", title="t", goals="g"))
+    assert gather_context(sub, "p1").human_guidance == []
