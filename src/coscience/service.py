@@ -74,6 +74,28 @@ class Service:
         sprint.status = SprintStatus.CANCELED
         self.substrate.save_sprint(sprint)
 
+    def edit_sprint(self, sprint_id: str, *, goals=None, plan=None, priority=None,
+                    resources_required=None, preemptible=None) -> None:
+        sprint = self._load_sprint(sprint_id)
+        st = sprint.status
+        if st in (SprintStatus.DONE, SprintStatus.CANCELED):
+            raise ValueError(f"{sprint_id} is {st.value} and is read-only")
+        if (goals is not None or plan is not None) and st != SprintStatus.PROPOSED:
+            raise ValueError("goals/plan are editable only while proposed")
+        if plan is not None and len(plan) == 0:
+            raise ValueError("plan must have at least one step")
+        if goals is not None:
+            sprint.goals = goals
+        if plan is not None:
+            sprint.plan = [Step.from_dict(s) for s in plan]
+        if priority is not None:
+            sprint.priority = priority
+        if resources_required is not None:
+            sprint.resources_required = {k: float(v) for k, v in resources_required.items()}
+        if preemptible is not None:
+            sprint.preemptible = preemptible
+        self.substrate.save_sprint(sprint)
+
     def list_sprints(self, status: str | None = None) -> list[dict]:
         wanted = SprintStatus(status) if status is not None else None
         rows = []

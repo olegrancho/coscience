@@ -69,3 +69,70 @@ def test_reject_non_proposed_raises(tmp_path):
 def test_reject_missing_raises_notfound(tmp_path):
     with pytest.raises(NotFoundError):
         Service(tmp_path).reject_sprint("nope")
+
+
+def _executing(svc, sid):
+    # Force a sprint into EXECUTING for guard tests (no scheduler needed).
+    s = svc.substrate.load_sprint(sid)
+    s.status = SprintStatus.EXECUTING
+    svc.substrate.save_sprint(s)
+
+
+def test_edit_proposed_all_fields(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="old", plan=[{"id": "s1", "run": "a"}])
+    svc.edit_sprint("sp1", goals="new", plan=[{"id": "s2", "run": "b"}],
+                    priority=5, resources_required={"gpu": 2}, preemptible=False)
+    d = svc.get_sprint("sp1")
+    assert d["goals"] == "new"
+    assert d["plan"] == [{"id": "s2", "run": "b"}]
+    assert d["priority"] == 5
+    assert d["resources_required"] == {"gpu": 2.0}
+    assert d["preemptible"] is False
+
+
+def test_edit_partial_leaves_other_fields(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="keep", plan=[{"id": "s1", "run": "a"}], priority=1)
+    svc.edit_sprint("sp1", priority=9)
+    d = svc.get_sprint("sp1")
+    assert d["goals"] == "keep"
+    assert d["priority"] == 9
+
+
+def test_edit_goals_blocked_when_not_proposed(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=[{"id": "s1", "run": "a"}])
+    svc.approve_sprint("sp1")
+    with pytest.raises(ValueError):
+        svc.edit_sprint("sp1", goals="nope")
+
+
+def test_edit_priority_allowed_when_executing(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=[{"id": "s1", "run": "a"}])
+    _executing(svc, "sp1")
+    svc.edit_sprint("sp1", priority=7)
+    assert svc.get_sprint("sp1")["priority"] == 7
+
+
+def test_edit_blocked_when_done(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=[{"id": "s1", "run": "a"}])
+    s = svc.substrate.load_sprint("sp1")
+    s.status = SprintStatus.DONE
+    svc.substrate.save_sprint(s)
+    with pytest.raises(ValueError):
+        svc.edit_sprint("sp1", priority=3)
+
+
+def test_edit_empty_plan_raises(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=[{"id": "s1", "run": "a"}])
+    with pytest.raises(ValueError):
+        svc.edit_sprint("sp1", plan=[])
+
+
+def test_edit_missing_raises_notfound(tmp_path):
+    with pytest.raises(NotFoundError):
+        Service(tmp_path).edit_sprint("nope", priority=1)
