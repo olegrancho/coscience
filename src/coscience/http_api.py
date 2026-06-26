@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 
 import uvicorn
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from coscience.service import NotFoundError, Service, service_from_env
@@ -41,6 +41,10 @@ class SprintPatch(BaseModel):
 
 class ProgramStatusIn(BaseModel):
     status: str
+
+
+class GuidanceIn(BaseModel):
+    text: str
 
 
 def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
@@ -148,6 +152,28 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         return service.get_program(program_id)
+
+    @api.get("/programs/{program_id}/guidance")
+    def list_guidance(program_id: str) -> list[dict]:
+        try:
+            return service.list_guidance(program_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.post("/programs/{program_id}/guidance", status_code=201)
+    def add_guidance(program_id: str, body: GuidanceIn) -> dict:
+        try:
+            return service.add_guidance(program_id, body.text)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.delete("/programs/{program_id}/guidance/{note_id}", status_code=204)
+    def remove_guidance(program_id: str, note_id: str) -> Response:
+        try:
+            service.remove_guidance(program_id, note_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        return Response(status_code=204)
 
     app.include_router(api)
     return app
