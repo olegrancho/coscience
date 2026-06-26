@@ -39,6 +39,10 @@ class SprintPatch(BaseModel):
     preemptible: bool | None = None
 
 
+class ProgramStatusIn(BaseModel):
+    status: str
+
+
 def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     app = FastAPI(title=title, version="0.0.0")
     api = APIRouter(prefix="/api")
@@ -134,6 +138,16 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.get_program(program_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.post("/programs/{program_id}/status")
+    def set_program_status(program_id: str, body: ProgramStatusIn) -> dict:
+        try:
+            service.set_program_status(program_id, body.status)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        return service.get_program(program_id)
 
     app.include_router(api)
     return app

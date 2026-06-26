@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from coscience.http_api import build_app
-from coscience.models import Result
+from coscience.models import Program, Result
 from coscience.service import Service
 
 
@@ -123,3 +123,19 @@ def test_patch_goals_when_approved_is_422(client):
 
 def test_patch_missing_is_404(client):
     assert client.patch("/api/sprints/nope", json={"priority": 1}).status_code == 404
+
+
+def test_set_program_status_via_http(client):
+    client.svc.substrate.save_program(Program(id="p1", title="t", goals="g"))
+    r = client.post("/api/programs/p1/status", json={"status": "paused"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "paused"
+
+
+def test_set_program_status_invalid_is_422(client):
+    client.svc.substrate.save_program(Program(id="p1", title="t", goals="g"))
+    assert client.post("/api/programs/p1/status", json={"status": "bogus"}).status_code == 422
+
+
+def test_set_program_status_missing_is_404(client):
+    assert client.post("/api/programs/nope/status", json={"status": "paused"}).status_code == 404
