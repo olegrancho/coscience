@@ -31,6 +31,14 @@ class SprintSubmit(BaseModel):
     resources_required: dict[str, float] | None = None
 
 
+class SprintPatch(BaseModel):
+    goals: str | None = None
+    plan: list[StepIn] | None = None
+    priority: int | None = None
+    resources_required: dict[str, float] | None = None
+    preemptible: bool | None = None
+
+
 def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     app = FastAPI(title=title, version="0.0.0")
     api = APIRouter(prefix="/api")
@@ -73,6 +81,29 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             service.approve_sprint(sprint_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+        return service.get_sprint(sprint_id)
+
+    @api.post("/sprints/{sprint_id}/reject")
+    def reject_sprint(sprint_id: str) -> dict:
+        try:
+            service.reject_sprint(sprint_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        return service.get_sprint(sprint_id)
+
+    @api.patch("/sprints/{sprint_id}")
+    def patch_sprint(sprint_id: str, body: SprintPatch) -> dict:
+        fields = body.model_dump(exclude_unset=True)
+        if "plan" in fields and fields["plan"] is not None:
+            fields["plan"] = [s if isinstance(s, dict) else s.model_dump() for s in body.plan]
+        try:
+            service.edit_sprint(sprint_id, **fields)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         return service.get_sprint(sprint_id)
 
     @api.get("/results")

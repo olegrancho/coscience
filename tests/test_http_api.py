@@ -85,3 +85,41 @@ def test_empty_plan_is_422(client):
 
 def test_invalid_status_filter_is_422(client):
     assert client.get("/api/sprints", params={"status": "bogus"}).status_code == 422
+
+
+def test_reject_via_http(client):
+    client.post("/api/sprints", json={"id": "sp1", "goals": "g",
+                                      "plan": [{"id": "s1", "run": "true"}]})
+    r = client.post("/api/sprints/sp1/reject")
+    assert r.status_code == 200
+    assert r.json()["status"] == "canceled"
+
+
+def test_reject_non_proposed_is_422(client):
+    client.post("/api/sprints", json={"id": "sp1", "goals": "g",
+                                      "plan": [{"id": "s1", "run": "true"}]})
+    client.post("/api/sprints/sp1/approve")
+    assert client.post("/api/sprints/sp1/reject").status_code == 422
+
+
+def test_reject_missing_is_404(client):
+    assert client.post("/api/sprints/nope/reject").status_code == 404
+
+
+def test_patch_priority(client):
+    client.post("/api/sprints", json={"id": "sp1", "goals": "g",
+                                      "plan": [{"id": "s1", "run": "true"}]})
+    r = client.patch("/api/sprints/sp1", json={"priority": 8})
+    assert r.status_code == 200
+    assert r.json()["priority"] == 8
+
+
+def test_patch_goals_when_approved_is_422(client):
+    client.post("/api/sprints", json={"id": "sp1", "goals": "g",
+                                      "plan": [{"id": "s1", "run": "true"}]})
+    client.post("/api/sprints/sp1/approve")
+    assert client.patch("/api/sprints/sp1", json={"goals": "x"}).status_code == 422
+
+
+def test_patch_missing_is_404(client):
+    assert client.patch("/api/sprints/nope", json={"priority": 1}).status_code == 404
