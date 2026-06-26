@@ -73,3 +73,12 @@ def test_commit_records_changes_in_git(tmp_path):
         ["git", "log", "--oneline"], cwd=tmp_path, capture_output=True, text=True
     ).stdout
     assert "add result" in log
+
+
+def test_guidance_round_trip(tmp_path):
+    from coscience.substrate import Substrate
+    sub = Substrate(tmp_path)
+    assert sub.load_guidance("p1") == []
+    notes = [{"id": "a1", "text": "focus on assays", "added_at": 1.0}]
+    sub.save_guidance("p1", notes)
+    assert sub.load_guidance("p1") == notes

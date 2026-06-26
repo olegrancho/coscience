@@ -181,6 +181,23 @@ class Substrate:
         d.mkdir(parents=True, exist_ok=True)
         (d / "pm.md").write_text(serialize(fm, f"# PM state {state.program_id}\n"))
 
+    def load_guidance(self, program_id: str) -> list[dict]:
+        path = self.program_dir(program_id) / "guidance.md"
+        if not path.is_file():
+            return []
+        fm, _ = parse(path.read_text())
+        out = []
+        for n in fm.get("notes", []):
+            out.append({"id": str(n["id"]), "text": str(n["text"]),
+                        "added_at": float(n["added_at"])})
+        return out
+
+    def save_guidance(self, program_id: str, notes: list[dict]) -> None:
+        d = self.program_dir(program_id)
+        d.mkdir(parents=True, exist_ok=True)
+        fm = {"type": "guidance", "notes": notes}
+        (d / "guidance.md").write_text(serialize(fm, f"# Guidance {program_id}\n"))
+
     # --- git ---
     def commit(self, message: str) -> None:
         if not (self.repo_root / ".git").is_dir():
