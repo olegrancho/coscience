@@ -12,6 +12,9 @@ def test_dockerfile_has_required_directives():
     assert "EXPOSE 8000" in text
     assert "coscience-http" in text               # runs the console script
     assert "COSCIENCE_REPO=/data" in text
+    assert "AS ui" in text                        # node build stage
+    assert "npm run build" in text                # builds the SPA
+    assert "frontend/dist" in text                # copies the bundle in
 
 
 def test_compose_service_shape():

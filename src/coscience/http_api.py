@@ -8,9 +8,12 @@ siblings over Service.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import uvicorn
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Response
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from coscience.service import NotFoundError, Service, service_from_env
@@ -180,8 +183,23 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
 
 
 def create_app() -> FastAPI:
-    """uvicorn factory: build the app from the environment (COSCIENCE_REPO)."""
-    return build_app(service_from_env())
+    """uvicorn factory: API from the environment, plus the SPA bundle if present."""
+    app = build_app(service_from_env())
+    ui_dir = Path(os.environ.get("COSCIENCE_UI_DIR",
+                                 Path(__file__).resolve().parents[2] / "frontend" / "dist"))
+    index = ui_dir / "index.html"
+    if index.is_file():
+        assets = ui_dir / "assets"
+        if assets.is_dir():
+            app.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+        @app.get("/{full_path:path}")
+        def spa(full_path: str) -> FileResponse:
+            candidate = ui_dir / full_path
+            if full_path and candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(index)
+    return app
 
 
 def main() -> None:
