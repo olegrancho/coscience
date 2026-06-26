@@ -195,8 +195,13 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}")
         def spa(full_path: str) -> FileResponse:
-            candidate = ui_dir / full_path
-            if full_path and candidate.is_file():
+            candidate = (ui_dir / full_path).resolve()
+            ui_root = ui_dir.resolve()
+            if (
+                full_path
+                and candidate.is_file()
+                and (candidate == ui_root or ui_root in candidate.parents)
+            ):
                 return FileResponse(candidate)
             return FileResponse(index)
     return app
