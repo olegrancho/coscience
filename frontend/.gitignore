@@ -1,2 +1,7 @@
 node_modules/
 dist/
+
+# TypeScript / Vite build byproducts
+*.tsbuildinfo
+vite.config.d.ts
+vite.config.js
