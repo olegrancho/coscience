@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from coscience.service import NotFoundError, Service, service_from_env
@@ -33,19 +33,20 @@ class SprintSubmit(BaseModel):
 
 def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     app = FastAPI(title=title, version="0.0.0")
+    api = APIRouter(prefix="/api")
 
-    @app.get("/health")
+    @api.get("/health")
     def health() -> dict:
         return {"status": "ok"}
 
-    @app.get("/sprints")
+    @api.get("/sprints")
     def list_sprints(status: str | None = Query(default=None)) -> list[dict]:
         try:
             return service.list_sprints(status)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
-    @app.post("/sprints", status_code=201)
+    @api.post("/sprints", status_code=201)
     def submit_sprint(body: SprintSubmit) -> dict:
         try:
             service.submit_sprint(
@@ -59,14 +60,14 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc))
         return service.get_sprint(body.id)
 
-    @app.get("/sprints/{sprint_id}")
+    @api.get("/sprints/{sprint_id}")
     def get_sprint(sprint_id: str) -> dict:
         try:
             return service.get_sprint(sprint_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
 
-    @app.post("/sprints/{sprint_id}/approve")
+    @api.post("/sprints/{sprint_id}/approve")
     def approve_sprint(sprint_id: str) -> dict:
         try:
             service.approve_sprint(sprint_id)
@@ -74,35 +75,36 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
         return service.get_sprint(sprint_id)
 
-    @app.get("/results")
+    @api.get("/results")
     def list_results() -> list[dict]:
         return service.list_results()
 
-    @app.get("/results/{result_id}")
+    @api.get("/results/{result_id}")
     def get_result(result_id: str) -> dict:
         try:
             return service.get_result(result_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"result not found: {result_id}")
 
-    @app.get("/ledger")
+    @api.get("/ledger")
     def ledger_status() -> dict:
         return service.ledger_status()
 
-    @app.get("/programs")
+    @api.get("/programs")
     def list_programs(status: str | None = Query(default=None)) -> list[dict]:
         try:
             return service.list_programs(status)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
-    @app.get("/programs/{program_id}")
+    @api.get("/programs/{program_id}")
     def get_program(program_id: str) -> dict:
         try:
             return service.get_program(program_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
 
+    app.include_router(api)
     return app
 
 

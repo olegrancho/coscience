@@ -12,11 +12,11 @@ use a scratch repo dir, e.g. `R=/tmp/coscience-pm-demo`. Test interpreter/venv:
 3. Inspect what it proposed (machinery wrote it, status must be `proposed`):
    `coscience` has no read cmd — use the HTTP API: in another shell,
    `COSCIENCE_REPO=$R COSCIENCE_HOST=127.0.0.1 coscience-http` then
-   `curl -s localhost:8000/programs/p1 | jq` (see the report + sprint list) and
-   `curl -s 'localhost:8000/sprints?status=proposed' | jq`.
+   `curl -s localhost:8000/api/programs/p1 | jq` (see the report + sprint list) and
+   `curl -s 'localhost:8000/api/sprints?status=proposed' | jq`.
 4. Read the report the PM wrote: `cat $R/programs/p1/report.md`.
 5. Approve one proposed sprint (human gate):
-   `curl -s -X POST localhost:8000/sprints/<sprint-id>/approve`  -> status "approved".
+   `curl -s -X POST localhost:8000/api/sprints/<sprint-id>/approve`  -> status "approved".
 6. Run the dispatcher to execute it:
    `coscience dispatch --repo $R --once`  (add `--executor claude` only if a step needs the LLM).
    Re-run `--once` until the sprint reaches `done` and a result file appears under `$R/results/`.

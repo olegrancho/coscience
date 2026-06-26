@@ -18,16 +18,16 @@ def _seed(tmp_path):
 
 def test_http_list_and_get_program(tmp_path):
     client = TestClient(build_app(_seed(tmp_path)))
-    assert [p["id"] for p in client.get("/programs").json()] == ["p1"]
-    r = client.get("/programs/p1")
+    assert [p["id"] for p in client.get("/api/programs").json()] == ["p1"]
+    r = client.get("/api/programs/p1")
     assert r.status_code == 200
     assert r.json()["goals"] == "cure"
-    assert client.get("/programs/nope").status_code == 404
+    assert client.get("/api/programs/nope").status_code == 404
 
 
 def test_http_invalid_status_is_422(tmp_path):
     client = TestClient(build_app(_seed(tmp_path)))
-    assert client.get("/programs", params={"status": "bogus"}).status_code == 422
+    assert client.get("/api/programs", params={"status": "bogus"}).status_code == 422
 
 
 def test_mcp_list_and_get_program(tmp_path):
