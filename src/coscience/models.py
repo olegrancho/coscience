@@ -64,6 +64,7 @@ class Sprint:
     resources_required: dict[str, float] = field(default_factory=dict)
     priority: int = 0
     preemptible: bool = True
+    rationale: str = ""
 
 
 @dataclass

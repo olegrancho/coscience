@@ -116,6 +116,7 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None) -> d
                 program=program_id, priority=prop.priority,
                 resources_required={k: float(v)
                                     for k, v in (prop.resources_required or {}).items()},
+                rationale=prop.rationale,
             ))
         if not already_proposed:
             submitted.append(sid)                      # new this run

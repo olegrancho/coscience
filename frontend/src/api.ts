@@ -5,8 +5,9 @@ export interface Program extends ProgramRow {
 }
 export interface GuidanceNote { id: string; text: string; added_at: number }
 export interface SprintRow {
-  id: string; status: string; goals: string; priority: number;
-  steps: number; results: string[];
+  id: string; status: string; goals: string; program: string | null;
+  priority: number; steps: number; results: string[];
+  rationale: string; resources_required: Record<string, number>;
 }
 export interface Step { id: string; run: string }
 export interface Sprint {
@@ -64,6 +65,7 @@ export const api = {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     }).then(j<Sprint>),
+  listResults: () => fetch("/api/results").then(j<ResultRow[]>),
   getResult: (id: string) => fetch(`/api/results/${id}`).then(j<ResultRow>),
   getLedger: () => fetch("/api/ledger").then(j<Ledger>),
 };

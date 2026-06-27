@@ -4,6 +4,17 @@ from coscience.models import SprintStatus
 from coscience.service import NotFoundError, Service
 
 
+def test_rationale_and_program_surface(tmp_path):
+    from coscience.models import Sprint, SprintStatus, Step
+    svc = Service(tmp_path)
+    svc.substrate.save_sprint(Sprint(id="sp9", status=SprintStatus.PROPOSED, goals="g",
+        plan=[Step(id="s1", run="true")], program="prog", rationale="because X"))
+    row = svc.list_sprints()[0]
+    assert row["rationale"] == "because X"
+    assert row["program"] == "prog"
+    assert svc.get_sprint("sp9")["rationale"] == "because X"
+
+
 def test_submit_then_list_and_get(tmp_path):
     svc = Service(tmp_path)
     sid = svc.submit_sprint(id="sp1", goals="cure", plan=[{"id": "s1", "run": "echo hi"}],
@@ -11,7 +22,8 @@ def test_submit_then_list_and_get(tmp_path):
     assert sid == "sp1"
     rows = svc.list_sprints()
     assert rows == [{"id": "sp1", "status": "proposed", "goals": "cure",
-                     "priority": 3, "steps": 1, "results": []}]
+                     "program": None, "priority": 3, "steps": 1, "results": [],
+                     "rationale": "", "resources_required": {"gpu": 1.0}}]
     detail = svc.get_sprint("sp1")
     assert detail["status"] == "proposed"
     assert detail["resources_required"] == {"gpu": 1.0}

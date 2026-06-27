@@ -106,9 +106,12 @@ class Service:
                 "id": sprint.id,
                 "status": sprint.status.value,
                 "goals": sprint.goals,
+                "program": sprint.program,
                 "priority": sprint.priority,
                 "steps": len(sprint.plan),
                 "results": list(sprint.results),
+                "rationale": sprint.rationale,
+                "resources_required": sprint.resources_required,
             })
         return rows
 
@@ -123,6 +126,7 @@ class Service:
             "priority": sprint.priority,
             "preemptible": sprint.preemptible,
             "resources_required": sprint.resources_required,
+            "rationale": sprint.rationale,
             "plan": [{"id": s.id, "run": s.run} for s in sprint.plan],
             "completed_steps": progress.completed_steps,
             "detached": progress.detached,

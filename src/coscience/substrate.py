@@ -32,6 +32,7 @@ class Substrate:
             },
             priority=int(fm.get("priority", 0)),
             preemptible=bool(fm.get("preemptible", True)),
+            rationale=str(fm.get("rationale", "")),
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
@@ -50,6 +51,8 @@ class Substrate:
             fm["priority"] = sprint.priority
         if not sprint.preemptible:
             fm["preemptible"] = False
+        if sprint.rationale:
+            fm["rationale"] = sprint.rationale
         d = self.sprint_dir(sprint.id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))
