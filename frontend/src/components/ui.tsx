@@ -1,6 +1,36 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Stack, Text } from "@mantine/core";
+import { Link } from "react-router-dom";
 import { SPRINT_STATE_ORDER, statusVar } from "./status";
+
+/** "2h ago" / "3d ago" / "Jun 27" — with the exact local time on hover. */
+function relTime(at: number): string {
+  const s = Math.max(0, Date.now() / 1000 - at);
+  if (s < 45) return "just now";
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.round(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return new Date(at * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+export function RelTime({ at, prefix }: { at?: number | null; prefix?: string }) {
+  if (!at) return null;
+  const abs = new Date(at * 1000).toLocaleString();
+  return <span title={abs}>{prefix}{relTime(at)}</span>;
+}
+
+/** A clear way back to the parent this page belongs under. Names the parent so
+ *  it doubles as context ("‹ Demo" tells you the experiment is in the Demo program). */
+export function BackLink({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <Link to={to} className="backlink">
+      <span aria-hidden>‹</span> <span className="backlink-label">{children}</span>
+    </Link>
+  );
+}
 
 type Var = CSSProperties & Record<string, string | number>;
 

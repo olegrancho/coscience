@@ -46,7 +46,7 @@ def test_parse_response_fenced_json_and_optional_defaults():
             + "\n```\nThanks!")
     out = parse_response(text)
     assert out.proposals[0].priority == 0
-    assert out.proposals[0].resources_required is None
+    assert out.proposals[0].resources_required == {}  # coerced to a clean dict
     assert out.proposals[0].rationale == ""
 
 

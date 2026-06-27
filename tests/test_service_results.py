@@ -10,7 +10,8 @@ def test_save_then_load_result(tmp_path):
     sub = Substrate(tmp_path)
     sub.save_result(Result(id="r1", sprint="sp1", summary="found X"))
     loaded = sub.load_result("r1")
-    assert loaded == Result(id="r1", sprint="sp1", summary="found X")
+    assert (loaded.id, loaded.sprint, loaded.summary) == ("r1", "sp1", "found X")
+    assert isinstance(loaded.completed_at, float)  # falls back to file mtime
 
 
 def test_iter_results_sorted(tmp_path):

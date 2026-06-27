@@ -39,6 +39,18 @@ def test_fresh_beat_proposes_and_reports(substrate):
     assert read_staging(substrate, "p1") is None        # cleared
 
 
+def test_beat_tolerates_non_numeric_resources(substrate):
+    # The LLM sometimes emits prose in resources_required (e.g. a wall-clock note).
+    # The beat must coerce — keep numeric amounts, drop the rest — not crash.
+    _prog(substrate)
+    from coscience.pm_reasoner import FakeReasoner
+    out = PMCycleOutput(proposals=[ProposedSprint(
+        suffix="x", goals="g", plan=[{"id": "s", "run": "true"}],
+        resources_required={"gpu": 2, "note": "CPU-bound; ~30 min wall clock"})])
+    pm_beat(substrate, "p1", FakeReasoner([out]))
+    assert substrate.load_sprint("p1-c0-x").resources_required == {"gpu": 2.0}
+
+
 def test_second_beat_uses_next_cycle(substrate):
     _prog(substrate)
     from coscience.pm_reasoner import FakeReasoner

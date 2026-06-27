@@ -52,7 +52,9 @@ def test_approve_changes_status(client):
 
 def test_results_round_trip(client):
     client.svc.substrate.save_result(Result(id="r1", sprint="sp1", summary="found X"))
-    assert client.get("/api/results").json() == [{"id": "r1", "sprint": "sp1", "summary": "found X"}]
+    rows = client.get("/api/results").json()
+    assert isinstance(rows[0].pop("completed_at"), float)
+    assert rows == [{"id": "r1", "sprint": "sp1", "summary": "found X"}]
     assert client.get("/api/results/r1").json()["summary"] == "found X"
 
 

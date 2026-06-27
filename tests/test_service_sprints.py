@@ -8,11 +8,17 @@ def test_rationale_and_program_surface(tmp_path):
     from coscience.models import Sprint, SprintStatus, Step
     svc = Service(tmp_path)
     svc.substrate.save_sprint(Sprint(id="sp9", status=SprintStatus.PROPOSED, goals="g",
-        plan=[Step(id="s1", run="true")], program="prog", rationale="because X"))
+        plan=[Step(id="s1", run="true")], program="prog", rationale="because X",
+        title="Short name", summary="One skimmable line."))
     row = svc.list_sprints()[0]
     assert row["rationale"] == "because X"
     assert row["program"] == "prog"
-    assert svc.get_sprint("sp9")["rationale"] == "because X"
+    assert row["title"] == "Short name"
+    assert row["summary"] == "One skimmable line."
+    detail = svc.get_sprint("sp9")
+    assert detail["rationale"] == "because X"
+    assert detail["title"] == "Short name"
+    assert detail["summary"] == "One skimmable line."
 
 
 def test_submit_then_list_and_get(tmp_path):
@@ -21,9 +27,9 @@ def test_submit_then_list_and_get(tmp_path):
                             priority=3, resources_required={"gpu": 1})
     assert sid == "sp1"
     rows = svc.list_sprints()
-    assert rows == [{"id": "sp1", "status": "proposed", "goals": "cure",
-                     "program": None, "priority": 3, "steps": 1, "results": [],
-                     "rationale": "", "resources_required": {"gpu": 1.0}}]
+    assert rows == [{"id": "sp1", "status": "proposed", "title": "", "summary": "",
+                     "goals": "cure", "program": None, "priority": 3, "steps": 1,
+                     "results": [], "rationale": "", "resources_required": {"gpu": 1.0}}]
     detail = svc.get_sprint("sp1")
     assert detail["status"] == "proposed"
     assert detail["resources_required"] == {"gpu": 1.0}

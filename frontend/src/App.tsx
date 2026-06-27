@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { AppShell, Group, Text } from "@mantine/core";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 import { Heartbeat } from "./components/ui";
@@ -12,10 +12,20 @@ import ResultDetail from "./views/ResultDetail";
 import Ledger from "./views/Ledger";
 
 const NAV = [
-  { to: "/", label: "Overview", end: true },
-  { to: "/programs", label: "Programs", end: false },
-  { to: "/ledger", label: "Ledger", end: false },
+  { to: "/", label: "Overview" },
+  { to: "/programs", label: "Programs" },
+  { to: "/ledger", label: "Compute" },
 ];
+
+/** Which rail item owns the current route. Experiment + result detail pages live
+ *  under the Programs section so the rail stays highlighted while you drill in. */
+function activeSection(pathname: string): string {
+  if (pathname === "/") return "/";
+  if (pathname.startsWith("/ledger")) return "/ledger";
+  if (pathname.startsWith("/programs") || pathname.startsWith("/sprints") || pathname.startsWith("/results"))
+    return "/programs";
+  return "";
+}
 
 function railLinkStyle({ isActive }: { isActive: boolean }) {
   return {
@@ -72,6 +82,8 @@ function Pulse() {
 }
 
 export default function App() {
+  const { pathname } = useLocation();
+  const active = activeSection(pathname);
   return (
     <AppShell header={{ height: 52 }} navbar={{ width: 232, breakpoint: "sm" }} padding={0}>
       <AppShell.Header style={{ background: "var(--card)", borderBottom: "1px solid var(--hairline)" }}>
@@ -96,9 +108,9 @@ export default function App() {
 
         <nav style={{ flex: 1 }}>
           {NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} style={railLinkStyle}>
+            <Link key={n.to} to={n.to} style={railLinkStyle({ isActive: active === n.to })}>
               {n.label}
-            </NavLink>
+            </Link>
           ))}
         </nav>
 

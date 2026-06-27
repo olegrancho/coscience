@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 
 from coscience.models import Sprint, SprintStatus, Step
-from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint
+from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
 
 
 def gather_context(substrate, program_id: str) -> PMContext:
@@ -63,7 +63,7 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput)
         "proposals": [
             {"suffix": p.suffix, "goals": p.goals, "plan": p.plan,
              "priority": p.priority, "resources_required": p.resources_required,
-             "rationale": p.rationale}
+             "rationale": p.rationale, "title": p.title, "summary": p.summary}
             for p in output.proposals
         ],
     }
@@ -114,9 +114,10 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None) -> d
                 id=sid, status=SprintStatus.PROPOSED, goals=prop.goals,
                 plan=[Step.from_dict(s) for s in prop.plan],
                 program=program_id, priority=prop.priority,
-                resources_required={k: float(v)
-                                    for k, v in (prop.resources_required or {}).items()},
+                resources_required=coerce_resources(prop.resources_required),
                 rationale=prop.rationale,
+                title=prop.title,
+                summary=prop.summary,
             ))
         if not already_proposed:
             submitted.append(sid)                      # new this run

@@ -10,7 +10,7 @@ import json
 import re
 import subprocess
 
-from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint
+from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
 
 
 class PMReasonerError(Exception):
@@ -49,12 +49,18 @@ PRIOR PROPOSALS you already made (do NOT repeat their intent): {prior_block}
 Respond with ONLY a JSON object (no prose outside it) of this shape:
 {{"report": "<markdown program-status summary>",
   "proposals": [
-    {{"suffix": "<short-slug>", "goals": "<what this sprint does>",
+    {{"suffix": "<short-slug>",
+      "title": "<=8 words naming the experiment, e.g. 'Cross-validate the witness pair'>",
+      "summary": "one or two plain sentences a reviewer can skim to decide",
+      "goals": "<what this sprint does, in full detail>",
       "plan": [{{"id": "<step-id>", "run": "<shell command>"}}],
       "priority": <int>, "resources_required": {{}} or null,
       "rationale": "<why this experiment next>"}}
   ]}}
 Propose 0 proposals if nothing new is warranted. Keep `plan` steps concrete and runnable.
+`resources_required` maps a resource name to a NUMBER only (e.g. {{"cpu": 1}} or {{"gpu": 2}}),
+or {{}} — never put notes or prose in it; put caveats in `rationale`.
+`title` is a short headline; `summary` is the skimmable gist; `goals` is the full objective.
 """
 
 
@@ -84,8 +90,10 @@ def parse_response(text: str) -> PMCycleOutput:
                 suffix=str(p["suffix"]), goals=str(p["goals"]),
                 plan=[{"id": str(s["id"]), "run": str(s["run"])} for s in p["plan"]],
                 priority=int(p.get("priority", 0)),
-                resources_required=p.get("resources_required"),
+                resources_required=coerce_resources(p.get("resources_required")),
                 rationale=str(p.get("rationale", "")),
+                title=str(p.get("title", "")),
+                summary=str(p.get("summary", "")),
             ))
         except (KeyError, TypeError) as exc:
             raise PMReasonerError(f"malformed proposal: {exc}") from exc

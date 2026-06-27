@@ -71,7 +71,9 @@ def test_results_round_trip(server, tmp_path):
     from coscience.models import Result
     # Reuse the same substrate the server's Service is bound to.
     Service(tmp_path).substrate.save_result(Result(id="r1", sprint="sp1", summary="found X"))
-    assert call(server, "list_results", {}) == [{"id": "r1", "sprint": "sp1", "summary": "found X"}]
+    rows = call(server, "list_results", {})
+    assert isinstance(rows[0].pop("completed_at"), float)
+    assert rows == [{"id": "r1", "sprint": "sp1", "summary": "found X"}]
     assert call(server, "get_result", {"id": "r1"})["summary"] == "found X"
 
 

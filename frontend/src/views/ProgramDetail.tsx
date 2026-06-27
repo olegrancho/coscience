@@ -3,9 +3,9 @@ import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import Markdown from "react-markdown";
+import Markdown, { type Components } from "react-markdown";
 import { api } from "../api";
-import { EmptyState, StatusBadge } from "../components/ui";
+import { BackLink, EmptyState, StatusBadge } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -30,6 +30,19 @@ export default function ProgramDetail() {
   }
   const p = program.data;
 
+  // The PM report mentions experiments by id (as `code` chips). Turn any that
+  // belong to this program into links to the experiment page.
+  const sprintIds = new Set(p.sprints.map((s) => s.id));
+  const reportComponents: Components = {
+    code({ className, children, node: _node, ...rest }) {
+      const text = String(children).replace(/\n$/, "");
+      if (sprintIds.has(text)) {
+        return <Link to={`/sprints/${text}`} className="report-sprint-link">{text}</Link>;
+      }
+      return <code className={className} {...rest}>{children}</code>;
+    },
+  };
+
   const setStatus = async (status: string, verb: string) => {
     try { await api.setProgramStatus(id, status); notifications.show({ color: "teal", title: verb, message: `Program ${status}.` }); refresh(); }
     catch (e) { notifications.show({ color: "red", title: `Couldn't ${verb.toLowerCase()}`, message: String(e) }); }
@@ -47,7 +60,7 @@ export default function ProgramDetail() {
   return (
     <Stack gap="lg">
       <div>
-        <div className="eyebrow" style={{ marginBottom: 7 }}>program</div>
+        <BackLink to="/programs">Programs</BackLink>
         <Group justify="space-between" align="flex-start" wrap="nowrap">
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: 0 }}>{p.title || p.id}</h1>
           <Group gap={8} wrap="nowrap">
@@ -67,7 +80,7 @@ export default function ProgramDetail() {
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 12 }}>the AI's status report</div>
-        {p.report ? <div className="report-leaf"><Markdown>{p.report}</Markdown></div>
+        {p.report ? <div className="report-leaf"><Markdown components={reportComponents}>{p.report}</Markdown></div>
           : <Text size="sm" c="dimmed">No report yet — the AI writes one each planning cycle.</Text>}
       </Card>
 
@@ -97,11 +110,18 @@ export default function ProgramDetail() {
         ) : (
           <Stack gap={2}>
             {p.sprints.map((s) => (
-              <Link key={s.id} to={`/sprints/${s.id}`}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, textDecoration: "none", color: "inherit", padding: "10px 6px", borderBottom: "1px solid var(--hairline)" }}>
-                <Text size="sm" style={{ minWidth: 0 }} truncate>{s.goals || s.id}</Text>
-                <StatusBadge status={s.status} />
-              </Link>
+              <div key={s.id}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 6px", borderBottom: "1px solid var(--hairline)" }}>
+                <Link to={`/sprints/${s.id}`} style={{ minWidth: 0, flex: 1, textDecoration: "none", color: "inherit" }}>
+                  <Text size="sm" truncate>{s.title || s.goals || s.id}</Text>
+                </Link>
+                <Group gap={12} wrap="nowrap">
+                  {s.results.length > 0 && (
+                    <Link to={`/results/${s.results[0]}`} className="view" style={{ fontSize: 13 }}>result →</Link>
+                  )}
+                  <StatusBadge status={s.status} />
+                </Group>
+              </div>
             ))}
           </Stack>
         )}

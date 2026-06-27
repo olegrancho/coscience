@@ -26,13 +26,13 @@ export default function Ledger() {
           <Stack gap={16}>
             {keys.map((k) => <Gauge key={k} label={k} used={l.used[k] ?? 0} capacity={l.capacity[k]} />)}
           </Stack>
-        ) : <Text size="sm" c="dimmed">No resource pool configured for this repo.</Text>}
+        ) : <Text size="sm" c="dimmed">No compute pool is configured yet, so there's nothing to meter.</Text>}
       </Card>
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 12 }}>running now · {l.leases.length}</div>
         {l.leases.length === 0 ? (
-          <Text size="sm" c="dimmed">Nothing is running. Approved experiments take compute here when the dispatcher starts them.</Text>
+          <Text size="sm" c="dimmed">Nothing is running right now. Approved experiments show up here while they use compute.</Text>
         ) : (
           <Table>
             <Table.Thead>

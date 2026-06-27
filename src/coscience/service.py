@@ -105,6 +105,8 @@ class Service:
             rows.append({
                 "id": sprint.id,
                 "status": sprint.status.value,
+                "title": sprint.title,
+                "summary": sprint.summary,
                 "goals": sprint.goals,
                 "program": sprint.program,
                 "priority": sprint.priority,
@@ -122,11 +124,15 @@ class Service:
         return {
             "id": sprint.id,
             "status": sprint.status.value,
+            "title": sprint.title,
+            "summary": sprint.summary,
             "goals": sprint.goals,
             "priority": sprint.priority,
             "preemptible": sprint.preemptible,
             "resources_required": sprint.resources_required,
             "rationale": sprint.rationale,
+            "program": sprint.program,
+            "results": list(sprint.results),
             "plan": [{"id": s.id, "run": s.run} for s in sprint.plan],
             "completed_steps": progress.completed_steps,
             "detached": progress.detached,
@@ -154,7 +160,8 @@ class Service:
             "id": p.id, "title": p.title, "status": p.status.value, "goals": p.goals,
             "report": self.substrate.load_report(program_id),
             "cycle": pm.cycle,
-            "sprints": [{"id": s.id, "status": s.status.value, "goals": s.goals}
+            "sprints": [{"id": s.id, "status": s.status.value, "goals": s.goals,
+                         "title": s.title, "results": list(s.results)}
                         for s in sprints],
         }
 
@@ -189,14 +196,19 @@ class Service:
 
     # --- results ---
     def list_results(self) -> list[dict]:
-        return [{"id": r.id, "sprint": r.sprint, "summary": r.summary}
+        return [{"id": r.id, "sprint": r.sprint, "summary": r.summary,
+                 "completed_at": r.completed_at}
                 for r in self.substrate.iter_results()]
 
     def get_result(self, result_id: str) -> dict:
         if not (self.repo_root / "results" / f"{result_id}.md").is_file():
             raise NotFoundError(result_id)
         r = self.substrate.load_result(result_id)
-        return {"id": r.id, "sprint": r.sprint, "summary": r.summary}
+        program = None
+        if (self.substrate.sprint_dir(r.sprint) / "sprint.md").is_file():
+            program = self.substrate.load_sprint(r.sprint).program
+        return {"id": r.id, "sprint": r.sprint, "summary": r.summary, "program": program,
+                "completed_at": r.completed_at}
 
     # --- ledger ---
     def ledger_status(self) -> dict:

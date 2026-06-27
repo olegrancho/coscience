@@ -65,6 +65,8 @@ class Sprint:
     priority: int = 0
     preemptible: bool = True
     rationale: str = ""
+    title: str = ""
+    summary: str = ""
 
 
 @dataclass
@@ -72,6 +74,7 @@ class Result:
     id: str
     sprint: str
     summary: str
+    completed_at: float | None = None
 
 
 @dataclass

@@ -1,22 +1,25 @@
 export interface ProgramRow { id: string; title: string; status: string; goals: string }
-export interface SprintRef { id: string; status: string; goals: string }
+export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[] }
 export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[];
 }
 export interface GuidanceNote { id: string; text: string; added_at: number }
 export interface SprintRow {
-  id: string; status: string; goals: string; program: string | null;
+  id: string; status: string; title: string; summary: string;
+  goals: string; program: string | null;
   priority: number; steps: number; results: string[];
   rationale: string; resources_required: Record<string, number>;
 }
 export interface Step { id: string; run: string }
 export interface Sprint {
-  id: string; status: string; goals: string; priority: number; preemptible: boolean;
+  id: string; status: string; title: string; summary: string;
+  goals: string; priority: number; preemptible: boolean;
   resources_required: Record<string, number>; rationale: string; plan: Step[];
+  program: string | null; results: string[];
   completed_steps: string[]; detached: Record<string, string>;
   outputs: Record<string, string>; lease: unknown | null;
 }
-export interface ResultRow { id: string; sprint: string; summary: string }
+export interface ResultRow { id: string; sprint: string; summary: string; program?: string | null; completed_at?: number | null }
 export interface Ledger {
   capacity: Record<string, number>; used: Record<string, number>;
   available: Record<string, number>; leases: unknown[];

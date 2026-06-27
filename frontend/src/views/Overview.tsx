@@ -3,7 +3,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type SprintRow } from "../api";
-import { Bars, computeCost, EmptyState, Gauge, Heartbeat, StateBar, StatusBadge } from "../components/ui";
+import { Bars, computeCost, EmptyState, Gauge, Heartbeat, RelTime, StateBar, StatusBadge } from "../components/ui";
 
 function programOf(s: SprintRow) {
   if (s.program) return s.program;
@@ -42,6 +42,8 @@ export default function Overview() {
   const status: Record<string, string> = {};
   const title: Record<string, string> = {};
   for (const p of progs) { status[p.id] = p.status; title[p.id] = p.title || p.id; }
+  const sprintTitle: Record<string, string> = {};
+  for (const s of allSprints) sprintTitle[s.id] = s.title || s.goals || s.id;
 
   const groups: Record<string, SprintRow[]> = {};
   for (const s of allSprints.filter((s) => s.status === "proposed")) {
@@ -62,14 +64,15 @@ export default function Overview() {
 
   const card = (s: SprintRow) => {
     const c = computeCost(s.resources_required, cap);
+    const heading = s.title || s.goals || s.id;
+    const summary = s.summary || s.rationale;
     return (
       <div key={s.id} className="exp" onClick={() => nav(`/sprints/${s.id}`)}>
         <span className="kind"><span className="d" />Experiment · awaiting approval</span>
-        <p className="goal">{s.goals || s.id}</p>
-        <div className="metarow">
-          {s.rationale && (<><span className="k">Why</span><span className="v">{s.rationale}</span></>)}
-          <span className="k">Compute</span>
-          <span className="cost"><Bars filled={c.filled} /> {c.text} · {s.steps}-step plan · {SCALE_HINT[c.scale]}</span>
+        <p className="exp-title">{heading}</p>
+        {summary && <p className="exp-summary">{summary}</p>}
+        <div className="exp-meta">
+          <Bars filled={c.filled} /> {c.text} · {SCALE_HINT[c.scale]} · {s.steps}-step plan
         </div>
         <div className="foot">
           <Link className="view" to={`/sprints/${s.id}`} onClick={(e) => e.stopPropagation()}>View plan →</Link>
@@ -150,7 +153,7 @@ export default function Overview() {
                 <Gauge key={k} label={k} used={ledger.data?.used[k] ?? 0} capacity={cap[k]} />
               ))}
             </Stack>
-          ) : <Text size="xs" c="dimmed">No resource pool configured.</Text>}
+          ) : <Text size="xs" c="dimmed">No compute pool configured yet.</Text>}
         </Card>
       </SimpleGrid>
 
@@ -161,13 +164,16 @@ export default function Overview() {
         ) : (
           <Stack gap={10}>
             {recent.map((r) => (
-              <Group key={r.id} justify="space-between" wrap="nowrap" style={{ borderBottom: "1px solid var(--hairline)", paddingBottom: 10 }}>
+              <Link key={r.id} to={`/results/${r.id}`}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, textDecoration: "none", color: "inherit", borderBottom: "1px solid var(--hairline)", paddingBottom: 10 }}>
                 <div style={{ minWidth: 0 }}>
-                  <Text size="sm">{r.summary.split("\n")[0] || "—"}</Text>
-                  <Link to={`/sprints/${r.sprint}`} className="mono" style={{ fontSize: 11, color: "var(--ink-faint)", textDecoration: "none" }}>{r.sprint}</Link>
+                  <Text size="sm" truncate>{sprintTitle[r.sprint] || r.summary.split("\n")[0] || "—"}</Text>
+                  <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>
+                    {r.completed_at ? <>finished <RelTime at={r.completed_at} /></> : "experiment finding"}
+                  </span>
                 </div>
-                <Link to={`/results/${r.id}`}><StatusBadge status="done" /></Link>
-              </Group>
+                <StatusBadge status="done" />
+              </Link>
             ))}
           </Stack>
         )}

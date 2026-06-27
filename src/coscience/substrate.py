@@ -33,6 +33,8 @@ class Substrate:
             priority=int(fm.get("priority", 0)),
             preemptible=bool(fm.get("preemptible", True)),
             rationale=str(fm.get("rationale", "")),
+            title=str(fm.get("title", "")),
+            summary=str(fm.get("summary", "")),
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
@@ -53,6 +55,10 @@ class Substrate:
             fm["preemptible"] = False
         if sprint.rationale:
             fm["rationale"] = sprint.rationale
+        if sprint.title:
+            fm["title"] = sprint.title
+        if sprint.summary:
+            fm["summary"] = sprint.summary
         d = self.sprint_dir(sprint.id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))
@@ -100,14 +106,24 @@ class Substrate:
     # --- results ---
     def save_result(self, result: Result) -> None:
         fm = {"type": "result", "sprint": result.sprint}
+        if result.completed_at is not None:
+            fm["completed_at"] = result.completed_at
         d = self.repo_root / "results"
         d.mkdir(parents=True, exist_ok=True)
         (d / f"{result.id}.md").write_text(serialize(fm, result.summary))
 
     def load_result(self, result_id: str) -> Result:
-        text = (self.repo_root / "results" / f"{result_id}.md").read_text()
-        fm, body = parse(text)
-        return Result(id=result_id, sprint=str(fm.get("sprint", "")), summary=body.strip())
+        path = self.repo_root / "results" / f"{result_id}.md"
+        fm, body = parse(path.read_text())
+        # explicit completed_at wins; otherwise fall back to when the file was written
+        completed_at = fm.get("completed_at")
+        if completed_at is None:
+            try:
+                completed_at = path.stat().st_mtime
+            except OSError:
+                completed_at = None
+        return Result(id=result_id, sprint=str(fm.get("sprint", "")), summary=body.strip(),
+                      completed_at=None if completed_at is None else float(completed_at))
 
     def iter_results(self) -> list[Result]:
         results_dir = self.repo_root / "results"
