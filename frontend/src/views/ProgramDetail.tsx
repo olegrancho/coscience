@@ -1,13 +1,14 @@
-import {
-  ActionIcon, Badge, Button, Card, Group, Loader, Stack, Table, Text,
-  TextInput, Title,
-} from "@mantine/core";
+import { ActionIcon, Button, Card, Group, Loader, Stack, Text, TextInput } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import { api } from "../api";
+import { EmptyState, StatusBadge } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
+
+const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
 export default function ProgramDetail() {
   const { id = "" } = useParams();
@@ -20,71 +21,93 @@ export default function ProgramDetail() {
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["program", id] });
     qc.invalidateQueries({ queryKey: ["guidance", id] });
+    qc.invalidateQueries({ queryKey: ["sprints"] });
   };
 
-  if (program.isLoading) return <Loader />;
-  if (program.error || !program.data) return <div>Program not found.</div>;
+  if (program.isLoading) return <Loader color="machine" />;
+  if (program.error || !program.data) {
+    return <EmptyState title="Program not found">Nothing here at “{id}”.</EmptyState>;
+  }
   const p = program.data;
 
-  const setStatus = async (status: string) => { await api.setProgramStatus(id, status); refresh(); };
-  const addNote = async () => { if (note.trim()) { await api.addGuidance(id, note.trim()); setNote(""); refresh(); } };
-  const delNote = async (nid: string) => { await api.removeGuidance(id, nid); refresh(); };
+  const setStatus = async (status: string, verb: string) => {
+    try { await api.setProgramStatus(id, status); notifications.show({ color: "teal", title: verb, message: `Program ${status}.` }); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: `Couldn't ${verb.toLowerCase()}`, message: String(e) }); }
+  };
+  const addNote = async () => {
+    if (!note.trim()) return;
+    try { await api.addGuidance(id, note.trim()); setNote(""); notifications.show({ color: "teal", title: "Guidance added", message: "The AI will weigh it next cycle." }); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't add", message: String(e) }); }
+  };
+  const delNote = async (nid: string) => {
+    try { await api.removeGuidance(id, nid); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't remove", message: String(e) }); }
+  };
 
   return (
-    <Stack>
-      <Group justify="space-between">
-        <Title order={2}>{p.title || p.id} <Badge ml="sm">{p.status}</Badge></Title>
-        <Group>
-          <Text size="sm" c="dimmed">PM cycle {p.cycle}</Text>
-          {p.status !== "active" && <Button variant="light" onClick={() => setStatus("active")}>Resume</Button>}
-          {p.status === "active" && <Button variant="light" color="yellow" onClick={() => setStatus("paused")}>Pause</Button>}
-          {p.status !== "closed" && <Button variant="light" color="gray" onClick={() => setStatus("closed")}>Close</Button>}
-          <Button onClick={() => setProposing(true)}>Propose sprint</Button>
+    <Stack gap="lg">
+      <div>
+        <div className="eyebrow" style={{ marginBottom: 7 }}>program</div>
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: 0 }}>{p.title || p.id}</h1>
+          <Group gap={8} wrap="nowrap">
+            {p.status !== "active" && <Button variant="light" color="machine" onClick={() => setStatus("active", "Resumed")}>Resume</Button>}
+            {p.status === "active" && <Button variant="light" color="signal" onClick={() => setStatus("paused", "Paused")}>Pause</Button>}
+            {p.status !== "closed" && <Button variant="default" onClick={() => setStatus("closed", "Closed")}>Close</Button>}
+            <Button color="machine" onClick={() => setProposing(true)}>Propose experiment</Button>
+          </Group>
         </Group>
-      </Group>
+        <Group gap={10} mt={9}>
+          <StatusBadge status={p.status} />
+          <Text size="sm" c="dimmed">the AI has run <span className="mono">{p.cycle}</span> planning {p.cycle === 1 ? "cycle" : "cycles"}</Text>
+        </Group>
+      </div>
 
-      <Card withBorder>
-        <Title order={4} mb="xs">PM report</Title>
-        <Markdown>{p.report || "_No report yet._"}</Markdown>
+      {p.goals && <Text c="dimmed" style={{ maxWidth: 680 }}>{p.goals}</Text>}
+
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>the AI's status report</div>
+        {p.report ? <div className="report-leaf"><Markdown>{p.report}</Markdown></div>
+          : <Text size="sm" c="dimmed">No report yet — the AI writes one each planning cycle.</Text>}
       </Card>
 
-      <Card withBorder>
-        <Title order={4} mb="xs">Human guidance</Title>
-        <Stack gap="xs">
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <div className="eyebrow" style={{ marginBottom: 4 }}>your guidance to the AI</div>
+        <Text size="xs" c="dimmed" mb="sm">Standing notes the AI weighs every cycle. Remove one when it's handled.</Text>
+        <Stack gap={8}>
           {(guidance.data ?? []).map((g) => (
-            <Group key={g.id} justify="space-between">
-              <Text>{g.text}</Text>
-              <ActionIcon variant="subtle" color="red" onClick={() => delNote(g.id)}>✕</ActionIcon>
+            <Group key={g.id} justify="space-between" wrap="nowrap" style={{ background: "var(--paper)", borderRadius: 8, padding: "8px 12px" }}>
+              <Text size="sm">{g.text}</Text>
+              <ActionIcon variant="subtle" color="gray" onClick={() => delNote(g.id)} aria-label="remove">✕</ActionIcon>
             </Group>
           ))}
-          <Group>
-            <TextInput style={{ flex: 1 }} placeholder="Add a steer for the PM…"
-                       value={note} onChange={(e) => setNote(e.currentTarget.value)} />
-            <Button onClick={addNote}>Add</Button>
+          <Group gap={8}>
+            <TextInput style={{ flex: 1 }} placeholder="Add a note for the AI…" value={note}
+              onChange={(e) => setNote(e.currentTarget.value)}
+              onKeyDown={(e) => e.key === "Enter" && addNote()} />
+            <Button variant="light" color="machine" onClick={addNote}>Add</Button>
           </Group>
         </Stack>
       </Card>
 
-      <Card withBorder>
-        <Title order={4} mb="xs">Sprints</Title>
-        <Table striped withTableBorder>
-          <Table.Thead><Table.Tr>
-            <Table.Th>Id</Table.Th><Table.Th>Status</Table.Th><Table.Th>Goals</Table.Th>
-          </Table.Tr></Table.Thead>
-          <Table.Tbody>
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>experiments · {p.sprints.length}</div>
+        {p.sprints.length === 0 ? (
+          <Text size="sm" c="dimmed">None yet. Propose one, or let the AI propose on its next cycle.</Text>
+        ) : (
+          <Stack gap={2}>
             {p.sprints.map((s) => (
-              <Table.Tr key={s.id}>
-                <Table.Td><Link to={`/sprints/${s.id}`}>{s.id}</Link></Table.Td>
-                <Table.Td><Badge>{s.status}</Badge></Table.Td>
-                <Table.Td>{s.goals}</Table.Td>
-              </Table.Tr>
+              <Link key={s.id} to={`/sprints/${s.id}`}
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, textDecoration: "none", color: "inherit", padding: "10px 6px", borderBottom: "1px solid var(--hairline)" }}>
+                <Text size="sm" style={{ minWidth: 0 }} truncate>{s.goals || s.id}</Text>
+                <StatusBadge status={s.status} />
+              </Link>
             ))}
-          </Table.Tbody>
-        </Table>
+          </Stack>
+        )}
       </Card>
 
-      <ProposeSprintModal programId={id} opened={proposing}
-                          onClose={() => setProposing(false)} onDone={refresh} />
+      <ProposeSprintModal programId={id} opened={proposing} onClose={() => setProposing(false)} onDone={refresh} />
     </Stack>
   );
 }

@@ -1,43 +1,58 @@
-import { Card, Group, Loader, Stack, Table, Text, Title } from "@mantine/core";
+import { Card, Loader, Stack, Table, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { api } from "../api";
+import { EmptyState, Gauge } from "../components/ui";
+
+const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
 export default function Ledger() {
   const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.getLedger });
-  if (ledger.isLoading) return <Loader />;
-  if (ledger.error || !ledger.data) return <div>Failed to load ledger.</div>;
+  if (ledger.isLoading) return <Loader color="machine" />;
+  if (ledger.error || !ledger.data) return <EmptyState title="Couldn't load compute">Try again in a moment.</EmptyState>;
   const l = ledger.data;
   const keys = Object.keys(l.capacity);
+
   return (
-    <Stack>
-      <Title order={2}>Resources</Title>
-      <Group>
-        {keys.map((k) => (
-          <Card withBorder key={k}>
-            <Text fw={700}>{k}</Text>
-            <Text size="sm">capacity {l.capacity[k]}</Text>
-            <Text size="sm">used {l.used[k] ?? 0}</Text>
-            <Text size="sm">available {l.available[k] ?? 0}</Text>
-          </Card>
-        ))}
-      </Group>
-      <Card withBorder>
-        <Title order={4} mb="xs">Active leases</Title>
-        <Table withTableBorder>
-          <Table.Thead><Table.Tr><Table.Th>Lease</Table.Th><Table.Th>Sprint</Table.Th><Table.Th>Amounts</Table.Th></Table.Tr></Table.Thead>
-          <Table.Tbody>
-            {l.leases.map((lease, i) => {
-              const x = lease as { id: string; sprint_id: string; amounts: unknown };
-              return (
-                <Table.Tr key={i}>
-                  <Table.Td>{x.id}</Table.Td>
-                  <Table.Td>{x.sprint_id}</Table.Td>
-                  <Table.Td>{JSON.stringify(x.amounts)}</Table.Td>
-                </Table.Tr>
-              );
-            })}
-          </Table.Tbody>
-        </Table>
+    <Stack gap="lg">
+      <div>
+        <div className="eyebrow" style={{ marginBottom: 7 }}>resources</div>
+        <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: 0 }}>Compute</h1>
+      </div>
+
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <div className="eyebrow" style={{ marginBottom: 16 }}>capacity in use</div>
+        {keys.length ? (
+          <Stack gap={16}>
+            {keys.map((k) => <Gauge key={k} label={k} used={l.used[k] ?? 0} capacity={l.capacity[k]} />)}
+          </Stack>
+        ) : <Text size="sm" c="dimmed">No resource pool configured for this repo.</Text>}
+      </Card>
+
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>running now · {l.leases.length}</div>
+        {l.leases.length === 0 ? (
+          <Text size="sm" c="dimmed">Nothing is running. Approved experiments take compute here when the dispatcher starts them.</Text>
+        ) : (
+          <Table>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Experiment</Table.Th><Table.Th>Using</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {l.leases.map((lease, i) => {
+                const x = lease as { id: string; sprint_id: string; amounts: Record<string, number> };
+                return (
+                  <Table.Tr key={i}>
+                    <Table.Td><Link to={`/sprints/${x.sprint_id}`} className="mono" style={{ fontSize: 13, color: "var(--machine)", textDecoration: "none" }}>{x.sprint_id}</Link></Table.Td>
+                    <Table.Td className="mono" style={{ fontSize: 13 }}>{Object.entries(x.amounts).map(([k, v]) => `${v} ${k}`).join(", ")}</Table.Td>
+                  </Table.Tr>
+                );
+              })}
+            </Table.Tbody>
+          </Table>
+        )}
       </Card>
     </Stack>
   );

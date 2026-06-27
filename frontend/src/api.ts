@@ -12,7 +12,7 @@ export interface SprintRow {
 export interface Step { id: string; run: string }
 export interface Sprint {
   id: string; status: string; goals: string; priority: number; preemptible: boolean;
-  resources_required: Record<string, number>; plan: Step[];
+  resources_required: Record<string, number>; rationale: string; plan: Step[];
   completed_steps: string[]; detached: Record<string, string>;
   outputs: Record<string, string>; lease: unknown | null;
 }
