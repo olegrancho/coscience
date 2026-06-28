@@ -8,9 +8,10 @@ from pathlib import Path
 from coscience.claude_executor import ClaudeCodeExecutor
 from coscience.dispatcher import CycleReport, Dispatcher
 from coscience.executor import ShellStepExecutor
+from coscience.loop_status import LoopStatus
 from coscience.models import BeatOutcome, Program
 from coscience.pm_claude import ClaudeCodeReasoner
-from coscience.pm_runner import pm_loop, pm_run_once
+from coscience.pm_runner import pm_run_once
 from coscience.resources import load_pool
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
@@ -38,6 +39,24 @@ def dispatch_once(repo_root: Path, executor_name: str = "shell") -> CycleReport:
         load_pool(repo_root), SchedulerPolicy(),
     )
     return disp.run_one_cycle()
+
+
+def _status_loop(status: LoopStatus, beat, interval: float, max_beats: int | None) -> int:
+    """Run `beat` on an interval. A background heartbeat re-renders every 5s so the
+    clock/uptime tick between beats; `beat` returns (last_line, counters)."""
+    status.render()                       # show the block before the first (slow) beat
+    status.start_heartbeat(5.0)
+    n = 0
+    try:
+        while max_beats is None or n < max_beats:
+            last, counters = beat()
+            status.record(last, counters)  # updates state + re-renders immediately
+            n += 1
+            if max_beats is None or n < max_beats:
+                time.sleep(interval)
+    finally:
+        status.stop()
+    return n
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -90,28 +109,27 @@ def main(argv: list[str] | None = None) -> int:
         if args.once or not args.loop:
             print(run_once(args.repo).value)
             return 0
-        beats = 0
-        while args.max_beats is None or beats < args.max_beats:
-            print(run_once(args.repo).value, flush=True)
-            beats += 1
-            if args.max_beats is None or beats < args.max_beats:
-                time.sleep(args.interval)
+
+        def _beat():
+            outcome = run_once(args.repo)
+            return outcome.value, {outcome.value: 1}
+        _status_loop(LoopStatus("worker"), _beat, args.interval, args.max_beats)
         return 0
 
     if args.command == "dispatch":
-        def _one():
+        if args.once or not args.loop:
             r = dispatch_once(args.repo, args.executor)
             print(f"granted={r.granted} preempted={r.preempted} beaten={r.beaten} "
                   f"completed={r.completed} waiting={r.waiting}", flush=True)
-        if args.once or not args.loop:
-            _one()
             return 0
-        beats = 0
-        while args.max_beats is None or beats < args.max_beats:
-            _one()
-            beats += 1
-            if args.max_beats is None or beats < args.max_beats:
-                time.sleep(args.interval)
+
+        def _beat():
+            r = dispatch_once(args.repo, args.executor)
+            # waiting is a current snapshot (shown live), not a per-cycle event to sum
+            return (f"granted {r.granted} · completed {r.completed} · waiting {r.waiting}",
+                    {"granted": r.granted, "completed": r.completed, "preempted": r.preempted})
+        _status_loop(LoopStatus("dispatch", uses_claude=(args.executor == "claude")),
+                     _beat, args.interval, args.max_beats)
         return 0
 
     if args.command == "pm":
@@ -122,9 +140,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{summary['program']}: cycle={summary['cycle']} "
                       f"submitted={summary['submitted']}", flush=True)
             return 0
-        rounds = pm_loop(substrate, reasoner, interval=args.interval,
-                         max_rounds=args.max_rounds)
-        print(f"pm ran {rounds} rounds", flush=True)
+
+        def _beat():
+            summaries = pm_run_once(substrate, reasoner)
+            ids = [sid for s in summaries for sid in s["submitted"]]
+            last = f"proposed {', '.join(ids)}" if ids else "no new proposals"
+            return last, {"proposed": len(ids)}  # each run is one cycle; "runs" covers it
+        _status_loop(LoopStatus("PM", uses_claude=True), _beat,
+                     args.interval, args.max_rounds)
         return 0
 
     parser.error("unknown command")  # raises SystemExit
