@@ -5,9 +5,8 @@ import argparse
 import time
 from pathlib import Path
 
-from coscience.claude_executor import ClaudeCodeExecutor
+from coscience.claude_executor import ClaudeAgent
 from coscience.dispatcher import CycleReport, Dispatcher
-from coscience.executor import ShellStepExecutor
 from coscience.loop_status import LoopStatus
 from coscience.models import BeatOutcome, Program
 from coscience.pm_claude import ClaudeCodeReasoner
@@ -19,23 +18,17 @@ from coscience.worker import Worker
 
 
 def run_once(repo_root: Path) -> BeatOutcome:
-    worker = Worker(Substrate(repo_root), ShellStepExecutor())
+    worker = Worker(Substrate(repo_root), ClaudeAgent())
     return worker.run_one_beat()
-
-
-def _make_executor(name: str):
-    if name == "claude":
-        return ClaudeCodeExecutor()
-    return ShellStepExecutor()
 
 
 def _make_pm_reasoner():
     return ClaudeCodeReasoner()
 
 
-def dispatch_once(repo_root: Path, executor_name: str = "shell") -> CycleReport:
+def dispatch_once(repo_root: Path) -> CycleReport:
     disp = Dispatcher(
-        Substrate(repo_root), _make_executor(executor_name),
+        Substrate(repo_root), ClaudeAgent(),
         load_pool(repo_root), SchedulerPolicy(),
     )
     return disp.run_one_cycle()
@@ -43,14 +36,14 @@ def dispatch_once(repo_root: Path, executor_name: str = "shell") -> CycleReport:
 
 def _status_loop(status: LoopStatus, beat, interval: float, max_beats: int | None) -> int:
     """Run `beat` on an interval. A background heartbeat re-renders every 5s so the
-    clock/uptime tick between beats; `beat` returns (last_line, counters)."""
+    clock/uptime tick between beats; `beat` returns (last_line, counters, claude_calls)."""
     status.render()                       # show the block before the first (slow) beat
     status.start_heartbeat(5.0)
     n = 0
     try:
         while max_beats is None or n < max_beats:
-            last, counters = beat()
-            status.record(last, counters)  # updates state + re-renders immediately
+            last, counters, claude_calls = beat()
+            status.record(last, counters, claude_calls)  # state + re-render
             n += 1
             if max_beats is None or n < max_beats:
                 time.sleep(interval)
@@ -78,7 +71,6 @@ def main(argv: list[str] | None = None) -> int:
     dmode.add_argument("--loop", action="store_true")
     d.add_argument("--interval", type=float, default=5.0)
     d.add_argument("--max-beats", type=int, default=None)
-    d.add_argument("--executor", choices=["shell", "claude"], default="shell")
 
     pg = sub.add_parser("program", help="manage research programs")
     pgsub = pg.add_subparsers(dest="program_command", required=True)
@@ -112,23 +104,25 @@ def main(argv: list[str] | None = None) -> int:
 
         def _beat():
             outcome = run_once(args.repo)
-            return outcome.value, {outcome.value: 1}
+            return outcome.value, {outcome.value: 1}, 0  # shell worker: no Claude
         _status_loop(LoopStatus("worker"), _beat, args.interval, args.max_beats)
         return 0
 
     if args.command == "dispatch":
         if args.once or not args.loop:
-            r = dispatch_once(args.repo, args.executor)
+            r = dispatch_once(args.repo)
             print(f"granted={r.granted} preempted={r.preempted} beaten={r.beaten} "
                   f"completed={r.completed} waiting={r.waiting}", flush=True)
             return 0
 
         def _beat():
-            r = dispatch_once(args.repo, args.executor)
+            r = dispatch_once(args.repo)
+            # a beaten sprint launches/advances its agent -> a Claude run that cycle
             # waiting is a current snapshot (shown live), not a per-cycle event to sum
             return (f"granted {r.granted} · completed {r.completed} · waiting {r.waiting}",
-                    {"granted": r.granted, "completed": r.completed, "preempted": r.preempted})
-        _status_loop(LoopStatus("dispatch", uses_claude=(args.executor == "claude")),
+                    {"granted": r.granted, "completed": r.completed, "preempted": r.preempted},
+                    r.beaten)
+        _status_loop(LoopStatus("dispatch", uses_claude=True),
                      _beat, args.interval, args.max_beats)
         return 0
 
@@ -144,8 +138,15 @@ def main(argv: list[str] | None = None) -> int:
         def _beat():
             summaries = pm_run_once(substrate, reasoner)
             ids = [sid for s in summaries for sid in s["submitted"]]
-            last = f"proposed {', '.join(ids)}" if ids else "no new proposals"
-            return last, {"proposed": len(ids)}  # each run is one cycle; "runs" covers it
+            reasoned = sum(0 if s.get("skipped") else 1 for s in summaries)
+            if ids:
+                last = f"proposed {', '.join(ids)}"
+            elif reasoned:
+                last = "reasoned — no new proposals"
+            else:
+                last = "idle — no input changed"
+            # reasoned == Claude calls this beat (skipped cycles don't call Claude)
+            return last, {"proposed": len(ids)}, reasoned
         _status_loop(LoopStatus("PM", uses_claude=True), _beat,
                      args.interval, args.max_rounds)
         return 0

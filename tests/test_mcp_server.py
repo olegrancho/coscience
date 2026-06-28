@@ -43,12 +43,12 @@ def test_every_tool_has_a_description(server):
 
 def test_submit_then_get_and_list(server):
     created = call(server, "submit_sprint", {
-        "id": "sp1", "goals": "cure", "plan": [{"id": "s1", "run": "echo hi"}],
+        "id": "sp1", "goals": "cure", "plan": ["echo hi"],
         "priority": 3, "resources_required": {"gpu": 1},
     })
     assert created["id"] == "sp1"
     assert created["status"] == "proposed"
-    assert created["plan"] == [{"id": "s1", "run": "echo hi"}]
+    assert created["plan"] == ["echo hi"]
 
     rows = call(server, "list_sprints", {"status": "proposed"})
     assert [r["id"] for r in rows] == ["sp1"]
@@ -60,7 +60,7 @@ def test_submit_then_get_and_list(server):
 
 def test_approve_changes_status(server):
     call(server, "submit_sprint", {"id": "sp1", "goals": "g",
-                                    "plan": [{"id": "s1", "run": "true"}]})
+                                    "plan": ["true"]})
     approved = call(server, "approve_sprint", {"id": "sp1"})
     assert approved["status"] == "approved"
     assert call(server, "list_sprints", {"status": "proposed"}) == []
@@ -91,7 +91,7 @@ def test_missing_sprint_raises_tool_error(server):
 def test_duplicate_submit_raises_tool_error(server):
     from mcp.server.fastmcp.exceptions import ToolError
     call(server, "submit_sprint", {"id": "sp1", "goals": "g",
-                                   "plan": [{"id": "s1", "run": "true"}]})
+                                   "plan": ["true"]})
     with pytest.raises(ToolError):
         asyncio.run(server.call_tool("submit_sprint", {
-            "id": "sp1", "goals": "g", "plan": [{"id": "s1", "run": "true"}]}))
+            "id": "sp1", "goals": "g", "plan": ["true"]}))

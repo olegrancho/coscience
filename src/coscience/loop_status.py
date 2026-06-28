@@ -97,8 +97,9 @@ class LoopStatus:
         self._clock = clock
         self.start = clock()
         self.iters = 0
+        self.claude_total = 0                    # Claude calls since this session started
         self.last_line = "starting…"
-        self._events: deque = deque()            # (t, counters) within the last hour
+        self._events: deque = deque()            # (t, counters, claude) within the last hour
         self._usage_text = ""
         self._usage_at = 0.0
         self._drawn = False
@@ -108,12 +109,14 @@ class LoopStatus:
         self._hb = None
 
     # --- state ---------------------------------------------------------------
-    def record(self, last_line: str, counters: dict | None = None) -> None:
+    def record(self, last_line: str, counters: dict | None = None,
+               claude_calls: int = 0) -> None:
         with self._lock:
             now = self._clock()
             self.iters += 1
+            self.claude_total += claude_calls
             self.last_line = last_line
-            self._events.append((now, dict(counters or {})))
+            self._events.append((now, dict(counters or {}), claude_calls))
             cutoff = now - 3600
             while self._events and self._events[0][0] < cutoff:
                 self._events.popleft()
@@ -121,11 +124,16 @@ class LoopStatus:
 
     def _hour_summary(self) -> str:
         agg: dict = {}
-        for _, c in self._events:
+        hour_claude = 0
+        for _, c, claude in self._events:
+            hour_claude += claude
             for k, v in c.items():
                 agg[k] = agg.get(k, 0) + v
         runs = len(self._events)
-        parts = [f"{v} {k}" for k, v in agg.items() if v]
+        parts = []
+        if self.uses_claude:
+            parts.append(f"{hour_claude} claude")     # Claude calls in the last hour
+        parts += [f"{v} {k}" for k, v in agg.items() if v]
         tail = (" · " + " · ".join(parts)) if parts else ""
         return f"{runs} run{'' if runs == 1 else 's'}{tail}"
 
@@ -145,13 +153,15 @@ class LoopStatus:
                 self._usage_at = now
             if self._usage_text:
                 return f"claude: {format_usage(self._usage_text, color=self._tty)}"
-        return f"claude: in use ({self.iters} call{'' if self.iters == 1 else 's'} this run)"
+        n = self.claude_total
+        return f"claude: in use ({n} call{'' if n == 1 else 's'} this run)"
 
     def lines(self) -> list[str]:
         clock = time.strftime("%H:%M:%S")
         up = _fmt_dur(self._clock() - self.start)
+        claude = f" · claude {self.claude_total}" if self.uses_claude else ""
         return [
-            f"{self.name} · iter {self.iters} · up {up} · {clock}",
+            f"{self.name} · iter {self.iters}{claude} · up {up} · {clock}",
             f"last:   {self.last_line}",
             f"1h:     {self._hour_summary()}",
             self._claude_line(),

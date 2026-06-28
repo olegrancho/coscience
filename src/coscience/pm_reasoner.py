@@ -37,7 +37,7 @@ class PMContext:
 class ProposedSprint:
     suffix: str
     goals: str
-    plan: list[dict]
+    plan: list[str] = field(default_factory=list)   # suggested steps (guidance), not commands
     priority: int = 0
     resources_required: dict | None = None
     rationale: str = ""

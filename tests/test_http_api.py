@@ -22,14 +22,14 @@ def test_health(client):
 
 def test_submit_then_get_and_list(client):
     body = {"id": "sp1", "goals": "cure",
-            "plan": [{"id": "s1", "run": "echo hi"}],
+            "plan": ["echo hi"],
             "priority": 3, "resources_required": {"gpu": 1}}
     r = client.post("/api/sprints", json=body)
     assert r.status_code == 201
     created = r.json()
     assert created["id"] == "sp1"
     assert created["status"] == "proposed"
-    assert created["plan"] == [{"id": "s1", "run": "echo hi"}]
+    assert created["plan"] == ["echo hi"]
 
     r = client.get("/api/sprints", params={"status": "proposed"})
     assert r.status_code == 200
@@ -43,7 +43,7 @@ def test_submit_then_get_and_list(client):
 
 def test_approve_changes_status(client):
     client.post("/api/sprints", json={"id": "sp1", "goals": "g",
-                                      "plan": [{"id": "s1", "run": "true"}]})
+                                      "plan": ["true"]})
     r = client.post("/api/sprints/sp1/approve")
     assert r.status_code == 200
     assert r.json()["status"] == "approved"
@@ -76,7 +76,7 @@ def test_missing_result_is_404(client):
 
 
 def test_duplicate_submit_is_409(client):
-    body = {"id": "sp1", "goals": "g", "plan": [{"id": "s1", "run": "true"}]}
+    body = {"id": "sp1", "goals": "g", "plan": ["true"]}
     assert client.post("/api/sprints", json=body).status_code == 201
     assert client.post("/api/sprints", json=body).status_code == 409
 
@@ -91,7 +91,7 @@ def test_invalid_status_filter_is_422(client):
 
 def test_reject_via_http(client):
     client.post("/api/sprints", json={"id": "sp1", "goals": "g",
-                                      "plan": [{"id": "s1", "run": "true"}]})
+                                      "plan": ["true"]})
     r = client.post("/api/sprints/sp1/reject")
     assert r.status_code == 200
     assert r.json()["status"] == "canceled"
@@ -99,7 +99,7 @@ def test_reject_via_http(client):
 
 def test_reject_non_proposed_is_422(client):
     client.post("/api/sprints", json={"id": "sp1", "goals": "g",
-                                      "plan": [{"id": "s1", "run": "true"}]})
+                                      "plan": ["true"]})
     client.post("/api/sprints/sp1/approve")
     assert client.post("/api/sprints/sp1/reject").status_code == 422
 
@@ -110,7 +110,7 @@ def test_reject_missing_is_404(client):
 
 def test_patch_priority(client):
     client.post("/api/sprints", json={"id": "sp1", "goals": "g",
-                                      "plan": [{"id": "s1", "run": "true"}]})
+                                      "plan": ["true"]})
     r = client.patch("/api/sprints/sp1", json={"priority": 8})
     assert r.status_code == 200
     assert r.json()["priority"] == 8
@@ -118,7 +118,7 @@ def test_patch_priority(client):
 
 def test_patch_goals_when_approved_is_422(client):
     client.post("/api/sprints", json={"id": "sp1", "goals": "g",
-                                      "plan": [{"id": "s1", "run": "true"}]})
+                                      "plan": ["true"]})
     client.post("/api/sprints/sp1/approve")
     assert client.patch("/api/sprints/sp1", json={"goals": "x"}).status_code == 422
 

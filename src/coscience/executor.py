@@ -1,39 +1,39 @@
-"""Step executors: how a sprint step actually gets run."""
+"""Detached-process helpers + the context an agent needs to run a sprint.
+
+A sprint is carried out by one long-lived Claude agent launched detached (see
+claude_executor.ClaudeAgent); these helpers start it, check whether it is still
+alive, and stop it. Process identity is a '<pid>:<starttime>' token so a reused
+PID can't be mistaken for the original job."""
 from __future__ import annotations
 
 import os
 import signal
 import subprocess
 import time
-from typing import Protocol
-
-from coscience.models import Step, StepResult
-
-
-class StepExecutor(Protocol):
-    def run(self, step: Step) -> StepResult:
-        ...
+from dataclasses import dataclass, field
+from pathlib import Path
 
 
-class ShellStepExecutor:
-    """Deterministic executor: runs the step's shell command."""
+@dataclass
+class ExecutionContext:
+    """The 'why and what' an agent needs to run a sprint: the program goal, the
+    sprint it belongs to, the suggested steps (guidance), and prior results in
+    this program."""
+    program_title: str = ""
+    program_goal: str = ""
+    sprint_title: str = ""
+    sprint_summary: str = ""
+    sprint_goals: str = ""
+    plan: list[str] = field(default_factory=list)            # suggested steps (guidance)
+    prior_results: list[str] = field(default_factory=list)   # formatted "## label\n<summary>"
+    repo_root: Path | None = None
 
-    def run(self, step: Step) -> StepResult:
-        proc = subprocess.run(
-            step.run, shell=True, capture_output=True, text=True
-        )
-        return StepResult(
-            step_id=step.id,
-            completed=proc.returncode == 0,
-            output=(proc.stdout or "") + (proc.stderr or ""),
-        )
 
-
-def launch_detached(command: str) -> str:
+def launch_detached(command: str, cwd: "str | Path | None" = None) -> str:
     """Start a shell command fully detached from this process; return its
     identity token '<pid>:<starttime>'."""
     proc = subprocess.Popen(
-        command, shell=True,
+        command, shell=True, cwd=cwd,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
         start_new_session=True,
     )

@@ -35,4 +35,5 @@ def test_pm_loop_runs_max_rounds(tmp_path, monkeypatch):
 
     rc = cli.main(["pm", "--repo", str(tmp_path), "--loop", "--max-rounds", "2"])
     assert rc == 0
-    assert Substrate(tmp_path).load_pm_state("p1").cycle == 2
+    # event-driven: round 1 reasons (cycle -> 1); round 2 sees no change and skips
+    assert Substrate(tmp_path).load_pm_state("p1").cycle == 1

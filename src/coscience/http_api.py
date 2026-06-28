@@ -19,15 +19,10 @@ from pydantic import BaseModel, Field
 from coscience.service import NotFoundError, Service, service_from_env
 
 
-class StepIn(BaseModel):
-    id: str
-    run: str
-
-
 class SprintSubmit(BaseModel):
     id: str
     goals: str
-    plan: list[StepIn] = Field(min_length=1)
+    plan: list[str] = Field(min_length=1)   # suggested steps in plain language
     program: str | None = None
     priority: int = 0
     preemptible: bool = True
@@ -36,7 +31,7 @@ class SprintSubmit(BaseModel):
 
 class SprintPatch(BaseModel):
     goals: str | None = None
-    plan: list[StepIn] | None = None
+    plan: list[str] | None = None
     priority: int | None = None
     resources_required: dict[str, float] | None = None
     preemptible: bool | None = None
@@ -70,7 +65,7 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         try:
             service.submit_sprint(
                 id=body.id, goals=body.goals,
-                plan=[step.model_dump() for step in body.plan],
+                plan=list(body.plan),
                 program=body.program, priority=body.priority,
                 preemptible=body.preemptible,
                 resources_required=body.resources_required,
@@ -107,8 +102,6 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     @api.patch("/sprints/{sprint_id}")
     def patch_sprint(sprint_id: str, body: SprintPatch) -> dict:
         fields = body.model_dump(exclude_unset=True)
-        if "plan" in fields and fields["plan"] is not None:
-            fields["plan"] = [s if isinstance(s, dict) else s.model_dump() for s in body.plan]
         try:
             service.edit_sprint(sprint_id, **fields)
         except NotFoundError:

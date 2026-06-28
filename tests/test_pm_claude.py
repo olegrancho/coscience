@@ -27,14 +27,14 @@ def test_render_prompt_includes_state_and_json_instruction():
 
 def test_parse_response_plain_json():
     text = json.dumps({"report": "looks good", "proposals": [
-        {"suffix": "a", "goals": "do a", "plan": [{"id": "s", "run": "true"}],
+        {"suffix": "a", "goals": "do a", "plan": ["true"],
          "priority": 3, "resources_required": {"gpu": 1}, "rationale": "because"}]})
     out = parse_response(text)
     assert out.report == "looks good"
     assert len(out.proposals) == 1
     p = out.proposals[0]
     assert (p.suffix, p.goals, p.priority) == ("a", "do a", 3)
-    assert p.plan == [{"id": "s", "run": "true"}]
+    assert p.plan == ["true"]
     assert p.resources_required == {"gpu": 1}
     assert p.rationale == "because"
 
@@ -42,7 +42,7 @@ def test_parse_response_plain_json():
 def test_parse_response_fenced_json_and_optional_defaults():
     text = ("Here is my plan:\n```json\n"
             + json.dumps({"report": "r", "proposals": [
-                {"suffix": "b", "goals": "g", "plan": [{"id": "s", "run": "true"}]}]})
+                {"suffix": "b", "goals": "g", "plan": ["true"]}]})
             + "\n```\nThanks!")
     out = parse_response(text)
     assert out.proposals[0].priority == 0
@@ -81,7 +81,7 @@ def test_run_uses_injected_invoke():
 
 def test_parse_response_handles_prose_with_braces_after_json():
     text = ('```json\n{"report": "r", "proposals": '
-            '[{"suffix": "a", "goals": "g", "plan": [{"id": "s", "run": "true"}], '
+            '[{"suffix": "a", "goals": "g", "plan": ["true"], '
             '"resources_required": {"gpu": 1}}]}\n```\n'
             'Note: consider {edge cases} later.')   # stray braces in trailing prose
     out = parse_response(text)

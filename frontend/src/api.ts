@@ -10,14 +10,12 @@ export interface SprintRow {
   priority: number; steps: number; results: string[];
   rationale: string; resources_required: Record<string, number>;
 }
-export interface Step { id: string; run: string }
 export interface Sprint {
   id: string; status: string; title: string; summary: string;
   goals: string; priority: number; preemptible: boolean;
-  resources_required: Record<string, number>; rationale: string; plan: Step[];
+  resources_required: Record<string, number>; rationale: string; plan: string[];
   program: string | null; results: string[];
-  completed_steps: string[]; detached: Record<string, string>;
-  outputs: Record<string, string>; lease: unknown | null;
+  agent_running: boolean; started_at: number | null; lease: unknown | null;
 }
 export interface ResultRow { id: string; sprint: string; summary: string; program?: string | null; completed_at?: number | null }
 export interface Ledger {
@@ -31,7 +29,7 @@ async function j<T>(r: Response): Promise<T> {
 }
 
 export interface SprintPatch {
-  goals?: string; plan?: Step[]; priority?: number;
+  goals?: string; plan?: string[]; priority?: number;
   resources_required?: Record<string, number>; preemptible?: boolean;
 }
 
@@ -53,7 +51,7 @@ export const api = {
     fetch(`/api/programs/${id}/guidance/${noteId}`, { method: "DELETE" }).then(j<void>),
   listSprints: () => fetch("/api/sprints").then(j<SprintRow[]>),
   getSprint: (id: string) => fetch(`/api/sprints/${id}`).then(j<Sprint>),
-  submitSprint: (body: { id: string; goals: string; plan: Step[]; program?: string;
+  submitSprint: (body: { id: string; goals: string; plan: string[]; program?: string;
                          priority?: number; resources_required?: Record<string, number> }) =>
     fetch("/api/sprints", {
       method: "POST", headers: { "Content-Type": "application/json" },

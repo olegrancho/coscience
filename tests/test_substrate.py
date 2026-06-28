@@ -1,6 +1,6 @@
 import subprocess
 
-from coscience.models import Sprint, SprintStatus, Step, ProgressState, Result
+from coscience.models import Sprint, SprintStatus, ProgressState, Result
 from coscience.substrate import Substrate
 from tests.conftest import write_raw_sprint
 
@@ -8,19 +8,26 @@ from tests.conftest import write_raw_sprint
 def test_load_sprint_parses_plan(substrate):
     write_raw_sprint(
         substrate.repo_root, "sp1", "approved", "cure cancer",
-        plan=[{"id": "s1", "run": "echo a"}, {"id": "s2", "run": "echo b"}],
+        plan=["scan the primes", "tabulate the gaps"],
     )
     sprint = substrate.load_sprint("sp1")
     assert sprint.id == "sp1"
     assert sprint.status == SprintStatus.APPROVED
     assert sprint.goals == "cure cancer"
-    assert sprint.plan == [Step("s1", "echo a"), Step("s2", "echo b")]
+    assert sprint.plan == ["scan the primes", "tabulate the gaps"]
+
+
+def test_legacy_dict_plan_entries_coerce_to_strings(substrate):
+    # tolerate old sprint files whose plan was [{id, run}]
+    write_raw_sprint(substrate.repo_root, "old", "approved", "g",
+                     plan=[{"id": "s1", "run": "echo a"}])
+    assert substrate.load_sprint("old").plan == ["echo a"]
 
 
 def test_save_then_load_roundtrips(substrate):
     sprint = Sprint(
         id="sp2", status=SprintStatus.EXECUTING, goals="g",
-        plan=[Step("s1", "echo a")], program="prog1",
+        plan=["do the work"], program="prog1",
     )
     substrate.save_sprint(sprint)
     loaded = substrate.load_sprint("sp2")
@@ -28,9 +35,9 @@ def test_save_then_load_roundtrips(substrate):
 
 
 def test_iter_sprints_filters_by_status(substrate):
-    write_raw_sprint(substrate.repo_root, "sp1", "approved", "g", [{"id": "s", "run": "x"}])
-    write_raw_sprint(substrate.repo_root, "sp2", "done", "g", [{"id": "s", "run": "x"}])
-    write_raw_sprint(substrate.repo_root, "sp3", "approved", "g", [{"id": "s", "run": "x"}])
+    write_raw_sprint(substrate.repo_root, "sp1", "approved", "g", ["x"])
+    write_raw_sprint(substrate.repo_root, "sp2", "done", "g", ["x"])
+    write_raw_sprint(substrate.repo_root, "sp3", "approved", "g", ["x"])
     approved = substrate.iter_sprints(status=SprintStatus.APPROVED)
     assert [s.id for s in approved] == ["sp1", "sp3"]
 
@@ -45,7 +52,7 @@ def test_load_progress_missing_returns_empty(substrate):
 
 
 def test_save_then_load_progress_roundtrips(substrate):
-    p = ProgressState(sprint_id="sp1", completed_steps=["s1"], detached={"s2": "4242:123456"})
+    p = ProgressState(sprint_id="sp1", agent_token="4242:123456", started_at=12.5)
     substrate.save_progress(p)
     assert substrate.load_progress("sp1") == p
 

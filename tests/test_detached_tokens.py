@@ -1,33 +1,31 @@
 import re
+import time
 
-from coscience.executor import ShellStepExecutor, is_running
-from coscience.models import Sprint, SprintStatus, Step
-from coscience.worker import Worker
+from coscience.executor import is_running, launch_detached, process_token, terminate_detached
 
 
-def test_launch_stores_identity_token(substrate):
-    substrate.save_sprint(Sprint(
-        id="J", status=SprintStatus.EXECUTING, goals="g",
-        plan=[Step("job", "detached: sleep 30")]))
-    worker = Worker(substrate, ShellStepExecutor())
-    worker.run_sprint_beat(substrate.load_sprint("J"))  # launches the detached job
-
-    token = substrate.load_progress("J").detached["job"]
+def test_launch_returns_identity_token():
+    token = launch_detached("sleep 30")
     assert re.fullmatch(r"\d+:\d+", token)   # "<pid>:<starttime>", not a bare int
     assert is_running(token) is True
-
-    worker.stop_sprint(substrate.load_sprint("J"))       # cleanup
-    assert substrate.load_progress("J").detached == {}
+    terminate_detached(token)
 
 
-def test_legacy_int_detached_value_still_readable(substrate, tmp_path):
-    # Simulate an old on-disk progress file whose detached value is a bare int.
-    substrate.save_sprint(Sprint(id="L", status=SprintStatus.EXECUTING, goals="g",
-                                 plan=[Step("job", "detached: sleep 30")]))
-    prog = substrate.load_progress("L")
-    prog.detached["job"] = "999999999"   # implausible bare PID (dead) — legacy shape
-    substrate.save_progress(prog)
-    # Reloads as a string and is_running treats it as plain liveness (dead -> False).
-    reloaded = substrate.load_progress("L")
-    assert reloaded.detached["job"] == "999999999"
-    assert is_running(reloaded.detached["job"]) is False
+def test_reused_pid_is_not_mistaken_for_the_original(tmp_path):
+    token = launch_detached("true")          # exits almost immediately
+    deadline = time.time() + 5
+    while is_running(token) and time.time() < deadline:
+        time.sleep(0.02)
+    # craft a token with the same pid but a different start time -> must read as dead
+    pid = int(token.split(":")[0])
+    assert is_running(f"{pid}:999999999") is False
+
+
+def test_legacy_bare_pid_string_degrades_to_liveness():
+    # an implausible bare PID (no identity) is treated as plain liveness -> dead
+    assert is_running("999999999") is False
+
+
+def test_process_token_shape():
+    token = process_token(1)                 # pid 1 exists; token is "1:<starttime>"
+    assert token.startswith("1:")

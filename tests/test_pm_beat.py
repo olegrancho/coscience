@@ -56,10 +56,39 @@ def test_second_beat_uses_next_cycle(substrate):
     from coscience.pm_reasoner import FakeReasoner
     fake = FakeReasoner([_out("a"), _out("b")])
     pm_beat(substrate, "p1", fake)
+    substrate.save_program(Program(id="p1", title="C", goals="cure FAST"))  # goal edit -> re-reason
     summary = pm_beat(substrate, "p1", fake)
     assert summary["submitted"] == ["p1-c1-b"]
     assert substrate.load_pm_state("p1").cycle == 2
     assert substrate.load_pm_state("p1").proposed_ids == ["p1-c0-a", "p1-c1-b"]
+
+
+def test_beat_skips_when_nothing_changed(substrate):
+    # The core of event-driven: with no new input, the reasoner is NOT called and
+    # no proposals pile up.
+    _prog(substrate)
+    from coscience.pm_reasoner import FakeReasoner
+    pm_beat(substrate, "p1", FakeReasoner([_out("a")]))   # cycle 0: proposes, records fingerprint
+    summary = pm_beat(substrate, "p1", BoomReasoner())     # would raise if it reasoned
+    assert summary["skipped"] is True
+    assert summary["submitted"] == []
+    assert substrate.load_pm_state("p1").cycle == 1        # no new cycle
+
+
+def test_beat_reasons_again_after_a_result_lands(substrate):
+    from coscience.models import Result
+    from coscience.pm_reasoner import FakeReasoner
+    _prog(substrate)
+    pm_beat(substrate, "p1", FakeReasoner([_out("a")]))
+    # a worker finishes the sprint and writes a result -> input changed
+    sp = substrate.load_sprint("p1-c0-a")
+    sp.status = SprintStatus.DONE
+    sp.results = ["r1"]
+    substrate.save_sprint(sp)
+    substrate.save_result(Result(id="r1", sprint="p1-c0-a", summary="found"))
+    summary = pm_beat(substrate, "p1", FakeReasoner([_out("b")]))
+    assert summary["skipped"] is False
+    assert summary["submitted"] == ["p1-c1-b"]
 
 
 def test_rerun_same_cycle_is_idempotent(substrate):

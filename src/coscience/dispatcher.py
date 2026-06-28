@@ -6,7 +6,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from coscience.executor import StepExecutor, is_running
 from coscience.ledger import Ledger
 from coscience.models import BeatOutcome, SprintStatus
 from coscience.resources import ResourcePool
@@ -28,12 +27,12 @@ class CycleReport:
 
 
 class Dispatcher:
-    def __init__(self, substrate: Substrate, executor: StepExecutor,
+    def __init__(self, substrate: Substrate, agent,
                  pool: ResourcePool, policy: SchedulerPolicy | None = None):
         self.substrate = substrate
-        self.executor = executor
+        self.agent = agent
         self.policy = policy or SchedulerPolicy()
-        self.worker = Worker(substrate, executor)
+        self.worker = Worker(substrate, agent)
         cos = substrate.repo_root / ".coscience"
         self.ledger = Ledger(pool, cos / "leases.json")
         self._queue_path = cos / "queue.json"
@@ -104,8 +103,7 @@ class Dispatcher:
         # ledger.
         for sprint in eligible:
             if self.ledger.lease_for(sprint.id) is None:
-                progress = self.substrate.load_progress(sprint.id)
-                if any(is_running(tok) for tok in progress.detached.values()):
+                if self.worker.agent_running(sprint.id):
                     self.worker.stop_sprint(sprint)
                     report.reconciled += 1
 

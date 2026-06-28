@@ -5,7 +5,7 @@ import subprocess
 from pathlib import Path
 
 from coscience.frontmatter_io import parse, serialize
-from coscience.models import Sprint, SprintStatus, Step, ProgressState, Result, Program, ProgramStatus, PMState
+from coscience.models import Sprint, SprintStatus, ProgressState, Result, Program, ProgramStatus, PMState
 
 
 class Substrate:
@@ -19,7 +19,9 @@ class Substrate:
     def load_sprint(self, sprint_id: str) -> Sprint:
         text = (self.sprint_dir(sprint_id) / "sprint.md").read_text()
         fm, _body = parse(text)
-        plan = [Step.from_dict(d) for d in fm.get("plan", [])]
+        # plan is natural-language suggested steps; tolerate legacy [{id,run}] entries
+        plan = [s if isinstance(s, str) else str(s.get("run") or s.get("text") or s)
+                for s in fm.get("plan", [])]
         return Sprint(
             id=sprint_id,
             status=SprintStatus(fm["status"]),
@@ -41,7 +43,7 @@ class Substrate:
         fm = {
             "status": str(sprint.status),
             "goals": sprint.goals,
-            "plan": [{"id": s.id, "run": s.run} for s in sprint.plan],
+            "plan": list(sprint.plan),
         }
         if sprint.program is not None:
             fm["program"] = sprint.program
@@ -84,18 +86,17 @@ class Substrate:
         if not path.is_file():
             return ProgressState(sprint_id=sprint_id)
         fm, _ = parse(path.read_text())
+        started = fm.get("started_at")
         return ProgressState(
             sprint_id=sprint_id,
-            completed_steps=list(fm.get("completed_steps", [])),
-            detached={str(k): str(v) for k, v in (fm.get("detached") or {}).items()},
-            outputs={str(k): str(v) for k, v in (fm.get("outputs") or {}).items()},
+            agent_token=str(fm.get("agent_token", "")),
+            started_at=None if started is None else float(started),
         )
 
     def save_progress(self, progress: ProgressState) -> None:
         fm = {
-            "completed_steps": progress.completed_steps,
-            "detached": progress.detached,
-            "outputs": progress.outputs,
+            "agent_token": progress.agent_token,
+            "started_at": progress.started_at,
         }
         d = self.sprint_dir(progress.sprint_id)
         d.mkdir(parents=True, exist_ok=True)
@@ -186,6 +187,7 @@ class Substrate:
             last_run=fm.get("last_run"),
             proposed_ids=list(fm.get("proposed_ids", [])),
             log=list(fm.get("log", [])),
+            last_fingerprint=str(fm.get("last_fingerprint", "")),
         )
 
     def save_pm_state(self, state: PMState) -> None:
@@ -196,6 +198,8 @@ class Substrate:
             "proposed_ids": state.proposed_ids,
             "log": state.log,
         }
+        if state.last_fingerprint:
+            fm["last_fingerprint"] = state.last_fingerprint
         d = self.program_dir(state.program_id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "pm.md").write_text(serialize(fm, f"# PM state {state.program_id}\n"))

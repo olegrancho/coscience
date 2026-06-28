@@ -26,23 +26,6 @@ class BeatOutcome(StrEnum):
 
 
 @dataclass
-class Step:
-    id: str
-    run: str
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "Step":
-        return cls(id=str(d["id"]), run=str(d["run"]))
-
-
-@dataclass
-class StepResult:
-    step_id: str
-    completed: bool
-    output: str = ""
-
-
-@dataclass
 class Lease:
     id: str
     sprint_id: str
@@ -58,7 +41,7 @@ class Sprint:
     id: str
     status: SprintStatus
     goals: str
-    plan: list[Step]
+    plan: list[str] = field(default_factory=list)   # natural-language suggested steps (guidance)
     program: str | None = None
     results: list[str] = field(default_factory=list)
     resources_required: dict[str, float] = field(default_factory=dict)
@@ -80,9 +63,8 @@ class Result:
 @dataclass
 class ProgressState:
     sprint_id: str
-    completed_steps: list[str] = field(default_factory=list)
-    detached: dict[str, str] = field(default_factory=dict)
-    outputs: dict[str, str] = field(default_factory=dict)
+    agent_token: str = ""              # detached agent process token; "" when not running
+    started_at: float | None = None    # when the current agent run was launched
 
 
 @dataclass
@@ -100,3 +82,4 @@ class PMState:
     last_run: float | None = None
     proposed_ids: list[str] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
+    last_fingerprint: str = ""

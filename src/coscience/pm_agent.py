@@ -3,13 +3,30 @@ atomic staging commit), then idempotently submit proposed sprints + write the
 report. Deterministic and kill-safe; the reasoner does no writes."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
 from dataclasses import dataclass
 
-from coscience.models import Sprint, SprintStatus, Step
+from coscience.models import Sprint, SprintStatus
 from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
+
+
+def context_fingerprint(context: PMContext) -> str:
+    """A stable hash of the inputs the PM should react to: program goals, human
+    guidance, the state of approved/running/done work, and results. The PM's own
+    pending proposals (status 'proposed') are deliberately excluded — they are its
+    output, not new input, so proposing does not re-trigger the next cycle."""
+    payload = {
+        "goals": context.goals,
+        "guidance": sorted(context.human_guidance),
+        "active": sorted((s["id"], s["status"]) for s in context.open_sprints
+                         if s["status"] != SprintStatus.PROPOSED.value),
+        "completed": sorted((s["id"], s["result"]) for s in context.completed),
+    }
+    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def gather_context(substrate, program_id: str) -> PMContext:
@@ -44,6 +61,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
 class StagedCycle:
     cycle: int
     output: PMCycleOutput
+    fingerprint: str = ""
 
 
 def proposal_id(program_id: str, cycle: int, suffix: str) -> str:
@@ -54,11 +72,13 @@ def _staging_path(substrate, program_id: str):
     return substrate.program_dir(program_id) / ".pm" / "cycle-staging.json"
 
 
-def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput) -> None:
+def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
+                  fingerprint: str = "") -> None:
     path = _staging_path(substrate, program_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "cycle": cycle,
+        "fingerprint": fingerprint,
         "report": output.report,
         "proposals": [
             {"suffix": p.suffix, "goals": p.goals, "plan": p.plan,
@@ -81,7 +101,8 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         report=data.get("report", ""),
         proposals=[ProposedSprint(**p) for p in data.get("proposals", [])],
     )
-    return StagedCycle(cycle=int(data["cycle"]), output=output)
+    return StagedCycle(cycle=int(data["cycle"]), output=output,
+                       fingerprint=data.get("fingerprint", ""))
 
 
 def clear_staging(substrate, program_id: str) -> None:
@@ -98,9 +119,18 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None) -> d
     if staged is None:
         cycle = pm.cycle
         context = gather_context(substrate, program_id)
+        fingerprint = context_fingerprint(context)
+        if fingerprint == pm.last_fingerprint:
+            # Event-driven: nothing the PM acts on has changed since the last cycle
+            # (no new results, guidance, approvals or goal edits). Stay idle — don't
+            # burn a reasoner call or pile up redundant proposals.
+            pm.last_run = time.time() if now is None else now
+            substrate.save_pm_state(pm)
+            return {"program": program_id, "cycle": cycle,
+                    "submitted": [], "proposed": [], "skipped": True}
         output = reasoner.run(context)                 # the ONE reasoner call
-        write_staging(substrate, program_id, cycle, output)   # COMMIT POINT
-        staged = StagedCycle(cycle=cycle, output=output)
+        write_staging(substrate, program_id, cycle, output, fingerprint)  # COMMIT POINT
+        staged = StagedCycle(cycle=cycle, output=output, fingerprint=fingerprint)
 
     cycle = staged.cycle
     submitted: list[str] = []
@@ -112,7 +142,7 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None) -> d
         if not (substrate.sprint_dir(sid) / "sprint.md").is_file():
             substrate.save_sprint(Sprint(
                 id=sid, status=SprintStatus.PROPOSED, goals=prop.goals,
-                plan=[Step.from_dict(s) for s in prop.plan],
+                plan=list(prop.plan),
                 program=program_id, priority=prop.priority,
                 resources_required=coerce_resources(prop.resources_required),
                 rationale=prop.rationale,
@@ -126,6 +156,7 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None) -> d
 
     pm.cycle = cycle + 1
     pm.last_run = time.time() if now is None else now
+    pm.last_fingerprint = staged.fingerprint
     for sid in proposed:
         if sid not in pm.proposed_ids:
             pm.proposed_ids.append(sid)
@@ -134,4 +165,4 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None) -> d
 
     clear_staging(substrate, program_id)
     return {"program": program_id, "cycle": cycle,
-            "submitted": submitted, "proposed": proposed}
+            "submitted": submitted, "proposed": proposed, "skipped": False}

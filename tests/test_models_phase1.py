@@ -1,4 +1,4 @@
-from coscience.models import Lease, Sprint, SprintStatus, Step
+from coscience.models import Lease, Sprint, SprintStatus
 from coscience.substrate import Substrate
 
 
@@ -20,7 +20,7 @@ def test_substrate_roundtrips_scheduling_fields(tmp_path):
     sub = Substrate(tmp_path)
     s = Sprint(
         id="sp1", status=SprintStatus.APPROVED, goals="g",
-        plan=[Step("s1", "echo hi")],
+        plan=["do the work"],
         resources_required={"gpu_24gb": 1}, priority=5, preemptible=False,
     )
     sub.save_sprint(s)
@@ -33,7 +33,7 @@ def test_substrate_roundtrips_scheduling_fields(tmp_path):
 def test_substrate_defaults_when_fields_absent(tmp_path):
     sub = Substrate(tmp_path)
     sub.save_sprint(Sprint(id="sp2", status=SprintStatus.APPROVED, goals="g",
-                           plan=[Step("s1", "echo hi")]))
+                           plan=["do the work"]))
     loaded = sub.load_sprint("sp2")
     assert loaded.resources_required == {}
     assert loaded.priority == 0

@@ -26,5 +26,6 @@ def test_pm_loop_runs_max_rounds_with_injected_sleep(substrate):
     rounds = pm_loop(substrate, fake, interval=9.0, max_rounds=2,
                      sleep=lambda s: sleeps.append(s))
     assert rounds == 2
-    assert substrate.load_pm_state("a").cycle == 2        # two beats happened
+    # event-driven: round 1 reasons+proposes (cycle -> 1); round 2 sees no change, skips
+    assert substrate.load_pm_state("a").cycle == 1
     assert sleeps == [9.0]                                 # slept between, not after last

@@ -1,4 +1,4 @@
-import { Button, Card, Code, Group, Loader, SimpleGrid, Stack, Text } from "@mantine/core";
+import { Button, Card, Group, Loader, SimpleGrid, Stack, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -51,12 +51,6 @@ function ResultPreview({ id }: { id: string }) {
 function programOf(id: string) {
   const i = id.indexOf("-");
   return i === -1 ? id : id.slice(0, i);
-}
-
-/** "check-witness-pair" → "Check witness pair" — a label a human can read. */
-function humanizeStep(stepId: string) {
-  const s = stepId.replace(/[-_]+/g, " ").trim();
-  return s ? s[0].toUpperCase() + s.slice(1) : stepId;
 }
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -159,28 +153,20 @@ export default function SprintDetail() {
         </Card>
       </SimpleGrid>
 
-      <Card padding="lg" radius="md" style={cardStyle}>
-        <div className="eyebrow" style={{ marginBottom: 4 }}>plan · {s.plan.length} {s.plan.length === 1 ? "step" : "steps"}</div>
-        <Text size="xs" c="dimmed" mb="md">What the AI will run, in order. The exact command is shown for each step.</Text>
-        <Stack gap={14}>
-          {s.plan.map((step, i) => {
-            const done = s.completed_steps.includes(step.id);
-            return (
-              <div key={step.id}>
-                <Group gap={9} wrap="nowrap" align="center" mb={6}>
-                  <span style={{ color: done ? "var(--st-done)" : "var(--ink-faint)", fontSize: 14 }}>{done ? "✓" : `${i + 1}.`}</span>
-                  <Text size="sm" fw={600}>{humanizeStep(step.id)}</Text>
-                  {done && <span className="mono" style={{ fontSize: 11, color: "var(--st-done)" }}>done</span>}
-                </Group>
-                <div style={{ paddingLeft: 24 }}>
-                  <div className="eyebrow" style={{ fontSize: 9.5, marginBottom: 4 }}>command</div>
-                  <Code block style={{ fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--ink-muted)" }}>{step.run}</Code>
-                </div>
-              </div>
-            );
-          })}
-        </Stack>
-      </Card>
+      {s.plan.length > 0 && (
+        <Card padding="lg" radius="md" style={cardStyle}>
+          <div className="eyebrow" style={{ marginBottom: 4 }}>suggested approach · {s.plan.length} {s.plan.length === 1 ? "step" : "steps"}</div>
+          <Text size="xs" c="dimmed" mb="md">High-level guidance for the research agent — it plans and carries out the actual work itself.</Text>
+          <Stack gap={11}>
+            {s.plan.map((step, i) => (
+              <Group key={i} gap={10} wrap="nowrap" align="flex-start">
+                <span style={{ color: "var(--ink-faint)", fontSize: 13, lineHeight: 1.55, minWidth: 16 }}>{i + 1}.</span>
+                <Text size="sm" style={{ lineHeight: 1.55 }}>{step}</Text>
+              </Group>
+            ))}
+          </Stack>
+        </Card>
+      )}
 
       <SprintEditModal sprint={s} opened={editing} onClose={() => setEditing(false)} onDone={refresh} />
     </Stack>

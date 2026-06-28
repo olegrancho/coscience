@@ -11,7 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from coscience.ledger import Ledger
-from coscience.models import Sprint, SprintStatus, Step, Program, ProgramStatus
+from coscience.models import Sprint, SprintStatus, Program, ProgramStatus
 from coscience.resources import ResourcePool, load_pool
 from coscience.substrate import Substrate
 
@@ -43,19 +43,19 @@ class Service:
         return self.substrate.load_sprint(sprint_id)
 
     # --- sprints ---
-    def submit_sprint(self, *, id: str, goals: str, plan: list[dict],
+    def submit_sprint(self, *, id: str, goals: str, plan: list[str],
                       program: str | None = None, priority: int = 0,
                       preemptible: bool = True, resources_required: dict | None = None,
                       status: str = "proposed") -> str:
         if not plan:
-            raise ValueError("plan must have at least one step")
+            raise ValueError("plan must have at least one suggested step")
         if (self.substrate.sprint_dir(id) / "sprint.md").is_file():
             raise ValueError(f"sprint {id} already exists")
         sprint = Sprint(
             id=id,
             status=SprintStatus(status),
             goals=goals,
-            plan=[Step.from_dict(step) for step in plan],
+            plan=[str(step) for step in plan],
             program=program,
             resources_required={k: float(v) for k, v in (resources_required or {}).items()},
             priority=priority,
@@ -85,11 +85,11 @@ class Service:
         if (goals is not None or plan is not None) and st != SprintStatus.PROPOSED:
             raise ValueError("goals/plan are editable only while proposed")
         if plan is not None and len(plan) == 0:
-            raise ValueError("plan must have at least one step")
+            raise ValueError("plan must have at least one suggested step")
         if goals is not None:
             sprint.goals = goals
         if plan is not None:
-            sprint.plan = [Step.from_dict(s) for s in plan]
+            sprint.plan = [str(s) for s in plan]
         if priority is not None:
             sprint.priority = priority
         if resources_required is not None:
@@ -133,10 +133,9 @@ class Service:
             "rationale": sprint.rationale,
             "program": sprint.program,
             "results": list(sprint.results),
-            "plan": [{"id": s.id, "run": s.run} for s in sprint.plan],
-            "completed_steps": progress.completed_steps,
-            "detached": progress.detached,
-            "outputs": progress.outputs,
+            "plan": list(sprint.plan),
+            "agent_running": bool(progress.agent_token),
+            "started_at": progress.started_at,
             "lease": None if lease is None else {
                 "id": lease.id, "sprint_id": lease.sprint_id, "amounts": lease.amounts,
                 "granted_at": lease.granted_at, "expires_at": lease.expires_at,

@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from coscience.models import Program, ProgramStatus, Sprint, SprintStatus, Step
+from coscience.models import Program, ProgramStatus, Sprint, SprintStatus
 from coscience.service import NotFoundError, Service
 from coscience.pm_runner import pm_run_once
 from coscience.pm_reasoner import FakeReasoner, PMCycleOutput, ProposedSprint
@@ -12,7 +12,7 @@ def test_list_and_get_program(tmp_path):
     svc = Service(tmp_path)
     svc.substrate.save_program(Program(id="p1", title="Cancer", goals="cure"))
     svc.substrate.save_sprint(Sprint(id="p1-s1", status=SprintStatus.PROPOSED,
-                                     goals="assay", plan=[Step("s", "true")], program="p1"))
+                                     goals="assay", plan=["do it"], program="p1"))
     assert svc.list_programs() == [{"id": "p1", "title": "Cancer",
                                     "status": "active", "goals": "cure"}]
     detail = svc.get_program("p1")
@@ -61,7 +61,7 @@ def test_paused_program_is_skipped_by_pm(tmp_path):
     svc.substrate.save_program(Program(id="p1", title="t", goals="g"))
     svc.set_program_status("p1", "paused")
     reasoner = FakeReasoner([PMCycleOutput(
-        proposals=[ProposedSprint(suffix="x", goals="go", plan=[{"id": "s", "run": "true"}])])])
+        proposals=[ProposedSprint(suffix="x", goals="go", plan=["do it"])])])
     summaries = pm_run_once(svc.substrate, reasoner)
     assert summaries == []           # paused program not beaten
     assert reasoner.calls == []      # reasoner never consulted

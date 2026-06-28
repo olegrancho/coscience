@@ -52,12 +52,21 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
     {{"suffix": "<short-slug>",
       "title": "<=8 words naming the experiment, e.g. 'Cross-validate the witness pair'>",
       "summary": "one or two plain sentences a reviewer can skim to decide",
-      "goals": "<what this sprint does, in full detail>",
-      "plan": [{{"id": "<step-id>", "run": "<shell command>"}}],
+      "goals": "<the full objective of this sprint>",
+      "plan": ["<suggested step in plain language>", "<another>", "..."],
       "priority": <int>, "resources_required": {{}} or null,
       "rationale": "<why this experiment next>"}}
   ]}}
-Propose 0 proposals if nothing new is warranted. Keep `plan` steps concrete and runnable.
+Propose 0 proposals if nothing new is warranted.
+
+Each sprint is carried out by a capable autonomous research agent that plans and does
+the work itself. So:
+- Size a sprint as a substantial unit of work — roughly a few days to a week — not a
+  single command. Propose meaningful experiments, not one-liners.
+- `plan` is a SHORT list (<=5) of SUGGESTED steps in plain language — high-level
+  guidance for the agent, NOT shell commands or code. Describe WHAT to do and what a
+  good result looks like; let the agent figure out how. Never put `python3 -c`,
+  `printf`, file redirects, or any executable command in `plan`.
 `resources_required` maps a resource name to a NUMBER only (e.g. {{"cpu": 1}} or {{"gpu": 2}}),
 or {{}} — never put notes or prose in it; put caveats in `rationale`.
 `title` is a short headline; `summary` is the skimmable gist; `goals` is the full objective.
@@ -88,7 +97,7 @@ def parse_response(text: str) -> PMCycleOutput:
         try:
             proposals.append(ProposedSprint(
                 suffix=str(p["suffix"]), goals=str(p["goals"]),
-                plan=[{"id": str(s["id"]), "run": str(s["run"])} for s in p["plan"]],
+                plan=[str(s) for s in p.get("plan", [])],
                 priority=int(p.get("priority", 0)),
                 resources_required=coerce_resources(p.get("resources_required")),
                 rationale=str(p.get("rationale", "")),

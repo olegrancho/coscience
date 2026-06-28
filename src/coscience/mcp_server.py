@@ -19,7 +19,7 @@ def build_server(service: Service, name: str = "coscience") -> FastMCP:
     server = FastMCP(name)
 
     @server.tool()
-    def submit_sprint(id: str, goals: str, plan: list[dict],
+    def submit_sprint(id: str, goals: str, plan: list[str],
                       program: str | None = None, priority: int = 0,
                       preemptible: bool = True,
                       resources_required: dict | None = None) -> dict:

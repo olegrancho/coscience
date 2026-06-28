@@ -7,16 +7,17 @@ interface Props { programId: string; opened: boolean; onClose: () => void; onDon
 export default function ProposeSprintModal({ programId, opened, onClose, onDone }: Props) {
   const [id, setId] = useState("");
   const [goals, setGoals] = useState("");
-  const [run, setRun] = useState("");
+  const [steps, setSteps] = useState("");
   const [priority, setPriority] = useState<number>(0);
   const [error, setError] = useState("");
 
   const submit = async () => {
     setError("");
     try {
+      const plan = steps.split("\n").map((s) => s.trim()).filter(Boolean);
       await api.submitSprint({
         id, goals, program: programId, priority,
-        plan: [{ id: "s1", run }],
+        plan: plan.length ? plan : [goals],
       });
       onDone(); onClose();
     } catch (e) { setError(String(e)); }
@@ -27,8 +28,8 @@ export default function ProposeSprintModal({ programId, opened, onClose, onDone 
       <Stack>
         <TextInput label="Sprint id" value={id} onChange={(e) => setId(e.currentTarget.value)} />
         <Textarea label="Goals" value={goals} onChange={(e) => setGoals(e.currentTarget.value)} />
-        <TextInput label="First step command" value={run}
-                   onChange={(e) => setRun(e.currentTarget.value)} />
+        <Textarea label="Suggested steps (one per line — guidance for the agent)" value={steps}
+                  autosize minRows={2} onChange={(e) => setSteps(e.currentTarget.value)} />
         <NumberInput label="Priority" value={priority}
                      onChange={(v) => setPriority(Number(v) || 0)} />
         {error && <div style={{ color: "red" }}>{error}</div>}

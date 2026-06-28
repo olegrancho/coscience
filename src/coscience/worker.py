@@ -1,15 +1,49 @@
-"""The Worker: one bounded unit of work per heartbeat."""
+"""The Worker: supervises one long-lived agent per sprint, one beat at a time.
+
+A beat does the smallest useful thing: if no agent is running for the claimed
+sprint, launch one; if it's still running, leave it; if it has finished, collect
+its result and mark the sprint done; if it died mid-run, clear it so a later beat
+relaunches and the agent resumes from its scratchpad."""
 from __future__ import annotations
 
-from coscience.executor import StepExecutor, is_running, launch_detached, terminate_detached
+import time
+
+from coscience.executor import ExecutionContext
 from coscience.models import BeatOutcome, Result, Sprint, SprintStatus
 from coscience.substrate import Substrate
 
 
 class Worker:
-    def __init__(self, substrate: Substrate, executor: StepExecutor):
+    def __init__(self, substrate: Substrate, agent):
         self.substrate = substrate
-        self.executor = executor
+        self.agent = agent
+
+    def _build_context(self, sprint: Sprint) -> ExecutionContext:
+        """Gather the program goal, sprint description and prior results so the
+        agent knows why it is running this sprint."""
+        program_title = program_goal = ""
+        if sprint.program:
+            try:
+                prog = self.substrate.load_program(sprint.program)
+                program_title, program_goal = prog.title, prog.goals
+            except OSError:
+                pass
+        prior: list[str] = []
+        for s in self.substrate.iter_sprints(status=SprintStatus.DONE):
+            if s.program != sprint.program or s.id == sprint.id:
+                continue
+            for rid in s.results:
+                try:
+                    summary = self.substrate.load_result(rid).summary.strip()
+                except OSError:
+                    continue
+                prior.append(f"## {s.title or s.id}\n{summary[:1000]}")
+        return ExecutionContext(
+            program_title=program_title, program_goal=program_goal,
+            sprint_title=sprint.title, sprint_summary=sprint.summary,
+            sprint_goals=sprint.goals, plan=list(sprint.plan),
+            prior_results=prior, repo_root=self.substrate.repo_root,
+        )
 
     def _claim_sprint(self):
         executing = self.substrate.iter_sprints(status=SprintStatus.EXECUTING)
@@ -30,63 +64,59 @@ class Worker:
             return BeatOutcome.IDLE
         return self.run_sprint_beat(sprint)
 
+    def agent_running(self, sprint_id: str) -> bool:
+        return self.agent.is_running(self.substrate.load_progress(sprint_id).agent_token)
+
     def run_sprint_beat(self, sprint: Sprint) -> BeatOutcome:
         progress = self.substrate.load_progress(sprint.id)
-        next_step = next(
-            (s for s in sprint.plan if s.id not in progress.completed_steps), None
-        )
+        sprint_dir = self.substrate.sprint_dir(sprint.id)
 
-        if next_step is None:
-            lines = [f"Sprint {sprint.id} completed {len(sprint.plan)} steps.", ""]
-            for step in sprint.plan:
-                out = progress.outputs.get(step.id, "").strip()
-                if out:
-                    lines.append(f"## {step.id}\n\n{out}\n")
-            result = Result(
-                id=f"{sprint.id}-result",
-                sprint=sprint.id,
-                summary="\n".join(lines).strip(),
-            )
-            self.substrate.save_result(result)
-            sprint.status = SprintStatus.DONE
-            sprint.results = [result.id]
-            self.substrate.save_sprint(sprint)
-            self.substrate.commit(f"sprint {sprint.id}: done, result {result.id}")
-            return BeatOutcome.COMPLETED
-
-        if next_step.run.startswith("detached:"):
-            command = next_step.run[len("detached:"):].strip()
-            token = progress.detached.get(next_step.id)
-            if token is None:
-                progress.detached[next_step.id] = launch_detached(command)
-                self.substrate.save_progress(progress)
-                self.substrate.commit(f"sprint {sprint.id}: step {next_step.id} launched")
-                return BeatOutcome.PROGRESSED
-            if is_running(token):
-                return BeatOutcome.PROGRESSED
-            progress.completed_steps.append(next_step.id)
-            del progress.detached[next_step.id]
+        # 1) no agent yet -> launch one
+        if not progress.agent_token:
+            token = self.agent.start(sprint, self._build_context(sprint),
+                                     sprint_dir, self.substrate.repo_root)
+            progress.agent_token = token
+            progress.started_at = time.time()
             self.substrate.save_progress(progress)
-            self.substrate.commit(f"sprint {sprint.id}: detached step {next_step.id} done")
+            self.substrate.commit(f"sprint {sprint.id}: agent launched")
             return BeatOutcome.PROGRESSED
 
-        step_result = self.executor.run(next_step)
-        if step_result.completed:
-            progress.completed_steps.append(next_step.id)
-            progress.outputs[next_step.id] = (step_result.output or "")[:2000]
+        # 2) agent still working -> leave it
+        if self.agent.is_running(progress.agent_token):
+            return BeatOutcome.PROGRESSED
+
+        # 3) agent ended -> collect
+        text, status = self.agent.collect(sprint_dir)
+        if status == "interrupted":
+            # killed/crashed mid-run -> clear so a later beat relaunches (agent resumes)
+            progress.agent_token = ""
             self.substrate.save_progress(progress)
-            self.substrate.commit(f"sprint {sprint.id}: step {next_step.id} done")
-        return BeatOutcome.PROGRESSED
+            self.substrate.commit(f"sprint {sprint.id}: agent interrupted, will resume")
+            return BeatOutcome.PROGRESSED
+
+        result = Result(
+            id=f"{sprint.id}-result", sprint=sprint.id,
+            summary=text or f"(agent produced no output; status={status})",
+            completed_at=time.time(),
+        )
+        self.substrate.save_result(result)
+        sprint.status = SprintStatus.DONE
+        sprint.results = [result.id]
+        self.substrate.save_sprint(sprint)
+        progress.agent_token = ""
+        self.substrate.save_progress(progress)
+        self.substrate.commit(f"sprint {sprint.id}: done ({status}), result {result.id}")
+        return BeatOutcome.COMPLETED
 
     def stop_sprint(self, sprint: Sprint) -> list[str]:
-        """Terminate the sprint's running detached jobs and clear them so the
-        steps relaunch on a later beat. Returns the stopped step ids."""
+        """Stop the sprint's running agent and clear it so a later beat relaunches
+        (the agent resumes from its scratchpad). Returns [sprint.id] if one was
+        stopped, else []."""
         progress = self.substrate.load_progress(sprint.id)
-        stopped = list(progress.detached.keys())
-        for _step_id, token in list(progress.detached.items()):
-            terminate_detached(token)
-        if stopped:
-            progress.detached = {}
-            self.substrate.save_progress(progress)
-            self.substrate.commit(f"sprint {sprint.id}: stopped detached jobs {stopped}")
-        return stopped
+        if not progress.agent_token:
+            return []
+        self.agent.stop(progress.agent_token)
+        progress.agent_token = ""
+        self.substrate.save_progress(progress)
+        self.substrate.commit(f"sprint {sprint.id}: agent stopped")
+        return [sprint.id]

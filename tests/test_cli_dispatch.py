@@ -1,12 +1,22 @@
+import pytest
+from tests.conftest import FakeAgent
+
+from coscience import cli
 from coscience.cli import dispatch_once, main
-from coscience.models import Sprint, SprintStatus, Step
+from coscience.models import Sprint, SprintStatus
 from coscience.substrate import Substrate
+
+
+@pytest.fixture(autouse=True)
+def fake_agent(monkeypatch):
+    # never launch a real claude in the dispatch/worker CLI paths
+    monkeypatch.setattr(cli, "ClaudeAgent", FakeAgent)
 
 
 def _seed(repo, sid, req=None):
     Substrate(repo).save_sprint(Sprint(
         id=sid, status=SprintStatus.APPROVED, goals="g",
-        plan=[Step("s1", "true")], resources_required=req or {}))
+        plan=["do the work"], resources_required=req or {}))
 
 
 def _write_pool(repo, yaml_text):

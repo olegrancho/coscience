@@ -26,10 +26,10 @@ def test_result_completed_at_explicit_wins(tmp_path):
 
 
 def test_get_result_links_to_program(tmp_path):
-    from coscience.models import SprintStatus, Step
+    from coscience.models import SprintStatus
     svc = Service(tmp_path)
     svc.substrate.save_sprint(Sprint(id="sp1", status=SprintStatus.DONE, goals="g",
-        plan=[Step(id="s1", run="true")], program="prog1"))
+        plan=["true"], program="prog1"))
     svc.substrate.save_result(Result(id="r1", sprint="sp1", summary="found X"))
     assert svc.get_result("r1")["program"] == "prog1"
 
@@ -60,7 +60,7 @@ def test_get_sprint_lease_includes_sprint_id(tmp_path):
     led.acquire("sp1", {"gpu": 1.0}, now=100.0, ttl=60.0)
 
     svc = Service(tmp_path, pool=pool)
-    svc.submit_sprint(id="sp1", goals="g", plan=[{"id": "s1", "run": "true"}])
+    svc.submit_sprint(id="sp1", goals="g", plan=["true"])
     lease = svc.get_sprint("sp1")["lease"]
     assert lease is not None
     assert lease["sprint_id"] == "sp1"

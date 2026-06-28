@@ -67,3 +67,20 @@ def test_format_usage_two_bars_and_fallback():
     assert "02:10" in out                        # 5h: time only, zero-padded
     assert re.search(r"\d{1,2} [A-Z][a-z]{2}", out)  # wk: a date like '28 Jun'
     assert format_usage("garbage", color=False) == "garbage"
+
+
+def test_claude_run_counter_total_and_last_hour():
+    from coscience.loop_status import LoopStatus
+    t = [1000.0]
+    s = LoopStatus("PM", uses_claude=True, usage_cmd=[], clock=lambda: t[0])
+    s.record("reasoned", {"proposed": 1}, claude_calls=1)   # a real cycle
+    s.record("idle", {}, claude_calls=0)                    # skipped cycle: no Claude
+    s.record("reasoned", {}, claude_calls=1)
+    assert s.claude_total == 2                               # session total
+    assert "2 claude" in s._hour_summary()                  # last-hour count
+    assert "claude 2" in s.lines()[0]                       # header shows the total
+    # an old Claude call falls out of the 1h window but stays in the session total
+    t[0] += 3601
+    s.record("reasoned", {}, claude_calls=1)
+    assert s.claude_total == 3
+    assert "1 claude" in s._hour_summary()
