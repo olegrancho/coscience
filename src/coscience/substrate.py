@@ -41,7 +41,8 @@ class Substrate:
             summary=str(fm.get("summary", "")),
             created_at=None if fm.get("created_at") is None else float(fm["created_at"]),
             comments=[{"id": str(c["id"]), "text": str(c["text"]),
-                       "added_at": float(c["added_at"])} for c in fm.get("comments", [])],
+                       "added_at": float(c["added_at"]),
+                       "target": str(c.get("target", "worker"))} for c in fm.get("comments", [])],
         )
 
     def save_sprint(self, sprint: Sprint) -> None:

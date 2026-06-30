@@ -72,6 +72,15 @@ def test_failed_run_is_not_laundered_into_a_result(substrate):
     assert substrate.load_progress("sp1").agent_token == ""  # cleared -> relaunches
 
 
+def test_only_worker_comments_reach_the_agent(substrate):
+    s = _approved("sp1")
+    s.comments = [{"id": "a", "text": "for the agent", "added_at": 1.0, "target": "worker"},
+                  {"id": "b", "text": "for the planner", "added_at": 2.0, "target": "pm"}]
+    substrate.save_sprint(s)
+    ctx = Worker(substrate, FakeAgent())._build_context(substrate.load_sprint("sp1"))
+    assert ctx.human_comments == ["for the agent"]
+
+
 def test_repeated_failures_cap_out_to_failed(substrate):
     # A deterministically broken sprint must stop relaunching after the cap.
     from coscience.worker import MAX_AGENT_FAILURES

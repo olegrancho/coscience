@@ -30,6 +30,7 @@ class PMContext:
     open_sprints: list[dict] = field(default_factory=list)
     completed: list[dict] = field(default_factory=list)
     failed: list[dict] = field(default_factory=list)   # sprints that failed, with why
+    sprint_feedback: list[dict] = field(default_factory=list)  # human notes addressed to the PM
     prior_proposals: list[str] = field(default_factory=list)
     human_guidance: list[str] = field(default_factory=list)
     ideas: list[dict] = field(default_factory=list)   # current idea pool (id/text/source/protected/comments)
@@ -61,6 +62,7 @@ class PMCycleOutput:
     ideas_summary: str = ""                          # PM's narrative over the whole idea pool
     new_ideas: list[str] = field(default_factory=list)      # vague directions to record (PM-sourced)
     delete_idea_ids: list[str] = field(default_factory=list)  # PM ideas to prune (protected ones ignored)
+    sprint_edits: list[dict] = field(default_factory=list)   # revisions to still-proposed sprints (from PM feedback)
 
 
 class Reasoner(Protocol):

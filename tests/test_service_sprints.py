@@ -203,6 +203,16 @@ def test_add_sprint_comment_any_status(tmp_path):
     assert svc.get_sprint("sp1")["comments"] == [c]
 
 
+def test_sprint_comment_target_routing(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["a"])
+    w = svc.add_sprint_comment("sp1", "for agent", target="worker")
+    p = svc.add_sprint_comment("sp1", "for planner", target="pm")
+    assert w["target"] == "worker" and p["target"] == "pm"
+    with pytest.raises(ValueError):
+        svc.add_sprint_comment("sp1", "x", target="bogus")
+
+
 def test_add_sprint_comment_rejects_empty(tmp_path):
     svc = Service(tmp_path)
     svc.submit_sprint(id="sp1", goals="g", plan=["a"])

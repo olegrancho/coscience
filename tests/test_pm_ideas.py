@@ -116,6 +116,39 @@ def test_failed_sprint_retriggers_pm(substrate):
     assert not pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="r2")]))["skipped"]
 
 
+def _with_pm_note(sid, status, goals="g"):
+    return Sprint(id=sid, status=status, goals=goals, plan=["a"], program="p1",
+                  comments=[{"id": "c1", "text": "rework this", "added_at": 1.0, "target": "pm"}])
+
+
+def test_pm_edits_proposed_sprint_from_feedback(substrate):
+    _prog(substrate)
+    substrate.save_sprint(_with_pm_note("p1-s", SprintStatus.PROPOSED, goals="old"))
+    out = PMCycleOutput(sprint_edits=[{"sprint_id": "p1-s", "goals": "new goal", "plan": ["x", "y"]}])
+    pm_beat(substrate, "p1", FakeReasoner([out]))
+    sp = substrate.load_sprint("p1-s")
+    assert sp.goals == "new goal" and sp.plan == ["x", "y"]
+
+
+def test_pm_cannot_edit_once_approved(substrate):
+    _prog(substrate)
+    substrate.save_sprint(_with_pm_note("p1-s", SprintStatus.APPROVED, goals="locked"))
+    out = PMCycleOutput(sprint_edits=[{"sprint_id": "p1-s", "goals": "hacked"}])
+    pm_beat(substrate, "p1", FakeReasoner([out]))
+    assert substrate.load_sprint("p1-s").goals == "locked"   # spec locked after approval
+
+
+def test_context_surfaces_pm_feedback_only(substrate):
+    _prog(substrate)
+    substrate.save_sprint(Sprint(id="p1-s", status=SprintStatus.PROPOSED, goals="g", plan=[], program="p1",
+        comments=[{"id": "c1", "text": "extend it", "added_at": 1.0, "target": "pm"},
+                  {"id": "c2", "text": "agent note", "added_at": 2.0, "target": "worker"}]))
+    fb = gather_context(substrate, "p1").sprint_feedback
+    assert len(fb) == 1
+    assert fb[0]["sprint_id"] == "p1-s" and fb[0]["editable"] is True
+    assert fb[0]["comments"] == ["extend it"]            # worker note excluded
+
+
 def test_context_exposes_pool_and_slots(substrate):
     _prog(substrate)
     _proposed(substrate, 1)

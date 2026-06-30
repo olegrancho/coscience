@@ -70,7 +70,8 @@ class Worker:
             sprint_title=sprint.title, sprint_summary=sprint.summary,
             sprint_goals=sprint.goals, plan=list(sprint.plan),
             prior_results=prior,
-            human_comments=[c["text"] for c in sprint.comments],
+            human_comments=[c["text"] for c in sprint.comments
+                            if c.get("target", "worker") == "worker"],
             repo_root=self.substrate.repo_root,
         )
 

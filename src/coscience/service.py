@@ -156,17 +156,21 @@ class Service:
         return {"budget": usage_meter.read_budget(),
                 "runs": usage_meter.run_stats(self.repo_root)}
 
-    def add_sprint_comment(self, sprint_id: str, text: str) -> dict:
-        """Append a human comment to a sprint. Allowed in any status (review,
-        running, or done) — it's feedback, not an edit, so no status guard."""
+    def add_sprint_comment(self, sprint_id: str, text: str, target: str = "worker") -> dict:
+        """Append a human comment to a sprint. Allowed in any status — it's
+        feedback, not an edit. `target` routes it: 'worker' (the running agent
+        reads it as direction) or 'pm' (the planner reads it and may revise the
+        sprint or propose a follow-up)."""
         text = text.strip()
         if not text:
             raise ValueError("comment text is required")
+        if target not in ("worker", "pm"):
+            raise ValueError("target must be 'worker' or 'pm'")
         sprint = self._load_sprint(sprint_id)
-        comment = {"id": uuid4().hex[:8], "text": text, "added_at": time.time()}
+        comment = {"id": uuid4().hex[:8], "text": text, "added_at": time.time(), "target": target}
         sprint.comments.append(comment)
         self.substrate.save_sprint(sprint)
-        self.substrate.commit(f"sprint {sprint_id}: comment added")
+        self.substrate.commit(f"sprint {sprint_id}: comment added ({target})")
         return comment
 
     # Files surfaced in the UI as the agent's "working documents", with a

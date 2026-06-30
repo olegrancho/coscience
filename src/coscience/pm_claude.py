@@ -27,6 +27,11 @@ def render_prompt(context: PMContext) -> str:
                         lambda s: f"- {s['id']}: {s['goals']} -> result: {s['result']}")
     failed_block = _lines(context.failed,
                           lambda s: f"- {s['id']}: {s['goals']} -> FAILED: {s['error']}")
+    feedback_block = _lines(
+        context.sprint_feedback,
+        lambda f: (f"- {f['sprint_id']} [{f['status']}, "
+                   f"{'EDITABLE' if f['editable'] else 'locked — propose a follow-up instead'}]: "
+                   + " | ".join(f["comments"])))
     prior_block = ", ".join(context.prior_proposals) or "(none)"
     guidance_block = ""
     if context.human_guidance:
@@ -66,6 +71,11 @@ propose a corrected/rescoped sprint, change the approach, or record an idea; do 
 blindly re-propose the same thing):
 {failed_block}
 
+HUMAN FEEDBACK ADDRESSED TO YOU about specific sprints (act on each: if it is
+EDITABLE, revise that sprint via sprint_edits; if it is locked, propose a follow-up
+or adjust your plan instead):
+{feedback_block}
+
 PRIOR PROPOSALS you already made (do NOT repeat their intent): {prior_block}
 
 IDEA POOL (id in brackets; you may delete only your own non-PROTECTED ideas):
@@ -80,6 +90,11 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
   "ideas_summary": "<short markdown summary of the whole idea pool: themes, what's promising, what you pruned and why>",
   "new_ideas": ["<a one-paragraph candidate direction>", "..."],
   "delete_idea_ids": ["<id of one of YOUR non-protected ideas to prune>", "..."],
+  "sprint_edits": [
+    {{"sprint_id": "<an EDITABLE (still-proposed) sprint to revise per feedback>",
+      "goals": "<rewritten objective, optional>", "plan": ["<revised step>", "..."],
+      "summary": "<optional>", "title": "<optional>", "priority": <int, optional>}}
+  ],
   "proposals": [
     {{"suffix": "<short-slug>",
       "title": "<=8 words naming the experiment, e.g. 'Cross-validate the witness pair'>",
@@ -149,12 +164,14 @@ def parse_response(text: str) -> PMCycleOutput:
             ))
         except (KeyError, TypeError) as exc:
             raise PMReasonerError(f"malformed proposal: {exc}") from exc
+    edits = [e for e in data.get("sprint_edits", []) if isinstance(e, dict) and e.get("sprint_id")]
     return PMCycleOutput(
         proposals=proposals,
         report=str(data.get("report", "")),
         ideas_summary=str(data.get("ideas_summary", "")),
         new_ideas=[str(s) for s in data.get("new_ideas", [])],
         delete_idea_ids=[str(s) for s in data.get("delete_idea_ids", [])],
+        sprint_edits=edits,
     )
 
 

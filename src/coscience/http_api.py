@@ -76,6 +76,11 @@ class IdeaPinIn(BaseModel):
     pinned: bool
 
 
+class SprintCommentIn(BaseModel):
+    text: str = Field(min_length=1)
+    target: str = "worker"          # 'worker' (steers the agent) or 'pm' (steers the planner)
+
+
 def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     app = FastAPI(title=title, version="0.0.0")
     api = APIRouter(prefix="/api")
@@ -124,9 +129,9 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
 
     @api.post("/sprints/{sprint_id}/comments", status_code=201)
-    def comment_sprint(sprint_id: str, body: GuidanceIn) -> dict:
+    def comment_sprint(sprint_id: str, body: SprintCommentIn) -> dict:
         try:
-            return service.add_sprint_comment(sprint_id, body.text)
+            return service.add_sprint_comment(sprint_id, body.text, target=body.target)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
         except ValueError as exc:

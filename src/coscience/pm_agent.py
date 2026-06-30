@@ -31,6 +31,8 @@ def context_fingerprint(context: PMContext) -> str:
                          if s["status"] != SprintStatus.PROPOSED.value),
         "completed": sorted((s["id"], s["result"]) for s in context.completed),
         "failed": sorted((s["id"], s["error"]) for s in context.failed),
+        "sprint_feedback": sorted((f["sprint_id"], c)
+                                  for f in context.sprint_feedback for c in f["comments"]),
         # Human idea signal re-triggers the PM; its own pm-sourced ideas/summary do not.
         "human_ideas": sorted(i["text"] for i in context.ideas if i.get("source") == "human"),
         "idea_comments": sorted(c["text"] for i in context.ideas for c in i.get("comments", [])),
@@ -45,9 +47,19 @@ def gather_context(substrate, program_id: str) -> PMContext:
     open_sprints: list[dict] = []
     completed: list[dict] = []
     failed: list[dict] = []
+    sprint_feedback: list[dict] = []
     for s in substrate.iter_sprints():
         if s.program != program_id:
             continue
+        pm_notes = [c["text"] for c in s.comments if c.get("target") == "pm"]
+        if pm_notes and s.status != SprintStatus.CANCELED:
+            sprint_feedback.append({
+                "sprint_id": s.id, "goals": s.goals, "status": s.status.value,
+                # PM may revise a sprint only until a human approves it; after that
+                # the spec is locked and the PM responds by proposing a follow-up.
+                "editable": s.status == SprintStatus.PROPOSED,
+                "comments": pm_notes,
+            })
         if s.status == SprintStatus.DONE:
             result = ""
             if s.results:
@@ -71,6 +83,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
     return PMContext(
         program_id=program_id, goals=program.goals, cycle=pm.cycle,
         open_sprints=open_sprints, completed=completed, failed=failed,
+        sprint_feedback=sprint_feedback,
         prior_proposals=list(pm.proposed_ids),
         human_guidance=guidance,
         ideas=idea_dicts, proposed_count=proposed_count, max_proposed=MAX_PROPOSED,
@@ -112,6 +125,7 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
         "ideas_summary": output.ideas_summary,
         "new_ideas": list(output.new_ideas),
         "delete_idea_ids": list(output.delete_idea_ids),
+        "sprint_edits": list(output.sprint_edits),
         "proposals": [
             {"suffix": p.suffix, "goals": p.goals, "plan": p.plan,
              "priority": p.priority, "resources_required": p.resources_required,
@@ -135,6 +149,7 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         ideas_summary=data.get("ideas_summary", ""),
         new_ideas=list(data.get("new_ideas", [])),
         delete_idea_ids=list(data.get("delete_idea_ids", [])),
+        sprint_edits=list(data.get("sprint_edits", [])),
         proposals=[ProposedSprint(**p) for p in data.get("proposals", [])],
     )
     return StagedCycle(cycle=int(data["cycle"]), output=output,
@@ -224,6 +239,29 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None) -> d
         existing_texts.add(text)
     new_summary = staged.output.ideas_summary or summary_text
     substrate.save_ideas(program_id, new_summary, list(ideas_by_id.values()))
+
+    # --- sprint revisions from PM-targeted feedback (only while still proposed) ---
+    for edit in staged.output.sprint_edits:
+        sid = str(edit.get("sprint_id", ""))
+        if not sid or not (substrate.sprint_dir(sid) / "sprint.md").is_file():
+            continue
+        sp = substrate.load_sprint(sid)
+        if sp.program != program_id or sp.status != SprintStatus.PROPOSED:
+            continue                                   # locked once a human approves
+        if edit.get("goals"):
+            sp.goals = str(edit["goals"])
+        if edit.get("plan") is not None:
+            sp.plan = [str(x) for x in edit["plan"]]
+        if edit.get("summary") is not None:
+            sp.summary = str(edit["summary"])
+        if edit.get("title") is not None:
+            sp.title = str(edit["title"])
+        if edit.get("priority") is not None:
+            try:
+                sp.priority = int(edit["priority"])
+            except (TypeError, ValueError):
+                pass
+        substrate.save_sprint(sp)
 
     substrate.save_report(program_id, staged.output.report)
 

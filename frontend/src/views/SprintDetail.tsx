@@ -1,4 +1,4 @@
-import { Button, Card, Group, Loader, SimpleGrid, Stack, Text, Textarea } from "@mantine/core";
+import { Button, Card, Group, Loader, SegmentedControl, SimpleGrid, Stack, Text, Textarea } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -128,6 +128,7 @@ export default function SprintDetail() {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [comment, setComment] = useState("");
+  const [commentTarget, setCommentTarget] = useState<"worker" | "pm">("worker");
   const prog = programOf(id);
   const sprint = useQuery({ queryKey: ["sprint", id], queryFn: () => api.getSprint(id) });
   const program = useQuery({ queryKey: ["program", prog], queryFn: () => api.getProgram(prog), enabled: !!prog });
@@ -153,7 +154,10 @@ export default function SprintDetail() {
   };
   const addComment = async () => {
     if (!comment.trim()) return;
-    try { await api.addSprintComment(id, comment.trim()); setComment(""); notifications.show({ color: "teal", title: "Comment added", message: "The research agent reads this as direction." }); refresh(); }
+    const msg = commentTarget === "pm"
+      ? "The AI planner reads this and may revise the sprint or follow up."
+      : "The research agent reads this as direction on its next run.";
+    try { await api.addSprintComment(id, comment.trim(), commentTarget); setComment(""); notifications.show({ color: "teal", title: "Comment added", message: msg }); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't comment", message: String(e) }); }
   };
 
@@ -204,18 +208,34 @@ export default function SprintDetail() {
       )}
 
       <Card padding="lg" radius="md" style={cardStyle}>
-        <div className="eyebrow" style={{ marginBottom: 4 }}>your feedback{s.comments.length ? ` · ${s.comments.length}` : ""}</div>
-        <Text size="xs" c="dimmed" mb="sm">Notes for the research agent — it reads these as direction on its next run.</Text>
-        <Stack gap={8}>
-          {s.comments.map((c) => (
-            <div key={c.id} style={{ background: "var(--paper)", borderRadius: 8, padding: "8px 12px" }}>
-              <div className="md-tight"><Md>{c.text}</Md></div>
-              <Text size="xs" c="dimmed" mt={2}><RelTime at={c.added_at} /></Text>
-            </div>
-          ))}
+        <div className="eyebrow" style={{ marginBottom: 10 }}>your feedback{s.comments.length ? ` · ${s.comments.length}` : ""}</div>
+        <Stack gap={10}>
+          {s.comments.map((c) => {
+            const toPm = c.target === "pm";
+            return (
+              <div key={c.id} style={{ background: "var(--paper)", borderRadius: 8, padding: "8px 12px" }}>
+                <div className="md-tight"><Md>{c.text}</Md></div>
+                <Group gap={8} mt={3} wrap="nowrap">
+                  <span className="mono" style={{ fontSize: 10.5, padding: "0px 6px", borderRadius: 999,
+                    color: toPm ? "var(--signal)" : "var(--machine)",
+                    background: toPm ? "var(--signal-weak)" : "var(--machine-weak)" }}>
+                    {toPm ? "→ planner" : "→ agent"}
+                  </span>
+                  <Text size="xs" c="dimmed"><RelTime at={c.added_at} /></Text>
+                </Group>
+              </div>
+            );
+          })}
+          <SegmentedControl size="xs" value={commentTarget} onChange={(v) => setCommentTarget(v as "worker" | "pm")}
+            data={[{ label: "To the agent", value: "worker" }, { label: "To the planner (AI)", value: "pm" }]} />
+          <Text size="xs" c="dimmed">
+            {commentTarget === "pm"
+              ? "The planner reads this and can rewrite the sprint's goals/plan while it's still proposed, or propose a follow-up."
+              : "The running agent reads this as direction on its next run."}
+          </Text>
           <Group gap={8} align="flex-start">
-            <Textarea style={{ flex: 1 }} placeholder="Leave a comment for the agent…" autosize minRows={1}
-              value={comment} onChange={(e) => setComment(e.currentTarget.value)} />
+            <Textarea style={{ flex: 1 }} placeholder={commentTarget === "pm" ? "e.g. rewrite the goals to focus on…" : "Direction for the agent…"}
+              autosize minRows={1} value={comment} onChange={(e) => setComment(e.currentTarget.value)} />
             <Button variant="light" color="machine" onClick={addComment}>Comment</Button>
           </Group>
         </Stack>
