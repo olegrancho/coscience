@@ -26,6 +26,13 @@ def test_instructions_carry_goal_steps_prior_and_autonomy(tmp_path):
     assert "python3 -c" not in text
 
 
+def test_instructions_carry_human_comments(tmp_path):
+    ctx = ExecutionContext(human_comments=["double-check the boundary at exactly 1e6"])
+    text = build_instructions(_sprint(), ctx, tmp_path / "scratchpad.md")
+    assert "Human feedback" in text
+    assert "double-check the boundary at exactly 1e6" in text
+
+
 def test_start_writes_instructions_and_runs_to_a_result(tmp_path, monkeypatch):
     fake = tmp_path / "claude"
     fake.write_text("#!/usr/bin/env bash\necho AGENT RAN\n")

@@ -1,4 +1,4 @@
-import { Button, Card, Group, Loader, SimpleGrid, Stack, Text } from "@mantine/core";
+import { Button, Card, Group, Loader, SimpleGrid, Stack, Text, Textarea } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -127,6 +127,7 @@ export default function SprintDetail() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const [comment, setComment] = useState("");
   const prog = programOf(id);
   const sprint = useQuery({ queryKey: ["sprint", id], queryFn: () => api.getSprint(id) });
   const program = useQuery({ queryKey: ["program", prog], queryFn: () => api.getProgram(prog), enabled: !!prog });
@@ -149,6 +150,11 @@ export default function SprintDetail() {
   const reject = async () => {
     try { await api.rejectSprint(id); notifications.show({ color: "gray", title: "Rejected", message: "Canceled — it won't run." }); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't reject", message: String(e) }); }
+  };
+  const addComment = async () => {
+    if (!comment.trim()) return;
+    try { await api.addSprintComment(id, comment.trim()); setComment(""); notifications.show({ color: "teal", title: "Comment added", message: "The research agent reads this as direction." }); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't comment", message: String(e) }); }
   };
 
   return (
@@ -185,6 +191,24 @@ export default function SprintDetail() {
           <Text>{s.rationale}</Text>
         </Card>
       )}
+
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <div className="eyebrow" style={{ marginBottom: 4 }}>your feedback{s.comments.length ? ` · ${s.comments.length}` : ""}</div>
+        <Text size="xs" c="dimmed" mb="sm">Notes for the research agent — it reads these as direction on its next run.</Text>
+        <Stack gap={8}>
+          {s.comments.map((c) => (
+            <div key={c.id} style={{ background: "var(--paper)", borderRadius: 8, padding: "8px 12px" }}>
+              <div className="md-tight"><Md>{c.text}</Md></div>
+              <Text size="xs" c="dimmed" mt={2}><RelTime at={c.added_at} /></Text>
+            </div>
+          ))}
+          <Group gap={8} align="flex-start">
+            <Textarea style={{ flex: 1 }} placeholder="Leave a comment for the agent…" autosize minRows={1}
+              value={comment} onChange={(e) => setComment(e.currentTarget.value)} />
+            <Button variant="light" color="machine" onClick={addComment}>Comment</Button>
+          </Group>
+        </Stack>
+      </Card>
 
       {s.results.length > 0 && (
         <Card padding="lg" radius="md" style={cardStyle}>

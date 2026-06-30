@@ -65,7 +65,9 @@ class Worker:
             program_title=program_title, program_goal=program_goal,
             sprint_title=sprint.title, sprint_summary=sprint.summary,
             sprint_goals=sprint.goals, plan=list(sprint.plan),
-            prior_results=prior, repo_root=self.substrate.repo_root,
+            prior_results=prior,
+            human_comments=[c["text"] for c in sprint.comments],
+            repo_root=self.substrate.repo_root,
         )
 
     def _claim_sprint(self):

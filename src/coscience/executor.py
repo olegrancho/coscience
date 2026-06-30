@@ -26,6 +26,7 @@ class ExecutionContext:
     sprint_goals: str = ""
     plan: list[str] = field(default_factory=list)            # suggested steps (guidance)
     prior_results: list[str] = field(default_factory=list)   # formatted "## label\n<summary>"
+    human_comments: list[str] = field(default_factory=list)  # human feedback on this sprint
     repo_root: Path | None = None
 
 

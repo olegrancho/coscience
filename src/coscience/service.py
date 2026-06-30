@@ -134,6 +134,7 @@ class Service:
             "program": sprint.program,
             "results": list(sprint.results),
             "plan": list(sprint.plan),
+            "comments": list(sprint.comments),
             "agent_running": bool(progress.agent_token),
             "started_at": progress.started_at,
             "lease": None if lease is None else {
@@ -142,6 +143,19 @@ class Service:
                 "priority": lease.priority, "preemptible": lease.preemptible,
             },
         }
+
+    def add_sprint_comment(self, sprint_id: str, text: str) -> dict:
+        """Append a human comment to a sprint. Allowed in any status (review,
+        running, or done) — it's feedback, not an edit, so no status guard."""
+        text = text.strip()
+        if not text:
+            raise ValueError("comment text is required")
+        sprint = self._load_sprint(sprint_id)
+        comment = {"id": uuid4().hex[:8], "text": text, "added_at": time.time()}
+        sprint.comments.append(comment)
+        self.substrate.save_sprint(sprint)
+        self.substrate.commit(f"sprint {sprint_id}: comment added")
+        return comment
 
     # Files surfaced in the UI as the agent's "working documents", with a
     # friendly label + kind and the order they should display in.

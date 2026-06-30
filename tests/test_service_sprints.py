@@ -191,6 +191,29 @@ def test_list_sprint_files_missing_raises(tmp_path):
         Service(tmp_path).list_sprint_files("nope")
 
 
+def test_add_sprint_comment_any_status(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["a"])
+    s = svc.substrate.load_sprint("sp1")
+    s.status = SprintStatus.DONE                       # commenting allowed even when done
+    svc.substrate.save_sprint(s)
+    c = svc.add_sprint_comment("sp1", "please double-check the boundary case")
+    assert c["text"] == "please double-check the boundary case" and c["id"]
+    assert svc.get_sprint("sp1")["comments"] == [c]
+
+
+def test_add_sprint_comment_rejects_empty(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["a"])
+    with pytest.raises(ValueError):
+        svc.add_sprint_comment("sp1", "  ")
+
+
+def test_add_sprint_comment_missing_raises(tmp_path):
+    with pytest.raises(NotFoundError):
+        Service(tmp_path).add_sprint_comment("nope", "x")
+
+
 def test_program_sprints_ordered_by_creation(tmp_path):
     svc = Service(tmp_path)
     from coscience.models import Program, ProgramStatus

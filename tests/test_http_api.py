@@ -40,6 +40,22 @@ def test_sprint_files_missing_is_404(client):
     assert client.get("/api/sprints/nope/files").status_code == 404
 
 
+def test_sprint_comment_round_trip(client):
+    client.post("/api/sprints", json={"id": "sp1", "goals": "g", "plan": ["a"]})
+    r = client.post("/api/sprints/sp1/comments", json={"text": "check the edge case"})
+    assert r.status_code == 201 and r.json()["text"] == "check the edge case"
+    assert client.get("/api/sprints/sp1").json()["comments"][0]["text"] == "check the edge case"
+
+
+def test_sprint_comment_empty_is_422(client):
+    client.post("/api/sprints", json={"id": "sp1", "goals": "g", "plan": ["a"]})
+    assert client.post("/api/sprints/sp1/comments", json={"text": ""}).status_code == 422
+
+
+def test_sprint_comment_missing_is_404(client):
+    assert client.post("/api/sprints/nope/comments", json={"text": "x"}).status_code == 404
+
+
 def test_submit_then_get_and_list(client):
     body = {"id": "sp1", "goals": "cure",
             "plan": ["echo hi"],

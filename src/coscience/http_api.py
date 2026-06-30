@@ -123,6 +123,15 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
 
+    @api.post("/sprints/{sprint_id}/comments", status_code=201)
+    def comment_sprint(sprint_id: str, body: GuidanceIn) -> dict:
+        try:
+            return service.add_sprint_comment(sprint_id, body.text)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
     @api.post("/sprints/{sprint_id}/approve")
     def approve_sprint(sprint_id: str) -> dict:
         try:

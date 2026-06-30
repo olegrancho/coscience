@@ -20,7 +20,7 @@ export interface Sprint {
   id: string; status: string; title: string; summary: string;
   goals: string; priority: number; preemptible: boolean;
   resources_required: Record<string, number>; rationale: string; plan: string[];
-  program: string | null; results: string[];
+  program: string | null; results: string[]; comments: IdeaComment[];
   agent_running: boolean; started_at: number | null; lease: unknown | null;
 }
 export interface SprintFile {
@@ -81,6 +81,11 @@ export const api = {
   listSprints: () => fetch("/api/sprints").then(j<SprintRow[]>),
   getSprint: (id: string) => fetch(`/api/sprints/${id}`).then(j<Sprint>),
   getSprintFiles: (id: string) => fetch(`/api/sprints/${id}/files`).then(j<SprintFile[]>),
+  addSprintComment: (id: string, text: string) =>
+    fetch(`/api/sprints/${id}/comments`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }).then(j<IdeaComment>),
   submitSprint: (body: { id: string; goals: string; plan: string[]; program?: string;
                          priority?: number; resources_required?: Record<string, number> }) =>
     fetch("/api/sprints", {

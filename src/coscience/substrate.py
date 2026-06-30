@@ -40,6 +40,8 @@ class Substrate:
             title=str(fm.get("title", "")),
             summary=str(fm.get("summary", "")),
             created_at=None if fm.get("created_at") is None else float(fm["created_at"]),
+            comments=[{"id": str(c["id"]), "text": str(c["text"]),
+                       "added_at": float(c["added_at"])} for c in fm.get("comments", [])],
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
@@ -71,6 +73,8 @@ class Substrate:
             sprint.created_at = time.time()
         if sprint.created_at is not None:
             fm["created_at"] = sprint.created_at
+        if sprint.comments:
+            fm["comments"] = list(sprint.comments)
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))
 

@@ -51,6 +51,7 @@ class Sprint:
     title: str = ""
     summary: str = ""
     created_at: float | None = None   # wall-clock of first save; orders sprints by appearance
+    comments: list[dict] = field(default_factory=list)  # human feedback [{id, text, added_at}]
 
 
 @dataclass

@@ -22,10 +22,15 @@ def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
     steps = "\n".join(f"- {s}" for s in sprint.plan) or "(none given — plan the work yourself)"
     program = ""
     prior = "None yet."
+    comments = ""
     if context is not None:
         program = f"{context.program_title}: {context.program_goal}".strip(": ").strip()
         if context.prior_results:
             prior = "\n\n".join(context.prior_results)
+        if context.human_comments:
+            notes = "\n".join(f"- {c}" for c in context.human_comments)
+            comments = ("\n\n## Human feedback on this sprint (weigh this — it is direction "
+                        "from your reviewers)\n" + notes)
     return f"""# Sprint: {sprint.title or sprint.id}
 
 You are an autonomous research agent. Carry out this sprint end to end, unattended.
@@ -40,6 +45,7 @@ or confirmation, and do NOT merely describe what you would do: actually do it.
 
 Objective:
 {sprint.goals}
+{comments}
 
 ## Suggested steps (guidance only — you decide the actual work)
 {steps}
