@@ -48,7 +48,7 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
           {open ? "▾" : "▸"}
         </button>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <Text size="sm" lineClamp={open ? undefined : 2} style={{ lineHeight: 1.5 }}>{idea.text}</Text>
+          <div className={"md-tight" + (open ? "" : " clamp2")}><Md>{idea.text}</Md></div>
           <Group gap={8} mt={5} wrap="nowrap">
             <SourceChip source={idea.source} />
             {idea.comments.length > 0 && (
@@ -72,7 +72,7 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
             <Stack gap={6} mt={10}>
               {idea.comments.map((c) => (
                 <div key={c.id} style={{ background: "var(--paper)", borderRadius: 8, padding: "7px 11px" }}>
-                  <Text size="sm">{c.text}</Text>
+                  <div className="md-tight"><Md>{c.text}</Md></div>
                   <Text size="xs" c="dimmed" mt={2}><RelTime at={c.added_at} /></Text>
                 </div>
               ))}

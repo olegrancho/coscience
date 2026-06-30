@@ -16,6 +16,7 @@ export default function ProgramDetail() {
   const qc = useQueryClient();
   const [note, setNote] = useState("");
   const [proposing, setProposing] = useState(false);
+  const [showAllRejected, setShowAllRejected] = useState(false);
 
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
   const guidance = useQuery({ queryKey: ["guidance", id], queryFn: () => api.listGuidance(id) });
@@ -106,29 +107,43 @@ export default function ProgramDetail() {
         </Stack>
       </Card>
 
-      <Card padding="lg" radius="md" style={cardStyle}>
-        <div className="eyebrow" style={{ marginBottom: 12 }}>experiments · {p.sprints.length}</div>
-        {p.sprints.length === 0 ? (
-          <Text size="sm" c="dimmed">None yet. Propose one, or let the AI propose on its next cycle.</Text>
-        ) : (
-          <Stack gap={2}>
-            {p.sprints.map((s) => (
-              <div key={s.id}
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 6px", borderBottom: "1px solid var(--hairline)" }}>
-                <Link to={`/sprints/${s.id}`} style={{ minWidth: 0, flex: 1, textDecoration: "none", color: "inherit" }}>
-                  <Text size="sm" truncate>{s.title || s.goals || s.id}</Text>
-                </Link>
-                <Group gap={12} wrap="nowrap">
-                  {s.results.length > 0 && (
-                    <Link to={`/results/${s.results[0]}`} className="view" style={{ fontSize: 13 }}>result →</Link>
-                  )}
-                  <StatusBadge status={s.status} />
-                </Group>
-              </div>
-            ))}
-          </Stack>
-        )}
-      </Card>
+      {(() => {
+        // Rejected (canceled) experiments pile up; show only the 3 most recent
+        // (sprints arrive newest-first) and tuck the rest behind "show all".
+        const rejectedIds = p.sprints.filter((s) => s.status === "canceled").map((s) => s.id);
+        const hidden = new Set(showAllRejected ? [] : rejectedIds.slice(3));
+        return (
+          <Card padding="lg" radius="md" style={cardStyle}>
+            <div className="eyebrow" style={{ marginBottom: 12 }}>experiments · {p.sprints.length}</div>
+            {p.sprints.length === 0 ? (
+              <Text size="sm" c="dimmed">None yet. Propose one, or let the AI propose on its next cycle.</Text>
+            ) : (
+              <Stack gap={2}>
+                {p.sprints.filter((s) => !hidden.has(s.id)).map((s) => (
+                  <div key={s.id}
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 6px", borderBottom: "1px solid var(--hairline)" }}>
+                    <Link to={`/sprints/${s.id}`} style={{ minWidth: 0, flex: 1, textDecoration: "none", color: "inherit" }}>
+                      <Text size="sm" truncate>{s.title || s.goals || s.id}</Text>
+                    </Link>
+                    <Group gap={12} wrap="nowrap">
+                      {s.results.length > 0 && (
+                        <Link to={`/results/${s.results[0]}`} className="view" style={{ fontSize: 13 }}>result →</Link>
+                      )}
+                      <StatusBadge status={s.status} />
+                    </Group>
+                  </div>
+                ))}
+                {rejectedIds.length > 3 && (
+                  <button type="button" className="linklike" style={{ alignSelf: "flex-start", marginTop: 8 }}
+                    onClick={() => setShowAllRejected((v) => !v)}>
+                    {showAllRejected ? "Show fewer" : `Show all ${rejectedIds.length} rejected`}
+                  </button>
+                )}
+              </Stack>
+            )}
+          </Card>
+        );
+      })()}
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <Group justify="space-between" align="center" mb={ideas.data?.summary.trim() ? 10 : 0}>
