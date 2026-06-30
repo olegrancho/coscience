@@ -19,6 +19,20 @@ def test_run_once_beats_only_active_programs(substrate):
     assert substrate.load_sprint("a-c0-z").program == "a"
 
 
+def test_pm_throttles_instead_of_calling_when_usage_exhausted(substrate):
+    # The classic crash: usage limit hit -> the PM must NOT call the reasoner (which
+    # would shell out to a dead `claude` and raise). It skips and retries later.
+    substrate.save_program(Program(id="a", title="A", goals="x"))
+    fake = FakeReasoner([_out("z")])
+    [s] = pm_run_once(substrate, fake, usage_ok=lambda: False)
+    assert s["throttled"] is True
+    assert fake.calls == []                                 # reasoner never invoked
+    # budget recovers -> the still-pending change is reasoned on the next pass
+    [s2] = pm_run_once(substrate, fake, usage_ok=lambda: True)
+    assert s2.get("throttled") is not True
+    assert len(fake.calls) == 1
+
+
 def test_pm_loop_runs_max_rounds_with_injected_sleep(substrate):
     substrate.save_program(Program(id="a", title="A", goals="x"))
     fake = FakeReasoner([_out("p"), _out("q")])

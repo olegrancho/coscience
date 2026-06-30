@@ -162,8 +162,14 @@ def clear_staging(substrate, program_id: str) -> None:
         path.unlink()
 
 
-def pm_beat(substrate, program_id: str, reasoner, now: float | None = None) -> dict:
-    """Run one bounded, kill-safe PM cycle for a program. Returns a summary."""
+def pm_beat(substrate, program_id: str, reasoner, now: float | None = None,
+           usage_ok=None) -> dict:
+    """Run one bounded, kill-safe PM cycle for a program. Returns a summary.
+
+    `usage_ok` is an optional () -> bool gate (production passes the real Claude
+    usage check). When it returns False we skip the reasoner call WITHOUT advancing
+    the fingerprint, so the pending change is re-reasoned once the budget recovers —
+    this is what stops a usage limit from crashing the loop."""
     pm = substrate.load_pm_state(program_id)
 
     staged = read_staging(substrate, program_id)
@@ -179,6 +185,13 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None) -> d
             substrate.save_pm_state(pm)
             return {"program": program_id, "cycle": cycle,
                     "submitted": [], "proposed": [], "skipped": True}
+        if usage_ok is not None and not usage_ok():
+            # Budget exhausted: do NOT call the reasoner (it would shell out to a dead
+            # `claude` and raise). Leave the fingerprint pending; retry when it frees up.
+            pm.last_run = time.time() if now is None else now
+            substrate.save_pm_state(pm)
+            return {"program": program_id, "cycle": cycle,
+                    "submitted": [], "proposed": [], "skipped": True, "throttled": True}
         output = reasoner.run(context)                 # the ONE reasoner call
         usage_meter.record_run(substrate.repo_root, "pm", program_id)
         write_staging(substrate, program_id, cycle, output, fingerprint)  # COMMIT POINT
