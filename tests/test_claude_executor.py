@@ -1,8 +1,9 @@
+import json
 import os
 import stat
 import time
 
-from coscience.claude_executor import ClaudeAgent, build_instructions
+from coscience.claude_executor import ClaudeAgent, build_instructions, read_activity
 from coscience.executor import ExecutionContext
 from coscience.models import Sprint, SprintStatus
 
@@ -69,3 +70,58 @@ def test_collect_reports_failed_on_nonzero_exit(tmp_path):
     text, status = ClaudeAgent().collect(sprint_dir)
     assert status == "failed"
     assert "ImportError" in text
+
+
+def _stream(*events: dict) -> str:
+    return "\n".join(json.dumps(e) for e in events) + "\n"
+
+
+def test_collect_unwraps_stream_result_and_writes_cost(tmp_path):
+    sprint_dir = tmp_path / "sprints" / "sp1"
+    sprint_dir.mkdir(parents=True)
+    (sprint_dir / "agent.out").write_text(_stream(
+        {"type": "system", "subtype": "init"},
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash",
+                                                       "input": {"command": "ls"}}]}},
+        {"type": "result", "subtype": "success", "result": "min gap is 2",
+         "total_cost_usd": 0.42, "num_turns": 7,
+         "usage": {"input_tokens": 1000, "output_tokens": 200}},
+    ))
+    (sprint_dir / "agent.exit").write_text("0\n")
+    text, status = ClaudeAgent().collect(sprint_dir)
+    assert status == "ok"
+    assert text == "min gap is 2"                         # final message, not the JSONL
+    cost = json.loads((sprint_dir / "agent.cost.json").read_text())
+    assert cost["cost"] == 0.42 and cost["tokens"] == 1200
+
+
+def test_collect_keeps_raw_when_no_result_event(tmp_path):
+    # A usage-limit message instead of a stream must survive for limit detection.
+    sprint_dir = tmp_path / "sprints" / "sp1"
+    sprint_dir.mkdir(parents=True)
+    (sprint_dir / "agent.out").write_text("You've hit your session limit · resets 6:40am")
+    (sprint_dir / "agent.exit").write_text("1\n")
+    text, status = ClaudeAgent().collect(sprint_dir)
+    assert status == "failed" and "session limit" in text
+
+
+def test_read_activity_labels_current_action(tmp_path):
+    sprint_dir = tmp_path / "sprints" / "sp1"
+    sprint_dir.mkdir(parents=True)
+    (sprint_dir / "agent.out").write_text(_stream(
+        {"type": "system", "subtype": "init"},
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Write",
+                                                       "input": {"file_path": "/x/scratchpad.md"}}]}},
+    ))
+    act = read_activity(sprint_dir, now=time.time())
+    assert act["label"] == "using Write · scratchpad.md"
+    assert act["active"] is True                          # just written
+    # an old feed reads as inactive (process gone)
+    stale = read_activity(sprint_dir, now=time.time() + 10_000)
+    assert stale["active"] is False
+
+
+def test_read_activity_none_without_feed(tmp_path):
+    sprint_dir = tmp_path / "sprints" / "sp1"
+    sprint_dir.mkdir(parents=True)
+    assert read_activity(sprint_dir) is None

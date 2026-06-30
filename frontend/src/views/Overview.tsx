@@ -3,7 +3,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type SprintRow } from "../api";
-import { Bars, computeCost, EmptyState, Gauge, Heartbeat, RelTime, Running, StateBar, StatusBadge, UsagePanel } from "../components/ui";
+import { Bars, computeCost, EmptyState, Gauge, Heartbeat, LiveActivity, RelTime, Running, StateBar, StatusBadge, UsagePanel } from "../components/ui";
 
 function programOf(s: SprintRow) {
   if (s.program) return s.program;
@@ -15,7 +15,7 @@ export default function Overview() {
   const qc = useQueryClient();
   const nav = useNavigate();
   const programs = useQuery({ queryKey: ["programs"], queryFn: api.listPrograms });
-  const sprints = useQuery({ queryKey: ["sprints"], queryFn: api.listSprints });
+  const sprints = useQuery({ queryKey: ["sprints"], queryFn: api.listSprints, refetchInterval: 8000 });
   const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.getLedger });
   const results = useQuery({ queryKey: ["results"], queryFn: api.listResults });
   const usage = useQuery({ queryKey: ["usage"], queryFn: api.getUsage });
@@ -157,7 +157,10 @@ export default function Overview() {
                 {list.map((s) => (
                   <div key={s.id} onClick={() => nav(`/sprints/${s.id}`)}
                     style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 13px", background: "var(--card)", border: "1px solid var(--hairline)", borderRadius: 10, cursor: "pointer" }}>
-                    <Text size="sm" truncate style={{ flex: 1 }}>{sprintTitle[s.id]}</Text>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Text size="sm" truncate>{sprintTitle[s.id]}</Text>
+                      <LiveActivity activity={s.activity} agentRunning />
+                    </div>
                     <Running since={s.started_at} />
                   </div>
                 ))}

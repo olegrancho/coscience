@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Stack, Text } from "@mantine/core";
 import { Link } from "react-router-dom";
-import type { RunAgg, Usage } from "../api";
+import type { RunAgg, SprintActivity, Usage } from "../api";
 import { SPRINT_STATE_ORDER, statusVar } from "./status";
 
 /** "2h ago" / "3d ago" / "Jun 27" — with the exact local time on hover. */
@@ -25,6 +25,27 @@ export function RelTime({ at, prefix }: { at?: number | null; prefix?: string })
 
 /** A clear way back to the parent this page belongs under. Names the parent so
  *  it doubles as context ("‹ Demo" tells you the experiment is in the Demo program). */
+/** Whether the worker agent is engaged right now and what it's doing, vs waiting.
+ *  Derives from the live event-feed activity plus whether a process is attached. */
+export function LiveActivity(
+  { activity, agentRunning }: { activity?: SprintActivity | null; agentRunning?: boolean },
+) {
+  if (!agentRunning && !activity) {
+    return <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>○ waiting for compute</span>;
+  }
+  const live = !!activity?.active;
+  const color = live ? "var(--machine)" : agentRunning ? "var(--ink-dim)" : "var(--ink-faint)";
+  const label = activity?.label ?? (agentRunning ? "agent engaged" : "waiting");
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color }}>
+      <span className={live ? "pulse-dot" : ""}
+            style={{ width: 7, height: 7, borderRadius: "50%", background: color, flex: "none" }} />
+      <span className="mono" style={{ maxWidth: 360, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+      {activity?.at ? <RelTime at={activity.at} prefix="·" /> : null}
+    </span>
+  );
+}
+
 export function BackLink({ to, children }: { to: string; children: ReactNode }) {
   return (
     <Link to={to} className="backlink">
@@ -177,13 +198,56 @@ export function UsageBar({ label, pct, resets }: { label: string; pct: number; r
   );
 }
 
+function fmtUsd(n: number): string {
+  if (!n) return "$0";
+  return n < 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(n < 100 ? 1 : 0)}`;
+}
+
 function RunStat({ label, agg }: { label: string; agg: RunAgg }) {
   return (
     <div style={{ flex: 1 }}>
       <Text size="xs" c="dimmed">{label} runs</Text>
       <Text style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 600, lineHeight: 1.1 }}>{agg.total}</Text>
       <Text size="xs" c="dimmed">{agg.last_hour} in last hour</Text>
+      {agg.cost > 0 && (
+        <Text size="xs" c="dimmed" title={`${agg.tokens.toLocaleString()} tokens total`}>
+          {fmtUsd(agg.cost)} · {fmtUsd(agg.cost_day)} today
+        </Text>
+      )}
     </div>
+  );
+}
+
+/** The Claude models a sprint worker / PM reasoner can run on. "" = launcher default. */
+export const MODEL_OPTIONS = [
+  { value: "", label: "Default" },
+  { value: "claude-sonnet-5", label: "Sonnet 5 (near-Opus, cheap)" },
+  { value: "claude-opus-4-8", label: "Opus 4.8 (most capable)" },
+  { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5 (cheapest)" },
+];
+
+/** A compact model picker. Shows a free-text value not in the list as-is. */
+export function ModelSelect(
+  { value, onChange, disabled, label }:
+  { value: string; onChange: (m: string) => void; disabled?: boolean; label?: string },
+) {
+  const opts = MODEL_OPTIONS.some((o) => o.value === value)
+    ? MODEL_OPTIONS : [...MODEL_OPTIONS, { value, label: value }];
+  return (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+      {label && <span style={{ color: "var(--ink-dim)" }}>{label}</span>}
+      <select
+        className="mono"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ fontSize: 12, padding: "3px 6px", background: "var(--surface)",
+                 color: "var(--ink)", border: "1px solid var(--hairline)", borderRadius: 6 }}
+      >
+        {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </label>
   );
 }
 

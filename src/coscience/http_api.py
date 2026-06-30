@@ -58,10 +58,15 @@ class SprintPatch(BaseModel):
     priority: int | None = None
     resources_required: dict[str, float] | None = None
     preemptible: bool | None = None
+    model: str | None = None
 
 
 class ProgramStatusIn(BaseModel):
     status: str
+
+
+class ProgramModelIn(BaseModel):
+    model: str = ""
 
 
 class GuidanceIn(BaseModel):
@@ -208,6 +213,13 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         return service.get_program(program_id)
+
+    @api.post("/programs/{program_id}/model")
+    def set_program_model(program_id: str, body: ProgramModelIn) -> dict:
+        try:
+            return service.set_program_model(program_id, body.model)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
 
     @api.get("/programs/{program_id}/guidance")
     def list_guidance(program_id: str) -> list[dict]:

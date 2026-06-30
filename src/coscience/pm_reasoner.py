@@ -36,6 +36,7 @@ class PMContext:
     ideas: list[dict] = field(default_factory=list)   # current idea pool (id/text/source/protected/comments)
     proposed_count: int = 0                            # sprints already in 'proposed'
     max_proposed: int = 4                              # cap the PM may not exceed
+    model: str = ""                                    # Claude model for this PM cycle; "" = default
 
     @property
     def free_slots(self) -> int:
@@ -53,6 +54,7 @@ class ProposedSprint:
     title: str = ""
     summary: str = ""
     from_idea: str = ""                              # idea id this promotes (removed when sprint is created)
+    model: str = ""                                  # suggested worker model for this sprint; "" = default
 
 
 @dataclass

@@ -103,7 +103,8 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
       "plan": ["<suggested step in plain language>", "<another>", "..."],
       "priority": <int>, "resources_required": {{}} or null,
       "rationale": "<why this experiment next>",
-      "from_idea": "<id of the pool idea this promotes, or omit>"}}
+      "from_idea": "<id of the pool idea this promotes, or omit>",
+      "model": "<optional: a Claude model slug to run this sprint's worker on, e.g. 'claude-sonnet-4-6' for cheap/routine work or 'claude-opus-4-8' for hard reasoning; omit to use the default>"}}
   ]}}
 Propose 0 proposals if nothing new is warranted, or you are at the cap.
 
@@ -161,6 +162,7 @@ def parse_response(text: str) -> PMCycleOutput:
                 title=str(p.get("title", "")),
                 summary=str(p.get("summary", "")),
                 from_idea=str(p.get("from_idea", "")),
+                model=str(p.get("model", "")),
             ))
         except (KeyError, TypeError) as exc:
             raise PMReasonerError(f"malformed proposal: {exc}") from exc
@@ -182,16 +184,32 @@ class ClaudeCodeReasoner:
     def __init__(self, invoke=None, claude_bin: str = "claude"):
         self.claude_bin = claude_bin
         self._invoke = invoke or self._default_invoke
+        self.last_cost: dict | None = None     # {cost, tokens} of the most recent call
 
-    def _default_invoke(self, prompt: str) -> str:
-        proc = subprocess.run(
-            [self.claude_bin, "-p", prompt, "--output-format", "text"],
-            capture_output=True, text=True,
-        )
+    def _default_invoke(self, prompt: str, model: str = "") -> str:
+        # --output-format json gives us the reply text plus cost/token usage in one
+        # envelope; we unwrap `result` and stash the cost for the dashboard.
+        cmd = [self.claude_bin, "-p", prompt, "--output-format", "json"]
+        if model:
+            cmd += ["--model", model]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
         if proc.returncode != 0:
             raise PMReasonerError(
                 f"claude exited {proc.returncode}: {(proc.stderr or '')[:200]}")
-        return proc.stdout or ""
+        try:
+            env = json.loads(proc.stdout)
+            usage = env.get("usage") or {}
+            self.last_cost = {"cost": env.get("total_cost_usd"),
+                              "tokens": sum(int(usage.get(k, 0) or 0) for k in (
+                                  "input_tokens", "output_tokens",
+                                  "cache_creation_input_tokens", "cache_read_input_tokens"))}
+            return str(env.get("result") or "")
+        except (json.JSONDecodeError, AttributeError):
+            return proc.stdout or ""
 
     def run(self, context: PMContext) -> PMCycleOutput:
-        return parse_response(self._invoke(render_prompt(context)))
+        try:
+            out = self._invoke(render_prompt(context), context.model)
+        except TypeError:                              # injected invoke may take prompt only
+            out = self._invoke(render_prompt(context))
+        return parse_response(out)

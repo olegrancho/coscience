@@ -87,6 +87,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
         prior_proposals=list(pm.proposed_ids),
         human_guidance=guidance,
         ideas=idea_dicts, proposed_count=proposed_count, max_proposed=MAX_PROPOSED,
+        model=program.pm_model,
     )
 
 
@@ -130,7 +131,7 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
             {"suffix": p.suffix, "goals": p.goals, "plan": p.plan,
              "priority": p.priority, "resources_required": p.resources_required,
              "rationale": p.rationale, "title": p.title, "summary": p.summary,
-             "from_idea": p.from_idea}
+             "from_idea": p.from_idea, "model": p.model}
             for p in output.proposals
         ],
     }
@@ -193,7 +194,10 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None,
             return {"program": program_id, "cycle": cycle,
                     "submitted": [], "proposed": [], "skipped": True, "throttled": True}
         output = reasoner.run(context)                 # the ONE reasoner call
-        usage_meter.record_run(substrate.repo_root, "pm", program_id)
+        lc = getattr(reasoner, "last_cost", None) or {}
+        usage_meter.record_run(substrate.repo_root, "pm", program_id,
+                               cost=lc.get("cost"), tokens=lc.get("tokens"),
+                               model=context.model)
         write_staging(substrate, program_id, cycle, output, fingerprint)  # COMMIT POINT
         staged = StagedCycle(cycle=cycle, output=output, fingerprint=fingerprint)
 
@@ -225,6 +229,7 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None,
                 rationale=prop.rationale,
                 title=prop.title,
                 summary=prop.summary,
+                model=prop.model,
             ))
             slots -= 1
         proposed.append(sid)

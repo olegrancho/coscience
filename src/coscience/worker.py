@@ -6,6 +6,7 @@ its result and mark the sprint done; if it died mid-run, clear it so a later bea
 relaunches and the agent resumes from its scratchpad."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -23,6 +24,16 @@ MAX_AGENT_FAILURES = 3
 # Messages a dead-on-arrival agent prints instead of doing work — must not be
 # mistaken for a real result.
 _USAGE_LIMIT_RE = re.compile(r"(session|usage|rate) limit|hit your .*limit|limit ·", re.I)
+
+
+def _read_cost(sprint_dir) -> tuple:
+    """Best-effort (cost, tokens) from the agent's cost sidecar; (None, None) if
+    absent (e.g. an interrupted run, or the fake agent in tests)."""
+    try:
+        data = json.loads((sprint_dir / "agent.cost.json").read_text())
+        return data.get("cost"), data.get("tokens")
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None, None
 
 
 def claude_usage_ok(threshold: float = 100.0) -> bool:
@@ -113,7 +124,6 @@ class Worker:
                 return BeatOutcome.IDLE
             token = self.agent.start(sprint, self._build_context(sprint),
                                      sprint_dir, self.substrate.repo_root)
-            usage_meter.record_run(self.substrate.repo_root, "worker", sprint.id)
             progress.agent_token = token
             progress.started_at = time.time()
             self.substrate.save_progress(progress)
@@ -128,6 +138,11 @@ class Worker:
         # a crash, kill, or usage limit must NOT be laundered into a "done" sprint.
         text, status = self.agent.collect(sprint_dir)
         progress.agent_token = ""
+        # One Claude invocation just ended (clean, failed, or interrupted) — record it
+        # with whatever cost/tokens the agent reported, so the dashboard can show spend.
+        cost, tokens = _read_cost(sprint_dir)
+        usage_meter.record_run(self.substrate.repo_root, "worker", sprint.id,
+                               cost=cost, tokens=tokens, model=sprint.model)
         if status == "interrupted" or (status == "failed" and _USAGE_LIMIT_RE.search(text or "")):
             # Transient: a kill/crash mid-run (resume from scratchpad) or a usage
             # limit (the usage gate holds relaunches). Don't count it; retry later.

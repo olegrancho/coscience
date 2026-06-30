@@ -30,7 +30,7 @@ def test_submit_then_list_and_get(tmp_path):
     assert rows == [{"id": "sp1", "status": "proposed", "title": "", "summary": "",
                      "goals": "cure", "program": None, "priority": 3, "steps": 1,
                      "results": [], "rationale": "", "resources_required": {"gpu": 1.0},
-                     "started_at": None}]
+                     "started_at": None, "model": "", "activity": None}]
     detail = svc.get_sprint("sp1")
     assert detail["status"] == "proposed"
     assert detail["resources_required"] == {"gpu": 1.0}
@@ -223,6 +223,29 @@ def test_add_sprint_comment_rejects_empty(tmp_path):
 def test_add_sprint_comment_missing_raises(tmp_path):
     with pytest.raises(NotFoundError):
         Service(tmp_path).add_sprint_comment("nope", "x")
+
+
+def test_sprint_model_round_trips_and_is_editable_while_executing(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["a"])
+    assert svc.get_sprint("sp1")["model"] == ""          # default: launcher's model
+    svc.edit_sprint("sp1", model="claude-sonnet-4-6")
+    assert svc.get_sprint("sp1")["model"] == "claude-sonnet-4-6"
+    _executing(svc, "sp1")
+    svc.edit_sprint("sp1", model="claude-opus-4-8")       # switchable while running
+    assert svc.get_sprint("sp1")["model"] == "claude-opus-4-8"
+    assert svc.list_sprints()[0]["model"] == "claude-opus-4-8"
+
+
+def test_program_pm_model_round_trips(tmp_path):
+    from coscience.models import Program, ProgramStatus
+    svc = Service(tmp_path)
+    svc.substrate.save_program(Program(id="p1", title="P", goals="g", status=ProgramStatus.ACTIVE))
+    assert svc.get_program("p1")["pm_model"] == ""
+    svc.set_program_model("p1", "claude-sonnet-4-6")
+    assert svc.get_program("p1")["pm_model"] == "claude-sonnet-4-6"
+    svc.set_program_model("p1", "")                       # clearing returns to default
+    assert svc.get_program("p1")["pm_model"] == ""
 
 
 def test_program_sprints_ordered_by_creation(tmp_path):

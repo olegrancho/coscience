@@ -7,6 +7,7 @@ checkpoints (so it can resume if interrupted), and watches its own Claude usage.
 We capture its output + exit code so the worker can collect a result when it ends."""
 from __future__ import annotations
 
+import json
 import shlex
 from pathlib import Path
 
@@ -92,7 +93,13 @@ class ClaudeAgent:
                 f.unlink()
         prompt = (f"Read the instructions in {instr} and carry out the sprint. "
                   "Follow them exactly; do not stop to ask for confirmation.")
-        cmd = (f"{self.claude_bin} -p {shlex.quote(prompt)} --dangerously-skip-permissions "
+        model = f"--model {shlex.quote(sprint.model)} " if sprint.model else ""
+        # stream-json --verbose -> agent.out becomes a live JSONL event feed (each
+        # assistant turn / tool use flushed as it happens, so the dashboard can show
+        # what the agent is doing right now) and ends with a `result` event carrying
+        # the final message + cost/token usage, which collect() parses.
+        cmd = (f"{self.claude_bin} -p {shlex.quote(prompt)} {model}"
+               f"--dangerously-skip-permissions --output-format stream-json --verbose "
                f"> {shlex.quote(str(out))} 2>&1; echo $? > {shlex.quote(str(exitf))}")
         return launch_detached(cmd, cwd=str(repo_root) if repo_root else None)
 
@@ -105,13 +112,105 @@ class ClaudeAgent:
 
     def collect(self, sprint_dir: Path) -> tuple[str, str]:
         """Return (text, status) where status is 'ok' (exit 0), 'failed' (exit != 0),
-        or 'interrupted' (no exit sentinel — killed/crashed; the worker relaunches)."""
+        or 'interrupted' (no exit sentinel — killed/crashed; the worker relaunches).
+
+        On a clean JSON envelope we unwrap the agent's final message as the result
+        text and write a cost sidecar (agent.cost.json) for the dashboard; on a
+        non-JSON exit (e.g. a usage-limit message) we return the raw text as-is so
+        the worker's limit detection still fires."""
         _instr, _scratch, out, exitf = self._paths(sprint_dir)
-        text = out.read_text().strip() if out.exists() else ""
+        raw = out.read_text().strip() if out.exists() else ""
         if not exitf.exists():
-            return text, "interrupted"
+            return raw, "interrupted"
         try:
             code = int((exitf.read_text().strip() or "1"))
         except ValueError:
             code = 1
+        text = self._unwrap_envelope(raw, sprint_dir)
         return text, ("ok" if code == 0 else "failed")
+
+    @staticmethod
+    def _unwrap_envelope(raw: str, sprint_dir: Path) -> str:
+        """Scan the JSONL event stream for the final `result` event: return its
+        message text and write a cost sidecar. If no such event is present (e.g. a
+        usage-limit message instead of a stream), return the raw text unchanged so
+        the worker's limit detection still fires."""
+        result = None
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                ev = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if isinstance(ev, dict) and ev.get("type") == "result" and "result" in ev:
+                result = ev                              # keep the last one
+        if result is None:
+            return raw
+        usage = result.get("usage") or {}
+        tokens = sum(int(usage.get(k, 0) or 0) for k in (
+            "input_tokens", "output_tokens",
+            "cache_creation_input_tokens", "cache_read_input_tokens"))
+        sidecar = {"cost": result.get("total_cost_usd"), "tokens": tokens,
+                   "turns": result.get("num_turns"), "duration_ms": result.get("duration_ms")}
+        try:
+            (sprint_dir / "agent.cost.json").write_text(json.dumps(sidecar))
+        except OSError:
+            pass
+        return str(result.get("result") or "")
+
+
+def read_activity(sprint_dir: Path, fresh_within: float = 90.0,
+                  now: float | None = None) -> dict | None:
+    """What the agent is doing right now, from the tail of its JSONL event feed.
+
+    Returns {label, active, at} where `label` is a short phrase ('using Bash',
+    'thinking', 'finished'), `active` is True if the feed was written to recently
+    (the process is alive and producing), and `at` is the feed's mtime. Returns
+    None if there's no feed yet. Best-effort — never raises."""
+    import time as _time
+    out = sprint_dir / "agent.out"
+    try:
+        mtime = out.stat().st_mtime
+        raw = out.read_text()
+    except OSError:
+        return None
+    now = _time.time() if now is None else now
+    label = "starting"
+    for line in raw.splitlines():                        # last meaningful event wins
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        lab = _event_label(ev)
+        if lab:
+            label = lab
+    return {"label": label, "active": (now - mtime) <= fresh_within, "at": mtime}
+
+
+def _event_label(ev: dict) -> str:
+    """A short human label for one stream-json event, or '' to ignore it."""
+    if not isinstance(ev, dict):
+        return ""
+    kind = ev.get("type")
+    if kind == "result":
+        return "finished"
+    if kind == "system":
+        return "starting"
+    if kind == "assistant":
+        for block in (ev.get("message") or {}).get("content", []):
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                name = block.get("name", "a tool")
+                inp = block.get("input") or {}
+                target = inp.get("file_path") or inp.get("path") or inp.get("pattern")
+                if name in ("Bash",) and inp.get("command"):
+                    return f"running: {str(inp['command']).splitlines()[0][:60]}"
+                return f"using {name}" + (f" · {Path(str(target)).name}" if target else "")
+        return "thinking"
+    if kind == "user":                                   # a tool returned -> agent will react
+        return "reading tool output"
+    return ""

@@ -6,7 +6,7 @@ import { Link, useParams } from "react-router-dom";
 import { type Components } from "react-markdown";
 import Md from "../components/Md";
 import { api } from "../api";
-import { BackLink, EmptyState, StatusBadge } from "../components/ui";
+import { BackLink, EmptyState, ModelSelect, StatusBadge } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -60,6 +60,10 @@ export default function ProgramDetail() {
     try { await api.removeGuidance(id, nid); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't remove", message: String(e) }); }
   };
+  const setPmModel = async (model: string) => {
+    try { await api.setProgramModel(id, model); notifications.show({ color: "teal", title: "Planner model set", message: model ? `The PM will plan on ${model}.` : "Back to the default model." }); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't set model", message: String(e) }); }
+  };
 
   return (
     <Stack gap="lg">
@@ -74,9 +78,10 @@ export default function ProgramDetail() {
             <Button color="machine" onClick={() => setProposing(true)}>Propose experiment</Button>
           </Group>
         </Group>
-        <Group gap={10} mt={9}>
+        <Group gap={10} mt={9} align="center">
           <StatusBadge status={p.status} />
           <Text size="sm" c="dimmed">the AI has run <span className="mono">{p.cycle}</span> planning {p.cycle === 1 ? "cycle" : "cycles"}</Text>
+          <ModelSelect value={p.pm_model} onChange={setPmModel} label="planner model" />
         </Group>
       </div>
 

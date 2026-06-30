@@ -23,9 +23,19 @@ def test_record_and_aggregate_runs(tmp_path):
 
 
 def test_run_stats_empty(tmp_path):
+    empty = {"total": 0, "last_hour": 0, "last_day": 0, "last": None,
+             "cost": 0, "cost_day": 0, "tokens": 0}
     stats = usage_meter.run_stats(tmp_path)
-    assert stats == {"pm": {"total": 0, "last_hour": 0, "last_day": 0, "last": None},
-                     "worker": {"total": 0, "last_hour": 0, "last_day": 0, "last": None}}
+    assert stats == {"pm": empty, "worker": empty}
+
+
+def test_run_stats_sums_cost_and_tokens(tmp_path):
+    usage_meter.record_run(tmp_path, "worker", "sp1", cost=0.5, tokens=1000, model="claude-opus-4-8")
+    usage_meter.record_run(tmp_path, "worker", "sp2", cost=0.25, tokens=400)
+    w = usage_meter.run_stats(tmp_path, now=10**12)["worker"]
+    assert w["total"] == 2
+    assert w["cost"] == 0.75
+    assert w["tokens"] == 1400
 
 
 def test_record_run_is_best_effort(tmp_path):

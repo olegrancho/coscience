@@ -53,6 +53,7 @@ class Sprint:
     summary: str = ""
     created_at: float | None = None   # wall-clock of first save; orders sprints by appearance
     comments: list[dict] = field(default_factory=list)  # human feedback [{id, text, added_at}]
+    model: str = ""                   # Claude model for this sprint's worker; "" = launcher default
 
 
 @dataclass
@@ -97,6 +98,7 @@ class Program:
     title: str
     goals: str
     status: ProgramStatus = ProgramStatus.ACTIVE
+    pm_model: str = ""                 # Claude model for this program's PM reasoner; "" = default
 
 
 @dataclass

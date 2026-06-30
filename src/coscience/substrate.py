@@ -43,6 +43,7 @@ class Substrate:
             comments=[{"id": str(c["id"]), "text": str(c["text"]),
                        "added_at": float(c["added_at"]),
                        "target": str(c.get("target", "worker"))} for c in fm.get("comments", [])],
+            model=str(fm.get("model", "")),
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
@@ -76,6 +77,8 @@ class Substrate:
             fm["created_at"] = sprint.created_at
         if sprint.comments:
             fm["comments"] = list(sprint.comments)
+        if sprint.model:
+            fm["model"] = sprint.model
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))
 
@@ -165,10 +168,13 @@ class Substrate:
             title=str(fm.get("title", "")),
             goals=body.strip(),
             status=ProgramStatus(fm.get("status", "active")),
+            pm_model=str(fm.get("pm_model", "")),
         )
 
     def save_program(self, program: Program) -> None:
         fm = {"type": "program", "title": program.title, "status": str(program.status)}
+        if program.pm_model:
+            fm["pm_model"] = program.pm_model
         d = self.program_dir(program.id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "program.md").write_text(serialize(fm, program.goals.strip() + "\n"))

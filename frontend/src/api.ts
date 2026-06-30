@@ -1,7 +1,7 @@
 export interface ProgramRow { id: string; title: string; status: string; goals: string }
-export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[] }
+export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string }
 export interface Program extends ProgramRow {
-  report: string; cycle: number; sprints: SprintRef[];
+  report: string; cycle: number; sprints: SprintRef[]; pm_model: string;
 }
 export interface GuidanceNote { id: string; text: string; added_at: number }
 export interface IdeaComment { id: string; text: string; added_at: number }
@@ -11,15 +11,19 @@ export interface Idea {
 }
 export interface IdeaPool { summary: string; ideas: Idea[] }
 export interface SprintComment { id: string; text: string; added_at: number; target: "worker" | "pm" }
+export interface SprintActivity { label: string; active: boolean; at: number }
 export interface SprintRow {
   id: string; status: string; title: string; summary: string;
   goals: string; program: string | null;
   priority: number; steps: number; results: string[];
   rationale: string; resources_required: Record<string, number>;
-  started_at: number | null;
+  started_at: number | null; model: string; activity: SprintActivity | null;
 }
 export interface UsageWindow { pct: number; resets: string }
-export interface RunAgg { total: number; last_hour: number; last_day: number; last: number | null }
+export interface RunAgg {
+  total: number; last_hour: number; last_day: number; last: number | null;
+  cost: number; cost_day: number; tokens: number;
+}
 export interface Usage {
   budget: { windows: Record<string, UsageWindow>; live: boolean } | null;
   runs: { pm: RunAgg; worker: RunAgg };
@@ -30,6 +34,7 @@ export interface Sprint {
   resources_required: Record<string, number>; rationale: string; plan: string[];
   program: string | null; results: string[]; comments: SprintComment[];
   agent_running: boolean; started_at: number | null; error: string; lease: unknown | null;
+  model: string; activity: SprintActivity | null;
 }
 export interface SprintFile {
   name: string; label: string; kind: string; size: number;
@@ -48,7 +53,7 @@ async function j<T>(r: Response): Promise<T> {
 
 export interface SprintPatch {
   goals?: string; plan?: string[]; priority?: number;
-  resources_required?: Record<string, number>; preemptible?: boolean;
+  resources_required?: Record<string, number>; preemptible?: boolean; model?: string;
 }
 
 export const api = {
@@ -60,6 +65,11 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     }).then(j<Program>),
+  setProgramModel: (id: string, model: string) =>
+    fetch(`/api/programs/${id}/model`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    }).then(j<{ id: string; pm_model: string }>),
   listGuidance: (id: string) => fetch(`/api/programs/${id}/guidance`).then(j<GuidanceNote[]>),
   addGuidance: (id: string, text: string) =>
     fetch(`/api/programs/${id}/guidance`, {

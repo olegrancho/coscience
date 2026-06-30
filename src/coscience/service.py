@@ -77,7 +77,7 @@ class Service:
         self.substrate.save_sprint(sprint)
 
     def edit_sprint(self, sprint_id: str, *, goals=None, plan=None, priority=None,
-                    resources_required=None, preemptible=None) -> None:
+                    resources_required=None, preemptible=None, model=None) -> None:
         sprint = self._load_sprint(sprint_id)
         st = sprint.status
         if st in (SprintStatus.DONE, SprintStatus.CANCELED):
@@ -96,15 +96,35 @@ class Service:
             sprint.resources_required = {k: float(v) for k, v in resources_required.items()}
         if preemptible is not None:
             sprint.preemptible = preemptible
+        if model is not None and model != sprint.model:
+            # The model is switchable at any time. A detached agent can't change model
+            # mid-process, so if one is already running we stop it; the next dispatch
+            # beat relaunches on the new model and resumes from the scratchpad.
+            sprint.model = str(model)
+            self._restart_agent_for_model(sprint_id)
         self.substrate.save_sprint(sprint)
+
+    def _restart_agent_for_model(self, sprint_id: str) -> None:
+        from coscience.executor import terminate_detached
+        progress = self.substrate.load_progress(sprint_id)
+        if not progress.agent_token:
+            return
+        try:
+            terminate_detached(progress.agent_token)
+        except Exception:
+            pass
+        progress.agent_token = ""
+        self.substrate.save_progress(progress)
 
     def list_sprints(self, status: str | None = None) -> list[dict]:
         wanted = SprintStatus(status) if status is not None else None
         rows = []
         for sprint in self.substrate.iter_sprints(status=wanted):
             started = None
+            activity = None
             if sprint.status == SprintStatus.EXECUTING:
                 started = self.substrate.load_progress(sprint.id).started_at
+                activity = self._activity(sprint.id)
             rows.append({
                 "id": sprint.id,
                 "status": sprint.status.value,
@@ -118,8 +138,14 @@ class Service:
                 "rationale": sprint.rationale,
                 "resources_required": sprint.resources_required,
                 "started_at": started,
+                "model": sprint.model,
+                "activity": activity,
             })
         return rows
+
+    def _activity(self, sprint_id: str) -> dict | None:
+        from coscience.claude_executor import read_activity
+        return read_activity(self.substrate.sprint_dir(sprint_id))
 
     def get_sprint(self, sprint_id: str) -> dict:
         sprint = self._load_sprint(sprint_id)
@@ -136,11 +162,13 @@ class Service:
             "resources_required": sprint.resources_required,
             "rationale": sprint.rationale,
             "program": sprint.program,
+            "model": sprint.model,
             "results": list(sprint.results),
             "plan": list(sprint.plan),
             "comments": list(sprint.comments),
             "agent_running": bool(progress.agent_token),
             "started_at": progress.started_at,
+            "activity": self._activity(sprint_id) if sprint.status == SprintStatus.EXECUTING else None,
             "error": progress.last_error if sprint.status == SprintStatus.FAILED else "",
             "lease": None if lease is None else {
                 "id": lease.id, "sprint_id": lease.sprint_id, "amounts": lease.amounts,
@@ -240,10 +268,11 @@ class Service:
         sprints.sort(key=self._appeared_at, reverse=True)  # newest first
         return {
             "id": p.id, "title": p.title, "status": p.status.value, "goals": p.goals,
+            "pm_model": p.pm_model,
             "report": self.substrate.load_report(program_id),
             "cycle": pm.cycle,
             "sprints": [{"id": s.id, "status": s.status.value, "goals": s.goals,
-                         "title": s.title, "results": list(s.results)}
+                         "title": s.title, "results": list(s.results), "model": s.model}
                         for s in sprints],
         }
 
@@ -254,6 +283,15 @@ class Service:
         program = self.substrate.load_program(program_id)
         program.status = new_status
         self.substrate.save_program(program)
+
+    def set_program_model(self, program_id: str, model: str) -> dict:
+        """Set the Claude model the PM reasoner uses for this program ("" = default)."""
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        program = self.substrate.load_program(program_id)
+        program.pm_model = str(model or "")
+        self.substrate.save_program(program)
+        return {"id": program_id, "pm_model": program.pm_model}
 
     def _require_program(self, program_id: str) -> None:
         if not (self.substrate.program_dir(program_id) / "program.md").is_file():

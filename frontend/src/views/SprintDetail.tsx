@@ -6,7 +6,7 @@ import { Link, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
-import { BackLink, EmptyState, RelTime, StatusBadge } from "../components/ui";
+import { BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge } from "../components/ui";
 import SprintEditModal from "../components/SprintEditModal";
 
 /** Inline result: shows a clamped preview that unfolds in place, plus a link to
@@ -87,6 +87,8 @@ function FileBlock({ f }: { f: SprintFile }) {
             <Text size="sm" c="dimmed">Empty.</Text>
           ) : isMd ? (
             <div className="report-leaf"><Md>{f.content}</Md></div>
+          ) : f.kind === "log" && f.content.trimStart().startsWith("{") ? (
+            <Transcript raw={f.content} />
           ) : (
             <pre className="mono" style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word",
                  fontSize: 12.5, lineHeight: 1.5, maxHeight: 440, overflow: "auto" }}>{f.content}</pre>
@@ -97,6 +99,53 @@ function FileBlock({ f }: { f: SprintFile }) {
         </div>
       )}
     </div>
+  );
+}
+
+type Turn = { kind: "say" | "tool" | "result"; text: string };
+
+/** Parse the agent's stream-json event feed into a readable transcript: what it
+ *  said, which tools it ran, and the final result line. Unknown/noisy events are
+ *  dropped so the live log reads like a narrative rather than raw JSONL. */
+function parseTranscript(raw: string): Turn[] {
+  const turns: Turn[] = [];
+  for (const line of raw.split("\n")) {
+    const t = line.trim();
+    if (!t.startsWith("{")) continue;
+    let ev: any;
+    try { ev = JSON.parse(t); } catch { continue; }
+    if (ev.type === "assistant") {
+      for (const b of ev.message?.content ?? []) {
+        if (b.type === "text" && b.text?.trim()) turns.push({ kind: "say", text: b.text.trim() });
+        else if (b.type === "tool_use") {
+          const inp = b.input ?? {};
+          const arg = inp.command || inp.file_path || inp.path || inp.pattern || inp.description || "";
+          turns.push({ kind: "tool", text: `${b.name}${arg ? ": " + String(arg).split("\n")[0] : ""}` });
+        }
+      }
+    } else if (ev.type === "result") {
+      const cost = typeof ev.total_cost_usd === "number" ? ` · $${ev.total_cost_usd.toFixed(2)}` : "";
+      turns.push({ kind: "result", text: `finished${cost}` });
+    }
+  }
+  return turns;
+}
+
+function Transcript({ raw }: { raw: string }) {
+  const turns = parseTranscript(raw);
+  if (!turns.length) {
+    return <Text size="sm" c="dimmed">Starting up — no agent activity yet.</Text>;
+  }
+  return (
+    <Stack gap={7} style={{ maxHeight: 460, overflow: "auto" }}>
+      {turns.map((t, i) => t.kind === "say" ? (
+        <Text key={i} size="sm" style={{ lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{t.text}</Text>
+      ) : t.kind === "result" ? (
+        <Text key={i} size="xs" className="mono" style={{ color: "var(--machine)" }}>✓ {t.text}</Text>
+      ) : (
+        <Text key={i} size="xs" className="mono" style={{ color: "var(--ink-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>▸ {t.text}</Text>
+      ))}
+    </Stack>
   );
 }
 
@@ -130,7 +179,10 @@ export default function SprintDetail() {
   const [comment, setComment] = useState("");
   const [commentTarget, setCommentTarget] = useState<"worker" | "pm">("worker");
   const prog = programOf(id);
-  const sprint = useQuery({ queryKey: ["sprint", id], queryFn: () => api.getSprint(id) });
+  const sprint = useQuery({
+    queryKey: ["sprint", id], queryFn: () => api.getSprint(id),
+    refetchInterval: (q) => (q.state.data?.status === "executing" ? 5000 : false),
+  });
   const program = useQuery({ queryKey: ["program", prog], queryFn: () => api.getProgram(prog), enabled: !!prog });
   const refresh = () => qc.invalidateQueries({ queryKey: ["sprint", id] });
 
@@ -151,6 +203,16 @@ export default function SprintDetail() {
   const reject = async () => {
     try { await api.rejectSprint(id); notifications.show({ color: "gray", title: "Rejected", message: "Canceled — it won't run." }); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't reject", message: String(e) }); }
+  };
+  const setModel = async (model: string) => {
+    const live = s.status === "executing" && s.agent_running;
+    try {
+      await api.editSprint(id, { model });
+      notifications.show({ color: "teal", title: "Model set",
+        message: live ? "Restarting the agent on the new model — it resumes from its scratchpad."
+                      : model ? `This sprint will run on ${model}.` : "Back to the default model." });
+      refresh();
+    } catch (e) { notifications.show({ color: "red", title: "Couldn't set model", message: String(e) }); }
   };
   const addComment = async () => {
     if (!comment.trim()) return;
@@ -175,9 +237,10 @@ export default function SprintDetail() {
             {actions.includes("edit") && <Button variant="light" color="machine" onClick={() => setEditing(true)}>Edit</Button>}
           </Group>
         </Group>
-        <Group gap={10} mt={9}>
+        <Group gap={10} mt={9} align="center">
           <StatusBadge status={s.status} />
           <span className="mono" style={{ fontSize: 12, color: "var(--ink-faint)" }}>ref {s.id}</span>
+          {s.status === "executing" && <LiveActivity activity={s.activity} agentRunning={s.agent_running} />}
         </Group>
         {s.summary && <Text mt={12} style={{ maxWidth: 620, color: "var(--ink-muted)", lineHeight: 1.55 }}>{s.summary}</Text>}
       </div>
@@ -259,6 +322,10 @@ export default function SprintDetail() {
           <div className="eyebrow" style={{ marginBottom: 10 }}>at a glance</div>
           <Stack gap={7}>
             <Group justify="space-between"><Text size="sm" c="dimmed">Priority</Text><Text size="sm" className="mono">{s.priority}</Text></Group>
+            <Group justify="space-between" wrap="nowrap">
+              <Text size="sm" c="dimmed">Model</Text>
+              <ModelSelect value={s.model} onChange={setModel} disabled={isDone || s.status === "canceled"} />
+            </Group>
             <Group justify="space-between"><Text size="sm" c="dimmed">Can pause for urgent work</Text><Text size="sm">{s.preemptible ? "yes" : "no"}</Text></Group>
             <Group justify="space-between">
               <Text size="sm" c="dimmed">State</Text>

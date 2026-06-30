@@ -30,14 +30,24 @@ def _runs_path(repo_root) -> Path:
     return Path(repo_root) / ".coscience" / "runs.jsonl"
 
 
-def record_run(repo_root, kind: str, ref: str = "") -> None:
+def record_run(repo_root, kind: str, ref: str = "", *, cost=None, tokens=None,
+               model: str = "") -> None:
     """Append one Claude-call record. `kind` is 'pm' or 'worker'; `ref` is the
-    program or sprint id. Best-effort — never let logging break a beat."""
+    program or sprint id. `cost` (USD), `tokens`, and `model` are recorded when
+    known (the agent reports them on a clean run). Best-effort — never let logging
+    break a beat."""
     try:
+        rec = {"ts": time.time(), "kind": kind, "ref": ref}
+        if cost is not None:
+            rec["cost"] = float(cost)
+        if tokens is not None:
+            rec["tokens"] = int(tokens)
+        if model:
+            rec["model"] = model
         path = _runs_path(repo_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a") as f:
-            f.write(json.dumps({"ts": time.time(), "kind": kind, "ref": ref}) + "\n")
+            f.write(json.dumps(rec) + "\n")
     except OSError:
         pass
 
@@ -63,12 +73,17 @@ def run_stats(repo_root, now: float | None = None) -> dict:
     runs = load_runs(repo_root)
 
     def agg(kind: str) -> dict:
-        ts = [float(r.get("ts", 0)) for r in runs if r.get("kind") == kind]
+        rs = [r for r in runs if r.get("kind") == kind]
+        ts = [float(r.get("ts", 0)) for r in rs]
         return {
             "total": len(ts),
             "last_hour": sum(1 for t in ts if now - t <= _HOUR),
             "last_day": sum(1 for t in ts if now - t <= _DAY),
             "last": max(ts) if ts else None,
+            "cost": round(sum(float(r.get("cost", 0) or 0) for r in rs), 4),
+            "cost_day": round(sum(float(r.get("cost", 0) or 0) for r in rs
+                                  if now - float(r.get("ts", 0)) <= _DAY), 4),
+            "tokens": sum(int(r.get("tokens", 0) or 0) for r in rs),
         }
 
     return {"pm": agg("pm"), "worker": agg("worker")}
