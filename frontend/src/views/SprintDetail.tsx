@@ -192,6 +192,17 @@ export default function SprintDetail() {
         </Card>
       )}
 
+      {s.status === "failed" && (
+        <Card padding="lg" radius="md" style={{ border: "1px solid var(--signal-line)", background: "var(--signal-weak)" }}>
+          <div className="eyebrow" style={{ marginBottom: 8, color: "var(--signal)" }}>this experiment failed</div>
+          <Text size="sm" mb={s.error ? 8 : 0}>The research agent gave up after repeated errors. The AI sees this and will rethink the approach.</Text>
+          {s.error && (
+            <pre className="mono" style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word",
+              fontSize: 12, lineHeight: 1.5, maxHeight: 240, overflow: "auto", color: "var(--ink-muted)" }}>{s.error}</pre>
+          )}
+        </Card>
+      )}
+
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 4 }}>your feedback{s.comments.length ? ` · ${s.comments.length}` : ""}</div>
         <Text size="xs" c="dimmed" mb="sm">Notes for the research agent — it reads these as direction on its next run.</Text>

@@ -1,4 +1,4 @@
-export type SprintStatus = "proposed" | "approved" | "executing" | "done" | "canceled";
+export type SprintStatus = "proposed" | "approved" | "executing" | "done" | "canceled" | "failed";
 export type Action = "approve" | "reject" | "edit";
 
 export function availableActions(status: SprintStatus): Action[] {

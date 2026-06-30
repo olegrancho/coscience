@@ -104,12 +104,16 @@ class Substrate:
             sprint_id=sprint_id,
             agent_token=str(fm.get("agent_token", "")),
             started_at=None if started is None else float(started),
+            failures=int(fm.get("failures", 0)),
+            last_error=str(fm.get("last_error", "")),
         )
 
     def save_progress(self, progress: ProgressState) -> None:
         fm = {
             "agent_token": progress.agent_token,
             "started_at": progress.started_at,
+            "failures": progress.failures,
+            "last_error": progress.last_error,
         }
         d = self.sprint_dir(progress.sprint_id)
         d.mkdir(parents=True, exist_ok=True)

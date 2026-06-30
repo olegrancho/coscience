@@ -25,6 +25,8 @@ def render_prompt(context: PMContext) -> str:
                         lambda s: f"- {s['id']} [{s['status']}]: {s['goals']}")
     done_block = _lines(context.completed,
                         lambda s: f"- {s['id']}: {s['goals']} -> result: {s['result']}")
+    failed_block = _lines(context.failed,
+                          lambda s: f"- {s['id']}: {s['goals']} -> FAILED: {s['error']}")
     prior_block = ", ".join(context.prior_proposals) or "(none)"
     guidance_block = ""
     if context.human_guidance:
@@ -58,6 +60,11 @@ OPEN SPRINTS (already proposed/approved/running — do not duplicate these):
 
 COMPLETED SPRINTS AND RESULTS (use these to decide what is most valuable next):
 {done_block}
+
+FAILED SPRINTS (the agent gave up after repeated errors — read the reason and react:
+propose a corrected/rescoped sprint, change the approach, or record an idea; do NOT
+blindly re-propose the same thing):
+{failed_block}
 
 PRIOR PROPOSALS you already made (do NOT repeat their intent): {prior_block}
 

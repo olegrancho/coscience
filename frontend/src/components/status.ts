@@ -5,6 +5,7 @@ const STATUS_VAR: Record<string, string> = {
   approved: "var(--st-approved)",
   executing: "var(--st-executing)",
   done: "var(--st-done)",
+  failed: "var(--signal)",
   paused: "var(--st-paused)",
   canceled: "var(--st-canceled)",
   active: "var(--st-approved)",
@@ -19,5 +20,5 @@ export function statusVar(status: string): string {
 export const NEEDS_HUMAN = "proposed";
 
 export const SPRINT_STATE_ORDER = [
-  "proposed", "approved", "executing", "done", "paused", "canceled",
+  "proposed", "approved", "executing", "done", "failed", "paused", "canceled",
 ];

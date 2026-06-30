@@ -17,6 +17,9 @@ from coscience.models import BeatOutcome, Result, Sprint, SprintStatus
 from coscience.substrate import Substrate
 
 _USAGE_SCRIPT = os.path.expanduser("~/.claude/skills/usage/usage.py")
+# After this many real (non-usage) failures, a sprint is marked FAILED rather than
+# relaunched forever — so a deterministically-broken sprint can't burn usage.
+MAX_AGENT_FAILURES = 3
 # Messages a dead-on-arrival agent prints instead of doing work — must not be
 # mistaken for a real result.
 _USAGE_LIMIT_RE = re.compile(r"(session|usage|rate) limit|hit your .*limit|limit ·", re.I)
@@ -123,14 +126,29 @@ class Worker:
         # 3) agent ended -> collect. Only a clean exit (status 'ok') is a result;
         # a crash, kill, or usage limit must NOT be laundered into a "done" sprint.
         text, status = self.agent.collect(sprint_dir)
-        if status != "ok":
-            why = "interrupted" if status == "interrupted" else (
-                "hit usage limit" if _USAGE_LIMIT_RE.search(text or "") else "failed")
-            # Clear the token so a later beat relaunches (the agent resumes from
-            # its scratchpad). The sprint stays EXECUTING — it is not done.
-            progress.agent_token = ""
+        progress.agent_token = ""
+        if status == "interrupted" or (status == "failed" and _USAGE_LIMIT_RE.search(text or "")):
+            # Transient: a kill/crash mid-run (resume from scratchpad) or a usage
+            # limit (the usage gate holds relaunches). Don't count it; retry later.
+            why = "interrupted" if status == "interrupted" else "hit usage limit"
             self.substrate.save_progress(progress)
             self.substrate.commit(f"sprint {sprint.id}: agent {why}, will retry")
+            return BeatOutcome.PROGRESSED
+        if status == "failed":
+            # A real failure (nonzero exit). Count it; after the cap, give up so a
+            # broken sprint can't relaunch forever — and record why for the PM.
+            progress.failures += 1
+            progress.last_error = (text or "").strip()[-600:] or "agent exited nonzero with no output"
+            if progress.failures >= MAX_AGENT_FAILURES:
+                sprint.status = SprintStatus.FAILED
+                self.substrate.save_sprint(sprint)
+                self.substrate.save_progress(progress)
+                self.substrate.commit(
+                    f"sprint {sprint.id}: FAILED after {progress.failures} attempts")
+                return BeatOutcome.COMPLETED          # terminal -> dispatcher releases the lease
+            self.substrate.save_progress(progress)
+            self.substrate.commit(
+                f"sprint {sprint.id}: attempt {progress.failures} failed, will retry")
             return BeatOutcome.PROGRESSED
 
         result = Result(

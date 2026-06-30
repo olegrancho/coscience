@@ -72,6 +72,26 @@ def test_failed_run_is_not_laundered_into_a_result(substrate):
     assert substrate.load_progress("sp1").agent_token == ""  # cleared -> relaunches
 
 
+def test_repeated_failures_cap_out_to_failed(substrate):
+    # A deterministically broken sprint must stop relaunching after the cap.
+    from coscience.worker import MAX_AGENT_FAILURES
+    agent = FakeAgent(result="boom: ImportError no sympy", status="failed")
+    substrate.save_sprint(_approved("sp1"))
+    worker = Worker(substrate, agent)
+    # each attempt is 2 beats (launch, then collect-fail); run up to just before the cap
+    for _ in range((MAX_AGENT_FAILURES - 1) * 2 + 1):
+        worker.run_one_beat()
+    assert substrate.load_sprint("sp1").status == SprintStatus.EXECUTING   # not yet
+    out = worker.run_one_beat()                                            # the capping failure
+    assert out == BeatOutcome.COMPLETED
+    sp = substrate.load_sprint("sp1")
+    assert sp.status == SprintStatus.FAILED
+    prog = substrate.load_progress("sp1")
+    assert prog.failures == MAX_AGENT_FAILURES
+    assert "ImportError" in prog.last_error
+    assert prog.agent_token == ""
+
+
 def test_usage_limit_message_is_not_a_result(substrate):
     # The classic dead-on-arrival case: agent printed the limit message and exited 1.
     agent = FakeAgent(result="You've hit your session limit · resets 6:40am", status="failed")

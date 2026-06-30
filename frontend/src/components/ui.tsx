@@ -145,6 +145,22 @@ export function Running({ since }: { since?: number | null }) {
   return <span className="mono" style={{ fontSize: 12, color: "var(--st-executing)" }}>{label}</span>;
 }
 
+const _WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/** Turn a usage-skill reset like "Tue 7:19" into "Tue 1 Jul · 7:19" — the
+ *  dashboard has the room for the date, unlike the statusline. */
+export function formatReset(resets: string): string {
+  const wd = resets.match(/\b(Sun|Mon|Tue|Wed|Thu|Fri|Sat)\b/);
+  const tm = resets.match(/(\d{1,2}:\d{2})/);
+  if (!wd) return resets;
+  const now = new Date();
+  const days = (_WD.indexOf(wd[1]) - now.getDay() + 7) % 7;
+  const d = new Date(now);
+  d.setDate(now.getDate() + days);
+  const date = d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return `${wd[1]} ${date}${tm ? " · " + tm[1] : ""}`;
+}
+
 /** One Claude-usage window bar (5-hour / weekly), tinted by pressure. */
 export function UsageBar({ label, pct, resets }: { label: string; pct: number; resets: string }) {
   const color = pct >= 85 ? "var(--signal)" : pct >= 60 ? "#caa12a" : "var(--machine)";
@@ -152,7 +168,7 @@ export function UsageBar({ label, pct, resets }: { label: string; pct: number; r
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
         <span className="mono" style={{ fontSize: 12, color: "var(--ink-muted)" }}>{label}</span>
-        <span className="mono" style={{ fontSize: 12 }}>{pct}% · resets {resets}</span>
+        <span className="mono" style={{ fontSize: 12 }}>{pct}% · resets {formatReset(resets)}</span>
       </div>
       <div style={{ height: 8, borderRadius: 999, background: "var(--paper-2)", overflow: "hidden" }}>
         <div style={{ height: "100%", width: `${Math.min(100, pct)}%`, background: color }} />

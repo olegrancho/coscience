@@ -141,6 +141,7 @@ class Service:
             "comments": list(sprint.comments),
             "agent_running": bool(progress.agent_token),
             "started_at": progress.started_at,
+            "error": progress.last_error if sprint.status == SprintStatus.FAILED else "",
             "lease": None if lease is None else {
                 "id": lease.id, "sprint_id": lease.sprint_id, "amounts": lease.amounts,
                 "granted_at": lease.granted_at, "expires_at": lease.expires_at,

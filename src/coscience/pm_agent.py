@@ -30,6 +30,7 @@ def context_fingerprint(context: PMContext) -> str:
         "active": sorted((s["id"], s["status"]) for s in context.open_sprints
                          if s["status"] != SprintStatus.PROPOSED.value),
         "completed": sorted((s["id"], s["result"]) for s in context.completed),
+        "failed": sorted((s["id"], s["error"]) for s in context.failed),
         # Human idea signal re-triggers the PM; its own pm-sourced ideas/summary do not.
         "human_ideas": sorted(i["text"] for i in context.ideas if i.get("source") == "human"),
         "idea_comments": sorted(c["text"] for i in context.ideas for c in i.get("comments", [])),
@@ -43,6 +44,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
     pm = substrate.load_pm_state(program_id)
     open_sprints: list[dict] = []
     completed: list[dict] = []
+    failed: list[dict] = []
     for s in substrate.iter_sprints():
         if s.program != program_id:
             continue
@@ -54,6 +56,9 @@ def gather_context(substrate, program_id: str) -> PMContext:
                 except OSError:
                     result = ""
             completed.append({"id": s.id, "goals": s.goals, "result": result})
+        elif s.status == SprintStatus.FAILED:
+            err = substrate.load_progress(s.id).last_error
+            failed.append({"id": s.id, "goals": s.goals, "error": err})
         elif s.status in (SprintStatus.PROPOSED, SprintStatus.APPROVED,
                           SprintStatus.EXECUTING):
             open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals})
@@ -65,7 +70,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
     proposed_count = sum(1 for s in open_sprints if s["status"] == SprintStatus.PROPOSED.value)
     return PMContext(
         program_id=program_id, goals=program.goals, cycle=pm.cycle,
-        open_sprints=open_sprints, completed=completed,
+        open_sprints=open_sprints, completed=completed, failed=failed,
         prior_proposals=list(pm.proposed_ids),
         human_guidance=guidance,
         ideas=idea_dicts, proposed_count=proposed_count, max_proposed=MAX_PROPOSED,

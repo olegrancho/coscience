@@ -94,6 +94,28 @@ def test_human_idea_retriggers_pm(substrate):
     assert not pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="r2")]))["skipped"]
 
 
+def test_context_surfaces_failed_sprints(substrate):
+    from coscience.models import ProgressState
+    _prog(substrate)
+    substrate.save_sprint(Sprint(id="p1-f", status=SprintStatus.FAILED, goals="do x",
+                                 plan=[], program="p1"))
+    substrate.save_progress(ProgressState(sprint_id="p1-f", failures=3,
+                                          last_error="ImportError: no sympy"))
+    ctx = gather_context(substrate, "p1")
+    assert ctx.failed == [{"id": "p1-f", "goals": "do x", "error": "ImportError: no sympy"}]
+
+
+def test_failed_sprint_retriggers_pm(substrate):
+    from coscience.models import ProgressState
+    _prog(substrate)
+    pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="r0")]))
+    assert pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="r1")]))["skipped"]
+    substrate.save_sprint(Sprint(id="p1-f", status=SprintStatus.FAILED, goals="g",
+                                 plan=[], program="p1"))
+    substrate.save_progress(ProgressState(sprint_id="p1-f", last_error="boom"))
+    assert not pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="r2")]))["skipped"]
+
+
 def test_context_exposes_pool_and_slots(substrate):
     _prog(substrate)
     _proposed(substrate, 1)

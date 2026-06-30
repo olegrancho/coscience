@@ -29,6 +29,7 @@ class PMContext:
     cycle: int
     open_sprints: list[dict] = field(default_factory=list)
     completed: list[dict] = field(default_factory=list)
+    failed: list[dict] = field(default_factory=list)   # sprints that failed, with why
     prior_proposals: list[str] = field(default_factory=list)
     human_guidance: list[str] = field(default_factory=list)
     ideas: list[dict] = field(default_factory=list)   # current idea pool (id/text/source/protected/comments)

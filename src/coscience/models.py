@@ -17,6 +17,7 @@ class SprintStatus(StrEnum):
     EXECUTING = "executing"
     DONE = "done"
     CANCELED = "canceled"
+    FAILED = "failed"          # agent failed repeatedly; terminal until a human acts
 
 
 class BeatOutcome(StrEnum):
@@ -67,6 +68,8 @@ class ProgressState:
     sprint_id: str
     agent_token: str = ""              # detached agent process token; "" when not running
     started_at: float | None = None    # when the current agent run was launched
+    failures: int = 0                  # consecutive agent failures (nonzero exit), for the retry cap
+    last_error: str = ""               # why the most recent run failed (surfaced to the PM)
 
 
 @dataclass

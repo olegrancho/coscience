@@ -28,7 +28,7 @@ export interface Sprint {
   goals: string; priority: number; preemptible: boolean;
   resources_required: Record<string, number>; rationale: string; plan: string[];
   program: string | null; results: string[]; comments: IdeaComment[];
-  agent_running: boolean; started_at: number | null; lease: unknown | null;
+  agent_running: boolean; started_at: number | null; error: string; lease: unknown | null;
 }
 export interface SprintFile {
   name: string; label: string; kind: string; size: number;
