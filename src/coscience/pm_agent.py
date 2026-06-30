@@ -10,6 +10,7 @@ import re
 import time
 from dataclasses import dataclass
 
+from coscience import usage_meter
 from coscience.models import Sprint, SprintStatus, Idea
 from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
 
@@ -159,6 +160,7 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None) -> d
             return {"program": program_id, "cycle": cycle,
                     "submitted": [], "proposed": [], "skipped": True}
         output = reasoner.run(context)                 # the ONE reasoner call
+        usage_meter.record_run(substrate.repo_root, "pm", program_id)
         write_staging(substrate, program_id, cycle, output, fingerprint)  # COMMIT POINT
         staged = StagedCycle(cycle=cycle, output=output, fingerprint=fingerprint)
 

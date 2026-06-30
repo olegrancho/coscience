@@ -2,12 +2,13 @@ import { Card, Loader, Stack, Table, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { EmptyState, Gauge } from "../components/ui";
+import { EmptyState, Gauge, UsagePanel } from "../components/ui";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
 export default function Ledger() {
   const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.getLedger });
+  const usage = useQuery({ queryKey: ["usage"], queryFn: api.getUsage });
   if (ledger.isLoading) return <Loader color="machine" />;
   if (ledger.error || !ledger.data) return <EmptyState title="Couldn't load compute">Try again in a moment.</EmptyState>;
   const l = ledger.data;
@@ -19,6 +20,12 @@ export default function Ledger() {
         <div className="eyebrow" style={{ marginBottom: 7 }}>resources</div>
         <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: 0 }}>Compute</h1>
       </div>
+
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <div className="eyebrow" style={{ marginBottom: 16 }}>Claude usage</div>
+        {usage.data ? <UsagePanel usage={usage.data} />
+          : <Text size="sm" c="dimmed">Usage reading unavailable.</Text>}
+      </Card>
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 16 }}>capacity in use</div>

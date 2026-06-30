@@ -176,6 +176,10 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def ledger_status() -> dict:
         return service.ledger_status()
 
+    @api.get("/usage")
+    def usage_stats() -> dict:
+        return service.usage_stats()
+
     @api.get("/programs")
     def list_programs(status: str | None = Query(default=None)) -> list[dict]:
         try:

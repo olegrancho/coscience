@@ -15,6 +15,13 @@ export interface SprintRow {
   goals: string; program: string | null;
   priority: number; steps: number; results: string[];
   rationale: string; resources_required: Record<string, number>;
+  started_at: number | null;
+}
+export interface UsageWindow { pct: number; resets: string }
+export interface RunAgg { total: number; last_hour: number; last_day: number; last: number | null }
+export interface Usage {
+  budget: { windows: Record<string, UsageWindow>; live: boolean } | null;
+  runs: { pm: RunAgg; worker: RunAgg };
 }
 export interface Sprint {
   id: string; status: string; title: string; summary: string;
@@ -104,4 +111,5 @@ export const api = {
   listResults: () => fetch("/api/results").then(j<ResultRow[]>),
   getResult: (id: string) => fetch(`/api/results/${id}`).then(j<ResultRow>),
   getLedger: () => fetch("/api/ledger").then(j<Ledger>),
+  getUsage: () => fetch("/api/usage").then(j<Usage>),
 };

@@ -102,6 +102,9 @@ class Service:
         wanted = SprintStatus(status) if status is not None else None
         rows = []
         for sprint in self.substrate.iter_sprints(status=wanted):
+            started = None
+            if sprint.status == SprintStatus.EXECUTING:
+                started = self.substrate.load_progress(sprint.id).started_at
             rows.append({
                 "id": sprint.id,
                 "status": sprint.status.value,
@@ -114,6 +117,7 @@ class Service:
                 "results": list(sprint.results),
                 "rationale": sprint.rationale,
                 "resources_required": sprint.resources_required,
+                "started_at": started,
             })
         return rows
 
@@ -143,6 +147,13 @@ class Service:
                 "priority": lease.priority, "preemptible": lease.preemptible,
             },
         }
+
+    def usage_stats(self) -> dict:
+        """Claude usage for the dashboard: the rolling 5h/weekly budget plus how
+        many calls the PM and worker have each made (total / last hour / last day)."""
+        from coscience import usage_meter
+        return {"budget": usage_meter.read_budget(),
+                "runs": usage_meter.run_stats(self.repo_root)}
 
     def add_sprint_comment(self, sprint_id: str, text: str) -> dict:
         """Append a human comment to a sprint. Allowed in any status (review,

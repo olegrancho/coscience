@@ -94,6 +94,15 @@ def test_results_round_trip(client):
     assert client.get("/api/results/r1").json()["summary"] == "found X"
 
 
+def test_usage_endpoint_shape(client):
+    r = client.get("/api/usage")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body["runs"]) == {"pm", "worker"}
+    assert "total" in body["runs"]["pm"]
+    assert "budget" in body            # may be None if usage skill is unreachable
+
+
 def test_ledger_status_shape(client):
     body = client.get("/api/ledger").json()
     assert set(body) == {"capacity", "used", "available", "leases"}

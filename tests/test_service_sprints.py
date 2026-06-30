@@ -29,7 +29,8 @@ def test_submit_then_list_and_get(tmp_path):
     rows = svc.list_sprints()
     assert rows == [{"id": "sp1", "status": "proposed", "title": "", "summary": "",
                      "goals": "cure", "program": None, "priority": 3, "steps": 1,
-                     "results": [], "rationale": "", "resources_required": {"gpu": 1.0}}]
+                     "results": [], "rationale": "", "resources_required": {"gpu": 1.0},
+                     "started_at": None}]
     detail = svc.get_sprint("sp1")
     assert detail["status"] == "proposed"
     assert detail["resources_required"] == {"gpu": 1.0}

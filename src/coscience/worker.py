@@ -11,6 +11,7 @@ import re
 import subprocess
 import time
 
+from coscience import usage_meter
 from coscience.executor import ExecutionContext
 from coscience.models import BeatOutcome, Result, Sprint, SprintStatus
 from coscience.substrate import Substrate
@@ -108,6 +109,7 @@ class Worker:
                 return BeatOutcome.IDLE
             token = self.agent.start(sprint, self._build_context(sprint),
                                      sprint_dir, self.substrate.repo_root)
+            usage_meter.record_run(self.substrate.repo_root, "worker", sprint.id)
             progress.agent_token = token
             progress.started_at = time.time()
             self.substrate.save_progress(progress)

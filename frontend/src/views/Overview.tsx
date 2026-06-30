@@ -3,7 +3,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type SprintRow } from "../api";
-import { Bars, computeCost, EmptyState, Gauge, Heartbeat, RelTime, StateBar, StatusBadge } from "../components/ui";
+import { Bars, computeCost, EmptyState, Gauge, Heartbeat, RelTime, Running, StateBar, StatusBadge, UsagePanel } from "../components/ui";
 
 function programOf(s: SprintRow) {
   if (s.program) return s.program;
@@ -18,6 +18,7 @@ export default function Overview() {
   const sprints = useQuery({ queryKey: ["sprints"], queryFn: api.listSprints });
   const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.getLedger });
   const results = useQuery({ queryKey: ["results"], queryFn: api.listResults });
+  const usage = useQuery({ queryKey: ["usage"], queryFn: api.getUsage });
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["sprints"] });
@@ -52,6 +53,12 @@ export default function Overview() {
   const active = Object.entries(groups).filter(([pid]) => (status[pid] ?? "active") === "active");
   const stalled = Object.entries(groups).filter(([pid]) => status[pid] && status[pid] !== "active");
   const waiting = active.reduce((n, [, list]) => n + list.length, 0);
+
+  const runningGroups: Record<string, SprintRow[]> = {};
+  for (const s of allSprints.filter((s) => s.status === "executing")) {
+    (runningGroups[programOf(s)] ??= []).push(s);
+  }
+  const runningCount = Object.values(runningGroups).reduce((n, l) => n + l.length, 0);
 
   const cap = ledger.data?.capacity ?? {};
   const byState: Record<string, number> = {};
@@ -133,6 +140,33 @@ export default function Overview() {
         </div>
       )}
 
+      {runningCount > 0 && (
+        <div style={{ marginTop: "var(--mantine-spacing-lg)" }}>
+          <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 0 4px" }}>
+            <span className="eyebrow" style={{ color: "var(--st-executing)", fontWeight: 600 }}>running now</span>
+            <Text className="mono" fw={600} style={{ color: "var(--st-executing)" }}>{runningCount} {runningCount === 1 ? "experiment" : "experiments"}</Text>
+          </div>
+          {Object.entries(runningGroups).map(([pid, list]) => (
+            <div className="group" key={pid}>
+              <div className="group-head">
+                <Heartbeat />
+                <span className="name">{title[pid] ?? pid}</span>
+                <span className="eyebrow">program</span>
+              </div>
+              <div className="group-body">
+                {list.map((s) => (
+                  <div key={s.id} onClick={() => nav(`/sprints/${s.id}`)}
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 13px", background: "var(--card)", border: "1px solid var(--hairline)", borderRadius: 10, cursor: "pointer" }}>
+                    <Text size="sm" truncate style={{ flex: 1 }}>{sprintTitle[s.id]}</Text>
+                    <Running since={s.started_at} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* calm strip: what the machine is doing on its own */}
       <SimpleGrid cols={{ base: 1, sm: 3 }} mt="lg" mb="lg">
         <Card padding="lg" radius="md" style={{ border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" }}>
@@ -156,6 +190,13 @@ export default function Overview() {
           ) : <Text size="xs" c="dimmed">No compute pool configured yet.</Text>}
         </Card>
       </SimpleGrid>
+
+      {usage.data && (
+        <Card padding="lg" radius="md" mb="lg" style={{ border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" }}>
+          <div className="eyebrow" style={{ marginBottom: 14 }}>Claude usage</div>
+          <UsagePanel usage={usage.data} />
+        </Card>
+      )}
 
       <Card padding="lg" radius="md" style={{ border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" }}>
         <div className="eyebrow" style={{ marginBottom: 14 }}>recent results</div>

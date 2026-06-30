@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Stack, Text } from "@mantine/core";
 import { Link } from "react-router-dom";
+import type { RunAgg, Usage } from "../api";
 import { SPRINT_STATE_ORDER, statusVar } from "./status";
 
 /** "2h ago" / "3d ago" / "Jun 27" — with the exact local time on hover. */
@@ -124,6 +125,74 @@ export function computeCost(resources: Record<string, number>, capacity: Record<
   const scale = frac < 0.34 ? "light" : frac < 0.67 ? "moderate" : "heavy";
   const filled = Math.max(1, Math.min(4, Math.round(frac * 4)));
   return { text, scale, filled };
+}
+
+/** "12m" / "1h 5m" / "2d 3h" — a compact elapsed duration. */
+export function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60), mm = m % 60;
+  if (h < 24) return mm ? `${h}h ${mm}m` : `${h}h`;
+  const d = Math.floor(h / 24), hh = h % 24;
+  return hh ? `${d}d ${hh}h` : `${d}d`;
+}
+
+/** "running 12m" tinted with the executing hue; just "running" if start unknown. */
+export function Running({ since }: { since?: number | null }) {
+  const label = since ? `running ${formatDuration(Date.now() / 1000 - since)}` : "running";
+  return <span className="mono" style={{ fontSize: 12, color: "var(--st-executing)" }}>{label}</span>;
+}
+
+/** One Claude-usage window bar (5-hour / weekly), tinted by pressure. */
+export function UsageBar({ label, pct, resets }: { label: string; pct: number; resets: string }) {
+  const color = pct >= 85 ? "var(--signal)" : pct >= 60 ? "#caa12a" : "var(--machine)";
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+        <span className="mono" style={{ fontSize: 12, color: "var(--ink-muted)" }}>{label}</span>
+        <span className="mono" style={{ fontSize: 12 }}>{pct}% · resets {resets}</span>
+      </div>
+      <div style={{ height: 8, borderRadius: 999, background: "var(--paper-2)", overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${Math.min(100, pct)}%`, background: color }} />
+      </div>
+    </div>
+  );
+}
+
+function RunStat({ label, agg }: { label: string; agg: RunAgg }) {
+  return (
+    <div style={{ flex: 1 }}>
+      <Text size="xs" c="dimmed">{label} runs</Text>
+      <Text style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 600, lineHeight: 1.1 }}>{agg.total}</Text>
+      <Text size="xs" c="dimmed">{agg.last_hour} in last hour</Text>
+    </div>
+  );
+}
+
+/** Claude usage: the rolling 5h/weekly budget plus PM and worker call counts. */
+export function UsagePanel({ usage }: { usage: Usage }) {
+  const w = usage.budget?.windows ?? {};
+  return (
+    <Stack gap={16}>
+      {usage.budget ? (
+        <Stack gap={10}>
+          {w["5h"] && <UsageBar label="5-hour" pct={w["5h"].pct} resets={w["5h"].resets} />}
+          {w["week"] && <UsageBar label="weekly" pct={w["week"].pct} resets={w["week"].resets} />}
+          {!usage.budget.live && <Text size="xs" c="dimmed">showing last cached reading</Text>}
+        </Stack>
+      ) : <Text size="sm" c="dimmed">Usage reading unavailable.</Text>}
+      <Group_ >
+        <RunStat label="PM" agg={usage.runs.pm} />
+        <RunStat label="Worker" agg={usage.runs.worker} />
+      </Group_>
+    </Stack>
+  );
+}
+
+function Group_({ children }: { children: ReactNode }) {
+  return <div style={{ display: "flex", gap: 18, borderTop: "1px solid var(--hairline)", paddingTop: 12 }}>{children}</div>;
 }
 
 /** Page heading with a mono eyebrow. */
