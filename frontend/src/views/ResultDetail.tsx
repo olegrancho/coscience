@@ -1,7 +1,7 @@
 import { Card, Loader, Stack, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import Markdown from "react-markdown";
+import Md from "../components/Md";
 import { api } from "../api";
 import { BackLink, EmptyState, RelTime } from "../components/ui";
 
@@ -50,7 +50,7 @@ export default function ResultDetail() {
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 10 }}>what it produced</div>
-        <div className="report-leaf"><Markdown>{r.summary}</Markdown></div>
+        <div className="report-leaf"><Md>{r.summary}</Md></div>
       </Card>
     </Stack>
   );

@@ -161,6 +161,31 @@ h1, h2, h3, h4, h5, .ff-display {
   padding: 1px 5px;
   border-radius: 4px;
 }
+/* GFM tables in reports/results */
+.report-leaf table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 14px 0;
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.report-leaf th, .report-leaf td {
+  border: 1px solid var(--signal-line);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.report-leaf thead th {
+  background: var(--signal);
+  color: #fff;
+  border-color: var(--signal);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.report-leaf tbody tr:nth-child(even) { background: var(--signal-weak); }
+.report-leaf table code { background: #f1e9d6; }
+
 /* an experiment id mentioned in the report, made clickable */
 .report-leaf .report-sprint-link {
   font-family: "IBM Plex Mono", ui-monospace, monospace;

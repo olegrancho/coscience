@@ -154,3 +154,52 @@ def test_edit_empty_plan_raises(tmp_path):
 def test_edit_missing_raises_notfound(tmp_path):
     with pytest.raises(NotFoundError):
         Service(tmp_path).edit_sprint("nope", priority=1)
+
+
+def test_list_sprint_files_orders_and_labels(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["a"])
+    d = svc.substrate.sprint_dir("sp1")
+    (d / "instructions.md").write_text("do the thing")
+    (d / "agent.out").write_text("line1\nline2")
+    (d / "scratchpad.md").write_text("# notes\nworking")
+    (d / "solver.py").write_text("print('hi')")
+    (d / "progress.md").write_text("---\nagent_token: x\n---")  # plumbing, hidden
+    files = svc.list_sprint_files("sp1")
+    names = [f["name"] for f in files]
+    # spec + plumbing excluded; known docs first in fixed order, artifacts last
+    assert names == ["scratchpad.md", "agent.out", "instructions.md", "solver.py"]
+    by = {f["name"]: f for f in files}
+    assert by["scratchpad.md"]["kind"] == "scratchpad"
+    assert by["agent.out"]["label"] == "Agent log"
+    assert by["solver.py"]["kind"] == "artifact"
+    assert by["scratchpad.md"]["content"] == "# notes\nworking"
+    assert by["solver.py"]["binary"] is False
+
+
+def test_list_sprint_files_flags_binary(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["a"])
+    (svc.substrate.sprint_dir("sp1") / "blob.bin").write_bytes(b"\xff\xfe\x00\x01")
+    blob = next(f for f in svc.list_sprint_files("sp1") if f["name"] == "blob.bin")
+    assert blob["binary"] is True
+    assert blob["content"] == ""
+
+
+def test_list_sprint_files_missing_raises(tmp_path):
+    with pytest.raises(NotFoundError):
+        Service(tmp_path).list_sprint_files("nope")
+
+
+def test_program_sprints_ordered_by_creation(tmp_path):
+    svc = Service(tmp_path)
+    from coscience.models import Program, ProgramStatus
+    svc.substrate.save_program(Program(id="p1", title="P", goals="g", status=ProgramStatus.ACTIVE))
+    # created in this order despite reverse-alphabetical ids
+    for sid, ts in [("zzz", 100.0), ("mmm", 200.0), ("aaa", 300.0)]:
+        svc.submit_sprint(id=sid, goals="g", plan=["a"], program="p1")
+        s = svc.substrate.load_sprint(sid)
+        s.created_at = ts
+        svc.substrate.save_sprint(s)
+    order = [s["id"] for s in svc.get_program("p1")["sprints"]]
+    assert order == ["aaa", "mmm", "zzz"]  # newest first

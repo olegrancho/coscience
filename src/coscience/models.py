@@ -50,6 +50,7 @@ class Sprint:
     rationale: str = ""
     title: str = ""
     summary: str = ""
+    created_at: float | None = None   # wall-clock of first save; orders sprints by appearance
 
 
 @dataclass
@@ -65,6 +66,25 @@ class ProgressState:
     sprint_id: str
     agent_token: str = ""              # detached agent process token; "" when not running
     started_at: float | None = None    # when the current agent run was launched
+
+
+@dataclass
+class Idea:
+    """A short, vague candidate direction for a program. The PM grows a pool of
+    these, prunes them as data arrives, and promotes promising ones into sprints.
+    `source` is who proposed it; pinning == protecting it from PM deletion."""
+    id: str
+    text: str
+    source: str = "human"               # "pm" | "human"
+    pinned: bool = False                # pin == protect
+    comments: list[dict] = field(default_factory=list)  # [{id, text, added_at}]
+    created_at: float = 0.0
+
+    @property
+    def protected(self) -> bool:
+        """Whether the PM is forbidden from deleting this idea. Human-proposed
+        ideas, pinned ideas, and any idea a human has commented on are protected."""
+        return self.source == "human" or self.pinned or bool(self.comments)
 
 
 @dataclass

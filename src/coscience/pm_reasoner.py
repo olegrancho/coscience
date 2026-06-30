@@ -31,6 +31,13 @@ class PMContext:
     completed: list[dict] = field(default_factory=list)
     prior_proposals: list[str] = field(default_factory=list)
     human_guidance: list[str] = field(default_factory=list)
+    ideas: list[dict] = field(default_factory=list)   # current idea pool (id/text/source/protected/comments)
+    proposed_count: int = 0                            # sprints already in 'proposed'
+    max_proposed: int = 4                              # cap the PM may not exceed
+
+    @property
+    def free_slots(self) -> int:
+        return max(0, self.max_proposed - self.proposed_count)
 
 
 @dataclass
@@ -43,12 +50,16 @@ class ProposedSprint:
     rationale: str = ""
     title: str = ""
     summary: str = ""
+    from_idea: str = ""                              # idea id this promotes (removed when sprint is created)
 
 
 @dataclass
 class PMCycleOutput:
     proposals: list[ProposedSprint] = field(default_factory=list)
     report: str = ""
+    ideas_summary: str = ""                          # PM's narrative over the whole idea pool
+    new_ideas: list[str] = field(default_factory=list)      # vague directions to record (PM-sourced)
+    delete_idea_ids: list[str] = field(default_factory=list)  # PM ideas to prune (protected ones ignored)
 
 
 class Reasoner(Protocol):

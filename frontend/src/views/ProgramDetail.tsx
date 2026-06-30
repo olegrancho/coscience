@@ -3,7 +3,8 @@ import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import Markdown, { type Components } from "react-markdown";
+import { type Components } from "react-markdown";
+import Md from "../components/Md";
 import { api } from "../api";
 import { BackLink, EmptyState, StatusBadge } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
@@ -18,9 +19,11 @@ export default function ProgramDetail() {
 
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
   const guidance = useQuery({ queryKey: ["guidance", id], queryFn: () => api.listGuidance(id) });
+  const ideas = useQuery({ queryKey: ["ideas", id], queryFn: () => api.listIdeas(id) });
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["program", id] });
     qc.invalidateQueries({ queryKey: ["guidance", id] });
+    qc.invalidateQueries({ queryKey: ["ideas", id] });
     qc.invalidateQueries({ queryKey: ["sprints"] });
   };
 
@@ -80,7 +83,7 @@ export default function ProgramDetail() {
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 12 }}>the AI's status report</div>
-        {p.report ? <div className="report-leaf"><Markdown components={reportComponents}>{p.report}</Markdown></div>
+        {p.report ? <div className="report-leaf"><Md components={reportComponents}>{p.report}</Md></div>
           : <Text size="sm" c="dimmed">No report yet — the AI writes one each planning cycle.</Text>}
       </Card>
 
@@ -125,6 +128,16 @@ export default function ProgramDetail() {
             ))}
           </Stack>
         )}
+      </Card>
+
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <Group justify="space-between" align="center" mb={ideas.data?.summary.trim() ? 10 : 0}>
+          <div className="eyebrow">ideas · {ideas.data?.ideas.length ?? 0}</div>
+          <Link to={`/programs/${id}/ideas`} className="view" style={{ fontSize: 13 }}>open ideas →</Link>
+        </Group>
+        {ideas.data?.summary.trim()
+          ? <Text size="sm" c="dimmed" lineClamp={2}>{ideas.data.summary.replace(/[#*`>_]/g, "")}</Text>
+          : <Text size="sm" c="dimmed">A pool of candidate directions the AI grows, prunes, and promotes into experiments.</Text>}
       </Card>
 
       <ProposeSprintModal programId={id} opened={proposing} onClose={() => setProposing(false)} onDone={refresh} />

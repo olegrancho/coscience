@@ -1,7 +1,15 @@
 import pytest
 
+import coscience.worker as worker_mod
 from coscience.frontmatter_io import serialize
 from coscience.substrate import Substrate
+
+
+@pytest.fixture(autouse=True)
+def _permissive_usage(monkeypatch):
+    """Default the usage gate to 'ok' so worker/dispatcher tests don't shell out
+    to the real usage script. Tests that exercise the gate pass usage_gate=... ."""
+    monkeypatch.setattr(worker_mod, "claude_usage_ok", lambda *a, **k: True)
 
 
 class FakeAgent:

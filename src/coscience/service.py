@@ -11,7 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from coscience.ledger import Ledger
-from coscience.models import Sprint, SprintStatus, Program, ProgramStatus
+from coscience.models import Sprint, SprintStatus, Program, ProgramStatus, Idea
 from coscience.resources import ResourcePool, load_pool
 from coscience.substrate import Substrate
 
@@ -143,11 +143,63 @@ class Service:
             },
         }
 
+    # Files surfaced in the UI as the agent's "working documents", with a
+    # friendly label + kind and the order they should display in.
+    _DOC_LABELS = {
+        "scratchpad.md": ("Scratchpad", "scratchpad"),
+        "agent.out": ("Agent log", "log"),
+        "instructions.md": ("Instructions", "instructions"),
+    }
+    _DOC_ORDER = {"scratchpad": 0, "log": 1, "instructions": 2, "artifact": 3}
+    # Plumbing that isn't a "document": the spec is shown as structured fields,
+    # progress holds the process token, agent.exit is just an exit code.
+    _DOC_HIDDEN = {"sprint.md", "progress.md", "agent.exit"}
+    _DOC_MAX_BYTES = 256 * 1024
+
+    def list_sprint_files(self, sprint_id: str) -> list[dict]:
+        """The agent's working documents for a sprint — scratchpad, log,
+        instructions, and any artifacts it produced — for display in the UI.
+
+        Reads only files directly in the sprint directory. Large files are
+        tailed (the recent end matters most for logs); binaries are flagged
+        without content.
+        """
+        self._load_sprint(sprint_id)  # raises NotFoundError for unknown sprints
+        d = self.substrate.sprint_dir(sprint_id)
+        docs: list[dict] = []
+        for path in (d.iterdir() if d.is_dir() else []):
+            if not path.is_file() or path.name.startswith(".") or path.name in self._DOC_HIDDEN:
+                continue
+            label, kind = self._DOC_LABELS.get(path.name, (path.name, "artifact"))
+            raw = path.read_bytes()
+            size = len(raw)
+            truncated = size > self._DOC_MAX_BYTES
+            if truncated:
+                raw = raw[-self._DOC_MAX_BYTES:]  # keep the tail — most relevant for logs
+            try:
+                content, binary = raw.decode("utf-8"), False
+            except UnicodeDecodeError:
+                content, binary = "", True
+            docs.append({"name": path.name, "label": label, "kind": kind,
+                         "size": size, "content": content,
+                         "truncated": truncated, "binary": binary})
+        docs.sort(key=lambda f: (self._DOC_ORDER[f["kind"]], f["name"]))
+        return docs
+
     # --- programs (read-only) ---
     def list_programs(self, status: str | None = None) -> list[dict]:
         wanted = ProgramStatus(status) if status is not None else None
         return [{"id": p.id, "title": p.title, "status": p.status.value, "goals": p.goals}
                 for p in self.substrate.iter_programs(status=wanted)]
+
+    def _appeared_at(self, sprint: Sprint) -> float:
+        """Sort key putting a program's sprints in creation order. Uses the
+        stored created_at; for legacy sprints without it, falls back to the
+        sprint.md modification time."""
+        if sprint.created_at is not None:
+            return sprint.created_at
+        spec = self.substrate.sprint_dir(sprint.id) / "sprint.md"
+        return spec.stat().st_mtime if spec.is_file() else 0.0
 
     def get_program(self, program_id: str) -> dict:
         if not (self.substrate.program_dir(program_id) / "program.md").is_file():
@@ -155,6 +207,7 @@ class Service:
         p = self.substrate.load_program(program_id)
         pm = self.substrate.load_pm_state(program_id)
         sprints = [s for s in self.substrate.iter_sprints() if s.program == program_id]
+        sprints.sort(key=self._appeared_at, reverse=True)  # newest first
         return {
             "id": p.id, "title": p.title, "status": p.status.value, "goals": p.goals,
             "report": self.substrate.load_report(program_id),
@@ -192,6 +245,67 @@ class Service:
         self._require_program(program_id)
         notes = [n for n in self.substrate.load_guidance(program_id) if n["id"] != note_id]
         self.substrate.save_guidance(program_id, notes)
+
+    # --- ideas ---
+    @staticmethod
+    def _idea_public(i: Idea) -> dict:
+        return {"id": i.id, "text": i.text, "source": i.source, "pinned": i.pinned,
+                "protected": i.protected, "comments": list(i.comments),
+                "created_at": i.created_at}
+
+    def list_ideas(self, program_id: str) -> dict:
+        self._require_program(program_id)
+        summary, ideas = self.substrate.load_ideas(program_id)
+        return {"summary": summary, "ideas": [self._idea_public(i) for i in ideas]}
+
+    def add_idea(self, program_id: str, text: str, source: str = "human") -> dict:
+        self._require_program(program_id)
+        text = text.strip()
+        if not text:
+            raise ValueError("idea text is required")
+        summary, ideas = self.substrate.load_ideas(program_id)
+        idea = Idea(id=uuid4().hex[:8], text=text, source=source, created_at=time.time())
+        ideas.append(idea)
+        self.substrate.save_ideas(program_id, summary, ideas)
+        self.substrate.commit(f"program {program_id}: idea added ({source})")
+        return self._idea_public(idea)
+
+    def delete_idea(self, program_id: str, idea_id: str, by: str = "human") -> None:
+        self._require_program(program_id)
+        summary, ideas = self.substrate.load_ideas(program_id)
+        target = next((i for i in ideas if i.id == idea_id), None)
+        if target is None:
+            raise NotFoundError(idea_id)
+        if by == "pm" and target.protected:
+            raise ValueError("idea is protected; the PM may not delete it")
+        ideas = [i for i in ideas if i.id != idea_id]
+        self.substrate.save_ideas(program_id, summary, ideas)
+        self.substrate.commit(f"program {program_id}: idea {idea_id} deleted ({by})")
+
+    def set_idea_pin(self, program_id: str, idea_id: str, pinned: bool) -> dict:
+        self._require_program(program_id)
+        summary, ideas = self.substrate.load_ideas(program_id)
+        target = next((i for i in ideas if i.id == idea_id), None)
+        if target is None:
+            raise NotFoundError(idea_id)
+        target.pinned = pinned
+        self.substrate.save_ideas(program_id, summary, ideas)
+        self.substrate.commit(f"program {program_id}: idea {idea_id} {'pinned' if pinned else 'unpinned'}")
+        return self._idea_public(target)
+
+    def add_idea_comment(self, program_id: str, idea_id: str, text: str) -> dict:
+        self._require_program(program_id)
+        text = text.strip()
+        if not text:
+            raise ValueError("comment text is required")
+        summary, ideas = self.substrate.load_ideas(program_id)
+        target = next((i for i in ideas if i.id == idea_id), None)
+        if target is None:
+            raise NotFoundError(idea_id)
+        target.comments.append({"id": uuid4().hex[:8], "text": text, "added_at": time.time()})
+        self.substrate.save_ideas(program_id, summary, ideas)
+        self.substrate.commit(f"program {program_id}: comment on idea {idea_id}")
+        return self._idea_public(target)
 
     # --- results ---
     def list_results(self) -> list[dict]:

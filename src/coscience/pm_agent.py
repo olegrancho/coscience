@@ -6,11 +6,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 
-from coscience.models import Sprint, SprintStatus
+from coscience.models import Sprint, SprintStatus, Idea
 from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
+
+# The PM may not push the program past this many sprints awaiting human review.
+# Humans can propose beyond it; this only gates the PM's own proposing/promoting.
+MAX_PROPOSED = 4
 
 
 def context_fingerprint(context: PMContext) -> str:
@@ -24,6 +29,9 @@ def context_fingerprint(context: PMContext) -> str:
         "active": sorted((s["id"], s["status"]) for s in context.open_sprints
                          if s["status"] != SprintStatus.PROPOSED.value),
         "completed": sorted((s["id"], s["result"]) for s in context.completed),
+        # Human idea signal re-triggers the PM; its own pm-sourced ideas/summary do not.
+        "human_ideas": sorted(i["text"] for i in context.ideas if i.get("source") == "human"),
+        "idea_comments": sorted(c["text"] for i in context.ideas for c in i.get("comments", [])),
     }
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
@@ -49,11 +57,17 @@ def gather_context(substrate, program_id: str) -> PMContext:
                           SprintStatus.EXECUTING):
             open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals})
     guidance = [n["text"] for n in substrate.load_guidance(program_id)]
+    _summary, ideas = substrate.load_ideas(program_id)
+    idea_dicts = [{"id": i.id, "text": i.text, "source": i.source,
+                   "protected": i.protected,
+                   "comments": [c["text"] for c in i.comments]} for i in ideas]
+    proposed_count = sum(1 for s in open_sprints if s["status"] == SprintStatus.PROPOSED.value)
     return PMContext(
         program_id=program_id, goals=program.goals, cycle=pm.cycle,
         open_sprints=open_sprints, completed=completed,
         prior_proposals=list(pm.proposed_ids),
         human_guidance=guidance,
+        ideas=idea_dicts, proposed_count=proposed_count, max_proposed=MAX_PROPOSED,
     )
 
 
@@ -65,7 +79,16 @@ class StagedCycle:
 
 
 def proposal_id(program_id: str, cycle: int, suffix: str) -> str:
-    return f"{program_id}-c{cycle}-{suffix}"
+    # The model sometimes returns a suffix that already carries the program and/or
+    # cycle prefix (e.g. "c2-foo" or "p1-c3-bar"), which would otherwise produce
+    # doubled ids like "p1-c2-c2-foo". Strip any such leading prefixes first.
+    s = suffix.strip().strip("-/ ")
+    prev = None
+    while prev != s:
+        prev = s
+        s = re.sub(rf"^{re.escape(program_id)}-", "", s)
+        s = re.sub(r"^c\d+-", "", s)
+    return f"{program_id}-c{cycle}-{s}"
 
 
 def _staging_path(substrate, program_id: str):
@@ -80,10 +103,14 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
         "cycle": cycle,
         "fingerprint": fingerprint,
         "report": output.report,
+        "ideas_summary": output.ideas_summary,
+        "new_ideas": list(output.new_ideas),
+        "delete_idea_ids": list(output.delete_idea_ids),
         "proposals": [
             {"suffix": p.suffix, "goals": p.goals, "plan": p.plan,
              "priority": p.priority, "resources_required": p.resources_required,
-             "rationale": p.rationale, "title": p.title, "summary": p.summary}
+             "rationale": p.rationale, "title": p.title, "summary": p.summary,
+             "from_idea": p.from_idea}
             for p in output.proposals
         ],
     }
@@ -99,6 +126,9 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
     data = json.loads(path.read_text())
     output = PMCycleOutput(
         report=data.get("report", ""),
+        ideas_summary=data.get("ideas_summary", ""),
+        new_ideas=list(data.get("new_ideas", [])),
+        delete_idea_ids=list(data.get("delete_idea_ids", [])),
         proposals=[ProposedSprint(**p) for p in data.get("proposals", [])],
     )
     return StagedCycle(cycle=int(data["cycle"]), output=output,
@@ -133,13 +163,25 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None) -> d
         staged = StagedCycle(cycle=cycle, output=output, fingerprint=fingerprint)
 
     cycle = staged.cycle
+    now_ts = time.time() if now is None else now
+    summary_text, ideas = substrate.load_ideas(program_id)
+    ideas_by_id = {i.id: i for i in ideas}
+
     submitted: list[str] = []
     proposed: list[str] = []
+    dropped: list[str] = []
+    # Free slots = the cap minus sprints already awaiting review. Enforced here so
+    # the PM can never push past it, whatever the reasoner returns.
+    open_proposed = sum(1 for s in substrate.iter_sprints(status=SprintStatus.PROPOSED)
+                        if s.program == program_id)
+    slots = MAX_PROPOSED - open_proposed
     for prop in staged.output.proposals:
         sid = proposal_id(program_id, cycle, prop.suffix)
-        proposed.append(sid)
-        already_proposed = sid in pm.proposed_ids
-        if not (substrate.sprint_dir(sid) / "sprint.md").is_file():
+        exists = (substrate.sprint_dir(sid) / "sprint.md").is_file()
+        if not exists:
+            if slots <= 0:
+                dropped.append(sid)                    # over the cap -> not proposed
+                continue
             substrate.save_sprint(Sprint(
                 id=sid, status=SprintStatus.PROPOSED, goals=prop.goals,
                 plan=list(prop.plan),
@@ -149,20 +191,45 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None) -> d
                 title=prop.title,
                 summary=prop.summary,
             ))
-        if not already_proposed:
+            slots -= 1
+        proposed.append(sid)
+        if sid not in pm.proposed_ids:
             submitted.append(sid)                      # new this run
+        # A promotion: the originating idea has become a sprint -> drop it from the pool.
+        if prop.from_idea:
+            ideas_by_id.pop(prop.from_idea, None)
+
+    # --- idea pool: prune, add, and re-summarise (protection enforced here) ---
+    for iid in staged.output.delete_idea_ids:
+        target = ideas_by_id.get(iid)
+        if target is not None and target.source == "pm" and not target.protected:
+            del ideas_by_id[iid]
+    existing_texts = {i.text for i in ideas_by_id.values()}
+    for text in staged.output.new_ideas:
+        text = str(text).strip()
+        if not text or text in existing_texts:
+            continue
+        # deterministic id so re-applying a staged cycle doesn't duplicate ideas
+        iid = hashlib.sha1(f"{program_id}|{cycle}|{text}".encode("utf-8")).hexdigest()[:8]
+        if iid in ideas_by_id:
+            continue
+        ideas_by_id[iid] = Idea(id=iid, text=text, source="pm", created_at=now_ts)
+        existing_texts.add(text)
+    new_summary = staged.output.ideas_summary or summary_text
+    substrate.save_ideas(program_id, new_summary, list(ideas_by_id.values()))
 
     substrate.save_report(program_id, staged.output.report)
 
     pm.cycle = cycle + 1
-    pm.last_run = time.time() if now is None else now
+    pm.last_run = now_ts
     pm.last_fingerprint = staged.fingerprint
     for sid in proposed:
         if sid not in pm.proposed_ids:
             pm.proposed_ids.append(sid)
-    pm.log.append(f"cycle {cycle}: proposed {proposed}")
+    pm.log.append(f"cycle {cycle}: proposed {proposed}"
+                  + (f", dropped {dropped} (cap)" if dropped else ""))
     substrate.save_pm_state(pm)
 
     clear_staging(substrate, program_id)
-    return {"program": program_id, "cycle": cycle,
-            "submitted": submitted, "proposed": proposed, "skipped": False}
+    return {"program": program_id, "cycle": cycle, "submitted": submitted,
+            "proposed": proposed, "dropped": dropped, "skipped": False}

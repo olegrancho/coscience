@@ -1,3 +1,5 @@
+import pytest
+
 from tests.conftest import FakeAgent
 
 from coscience.models import BeatOutcome, Program, Result, Sprint, SprintStatus
@@ -56,15 +58,49 @@ def test_interrupted_agent_relaunches_to_resume(substrate):
     assert agent.started == ["sp1", "sp1"]
 
 
-def test_failed_run_completes_with_the_failure_as_result(substrate):
-    # exit != 0 means it ran to completion but failed: surface it, don't loop forever.
+def test_failed_run_is_not_laundered_into_a_result(substrate):
+    # exit != 0 (crash) must NOT become a "done" sprint with the crash text as result.
     agent = FakeAgent(result="ImportError: no module named sympy", status="failed")
     substrate.save_sprint(_approved("sp1"))
     worker = Worker(substrate, agent)
+    worker.run_one_beat()                                  # launch
+    assert worker.run_one_beat() == BeatOutcome.PROGRESSED  # ended failed -> retry, not done
+    assert substrate.load_sprint("sp1").status == SprintStatus.EXECUTING
+    assert substrate.load_sprint("sp1").results == []
+    with pytest.raises(Exception):
+        substrate.load_result("sp1-result")               # no result written
+    assert substrate.load_progress("sp1").agent_token == ""  # cleared -> relaunches
+
+
+def test_usage_limit_message_is_not_a_result(substrate):
+    # The classic dead-on-arrival case: agent printed the limit message and exited 1.
+    agent = FakeAgent(result="You've hit your session limit · resets 6:40am", status="failed")
+    substrate.save_sprint(_approved("sp1"))
+    worker = Worker(substrate, agent)
     worker.run_one_beat()
-    assert worker.run_one_beat() == BeatOutcome.COMPLETED
-    assert substrate.load_sprint("sp1").status == SprintStatus.DONE
-    assert "ImportError" in substrate.load_result("sp1-result").summary
+    assert worker.run_one_beat() == BeatOutcome.PROGRESSED
+    assert substrate.load_sprint("sp1").status == SprintStatus.EXECUTING
+    assert substrate.load_sprint("sp1").results == []
+
+
+def test_usage_exhausted_blocks_launch(substrate):
+    agent = FakeAgent()
+    substrate.save_sprint(_approved("sp1"))
+    worker = Worker(substrate, agent, usage_gate=lambda: False)
+    assert worker.run_one_beat() == BeatOutcome.IDLE       # claimed but not launched
+    assert agent.started == []                             # no agent spawned
+    assert substrate.load_progress("sp1").agent_token == ""
+
+
+def test_usage_recovers_then_launches(substrate):
+    agent = FakeAgent()
+    substrate.save_sprint(_approved("sp1"))
+    gate = {"ok": False}
+    worker = Worker(substrate, agent, usage_gate=lambda: gate["ok"])
+    assert worker.run_one_beat() == BeatOutcome.IDLE       # blocked
+    gate["ok"] = True
+    assert worker.run_one_beat() == BeatOutcome.PROGRESSED  # now launches
+    assert agent.started == ["sp1"]
 
 
 def test_agent_is_handed_program_and_prior_results(substrate):

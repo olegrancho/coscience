@@ -32,8 +32,23 @@ def render_prompt(context: PMContext) -> str:
         guidance_block = (
             "\n\nHUMAN GUIDANCE (standing direction from the oversight committee "
             "— weigh these in your proposals):\n" + notes)
-    return f"""You are the PM agent for a research program. Propose the next sprint(s)
-and write a short status report. You only PROPOSE; humans approve.
+
+    def _idea_line(i):
+        flags = []
+        if i.get("source") == "human":
+            flags.append("human")
+        if i.get("protected"):
+            flags.append("PROTECTED")
+        if i.get("comments"):
+            flags.append("comments: " + " | ".join(i["comments"]))
+        tag = f" ({'; '.join(flags)})" if flags else ""
+        return f"- [{i['id']}] {i['text']}{tag}"
+    ideas_block = _lines(context.ideas, _idea_line)
+
+    return f"""You are the PM agent for a research program. You maintain two things:
+a small set of PROPOSED SPRINTS (concrete next experiments, which humans approve), and
+an IDEA POOL (short, vague candidate directions you grow and prune over time). You only
+PROPOSE and curate; humans approve sprints.
 
 PROGRAM GOALS:
 {context.goals}{guidance_block}
@@ -46,8 +61,18 @@ COMPLETED SPRINTS AND RESULTS (use these to decide what is most valuable next):
 
 PRIOR PROPOSALS you already made (do NOT repeat their intent): {prior_block}
 
+IDEA POOL (id in brackets; you may delete only your own non-PROTECTED ideas):
+{ideas_block}
+
+SPRINT CAP: at most {context.max_proposed} sprints may await review. {context.proposed_count} are
+pending now, so you have {context.free_slots} free slot(s). Propose/promote AT MOST {context.free_slots};
+if that is 0, propose nothing and instead curate the idea pool.
+
 Respond with ONLY a JSON object (no prose outside it) of this shape:
 {{"report": "<markdown program-status summary>",
+  "ideas_summary": "<short markdown summary of the whole idea pool: themes, what's promising, what you pruned and why>",
+  "new_ideas": ["<a one-paragraph candidate direction>", "..."],
+  "delete_idea_ids": ["<id of one of YOUR non-protected ideas to prune>", "..."],
   "proposals": [
     {{"suffix": "<short-slug>",
       "title": "<=8 words naming the experiment, e.g. 'Cross-validate the witness pair'>",
@@ -55,9 +80,19 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
       "goals": "<the full objective of this sprint>",
       "plan": ["<suggested step in plain language>", "<another>", "..."],
       "priority": <int>, "resources_required": {{}} or null,
-      "rationale": "<why this experiment next>"}}
+      "rationale": "<why this experiment next>",
+      "from_idea": "<id of the pool idea this promotes, or omit>"}}
   ]}}
-Propose 0 proposals if nothing new is warranted.
+Propose 0 proposals if nothing new is warranted, or you are at the cap.
+
+Run the program by curating ideas, not by piling on sprints:
+- Keep the idea pool small and alive. As results arrive, PRUNE ideas that are settled,
+  disproven, or obsolete (delete_idea_ids — only your own, non-protected). ADD new ideas
+  (new_ideas, ~1 paragraph each) when results suggest fresh directions.
+- PROMOTE an idea to a sprint only when it is genuinely promising AND you have a free
+  slot: emit a proposal with `from_idea` set to that idea's id (it leaves the pool).
+- Ideas marked PROTECTED (human-proposed, pinned, or commented-on) are off-limits to
+  deletion — treat human comments on them as direction.
 
 Each sprint is carried out by a capable autonomous research agent that plans and does
 the work itself. So:
@@ -103,10 +138,17 @@ def parse_response(text: str) -> PMCycleOutput:
                 rationale=str(p.get("rationale", "")),
                 title=str(p.get("title", "")),
                 summary=str(p.get("summary", "")),
+                from_idea=str(p.get("from_idea", "")),
             ))
         except (KeyError, TypeError) as exc:
             raise PMReasonerError(f"malformed proposal: {exc}") from exc
-    return PMCycleOutput(proposals=proposals, report=str(data.get("report", "")))
+    return PMCycleOutput(
+        proposals=proposals,
+        report=str(data.get("report", "")),
+        ideas_summary=str(data.get("ideas_summary", "")),
+        new_ideas=[str(s) for s in data.get("new_ideas", [])],
+        delete_idea_ids=[str(s) for s in data.get("delete_idea_ids", [])],
+    )
 
 
 class ClaudeCodeReasoner:

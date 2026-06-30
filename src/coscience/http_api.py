@@ -8,6 +8,8 @@ siblings over Service.
 from __future__ import annotations
 
 import os
+import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 import uvicorn
@@ -17,6 +19,27 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from coscience.service import NotFoundError, Service, service_from_env
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@lru_cache(maxsize=1)
+def server_version() -> str:
+    """Short git SHA of the code this server is running, resolved once at startup.
+
+    Lets the dashboard detect when a long-lived server has drifted from the
+    bundle it's serving (e.g. code was rebuilt but the process never bounced).
+    """
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=_REPO_ROOT, capture_output=True, text=True, timeout=2,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
 
 
 class SprintSubmit(BaseModel):
@@ -45,6 +68,14 @@ class GuidanceIn(BaseModel):
     text: str
 
 
+class IdeaIn(BaseModel):
+    text: str = Field(min_length=1)
+
+
+class IdeaPinIn(BaseModel):
+    pinned: bool
+
+
 def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     app = FastAPI(title=title, version="0.0.0")
     api = APIRouter(prefix="/api")
@@ -52,6 +83,10 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     @api.get("/health")
     def health() -> dict:
         return {"status": "ok"}
+
+    @api.get("/version")
+    def version() -> dict:
+        return {"sha": server_version()}
 
     @api.get("/sprints")
     def list_sprints(status: str | None = Query(default=None)) -> list[dict]:
@@ -78,6 +113,13 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def get_sprint(sprint_id: str) -> dict:
         try:
             return service.get_sprint(sprint_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+
+    @api.get("/sprints/{sprint_id}/files")
+    def sprint_files(sprint_id: str) -> list[dict]:
+        try:
+            return service.list_sprint_files(sprint_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
 
@@ -170,6 +212,46 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
         return Response(status_code=204)
+
+    @api.get("/programs/{program_id}/ideas")
+    def list_ideas(program_id: str) -> dict:
+        try:
+            return service.list_ideas(program_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.post("/programs/{program_id}/ideas", status_code=201)
+    def add_idea(program_id: str, body: IdeaIn) -> dict:
+        try:
+            return service.add_idea(program_id, body.text, source="human")
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.delete("/programs/{program_id}/ideas/{idea_id}", status_code=204)
+    def delete_idea(program_id: str, idea_id: str) -> Response:
+        try:
+            service.delete_idea(program_id, idea_id, by="human")
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"not found: {program_id}/{idea_id}")
+        return Response(status_code=204)
+
+    @api.post("/programs/{program_id}/ideas/{idea_id}/pin")
+    def pin_idea(program_id: str, idea_id: str, body: IdeaPinIn) -> dict:
+        try:
+            return service.set_idea_pin(program_id, idea_id, body.pinned)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"not found: {program_id}/{idea_id}")
+
+    @api.post("/programs/{program_id}/ideas/{idea_id}/comments", status_code=201)
+    def comment_idea(program_id: str, idea_id: str, body: GuidanceIn) -> dict:
+        try:
+            return service.add_idea_comment(program_id, idea_id, body.text)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"not found: {program_id}/{idea_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     app.include_router(api)
     return app

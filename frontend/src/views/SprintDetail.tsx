@@ -3,8 +3,8 @@ import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import Markdown from "react-markdown";
-import { api } from "../api";
+import Md from "../components/Md";
+import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
 import { BackLink, EmptyState, RelTime, StatusBadge } from "../components/ui";
 import SprintEditModal from "../components/SprintEditModal";
@@ -31,7 +31,7 @@ function ResultPreview({ id }: { id: string }) {
         aria-label={folded ? "Unfold result" : undefined}
         onKeyDown={folded ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(true); } } : undefined}
       >
-        <Markdown>{summary}</Markdown>
+        <Md>{summary}</Md>
       </div>
       <Group gap={16} mt={10} align="center">
         {long && (
@@ -54,6 +54,74 @@ function programOf(id: string) {
 }
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
+
+function fmtSize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** One collapsible agent document. Scratchpad + log open by default (the live
+ *  view of what the agent is doing); instructions + artifacts start folded. */
+function FileBlock({ f }: { f: SprintFile }) {
+  const [open, setOpen] = useState(f.kind === "scratchpad" || f.kind === "log");
+  const isMd = f.name.endsWith(".md");
+  return (
+    <div style={{ border: "1px solid var(--hairline)", borderRadius: 8, overflow: "hidden" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 12px",
+                 background: "var(--machine-weak)", border: "none", cursor: "pointer", textAlign: "left" }}
+      >
+        <span style={{ color: "var(--ink-faint)", fontSize: 11, width: 10 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>{f.label}</span>
+        {f.label !== f.name && <span className="mono" style={{ fontSize: 11, color: "var(--ink-faint)" }}>{f.name}</span>}
+        <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--ink-faint)" }} className="mono">{fmtSize(f.size)}</span>
+      </button>
+      {open && (
+        <div style={{ padding: "12px 14px" }}>
+          {f.binary ? (
+            <Text size="sm" c="dimmed">Binary file — not shown.</Text>
+          ) : !f.content.trim() ? (
+            <Text size="sm" c="dimmed">Empty.</Text>
+          ) : isMd ? (
+            <div className="report-leaf"><Md>{f.content}</Md></div>
+          ) : (
+            <pre className="mono" style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word",
+                 fontSize: 12.5, lineHeight: 1.5, maxHeight: 440, overflow: "auto" }}>{f.content}</pre>
+          )}
+          {f.truncated && (
+            <Text size="xs" c="dimmed" mt={8}>… showing the most recent {Math.round(f.content.length / 1024)} KB.</Text>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The agent's working documents for a sprint. Polls while the agent runs so
+ *  scratchpad + log update live; static once finished. */
+function WorkingDocs({ sprintId, live }: { sprintId: string; live: boolean }) {
+  const files = useQuery({
+    queryKey: ["sprint-files", sprintId],
+    queryFn: () => api.getSprintFiles(sprintId),
+    refetchInterval: live ? 5000 : false,
+  });
+  const docs = files.data ?? [];
+  if (!docs.length) return null;
+  return (
+    <Card padding="lg" radius="md" style={cardStyle}>
+      <div className="eyebrow" style={{ marginBottom: 4 }}>working documents · {docs.length}</div>
+      <Text size="xs" c="dimmed" mb="md">
+        The research agent's own files for this experiment{live ? " — refreshing live while it runs." : "."}
+      </Text>
+      <Stack gap={10}>
+        {docs.map((f) => <FileBlock key={f.name} f={f} />)}
+      </Stack>
+    </Card>
+  );
+}
 
 export default function SprintDetail() {
   const { id = "" } = useParams();
@@ -128,6 +196,8 @@ export default function SprintDetail() {
           </Stack>
         </Card>
       )}
+
+      <WorkingDocs sprintId={s.id} live={s.agent_running} />
 
       <SimpleGrid cols={{ base: 1, sm: 2 }}>
         <Card padding="lg" radius="md" style={cardStyle}>

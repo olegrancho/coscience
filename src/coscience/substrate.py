@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 
 from coscience.frontmatter_io import parse, serialize
-from coscience.models import Sprint, SprintStatus, ProgressState, Result, Program, ProgramStatus, PMState
+from coscience.models import (Sprint, SprintStatus, ProgressState, Result, Program,
+                              ProgramStatus, PMState, Idea)
 
 
 class Substrate:
@@ -37,6 +39,7 @@ class Substrate:
             rationale=str(fm.get("rationale", "")),
             title=str(fm.get("title", "")),
             summary=str(fm.get("summary", "")),
+            created_at=None if fm.get("created_at") is None else float(fm["created_at"]),
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
@@ -62,6 +65,12 @@ class Substrate:
         if sprint.summary:
             fm["summary"] = sprint.summary
         d = self.sprint_dir(sprint.id)
+        # Stamp creation time on first save only, so it survives later edits and
+        # legacy sprints (saved before this field existed) stay unstamped.
+        if sprint.created_at is None and not (d / "sprint.md").is_file():
+            sprint.created_at = time.time()
+        if sprint.created_at is not None:
+            fm["created_at"] = sprint.created_at
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))
 
@@ -220,6 +229,38 @@ class Substrate:
         d.mkdir(parents=True, exist_ok=True)
         fm = {"type": "guidance", "notes": notes}
         (d / "guidance.md").write_text(serialize(fm, f"# Guidance {program_id}\n"))
+
+    # --- ideas (a pool of candidate directions + the PM's summary of it) ---
+    def load_ideas(self, program_id: str) -> tuple[str, list[Idea]]:
+        path = self.program_dir(program_id) / "ideas.md"
+        if not path.is_file():
+            return "", []
+        fm, _ = parse(path.read_text())
+        ideas = []
+        for n in fm.get("ideas", []):
+            ideas.append(Idea(
+                id=str(n["id"]), text=str(n["text"]),
+                source=str(n.get("source", "human")),
+                pinned=bool(n.get("pinned", False)),
+                comments=[{"id": str(c["id"]), "text": str(c["text"]),
+                           "added_at": float(c["added_at"])} for c in n.get("comments", [])],
+                created_at=float(n.get("created_at", 0.0)),
+            ))
+        return str(fm.get("summary", "")), ideas
+
+    def save_ideas(self, program_id: str, summary: str, ideas: list[Idea]) -> None:
+        d = self.program_dir(program_id)
+        d.mkdir(parents=True, exist_ok=True)
+        fm = {
+            "type": "ideas",
+            "summary": summary,
+            "ideas": [
+                {"id": i.id, "text": i.text, "source": i.source, "pinned": i.pinned,
+                 "comments": list(i.comments), "created_at": i.created_at}
+                for i in ideas
+            ],
+        }
+        (d / "ideas.md").write_text(serialize(fm, f"# Ideas {program_id}\n"))
 
     # --- git ---
     def commit(self, message: str) -> None:

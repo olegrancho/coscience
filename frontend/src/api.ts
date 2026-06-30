@@ -4,6 +4,12 @@ export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[];
 }
 export interface GuidanceNote { id: string; text: string; added_at: number }
+export interface IdeaComment { id: string; text: string; added_at: number }
+export interface Idea {
+  id: string; text: string; source: "pm" | "human";
+  pinned: boolean; protected: boolean; comments: IdeaComment[]; created_at: number;
+}
+export interface IdeaPool { summary: string; ideas: Idea[] }
 export interface SprintRow {
   id: string; status: string; title: string; summary: string;
   goals: string; program: string | null;
@@ -16,6 +22,10 @@ export interface Sprint {
   resources_required: Record<string, number>; rationale: string; plan: string[];
   program: string | null; results: string[];
   agent_running: boolean; started_at: number | null; lease: unknown | null;
+}
+export interface SprintFile {
+  name: string; label: string; kind: string; size: number;
+  content: string; truncated: boolean; binary: boolean;
 }
 export interface ResultRow { id: string; sprint: string; summary: string; program?: string | null; completed_at?: number | null }
 export interface Ledger {
@@ -34,6 +44,7 @@ export interface SprintPatch {
 }
 
 export const api = {
+  getVersion: () => fetch("/api/version").then(j<{ sha: string }>),
   listPrograms: () => fetch("/api/programs").then(j<ProgramRow[]>),
   getProgram: (id: string) => fetch(`/api/programs/${id}`).then(j<Program>),
   setProgramStatus: (id: string, status: string) =>
@@ -49,8 +60,27 @@ export const api = {
     }).then(j<GuidanceNote>),
   removeGuidance: (id: string, noteId: string) =>
     fetch(`/api/programs/${id}/guidance/${noteId}`, { method: "DELETE" }).then(j<void>),
+  listIdeas: (id: string) => fetch(`/api/programs/${id}/ideas`).then(j<IdeaPool>),
+  addIdea: (id: string, text: string) =>
+    fetch(`/api/programs/${id}/ideas`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }).then(j<Idea>),
+  deleteIdea: (id: string, ideaId: string) =>
+    fetch(`/api/programs/${id}/ideas/${ideaId}`, { method: "DELETE" }).then(j<void>),
+  setIdeaPin: (id: string, ideaId: string, pinned: boolean) =>
+    fetch(`/api/programs/${id}/ideas/${ideaId}/pin`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned }),
+    }).then(j<Idea>),
+  addIdeaComment: (id: string, ideaId: string, text: string) =>
+    fetch(`/api/programs/${id}/ideas/${ideaId}/comments`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }).then(j<Idea>),
   listSprints: () => fetch("/api/sprints").then(j<SprintRow[]>),
   getSprint: (id: string) => fetch(`/api/sprints/${id}`).then(j<Sprint>),
+  getSprintFiles: (id: string) => fetch(`/api/sprints/${id}/files`).then(j<SprintFile[]>),
   submitSprint: (body: { id: string; goals: string; plan: string[]; program?: string;
                          priority?: number; resources_required?: Record<string, number> }) =>
     fetch("/api/sprints", {

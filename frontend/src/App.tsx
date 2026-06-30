@@ -7,6 +7,7 @@ import { Heartbeat } from "./components/ui";
 import Overview from "./views/Overview";
 import Programs from "./views/ProgramsOverview";
 import ProgramDetail from "./views/ProgramDetail";
+import IdeasView from "./views/IdeasView";
 import SprintDetail from "./views/SprintDetail";
 import ResultDetail from "./views/ResultDetail";
 import Ledger from "./views/Ledger";
@@ -81,14 +82,41 @@ function Pulse() {
   );
 }
 
+/** Warns when the API server is running a different build than this page —
+ *  the classic "server wasn't restarted after a rebuild" trap, which surfaces
+ *  as blank pages / 500s when old code meets new on-disk data. Polls so a
+ *  mid-session restart clears (or raises) the warning on its own. */
+function VersionBanner() {
+  const v = useQuery({
+    queryKey: ["version"],
+    queryFn: api.getVersion,
+    refetchInterval: 30_000,
+  });
+  const server = v.data?.sha;
+  const page = __APP_VERSION__;
+  const drift = !!server && server !== "unknown" && page !== "unknown" && server !== page;
+  if (!drift) return null;
+  return (
+    <Group gap={7} style={{ marginRight: "auto" }} wrap="nowrap">
+      <span style={{ color: "var(--signal)", fontSize: 13 }}>⚠</span>
+      <Text size="xs" c="dimmed">
+        server <span className="mono" style={{ color: "var(--ink)" }}>{server}</span> ≠ page{" "}
+        <span className="mono" style={{ color: "var(--ink)" }}>{page}</span> — restart the backend, then{" "}
+        <button type="button" className="linklike" onClick={() => location.reload()}>reload</button>
+      </Text>
+    </Group>
+  );
+}
+
 export default function App() {
   const { pathname } = useLocation();
   const active = activeSection(pathname);
   return (
     <AppShell header={{ height: 52 }} navbar={{ width: 232, breakpoint: "sm" }} padding={0}>
       <AppShell.Header style={{ background: "var(--card)", borderBottom: "1px solid var(--hairline)" }}>
-        <Group h="100%" px="lg" justify="flex-end">
-          <Group gap={7}>
+        <Group h="100%" px="lg" justify="flex-end" wrap="nowrap">
+          <VersionBanner />
+          <Group gap={7} wrap="nowrap">
             <span className="heartbeat" />
             <Text className="mono" size="xs" c="dimmed">live · refreshes every 10s</Text>
           </Group>
@@ -124,6 +152,7 @@ export default function App() {
               <Route path="/" element={<Overview />} />
               <Route path="/programs" element={<Programs />} />
               <Route path="/programs/:id" element={<ProgramDetail />} />
+              <Route path="/programs/:id/ideas" element={<IdeasView />} />
               <Route path="/sprints/:id" element={<SprintDetail />} />
               <Route path="/results/:id" element={<ResultDetail />} />
               <Route path="/ledger" element={<Ledger />} />

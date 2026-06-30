@@ -28,11 +28,12 @@ class CycleReport:
 
 class Dispatcher:
     def __init__(self, substrate: Substrate, agent,
-                 pool: ResourcePool, policy: SchedulerPolicy | None = None):
+                 pool: ResourcePool, policy: SchedulerPolicy | None = None,
+                 usage_gate=None):
         self.substrate = substrate
         self.agent = agent
         self.policy = policy or SchedulerPolicy()
-        self.worker = Worker(substrate, agent)
+        self.worker = Worker(substrate, agent, usage_gate=usage_gate)
         cos = substrate.repo_root / ".coscience"
         self.ledger = Ledger(pool, cos / "leases.json")
         self._queue_path = cos / "queue.json"

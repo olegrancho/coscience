@@ -20,6 +20,26 @@ def test_health(client):
     assert r.json() == {"status": "ok"}
 
 
+def test_version_returns_sha(client):
+    r = client.get("/api/version")
+    assert r.status_code == 200
+    sha = r.json()["sha"]
+    assert isinstance(sha, str) and sha
+
+
+def test_sprint_files_endpoint(client):
+    client.post("/api/sprints", json={"id": "sp1", "goals": "g", "plan": ["a"]})
+    (client.svc.substrate.sprint_dir("sp1") / "scratchpad.md").write_text("# notes")
+    r = client.get("/api/sprints/sp1/files")
+    assert r.status_code == 200
+    names = [f["name"] for f in r.json()]
+    assert names == ["scratchpad.md"]
+
+
+def test_sprint_files_missing_is_404(client):
+    assert client.get("/api/sprints/nope/files").status_code == 404
+
+
 def test_submit_then_get_and_list(client):
     body = {"id": "sp1", "goals": "cure",
             "plan": ["echo hi"],

@@ -7,6 +7,14 @@ def test_proposal_id_format():
     assert proposal_id("p1", 3, "assay") == "p1-c3-assay"
 
 
+def test_proposal_id_strips_doubled_prefixes():
+    # the model sometimes echoes the cycle and/or program prefix into the suffix
+    assert proposal_id("p1", 2, "c2-heuristic-gap-forecast") == "p1-c2-heuristic-gap-forecast"
+    assert proposal_id("p1", 3, "p1-c3-land-literature-rungs") == "p1-c3-land-literature-rungs"
+    assert proposal_id("p1", 4, "p1-foo") == "p1-c4-foo"
+    assert proposal_id("p1", 5, "  c5-bar  ") == "p1-c5-bar"
+
+
 def test_staging_roundtrip_carries_cycle(substrate):
     out = PMCycleOutput(
         proposals=[ProposedSprint(suffix="a", goals="g", plan=[{"id": "s", "run": "true"}],
