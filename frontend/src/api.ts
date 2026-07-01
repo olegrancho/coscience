@@ -124,6 +124,8 @@ export const api = {
   listSprints: () => fetch("/api/sprints").then(j<SprintRow[]>),
   getSprint: (id: string) => fetch(`/api/sprints/${id}`).then(j<Sprint>),
   getSprintFiles: (id: string) => fetch(`/api/sprints/${id}/files`).then(j<SprintFile[]>),
+  getSprintFile: (id: string, name: string) =>
+    fetch(`/api/sprints/${id}/files/${encodeURIComponent(name)}`).then(j<SprintFile>),
   addSprintComment: (id: string, text: string, target: "worker" | "pm") =>
     fetch(`/api/sprints/${id}/comments`, {
       method: "POST", headers: { "Content-Type": "application/json" },

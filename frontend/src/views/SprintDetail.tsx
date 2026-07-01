@@ -63,9 +63,22 @@ function fmtSize(n: number): string {
 
 /** One collapsible agent document. Scratchpad + log open by default (the live
  *  view of what the agent is doing); instructions + artifacts start folded. */
-function FileBlock({ f }: { f: SprintFile }) {
+function FileBlock({ f, sprintId, live }: { f: SprintFile; sprintId: string; live?: boolean }) {
   const [open, setOpen] = useState(f.kind === "scratchpad" || f.kind === "log");
+  const [full, setFull] = useState(false);
   const isMd = f.name.endsWith(".md");
+
+  // Only fetch the untruncated file when the user asks for it (and there's more to
+  // show). Poll it too while the agent runs so "full log" stays live like the tail.
+  const fullQ = useQuery({
+    queryKey: ["sprint-file", sprintId, f.name],
+    queryFn: () => api.getSprintFile(sprintId, f.name),
+    enabled: open && full && f.truncated,
+    refetchInterval: live ? 5000 : false,
+  });
+  const showingFull = full && f.truncated;
+  const content = showingFull ? (fullQ.data?.content ?? f.content) : f.content;
+
   return (
     <div style={{ border: "1px solid var(--hairline)", borderRadius: 8, overflow: "hidden" }}>
       <button
@@ -81,20 +94,36 @@ function FileBlock({ f }: { f: SprintFile }) {
       </button>
       {open && (
         <div style={{ padding: "12px 14px" }}>
+          {f.truncated && (
+            <Group gap={10} align="center" mb={10}>
+              <SegmentedControl
+                size="xs" value={full ? "full" : "recent"}
+                onChange={(v) => setFull(v === "full")}
+                data={[{ label: "Most recent", value: "recent" }, { label: "Full log", value: "full" }]}
+              />
+              <Text size="xs" c="dimmed">
+                {showingFull
+                  ? `full file · ${fmtSize(f.size)}`
+                  : `tail · most recent ${Math.round(f.content.length / 1024)} KB of ${fmtSize(f.size)}`}
+              </Text>
+              {showingFull && fullQ.isFetching && <Loader size="xs" />}
+            </Group>
+          )}
           {f.binary ? (
             <Text size="sm" c="dimmed">Binary file — not shown.</Text>
-          ) : !f.content.trim() ? (
+          ) : showingFull && fullQ.isLoading ? (
+            <Group gap={8}><Loader size="xs" /><Text size="sm" c="dimmed">Loading full log…</Text></Group>
+          ) : showingFull && fullQ.isError ? (
+            <Text size="sm" c="red">Couldn't load the full log.</Text>
+          ) : !content.trim() ? (
             <Text size="sm" c="dimmed">Empty.</Text>
           ) : isMd ? (
-            <div className="report-leaf"><Md>{f.content}</Md></div>
+            <div className="report-leaf"><Md>{content}</Md></div>
           ) : f.kind === "log" ? (
-            <Transcript raw={f.content} />
+            <Transcript raw={content} />
           ) : (
             <pre className="mono" style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word",
-                 fontSize: 12.5, lineHeight: 1.5, maxHeight: 440, overflow: "auto" }}>{f.content}</pre>
-          )}
-          {f.truncated && (
-            <Text size="xs" c="dimmed" mt={8}>… showing the most recent {Math.round(f.content.length / 1024)} KB.</Text>
+                 fontSize: 12.5, lineHeight: 1.5, maxHeight: 440, overflow: "auto" }}>{content}</pre>
           )}
         </div>
       )}
@@ -171,7 +200,7 @@ function WorkingDocs({ sprintId, live }: { sprintId: string; live: boolean }) {
         The research agent's own files for this experiment{live ? " — refreshing live while it runs." : "."}
       </Text>
       <Stack gap={10}>
-        {docs.map((f) => <FileBlock key={f.name} f={f} />)}
+        {docs.map((f) => <FileBlock key={f.name} f={f} sprintId={sprintId} live={live} />)}
       </Stack>
     </Card>
   );

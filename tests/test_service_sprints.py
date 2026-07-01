@@ -210,6 +210,31 @@ def test_list_sprint_files_missing_raises(tmp_path):
         Service(tmp_path).list_sprint_files("nope")
 
 
+def test_read_sprint_file_returns_full_untruncated(tmp_path):
+    # 'show full log' toggle: read_sprint_file returns the whole file, unlike the
+    # tailed list view.
+    import json
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["a"])
+    d = svc.substrate.sprint_dir("sp1")
+    body = "\n".join(json.dumps({"type": "assistant", "i": i}) for i in range(20000)) + "\n"
+    (d / "agent.out").write_text(body)
+    assert next(x for x in svc.list_sprint_files("sp1") if x["name"] == "agent.out")["truncated"]
+    full = svc.read_sprint_file("sp1", "agent.out")
+    assert full["truncated"] is False
+    assert full["content"] == body            # whole file, nothing dropped
+    assert full["size"] == len(body.encode())
+
+
+def test_read_sprint_file_guards_traversal_and_hidden(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["a"])
+    (svc.substrate.sprint_dir("sp1") / "progress.md").write_text("---\n---")  # hidden plumbing
+    for bad in ("../../etc/passwd", "progress.md", "nope.txt", "sub/dir.txt"):
+        with pytest.raises(NotFoundError):
+            svc.read_sprint_file("sp1", bad)
+
+
 def test_add_sprint_comment_any_status(tmp_path):
     svc = Service(tmp_path)
     svc.submit_sprint(id="sp1", goals="g", plan=["a"])

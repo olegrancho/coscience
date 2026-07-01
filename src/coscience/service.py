@@ -248,6 +248,24 @@ class Service:
         docs.sort(key=lambda f: (self._DOC_ORDER[f["kind"]], f["name"]))
         return docs
 
+    def read_sprint_file(self, sprint_id: str, name: str) -> dict:
+        """Full (untruncated) content of one sprint document — backs the UI's
+        'show full log' toggle, where list_sprint_files tails large files.
+        Path-guarded to the sprint directory (no traversal, no hidden files)."""
+        self._load_sprint(sprint_id)  # raises NotFoundError for unknown sprints
+        d = self.substrate.sprint_dir(sprint_id).resolve()
+        path = (d / name).resolve()
+        if (path.parent != d or not path.is_file()
+                or path.name.startswith(".") or path.name in self._DOC_HIDDEN):
+            raise NotFoundError(name)
+        label, kind = self._DOC_LABELS.get(path.name, (path.name, "artifact"))
+        raw = path.read_bytes()
+        binary = b"\x00" in raw[:8192]
+        content = "" if binary else raw.decode("utf-8", errors="replace")
+        return {"name": path.name, "label": label, "kind": kind,
+                "size": len(raw), "content": content,
+                "truncated": False, "binary": binary}
+
     # --- programs (read-only) ---
     def list_programs(self, status: str | None = None) -> list[dict]:
         wanted = ProgramStatus(status) if status is not None else None
