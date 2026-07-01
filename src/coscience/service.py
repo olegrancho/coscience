@@ -297,6 +297,19 @@ class Service:
         self.substrate.save_program(program)
         return {"id": program_id, "pm_model": program.pm_model}
 
+    def replan(self, program_id: str) -> dict:
+        """Run one PM cycle for this program right now (forced) so a human edit or
+        comment is acted on without waiting for the loop tick. The per-program lock
+        inside pm_beat keeps this from racing the background loop; returns the beat
+        summary (with `busy` if the loop was mid-cycle)."""
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        from coscience.pm_agent import pm_beat
+        from coscience.pm_claude import ClaudeCodeReasoner
+        from coscience.worker import claude_usage_ok
+        return pm_beat(self.substrate, program_id, ClaudeCodeReasoner(),
+                       usage_ok=claude_usage_ok, force=True)
+
     def set_program_workdir(self, program_id: str, workdir: str) -> dict:
         """Set the project folder this program's sprint agents run in ("" = control
         repo). Returns the stored value plus whether the path currently exists, so

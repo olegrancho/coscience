@@ -232,6 +232,13 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
 
+    @api.post("/programs/{program_id}/replan")
+    def replan(program_id: str) -> dict:
+        try:
+            return service.replan(program_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
     @api.get("/programs/{program_id}/guidance")
     def list_guidance(program_id: str) -> list[dict]:
         try:

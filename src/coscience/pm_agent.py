@@ -3,6 +3,7 @@ atomic staging commit), then idempotently submit proposed sprints + write the
 report. Deterministic and kill-safe; the reasoner does no writes."""
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -164,13 +165,54 @@ def clear_staging(substrate, program_id: str) -> None:
 
 
 def pm_beat(substrate, program_id: str, reasoner, now: float | None = None,
-           usage_ok=None) -> dict:
-    """Run one bounded, kill-safe PM cycle for a program. Returns a summary.
+            usage_ok=None, force: bool = False) -> dict:
+    """Run one bounded, kill-safe PM cycle for a program under a per-program lock.
+
+    The lock serialises the background loop against on-demand "replan now" calls so
+    they can never reason concurrently or race the staging commit. If another beat
+    already holds it, this one returns a `busy` skip instead of blocking. `force`
+    bypasses the event-gate (an explicit human replan reasons even if nothing changed)."""
+    lock = _acquire_program_lock(substrate, program_id)
+    if lock is None:
+        pm = substrate.load_pm_state(program_id)
+        return {"program": program_id, "cycle": pm.cycle,
+                "submitted": [], "proposed": [], "skipped": True, "busy": True}
+    try:
+        return _run_pm_cycle(substrate, program_id, reasoner, now, usage_ok, force)
+    finally:
+        _release_program_lock(lock)
+
+
+def _acquire_program_lock(substrate, program_id: str):
+    """Non-blocking per-program advisory lock (flock). Returns the open file handle
+    on success, or None if another process/thread already holds it. The OS releases
+    it if the holder dies, preserving kill-safety."""
+    lockdir = substrate.repo_root / ".coscience"
+    lockdir.mkdir(parents=True, exist_ok=True)
+    f = open(lockdir / f"pm-{program_id}.lock", "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    return f
+
+
+def _release_program_lock(f) -> None:
+    try:
+        fcntl.flock(f, fcntl.LOCK_UN)
+    finally:
+        f.close()
+
+
+def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None,
+                  usage_ok=None, force: bool = False) -> dict:
+    """One PM cycle body (already holding the program lock): gather context, reason
+    once behind the staging commit, then idempotently apply proposals/ideas/edits.
 
     `usage_ok` is an optional () -> bool gate (production passes the real Claude
     usage check). When it returns False we skip the reasoner call WITHOUT advancing
-    the fingerprint, so the pending change is re-reasoned once the budget recovers —
-    this is what stops a usage limit from crashing the loop."""
+    the fingerprint, so the pending change is re-reasoned once the budget recovers."""
     pm = substrate.load_pm_state(program_id)
 
     staged = read_staging(substrate, program_id)
@@ -178,7 +220,7 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None,
         cycle = pm.cycle
         context = gather_context(substrate, program_id)
         fingerprint = context_fingerprint(context)
-        if fingerprint == pm.last_fingerprint:
+        if not force and fingerprint == pm.last_fingerprint:
             # Event-driven: nothing the PM acts on has changed since the last cycle
             # (no new results, guidance, approvals or goal edits). Stay idle — don't
             # burn a reasoner call or pile up redundant proposals.

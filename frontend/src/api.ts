@@ -70,6 +70,9 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model }),
     }).then(j<{ id: string; pm_model: string }>),
+  replan: (id: string) =>
+    fetch(`/api/programs/${id}/replan`, { method: "POST" }).then(
+      j<{ program: string; cycle: number; submitted: string[]; skipped?: boolean; busy?: boolean; throttled?: boolean }>),
   setProgramWorkdir: (id: string, workdir: string) =>
     fetch(`/api/programs/${id}/workdir`, {
       method: "POST", headers: { "Content-Type": "application/json" },

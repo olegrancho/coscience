@@ -16,6 +16,7 @@ export default function ProgramDetail() {
   const qc = useQueryClient();
   const [note, setNote] = useState("");
   const [proposing, setProposing] = useState(false);
+  const [replanning, setReplanning] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
   const [showAll, setShowAll] = useState(false);
 
@@ -65,6 +66,19 @@ export default function ProgramDetail() {
     try { await api.setProgramModel(id, model); notifications.show({ color: "teal", title: "Planner model set", message: model ? `The PM will plan on ${model}.` : "Back to the default model." }); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't set model", message: String(e) }); }
   };
+  const replan = async () => {
+    setReplanning(true);
+    try {
+      const r = await api.replan(id);
+      const msg = r.busy ? "The PM is already reasoning — try again in a moment."
+        : r.throttled ? "Claude usage is exhausted; it will resume after the reset."
+        : r.submitted?.length ? `Proposed ${r.submitted.join(", ")}.`
+        : "Re-planned — no new proposals.";
+      notifications.show({ color: r.busy || r.throttled ? "yellow" : "teal", title: "Replan", message: msg });
+      refresh();
+    } catch (e) { notifications.show({ color: "red", title: "Replan failed", message: String(e) }); }
+    finally { setReplanning(false); }
+  };
   const saveWorkdir = async (value: string) => {
     try {
       const r = await api.setProgramWorkdir(id, value.trim());
@@ -89,6 +103,8 @@ export default function ProgramDetail() {
             {p.status !== "active" && <Button variant="light" color="machine" onClick={() => setStatus("active", "Resumed")}>Resume</Button>}
             {p.status === "active" && <Button variant="light" color="signal" onClick={() => setStatus("paused", "Paused")}>Pause</Button>}
             {p.status !== "closed" && <Button variant="default" onClick={() => setStatus("closed", "Closed")}>Close</Button>}
+            <Button variant="light" color="machine" loading={replanning} onClick={replan}
+                    title="Run the PM planner now instead of waiting for its next cycle">Replan now</Button>
             <Button color="machine" onClick={() => setProposing(true)}>Propose experiment</Button>
           </Group>
         </Group>

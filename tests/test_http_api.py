@@ -186,3 +186,17 @@ def test_set_program_status_invalid_is_422(client):
 
 def test_set_program_status_missing_is_404(client):
     assert client.post("/api/programs/nope/status", json={"status": "paused"}).status_code == 404
+
+
+def test_replan_endpoint_runs_a_beat(client, monkeypatch):
+    # The route must invoke service.replan; stub it so we don't shell out to Claude.
+    client.svc.substrate.save_program(Program(id="p1", title="t", goals="g"))
+    monkeypatch.setattr(client.svc, "replan",
+                        lambda pid: {"program": pid, "cycle": 1, "submitted": ["p1-c0-x"]})
+    r = client.post("/api/programs/p1/replan")
+    assert r.status_code == 200
+    assert r.json()["submitted"] == ["p1-c0-x"]
+
+
+def test_replan_missing_is_404(client):
+    assert client.post("/api/programs/nope/replan").status_code == 404

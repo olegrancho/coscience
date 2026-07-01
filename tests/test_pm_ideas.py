@@ -83,6 +83,34 @@ def test_promotion_creates_sprint_and_removes_idea(substrate):
     assert ideas == []                                  # the seed left the pool
 
 
+def test_force_reasons_even_when_nothing_changed(substrate):
+    # "Replan now": an explicit human replan must reason even if the fingerprint is
+    # unchanged (a normal beat would skip).
+    _prog(substrate)
+    pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="r0")]))
+    fake = FakeReasoner([PMCycleOutput(report="r1")])
+    assert pm_beat(substrate, "p1", fake)["skipped"]           # unchanged -> skip
+    fake2 = FakeReasoner([PMCycleOutput(report="r2")])
+    out = pm_beat(substrate, "p1", fake2, force=True)          # forced -> reasons
+    assert not out.get("skipped")
+    assert len(fake2.calls) == 1
+
+
+def test_concurrent_beat_returns_busy(substrate):
+    # While one beat holds the per-program lock, a second returns a busy skip rather
+    # than racing the staging commit (this is what makes on-demand replan safe).
+    from coscience.pm_agent import _acquire_program_lock, _release_program_lock
+    _prog(substrate)
+    held = _acquire_program_lock(substrate, "p1")
+    try:
+        out = pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="x")]), force=True)
+        assert out["busy"] is True and out["skipped"] is True
+    finally:
+        _release_program_lock(held)
+    # lock free again -> a beat runs normally
+    assert not pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="y")]), force=True).get("busy")
+
+
 def test_human_idea_retriggers_pm(substrate):
     # An idle PM (unchanged fingerprint) must wake when a human adds an idea.
     _prog(substrate)
