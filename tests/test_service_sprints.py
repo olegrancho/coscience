@@ -178,6 +178,24 @@ def test_list_sprint_files_orders_and_labels(tmp_path):
     assert by["solver.py"]["binary"] is False
 
 
+def test_truncated_log_starts_clean_and_stays_text(tmp_path):
+    # A >256KB stream-json log tailed to the last 256KB must not be mis-flagged as
+    # binary (a byte-cut can split a UTF-8 codepoint) and must start on a clean line
+    # boundary so the transcript parser sees whole JSON events, not a partial first line.
+    import json
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["a"])
+    d = svc.substrate.sprint_dir("sp1")
+    lines = [json.dumps({"type": "assistant", "i": i, "note": "café ☕"}) for i in range(20000)]
+    (d / "agent.out").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    f = next(x for x in svc.list_sprint_files("sp1") if x["name"] == "agent.out")
+    assert f["truncated"] is True
+    assert f["binary"] is False                       # not mis-flagged despite the codepoint cut
+    assert f["content"]                                # non-empty
+    first = f["content"].lstrip().splitlines()[0]
+    json.loads(first)                                 # first line is a whole event, not a fragment
+
+
 def test_list_sprint_files_flags_binary(tmp_path):
     svc = Service(tmp_path)
     svc.submit_sprint(id="sp1", goals="g", plan=["a"])

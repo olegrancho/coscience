@@ -234,10 +234,14 @@ class Service:
             truncated = size > self._DOC_MAX_BYTES
             if truncated:
                 raw = raw[-self._DOC_MAX_BYTES:]  # keep the tail — most relevant for logs
-            try:
-                content, binary = raw.decode("utf-8"), False
-            except UnicodeDecodeError:
-                content, binary = "", True
+                nl = raw.find(b"\n")              # ...but start at a clean line boundary so the
+                if nl != -1:                      # partial first line — and any UTF-8 codepoint
+                    raw = raw[nl + 1:]            # split at the byte cut — isn't shown as garbage
+            # A real binary has NUL bytes; text logs never do. Decoding a truncated text
+            # tail with errors="replace" keeps it readable even if a codepoint got clipped
+            # (rather than failing the whole decode and mis-flagging the log as binary).
+            binary = b"\x00" in raw[:8192]
+            content = "" if binary else raw.decode("utf-8", errors="replace")
             docs.append({"name": path.name, "label": label, "kind": kind,
                          "size": size, "content": content,
                          "truncated": truncated, "binary": binary})
