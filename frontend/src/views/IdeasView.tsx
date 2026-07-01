@@ -48,7 +48,8 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
           style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-faint)", fontSize: 12, paddingTop: 2 }}>
           {open ? "▾" : "▸"}
         </button>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
+          onClick={() => setOpen((o) => !o)}>
           <div className={"md-tight" + (open ? "" : " clamp2")}><Md>{idea.text}</Md></div>
           <Group gap={8} mt={5} wrap="nowrap">
             <SourceChip source={idea.source} />
