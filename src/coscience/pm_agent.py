@@ -35,7 +35,9 @@ def _context_payload(context: PMContext) -> dict:
                                   for f in context.sprint_feedback for c in f["comments"]),
         # Human idea signal re-triggers the PM; its own pm-sourced ideas/summary do not.
         "human_ideas": sorted(i["text"] for i in context.ideas if i.get("source") == "human"),
-        "idea_comments": sorted(c["text"] for i in context.ideas for c in i.get("comments", [])),
+        # gather_context flattens idea comments to plain strings (not dicts), same as
+        # sprint_feedback above — index them as strings.
+        "idea_comments": sorted(str(c) for i in context.ideas for c in i.get("comments", [])),
     }
 
 

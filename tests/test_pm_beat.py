@@ -91,6 +91,22 @@ def test_beat_reasons_again_after_a_result_lands(substrate):
     assert summary["submitted"] == ["p1-c1-b"]
 
 
+def test_beat_reasons_again_after_idea_comment(substrate):
+    # Regression: a human comment on an idea must re-trigger the PM. gather_context
+    # flattens idea comments to plain strings, so context_fingerprint must index
+    # them as strings — it previously did comment["text"] and raised TypeError,
+    # crashing every beat (the PM froze silently the moment any idea got a comment).
+    from coscience.models import Idea
+    from coscience.pm_reasoner import FakeReasoner
+    _prog(substrate)
+    pm_beat(substrate, "p1", FakeReasoner([_out("a")]))    # records fingerprint (no comments)
+    substrate.save_ideas("p1", "", [Idea(id="i1", text="try X", source="pm",
+        comments=[{"id": "c1", "text": "promising — pursue it", "added_at": 1.0}])])
+    summary = pm_beat(substrate, "p1", FakeReasoner([_out("b")]))
+    assert summary["skipped"] is False
+    assert summary["submitted"] == ["p1-c1-b"]
+
+
 def test_rerun_same_cycle_is_idempotent(substrate):
     # Stage a cycle, then run twice from the same staged state (simulating a
     # crash before clear). The reasoner must NOT be called, and no duplicate.
