@@ -142,13 +142,13 @@ function Transcript({ raw }: { raw: string }) {
       : <Text size="sm" c="dimmed">Starting up — no agent activity yet.</Text>;
   }
   return (
-    <Stack gap={7} style={{ maxHeight: 460, overflow: "auto" }}>
+    <Stack gap={7} style={{ maxHeight: 460, overflowY: "auto", overflowX: "hidden" }}>
       {turns.map((t, i) => t.kind === "say" ? (
-        <Text key={i} size="sm" style={{ lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{t.text}</Text>
+        <Text key={i} size="sm" style={{ lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{t.text}</Text>
       ) : t.kind === "result" ? (
-        <Text key={i} size="xs" className="mono" style={{ color: "var(--machine)" }}>✓ {t.text}</Text>
+        <Text key={i} size="xs" className="mono" style={{ color: "var(--machine)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>✓ {t.text}</Text>
       ) : (
-        <Text key={i} size="xs" className="mono" style={{ color: "var(--ink-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>▸ {t.text}</Text>
+        <Text key={i} size="xs" className="mono" style={{ color: "var(--ink-dim)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>▸ {t.text}</Text>
       ))}
     </Stack>
   );
