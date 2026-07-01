@@ -221,10 +221,10 @@ function RunStat({ label, agg }: { label: string; agg: RunAgg }) {
 /** The Claude models a sprint worker / PM reasoner can run on. "" = launcher default. */
 export const MODEL_OPTIONS = [
   { value: "", label: "Default" },
-  { value: "claude-sonnet-5", label: "Sonnet 5 (near-Opus, cheap)" },
-  { value: "claude-opus-4-8", label: "Opus 4.8 (most capable)" },
+  { value: "claude-sonnet-5", label: "Sonnet 5" },
+  { value: "claude-opus-4-8", label: "Opus 4.8" },
   { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5 (cheapest)" },
+  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
 ];
 
 /** A compact model picker. Shows a free-text value not in the list as-is. */

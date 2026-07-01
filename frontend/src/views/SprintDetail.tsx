@@ -87,7 +87,7 @@ function FileBlock({ f }: { f: SprintFile }) {
             <Text size="sm" c="dimmed">Empty.</Text>
           ) : isMd ? (
             <div className="report-leaf"><Md>{f.content}</Md></div>
-          ) : f.kind === "log" && f.content.trimStart().startsWith("{") ? (
+          ) : f.kind === "log" ? (
             <Transcript raw={f.content} />
           ) : (
             <pre className="mono" style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word",
@@ -134,7 +134,12 @@ function parseTranscript(raw: string): Turn[] {
 function Transcript({ raw }: { raw: string }) {
   const turns = parseTranscript(raw);
   if (!turns.length) {
-    return <Text size="sm" c="dimmed">Starting up — no agent activity yet.</Text>;
+    // Not a parseable event stream (plain-text log, or truncated to a fragment
+    // with no whole JSON line) — fall back to showing it verbatim.
+    return raw.trim()
+      ? <pre className="mono" style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word",
+             fontSize: 12.5, lineHeight: 1.5, maxHeight: 440, overflow: "auto" }}>{raw}</pre>
+      : <Text size="sm" c="dimmed">Starting up — no agent activity yet.</Text>;
   }
   return (
     <Stack gap={7} style={{ maxHeight: 460, overflow: "auto" }}>
