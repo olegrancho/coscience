@@ -79,6 +79,45 @@ function Pulse() {
           <b className="mono">{waiting}</b> awaiting you
         </span>
       </Row>
+      <UsageBars />
+    </div>
+  );
+}
+
+/** Claude budget as horizontal fill bars in the rail's pulse: how much of the
+ *  rolling 5-hour window and the weekly allowance is spent, with the reset time.
+ *  Turns amber past 85% so the "you're about to get throttled" moment is visible
+ *  before agents start pausing. */
+function UsageBars() {
+  const usage = useQuery({ queryKey: ["usage"], queryFn: api.getUsage, refetchInterval: 30_000 });
+  const windows = usage.data?.budget?.windows;
+  if (!windows) return null;
+  const rows: { key: string; label: string }[] = [
+    { key: "5h", label: "5h window" },
+    { key: "week", label: "this week" },
+  ];
+  const shown = rows.filter((r) => windows[r.key]);
+  if (!shown.length) return null;
+  return (
+    <div style={{ display: "grid", gap: 9, marginTop: 4 }}>
+      {shown.map(({ key, label }) => {
+        const w = windows[key];
+        const pct = Math.max(0, Math.min(100, Math.round(w.pct)));
+        const hot = pct >= 85;
+        return (
+          <div key={key} style={{ display: "grid", gap: 3 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--ink-muted)" }}>
+              <span>{label}</span>
+              <span className="mono" style={{ color: hot ? "var(--signal)" : "var(--ink)" }}>{pct}%</span>
+            </div>
+            <div style={{ height: 6, borderRadius: 6, background: "var(--hairline)", overflow: "hidden" }}>
+              <div style={{ width: `${pct}%`, height: "100%", borderRadius: 6,
+                background: hot ? "var(--signal)" : "var(--machine)", transition: "width .3s ease" }} />
+            </div>
+            <div style={{ fontSize: 10, color: "var(--ink-faint)" }}>resets {w.resets}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }
