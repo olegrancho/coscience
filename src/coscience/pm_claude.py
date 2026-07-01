@@ -86,7 +86,7 @@ pending now, so you have {context.free_slots} free slot(s). Propose/promote AT M
 if that is 0, propose nothing and instead curate the idea pool.
 
 Respond with ONLY a JSON object (no prose outside it) of this shape:
-{{"report": "<markdown program-status summary>",
+{{"report": "<program-status summary as STRUCTURED markdown, NOT one run-on paragraph: a bold one-line headline, then a blank line, then a few short paragraphs and/or '-' bullet points, with a blank line between blocks. Put real newlines in the JSON string (escaped as \\n).>",
   "ideas_summary": "<short markdown summary of the whole idea pool: themes, what's promising, what you pruned and why>",
   "new_ideas": ["<a one-paragraph candidate direction>", "..."],
   "delete_idea_ids": ["<id of one of YOUR non-protected ideas to prune>", "..."],
