@@ -16,7 +16,8 @@ export default function ProgramDetail() {
   const qc = useQueryClient();
   const [note, setNote] = useState("");
   const [proposing, setProposing] = useState(false);
-  const [showAllRejected, setShowAllRejected] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [showAll, setShowAll] = useState(false);
 
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
   const guidance = useQuery({ queryKey: ["guidance", id], queryFn: () => api.listGuidance(id) });
@@ -113,18 +114,48 @@ export default function ProgramDetail() {
       </Card>
 
       {(() => {
-        // Rejected (canceled) experiments pile up; show only the 3 most recent
-        // (sprints arrive newest-first) and tuck the rest behind "show all".
-        const rejectedIds = p.sprints.filter((s) => s.status === "canceled").map((s) => s.id);
-        const hidden = new Set(showAllRejected ? [] : rejectedIds.slice(3));
+        // Filter by status, then (unless "show all") cap the noisy terminal
+        // statuses — done and canceled — at their 3 most recent (sprints arrive
+        // newest-first). Active statuses are always shown in full.
+        const CAPPED = new Set(["done", "canceled"]);
+        const CAP = 3;
+        const filtered = statusFilter === "all"
+          ? p.sprints : p.sprints.filter((s) => s.status === statusFilter);
+        const seen: Record<string, number> = {};
+        const hidden = new Set<string>();
+        if (!showAll) {
+          for (const s of filtered) {
+            if (!CAPPED.has(s.status)) continue;
+            seen[s.status] = (seen[s.status] ?? 0) + 1;
+            if (seen[s.status] > CAP) hidden.add(s.id);
+          }
+        }
+        const shown = filtered.filter((s) => !hidden.has(s.id));
+        const counts = p.sprints.reduce<Record<string, number>>((a, s) => {
+          a[s.status] = (a[s.status] ?? 0) + 1; return a;
+        }, {});
+        const order = ["proposed", "approved", "executing", "failed", "done", "canceled"];
         return (
           <Card padding="lg" radius="md" style={cardStyle}>
-            <div className="eyebrow" style={{ marginBottom: 12 }}>experiments · {p.sprints.length}</div>
+            <Group justify="space-between" align="center" mb={12} wrap="nowrap">
+              <div className="eyebrow">experiments · {p.sprints.length}</div>
+              <select className="mono" value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                style={{ fontSize: 12, padding: "3px 6px", background: "var(--surface)",
+                         color: "var(--ink)", border: "1px solid var(--hairline)", borderRadius: 6 }}>
+                <option value="all">all statuses ({p.sprints.length})</option>
+                {order.filter((st) => counts[st]).map((st) => (
+                  <option key={st} value={st}>{st} ({counts[st]})</option>
+                ))}
+              </select>
+            </Group>
             {p.sprints.length === 0 ? (
               <Text size="sm" c="dimmed">None yet. Propose one, or let the AI propose on its next cycle.</Text>
+            ) : shown.length === 0 ? (
+              <Text size="sm" c="dimmed">No {statusFilter} experiments.</Text>
             ) : (
               <Stack gap={2}>
-                {p.sprints.filter((s) => !hidden.has(s.id)).map((s) => (
+                {shown.map((s) => (
                   <div key={s.id}
                     style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 6px", borderBottom: "1px solid var(--hairline)" }}>
                     <Link to={`/sprints/${s.id}`} style={{ minWidth: 0, flex: 1, textDecoration: "none", color: "inherit" }}>
@@ -138,10 +169,10 @@ export default function ProgramDetail() {
                     </Group>
                   </div>
                 ))}
-                {rejectedIds.length > 3 && (
+                {(hidden.size > 0 || showAll) && (
                   <button type="button" className="linklike" style={{ alignSelf: "flex-start", marginTop: 8 }}
-                    onClick={() => setShowAllRejected((v) => !v)}>
-                    {showAllRejected ? "Show fewer" : `Show all ${rejectedIds.length} rejected`}
+                    onClick={() => setShowAll((v) => !v)}>
+                    {showAll ? "Show fewer" : `Show all (${hidden.size} more)`}
                   </button>
                 )}
               </Stack>
