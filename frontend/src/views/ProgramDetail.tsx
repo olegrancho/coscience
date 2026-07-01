@@ -6,7 +6,7 @@ import { Link, useParams } from "react-router-dom";
 import { type Components } from "react-markdown";
 import Md from "../components/Md";
 import { api } from "../api";
-import { BackLink, EmptyState, ModelSelect, StatusBadge } from "../components/ui";
+import { BackLink, EmptyState, ModelSelect, RelTime, StatusBadge } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -135,6 +135,26 @@ export default function ProgramDetail() {
         {p.report ? <div className="report-leaf"><Md components={reportComponents}>{p.report}</Md></div>
           : <Text size="sm" c="dimmed">No report yet — the AI writes one each planning cycle.</Text>}
       </Card>
+
+      {p.activations?.length > 0 && (
+        <Card padding="lg" radius="md" style={cardStyle}>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>PM activity — when it planned and why</div>
+          <Stack gap={7}>
+            {p.activations.slice(0, 12).map((a, i) => (
+              <Group key={i} justify="space-between" wrap="nowrap" align="baseline"
+                style={{ borderBottom: "1px solid var(--hairline)", paddingBottom: 6 }}>
+                <Text size="sm" style={{ minWidth: 0 }}>
+                  <span className="mono" style={{ color: "var(--ink-faint)" }}>#{a.cycle}</span>{" "}
+                  {(a.triggers?.length ? a.triggers.join(", ") : "reasoned")}
+                  {a.forced && a.triggers?.[0] !== "manual replan" && " · manual"}
+                  {a.submitted?.length ? <span style={{ color: "var(--machine)" }}> → proposed {a.submitted.length}</span> : null}
+                </Text>
+                <RelTime at={a.at} />
+              </Group>
+            ))}
+          </Stack>
+        </Card>
+      )}
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 4 }}>your guidance to the AI</div>

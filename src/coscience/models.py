@@ -110,3 +110,7 @@ class PMState:
     proposed_ids: list[str] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
     last_fingerprint: str = ""
+    # per-category signatures of the last reasoned context, so the next cycle can
+    # name WHAT changed; and a capped timeline of activations for the dashboard.
+    last_signals: dict = field(default_factory=dict)
+    activations: list[dict] = field(default_factory=list)  # [{at, cycle, triggers, submitted, forced}]

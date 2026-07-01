@@ -275,6 +275,8 @@ class Service:
             "pm_model": p.pm_model, "workdir": p.workdir,
             "report": self.substrate.load_report(program_id),
             "cycle": pm.cycle,
+            "activations": list(reversed(pm.activations)),   # newest first, for the timeline
+            "last_run": pm.last_run,
             "sprints": [{"id": s.id, "status": s.status.value, "goals": s.goals,
                          "title": s.title, "results": list(s.results), "model": s.model}
                         for s in sprints],

@@ -83,6 +83,32 @@ def test_promotion_creates_sprint_and_removes_idea(substrate):
     assert ideas == []                                  # the seed left the pool
 
 
+def test_activation_log_records_trigger_and_submitted(substrate):
+    _prog(substrate)
+    # first cycle -> labelled "first cycle"
+    pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(proposals=[_prop("a")], report="r")]))
+    acts = substrate.load_pm_state("p1").activations
+    assert len(acts) == 1
+    assert acts[0]["triggers"] == ["first cycle"]
+    assert acts[0]["submitted"] == ["p1-c0-a"]
+    # add guidance -> next activation names guidance as the trigger
+    substrate.save_guidance("p1", [{"id": "g1", "text": "focus on X", "added_at": 1.0}])
+    pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="r2")]))
+    acts = substrate.load_pm_state("p1").activations
+    assert len(acts) == 2
+    assert "guidance changed" in acts[1]["triggers"]
+
+
+def test_activation_log_marks_manual_replan(substrate):
+    _prog(substrate)
+    pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="r0")]))
+    # nothing changed, but forced -> recorded as a manual replan
+    out = pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="r1")]), force=True)
+    assert not out.get("skipped")
+    acts = substrate.load_pm_state("p1").activations
+    assert acts[-1]["triggers"] == ["manual replan"] and acts[-1]["forced"] is True
+
+
 def test_force_reasons_even_when_nothing_changed(substrate):
     # "Replan now": an explicit human replan must reason even if the fingerprint is
     # unchanged (a normal beat would skip).

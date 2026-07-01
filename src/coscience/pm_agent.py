@@ -20,12 +20,11 @@ from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coer
 MAX_PROPOSED = 4
 
 
-def context_fingerprint(context: PMContext) -> str:
-    """A stable hash of the inputs the PM should react to: program goals, human
-    guidance, the state of approved/running/done work, and results. The PM's own
-    pending proposals (status 'proposed') are deliberately excluded — they are its
-    output, not new input, so proposing does not re-trigger the next cycle."""
-    payload = {
+def _context_payload(context: PMContext) -> dict:
+    """The per-category inputs the PM reacts to. The PM's own pending proposals
+    (status 'proposed') are deliberately excluded — they are its output, not new
+    input, so proposing does not re-trigger the next cycle."""
+    return {
         "goals": context.goals,
         "guidance": sorted(context.human_guidance),
         "active": sorted((s["id"], s["status"]) for s in context.open_sprints
@@ -38,8 +37,39 @@ def context_fingerprint(context: PMContext) -> str:
         "human_ideas": sorted(i["text"] for i in context.ideas if i.get("source") == "human"),
         "idea_comments": sorted(c["text"] for i in context.ideas for c in i.get("comments", [])),
     }
-    blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+
+def context_fingerprint(context: PMContext) -> str:
+    """A stable hash over all the inputs — unchanged hash means nothing to react to."""
+    blob = json.dumps(_context_payload(context), sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+# Human labels for each payload category, used to say WHAT triggered a PM cycle.
+_TRIGGER_LABELS = {
+    "goals": "goals edited",
+    "guidance": "guidance changed",
+    "active": "sprint approved / state change",
+    "completed": "a result completed",
+    "failed": "a sprint failed",
+    "sprint_feedback": "feedback to the planner",
+    "human_ideas": "a human idea",
+    "idea_comments": "comment on an idea",
+}
+
+
+def context_signals(context: PMContext) -> dict:
+    """A per-category signature so the next cycle can name what changed."""
+    return {k: hashlib.sha1(json.dumps(v, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
+            for k, v in _context_payload(context).items()}
+
+
+def _triggers(last_signals: dict, new_signals: dict, forced: bool) -> list[str]:
+    if not last_signals:
+        return ["first cycle"]
+    changed = [_TRIGGER_LABELS.get(k, k) for k, h in new_signals.items()
+               if last_signals.get(k) != h]
+    return changed or (["manual replan"] if forced else [])
 
 
 def gather_context(substrate, program_id: str) -> PMContext:
@@ -215,6 +245,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     the fingerprint, so the pending change is re-reasoned once the budget recovers."""
     pm = substrate.load_pm_state(program_id)
 
+    new_signals = None       # set when we actually reason -> drives the activation record
+    trigger_labels = None
     staged = read_staging(substrate, program_id)
     if staged is None:
         cycle = pm.cycle
@@ -235,6 +267,9 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             substrate.save_pm_state(pm)
             return {"program": program_id, "cycle": cycle,
                     "submitted": [], "proposed": [], "skipped": True, "throttled": True}
+        # About to reason -> capture what changed since the last reasoned cycle.
+        new_signals = context_signals(context)
+        trigger_labels = _triggers(pm.last_signals, new_signals, force)
         output = reasoner.run(context)                 # the ONE reasoner call
         lc = getattr(reasoner, "last_cost", None) or {}
         usage_meter.record_run(substrate.repo_root, "pm", program_id,
@@ -333,6 +368,13 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             pm.proposed_ids.append(sid)
     pm.log.append(f"cycle {cycle}: proposed {proposed}"
                   + (f", dropped {dropped} (cap)" if dropped else ""))
+    if new_signals is not None:                        # we actually reasoned this beat
+        pm.last_signals = new_signals
+        pm.activations.append({
+            "at": now_ts, "cycle": cycle, "triggers": trigger_labels,
+            "submitted": list(submitted), "forced": bool(force),
+        })
+        pm.activations = pm.activations[-50:]          # keep the recent timeline bounded
     substrate.save_pm_state(pm)
 
     clear_staging(substrate, program_id)

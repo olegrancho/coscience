@@ -215,6 +215,8 @@ class Substrate:
             proposed_ids=list(fm.get("proposed_ids", [])),
             log=list(fm.get("log", [])),
             last_fingerprint=str(fm.get("last_fingerprint", "")),
+            last_signals=dict(fm.get("last_signals", {})),
+            activations=list(fm.get("activations", [])),
         )
 
     def save_pm_state(self, state: PMState) -> None:
@@ -227,6 +229,10 @@ class Substrate:
         }
         if state.last_fingerprint:
             fm["last_fingerprint"] = state.last_fingerprint
+        if state.last_signals:
+            fm["last_signals"] = state.last_signals
+        if state.activations:
+            fm["activations"] = state.activations
         d = self.program_dir(state.program_id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "pm.md").write_text(serialize(fm, f"# PM state {state.program_id}\n"))

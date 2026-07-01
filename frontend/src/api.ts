@@ -1,7 +1,9 @@
 export interface ProgramRow { id: string; title: string; status: string; goals: string }
 export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string }
+export interface PMActivation { at: number; cycle: number; triggers: string[]; submitted: string[]; forced: boolean }
 export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
+  activations: PMActivation[]; last_run: number | null;
 }
 export interface GuidanceNote { id: string; text: string; added_at: number }
 export interface IdeaComment { id: string; text: string; added_at: number }
