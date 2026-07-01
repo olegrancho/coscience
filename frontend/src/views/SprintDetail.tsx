@@ -148,7 +148,7 @@ function Transcript({ raw }: { raw: string }) {
       ) : t.kind === "result" ? (
         <Text key={i} size="xs" className="mono" style={{ color: "var(--machine)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>✓ {t.text}</Text>
       ) : (
-        <Text key={i} size="xs" className="mono" style={{ color: "var(--ink-dim)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>▸ {t.text}</Text>
+        <Text key={i} size="xs" className="mono" style={{ color: "var(--ink-faint)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>▸ {t.text}</Text>
       ))}
     </Stack>
   );
