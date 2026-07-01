@@ -88,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
     pgc.add_argument("--id", required=True)
     pgc.add_argument("--title", required=True)
     pgc.add_argument("--goals", required=True)
+    pgc.add_argument("--workdir", default="",
+                     help="project folder this program's agents run in (default: the control repo)")
 
     pm = sub.add_parser("pm", help="run the PM agent: propose sprints for active programs")
     pm.add_argument("--repo", required=True, type=Path)
@@ -102,7 +104,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "program":
         if args.program_command == "create":
             Substrate(args.repo).save_program(
-                Program(id=args.id, title=args.title, goals=args.goals))
+                Program(id=args.id, title=args.title, goals=args.goals,
+                        workdir=args.workdir))
             print(args.id)
             return 0
 

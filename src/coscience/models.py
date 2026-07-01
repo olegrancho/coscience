@@ -99,6 +99,7 @@ class Program:
     goals: str
     status: ProgramStatus = ProgramStatus.ACTIVE
     pm_model: str = ""                 # Claude model for this program's PM reasoner; "" = default
+    workdir: str = ""                  # project folder this program's agents run in; "" = control repo
 
 
 @dataclass

@@ -65,6 +65,19 @@ export default function ProgramDetail() {
     try { await api.setProgramModel(id, model); notifications.show({ color: "teal", title: "Planner model set", message: model ? `The PM will plan on ${model}.` : "Back to the default model." }); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't set model", message: String(e) }); }
   };
+  const saveWorkdir = async (value: string) => {
+    try {
+      const r = await api.setProgramWorkdir(id, value.trim());
+      notifications.show({
+        color: r.workdir && !r.exists ? "yellow" : "teal",
+        title: "Project folder set",
+        message: !r.workdir ? "Agents for this program run in the control repo."
+          : r.exists ? `Agents run in ${r.workdir}.`
+          : `Saved, but ${r.workdir} doesn't exist yet — agents fall back to the control repo until it does.`,
+      });
+      refresh();
+    } catch (e) { notifications.show({ color: "red", title: "Couldn't set folder", message: String(e) }); }
+  };
 
   return (
     <Stack gap="lg">
@@ -83,6 +96,19 @@ export default function ProgramDetail() {
           <StatusBadge status={p.status} />
           <Text size="sm" c="dimmed">the AI has run <span className="mono">{p.cycle}</span> planning {p.cycle === 1 ? "cycle" : "cycles"}</Text>
           <ModelSelect value={p.pm_model} onChange={setPmModel} label="planner model" />
+        </Group>
+        <Group gap={8} mt={8} align="center" wrap="nowrap">
+          <span className="eyebrow" style={{ whiteSpace: "nowrap" }}>project folder</span>
+          <TextInput
+            key={p.workdir}
+            size="xs"
+            className="mono"
+            defaultValue={p.workdir}
+            placeholder="control repo — set a path to run this program's agents there"
+            style={{ minWidth: 380, flex: 1, maxWidth: 560 }}
+            onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
+            onBlur={(e) => { if (e.currentTarget.value.trim() !== p.workdir) saveWorkdir(e.currentTarget.value); }}
+          />
         </Group>
       </div>
 

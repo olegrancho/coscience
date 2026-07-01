@@ -60,10 +60,11 @@ class Worker:
         """Gather the program goal, sprint description and prior results so the
         agent knows why it is running this sprint."""
         program_title = program_goal = ""
+        workdir = ""
         if sprint.program:
             try:
                 prog = self.substrate.load_program(sprint.program)
-                program_title, program_goal = prog.title, prog.goals
+                program_title, program_goal, workdir = prog.title, prog.goals, prog.workdir
             except OSError:
                 pass
         prior: list[str] = []
@@ -83,8 +84,18 @@ class Worker:
             prior_results=prior,
             human_comments=[c["text"] for c in sprint.comments
                             if c.get("target", "worker") == "worker"],
-            repo_root=self.substrate.repo_root,
+            # The agent's working directory: the program's project folder if it set
+            # one (and it exists), else the control repo. Sprint metadata/scratchpad
+            # still live in the control repo (absolute paths); only the cwd changes.
+            repo_root=self._agent_cwd(workdir),
         )
+
+    def _agent_cwd(self, workdir: str):
+        if workdir:
+            p = os.path.expanduser(workdir)
+            if os.path.isdir(p):
+                return p
+        return self.substrate.repo_root
 
     def _claim_sprint(self):
         executing = self.substrate.iter_sprints(status=SprintStatus.EXECUTING)
@@ -122,8 +133,8 @@ class Worker:
                 # arrival and print a limit message. Leave the sprint claimed; a
                 # later beat retries once usage frees up.
                 return BeatOutcome.IDLE
-            token = self.agent.start(sprint, self._build_context(sprint),
-                                     sprint_dir, self.substrate.repo_root)
+            ctx = self._build_context(sprint)
+            token = self.agent.start(sprint, ctx, sprint_dir, ctx.repo_root)
             progress.agent_token = token
             progress.started_at = time.time()
             self.substrate.save_progress(progress)

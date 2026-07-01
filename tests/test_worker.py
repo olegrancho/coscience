@@ -152,3 +152,33 @@ def test_agent_is_handed_program_and_prior_results(substrate):
     assert agent.ctx.sprint_title == "Cross-check"
     assert any("min_gap = 2" in p for p in agent.ctx.prior_results)
     assert agent.ctx.repo_root == substrate.repo_root
+
+
+def test_agent_runs_in_the_program_workdir_when_set(substrate, tmp_path):
+    # A program pointing at its own project folder -> the agent launches there,
+    # not in the control repo (metadata still lives in the control repo).
+    proj = tmp_path / "hobby-synth"; proj.mkdir()
+    substrate.save_program(Program(id="p1", title="Hobby", goals="tinker",
+                                   workdir=str(proj)))
+    substrate.save_sprint(_approved("p1-c0-x", program="p1"))
+
+    class Capturing(FakeAgent):
+        def start(self, sprint, context, sprint_dir, repo_root=None):
+            self.launched_in, self.ctx = repo_root, context
+            return super().start(sprint, context, sprint_dir, repo_root)
+
+    agent = Capturing()
+    Worker(substrate, agent).run_sprint_beat(substrate.load_sprint("p1-c0-x"))
+    assert str(agent.launched_in) == str(proj)             # agent cwd = project folder
+    assert str(agent.ctx.repo_root) == str(proj)
+
+
+def test_agent_falls_back_to_control_repo_when_workdir_missing(substrate, tmp_path):
+    # A workdir that doesn't exist must not send the agent into a bad cwd; it falls
+    # back to the control repo rather than failing to launch.
+    substrate.save_program(Program(id="p1", title="Hobby", goals="tinker",
+                                   workdir="/no/such/dir"))
+    substrate.save_sprint(_approved("p1-c0-x", program="p1"))
+    agent = FakeAgent()
+    ctx = Worker(substrate, agent)._build_context(substrate.load_sprint("p1-c0-x"))
+    assert ctx.repo_root == substrate.repo_root

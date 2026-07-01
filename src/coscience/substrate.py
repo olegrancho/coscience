@@ -169,12 +169,15 @@ class Substrate:
             goals=body.strip(),
             status=ProgramStatus(fm.get("status", "active")),
             pm_model=str(fm.get("pm_model", "")),
+            workdir=str(fm.get("workdir", "")),
         )
 
     def save_program(self, program: Program) -> None:
         fm = {"type": "program", "title": program.title, "status": str(program.status)}
         if program.pm_model:
             fm["pm_model"] = program.pm_model
+        if program.workdir:
+            fm["workdir"] = program.workdir
         d = self.program_dir(program.id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "program.md").write_text(serialize(fm, program.goals.strip() + "\n"))

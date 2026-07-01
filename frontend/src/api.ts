@@ -1,7 +1,7 @@
 export interface ProgramRow { id: string; title: string; status: string; goals: string }
 export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string }
 export interface Program extends ProgramRow {
-  report: string; cycle: number; sprints: SprintRef[]; pm_model: string;
+  report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
 }
 export interface GuidanceNote { id: string; text: string; added_at: number }
 export interface IdeaComment { id: string; text: string; added_at: number }
@@ -70,6 +70,11 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model }),
     }).then(j<{ id: string; pm_model: string }>),
+  setProgramWorkdir: (id: string, workdir: string) =>
+    fetch(`/api/programs/${id}/workdir`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workdir }),
+    }).then(j<{ id: string; workdir: string; exists: boolean }>),
   listGuidance: (id: string) => fetch(`/api/programs/${id}/guidance`).then(j<GuidanceNote[]>),
   addGuidance: (id: string, text: string) =>
     fetch(`/api/programs/${id}/guidance`, {

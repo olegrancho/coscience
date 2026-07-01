@@ -268,7 +268,7 @@ class Service:
         sprints.sort(key=self._appeared_at, reverse=True)  # newest first
         return {
             "id": p.id, "title": p.title, "status": p.status.value, "goals": p.goals,
-            "pm_model": p.pm_model,
+            "pm_model": p.pm_model, "workdir": p.workdir,
             "report": self.substrate.load_report(program_id),
             "cycle": pm.cycle,
             "sprints": [{"id": s.id, "status": s.status.value, "goals": s.goals,
@@ -292,6 +292,19 @@ class Service:
         program.pm_model = str(model or "")
         self.substrate.save_program(program)
         return {"id": program_id, "pm_model": program.pm_model}
+
+    def set_program_workdir(self, program_id: str, workdir: str) -> dict:
+        """Set the project folder this program's sprint agents run in ("" = control
+        repo). Returns the stored value plus whether the path currently exists, so
+        the UI can warn on a typo without blocking (the folder may appear later)."""
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        wd = str(workdir or "").strip()
+        program = self.substrate.load_program(program_id)
+        program.workdir = wd
+        self.substrate.save_program(program)
+        exists = bool(wd) and os.path.isdir(os.path.expanduser(wd))
+        return {"id": program_id, "workdir": wd, "exists": exists}
 
     def _require_program(self, program_id: str) -> None:
         if not (self.substrate.program_dir(program_id) / "program.md").is_file():

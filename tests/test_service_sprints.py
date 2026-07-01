@@ -248,6 +248,20 @@ def test_program_pm_model_round_trips(tmp_path):
     assert svc.get_program("p1")["pm_model"] == ""
 
 
+def test_program_workdir_round_trips_and_flags_existence(tmp_path):
+    from coscience.models import Program, ProgramStatus
+    svc = Service(tmp_path)
+    svc.substrate.save_program(Program(id="p1", title="P", goals="g", status=ProgramStatus.ACTIVE))
+    assert svc.get_program("p1")["workdir"] == ""
+    proj = tmp_path / "hobby"; proj.mkdir()
+    out = svc.set_program_workdir("p1", str(proj))
+    assert out["workdir"] == str(proj) and out["exists"] is True
+    assert svc.get_program("p1")["workdir"] == str(proj)
+    # a path that doesn't exist is stored but flagged, not rejected
+    missing = svc.set_program_workdir("p1", "/no/such/dir")
+    assert missing["workdir"] == "/no/such/dir" and missing["exists"] is False
+
+
 def test_program_sprints_ordered_by_creation(tmp_path):
     svc = Service(tmp_path)
     from coscience.models import Program, ProgramStatus
