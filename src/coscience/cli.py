@@ -42,11 +42,17 @@ def _status_loop(status: LoopStatus, beat, interval: float, max_beats: int | Non
     n = 0
     try:
         while max_beats is None or n < max_beats:
+            # Nothing in a beat — not a reasoner error, a usage limit, nor a render
+            # glitch — may terminate the loop. On any failure we log it and keep
+            # ticking, so the loop pauses/idles through trouble instead of dying.
             try:
                 last, counters, claude_calls = beat()
-            except Exception as exc:                  # a beat must never kill the loop
-                last, counters, claude_calls = f"error: {exc}"[:200], {}, 0
-            status.record(last, counters, claude_calls)  # state + re-render
+                status.record(last, counters, claude_calls)  # state + re-render
+            except Exception as exc:
+                try:
+                    status.record(f"error (continuing): {exc}"[:200], {}, 0)
+                except Exception:
+                    pass
             n += 1
             if max_beats is None or n < max_beats:
                 time.sleep(interval)
@@ -142,10 +148,13 @@ def main(argv: list[str] | None = None) -> int:
             summaries = pm_run_once(substrate, reasoner, usage_ok=claude_usage_ok)
             ids = [sid for s in summaries for sid in s["submitted"]]
             reasoned = sum(0 if s.get("skipped") else 1 for s in summaries)
+            throttled = any(s.get("throttled") for s in summaries)
             if ids:
                 last = f"proposed {', '.join(ids)}"
             elif reasoned:
                 last = "reasoned — no new proposals"
+            elif throttled:
+                last = "paused — Claude usage exhausted; resumes after reset"
             else:
                 last = "idle — no input changed"
             # reasoned == Claude calls this beat (skipped cycles don't call Claude)
