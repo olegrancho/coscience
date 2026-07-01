@@ -254,6 +254,21 @@ class Substrate:
         fm = {"type": "guidance", "notes": notes}
         (d / "guidance.md").write_text(serialize(fm, f"# Guidance {program_id}\n"))
 
+    # --- PM chat (a Q&A thread with the planner) ---
+    def load_chat(self, program_id: str) -> list[dict]:
+        path = self.program_dir(program_id) / "chat.md"
+        if not path.is_file():
+            return []
+        fm, _ = parse(path.read_text())
+        return [{"role": str(m.get("role", "user")), "text": str(m.get("text", "")),
+                 "at": float(m.get("at", 0.0))} for m in fm.get("messages", [])]
+
+    def save_chat(self, program_id: str, messages: list[dict]) -> None:
+        d = self.program_dir(program_id)
+        d.mkdir(parents=True, exist_ok=True)
+        fm = {"type": "chat", "messages": messages}
+        (d / "chat.md").write_text(serialize(fm, f"# PM chat {program_id}\n"))
+
     # --- ideas (a pool of candidate directions + the PM's summary of it) ---
     def load_ideas(self, program_id: str) -> tuple[str, list[Idea]]:
         path = self.program_dir(program_id) / "ideas.md"

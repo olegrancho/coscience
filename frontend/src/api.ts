@@ -13,6 +13,7 @@ export interface Idea {
   demoted: boolean;
 }
 export interface IdeaPool { summary: string; ideas: Idea[] }
+export interface ChatMessage { role: "user" | "pm"; text: string; at: number }
 export interface SprintComment { id: string; text: string; added_at: number; target: "worker" | "pm" }
 export interface SprintActivity { label: string; active: boolean; at: number }
 export interface SprintRow {
@@ -73,6 +74,12 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model }),
     }).then(j<{ id: string; pm_model: string }>),
+  getChat: (id: string) => fetch(`/api/programs/${id}/chat`).then(j<ChatMessage[]>),
+  sendChat: (id: string, message: string) =>
+    fetch(`/api/programs/${id}/chat`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    }).then(j<{ reply: string; messages: ChatMessage[] }>),
   replan: (id: string) =>
     fetch(`/api/programs/${id}/replan`, { method: "POST" }).then(
       j<{ program: string; cycle: number; submitted: string[]; skipped?: boolean; busy?: boolean; throttled?: boolean }>),

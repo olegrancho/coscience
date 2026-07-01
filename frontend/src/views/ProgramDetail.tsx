@@ -103,6 +103,8 @@ export default function ProgramDetail() {
             {p.status !== "active" && <Button variant="light" color="machine" onClick={() => setStatus("active", "Resumed")}>Resume</Button>}
             {p.status === "active" && <Button variant="light" color="signal" onClick={() => setStatus("paused", "Paused")}>Pause</Button>}
             {p.status !== "closed" && <Button variant="default" onClick={() => setStatus("closed", "Closed")}>Close</Button>}
+            <Button variant="subtle" color="machine" component={Link} to={`/programs/${id}/chat`}
+                    title="Ask the PM planner clarifying questions">Chat</Button>
             <Button variant="light" color="machine" loading={replanning} onClick={replan}
                     title="Run the PM planner now instead of waiting for its next cycle">Replan now</Button>
             <Button color="machine" onClick={() => setProposing(true)}>Propose experiment</Button>

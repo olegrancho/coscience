@@ -8,6 +8,7 @@ import Overview from "./views/Overview";
 import Programs from "./views/ProgramsOverview";
 import ProgramDetail from "./views/ProgramDetail";
 import IdeasView from "./views/IdeasView";
+import ChatView from "./views/ChatView";
 import SprintDetail from "./views/SprintDetail";
 import ResultDetail from "./views/ResultDetail";
 import Ledger from "./views/Ledger";
@@ -153,6 +154,7 @@ export default function App() {
               <Route path="/programs" element={<Programs />} />
               <Route path="/programs/:id" element={<ProgramDetail />} />
               <Route path="/programs/:id/ideas" element={<IdeasView />} />
+              <Route path="/programs/:id/chat" element={<ChatView />} />
               <Route path="/sprints/:id" element={<SprintDetail />} />
               <Route path="/results/:id" element={<ResultDetail />} />
               <Route path="/ledger" element={<Ledger />} />

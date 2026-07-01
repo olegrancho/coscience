@@ -215,3 +215,55 @@ class ClaudeCodeReasoner:
         except TypeError:                              # injected invoke may take prompt only
             out = self._invoke(render_prompt(context))
         return parse_response(out)
+
+
+def render_chat_prompt(context: PMContext, history: list[dict], message: str) -> str:
+    """A conversational prompt: the PM answers a human's question about the program
+    with full context. Answer-only — it does not act (the human acts via the UI)."""
+    def _lines(items, fmt):
+        return "\n".join(fmt(i) for i in items) or "(none)"
+    open_block = _lines(context.open_sprints, lambda s: f"- {s['id']} [{s['status']}]: {s['goals']}")
+    done_block = _lines(context.completed, lambda s: f"- {s['id']}: {s['goals']} -> {s['result']}")
+    ideas_block = _lines(context.ideas, lambda i: f"- {i['text']}")
+    guidance_block = _lines(context.human_guidance, lambda g: f"- {g}")
+    convo = "\n".join(f"{'PM' if m['role'] == 'pm' else 'Human'}: {m['text']}" for m in history) \
+        or "(start of conversation)"
+    return f"""You are the PM (planning) agent for a research program, in a direct chat with the
+human overseer. Answer their questions about the program clearly and concisely. You may
+explain your reasoning, discuss trade-offs, and suggest what could be done next — but you
+do NOT take actions here; the human acts via the dashboard (approve/propose/comment/guide).
+Reply in plain prose or markdown. Do NOT output JSON.
+
+PROGRAM GOALS:
+{context.goals}
+
+OPEN SPRINTS (proposed / approved / running):
+{open_block}
+
+COMPLETED SPRINTS AND RESULTS:
+{done_block}
+
+IDEA POOL:
+{ideas_block}
+
+STANDING GUIDANCE:
+{guidance_block}
+
+CONVERSATION SO FAR:
+{convo}
+
+Human: {message}
+PM:"""
+
+
+def chat_reply(context: PMContext, history: list[dict], message: str,
+               claude_bin: str = "claude") -> str:
+    """Shell the `claude` binary for one conversational PM reply (plain text)."""
+    prompt = render_chat_prompt(context, history, message)
+    cmd = [claude_bin, "-p", prompt, "--output-format", "text"]
+    if context.model:
+        cmd += ["--model", context.model]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise PMReasonerError(f"claude exited {proc.returncode}: {(proc.stderr or '')[:200]}")
+    return (proc.stdout or "").strip()

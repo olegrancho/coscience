@@ -77,6 +77,10 @@ class GuidanceIn(BaseModel):
     text: str
 
 
+class ChatIn(BaseModel):
+    message: str = Field(min_length=1)
+
+
 class IdeaIn(BaseModel):
     text: str = Field(min_length=1)
 
@@ -251,6 +255,22 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.replan(program_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.get("/programs/{program_id}/chat")
+    def get_chat(program_id: str) -> list[dict]:
+        try:
+            return service.list_chat(program_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.post("/programs/{program_id}/chat")
+    def post_chat(program_id: str, body: ChatIn) -> dict:
+        try:
+            return service.chat(program_id, body.message)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     @api.get("/programs/{program_id}/guidance")
     def list_guidance(program_id: str) -> list[dict]:

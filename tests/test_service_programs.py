@@ -8,6 +8,35 @@ from coscience.pm_runner import pm_run_once
 from coscience.pm_reasoner import FakeReasoner, PMCycleOutput, ProposedSprint
 
 
+def test_pm_chat_appends_and_persists(tmp_path):
+    svc = Service(tmp_path)
+    svc.substrate.save_program(Program(id="p1", title="P", goals="cure",
+                                       status=ProgramStatus.ACTIVE))
+
+    seen = {}
+    def fake_chat(context, history, message):
+        seen["goals"] = context.goals
+        seen["history_len"] = len(history)          # prior turns, excluding this message
+        return f"answer to: {message}"
+
+    out = svc.chat("p1", "what's next?", chat_fn=fake_chat)
+    assert out["reply"] == "answer to: what's next?"
+    assert seen["goals"] == "cure" and seen["history_len"] == 0
+    msgs = svc.list_chat("p1")
+    assert [m["role"] for m in msgs] == ["user", "pm"]
+    assert msgs[0]["text"] == "what's next?"
+    svc.chat("p1", "and after that?", chat_fn=fake_chat)   # follow-up sees prior turns
+    assert seen["history_len"] == 2
+    assert len(svc.list_chat("p1")) == 4
+
+
+def test_pm_chat_rejects_empty(tmp_path):
+    svc = Service(tmp_path)
+    svc.substrate.save_program(Program(id="p1", title="P", goals="g"))
+    with pytest.raises(ValueError):
+        svc.chat("p1", "   ", chat_fn=lambda *a: "x")
+
+
 def test_list_and_get_program(tmp_path):
     svc = Service(tmp_path)
     svc.substrate.save_program(Program(id="p1", title="Cancer", goals="cure"))

@@ -329,6 +329,36 @@ class Service:
         if not (self.substrate.program_dir(program_id) / "program.md").is_file():
             raise NotFoundError(program_id)
 
+    # --- PM chat (ask the planner clarifying questions; answer-only) ---
+    def list_chat(self, program_id: str) -> list[dict]:
+        self._require_program(program_id)
+        return self.substrate.load_chat(program_id)
+
+    def chat(self, program_id: str, message: str, chat_fn=None) -> dict:
+        """Post a message to the PM chat and get its reply. `chat_fn(context, history,
+        message) -> str` is injectable for tests; the default shells the reasoner with
+        the program context. The thread is persisted (capped) in chat.md."""
+        self._require_program(program_id)
+        message = str(message).strip()
+        if not message:
+            raise ValueError("message is required")
+        history = self.substrate.load_chat(program_id)
+        from coscience.worker import claude_usage_ok
+        if chat_fn is None and not claude_usage_ok():
+            reply = "_(Claude usage is exhausted — please try again after the reset.)_"
+        else:
+            from coscience.pm_agent import gather_context
+            from coscience.pm_claude import chat_reply
+            context = gather_context(self.substrate, program_id)
+            reply = (chat_fn or chat_reply)(context, list(history), message)
+        now = time.time()
+        history.append({"role": "user", "text": message, "at": now})
+        history.append({"role": "pm", "text": reply, "at": time.time()})
+        history = history[-200:]                          # bound the stored thread
+        self.substrate.save_chat(program_id, history)
+        self.substrate.commit(f"program {program_id}: pm chat")
+        return {"reply": reply, "messages": history}
+
     def list_guidance(self, program_id: str) -> list[dict]:
         self._require_program(program_id)
         return self.substrate.load_guidance(program_id)
