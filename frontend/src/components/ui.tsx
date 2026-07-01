@@ -34,7 +34,7 @@ export function LiveActivity(
     return <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>○ waiting for compute</span>;
   }
   const live = !!activity?.active;
-  const color = live ? "var(--machine)" : agentRunning ? "var(--ink-dim)" : "var(--ink-faint)";
+  const color = live ? "var(--machine)" : agentRunning ? "var(--ink-muted)" : "var(--ink-faint)";
   const label = activity?.label ?? (agentRunning ? "agent engaged" : "waiting");
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color }}>
@@ -236,7 +236,7 @@ export function ModelSelect(
     ? MODEL_OPTIONS : [...MODEL_OPTIONS, { value, label: value }];
   return (
     <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-      {label && <span style={{ color: "var(--ink-dim)" }}>{label}</span>}
+      {label && <span style={{ color: "var(--ink-muted)" }}>{label}</span>}
       <select
         className="mono"
         value={value}
