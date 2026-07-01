@@ -49,3 +49,26 @@ def test_gather_context_empty_guidance(tmp_path):
     sub = Substrate(tmp_path)
     sub.save_program(Program(id="p1", title="t", goals="g"))
     assert gather_context(sub, "p1").human_guidance == []
+
+
+def test_gather_context_resolves_workdir_to_project_folder(tmp_path):
+    # A program with a real project folder: the PM session must run there, so the
+    # planner explores the same tree as its workers (not the loop's launch cwd).
+    from coscience.substrate import Substrate
+    from coscience.models import Program
+    from coscience.pm_agent import gather_context
+    project = tmp_path / "project-x"
+    project.mkdir()
+    sub = Substrate(tmp_path / "repo")
+    sub.save_program(Program(id="p1", title="t", goals="g", workdir=str(project)))
+    assert gather_context(sub, "p1").workdir == str(project)
+
+
+def test_gather_context_workdir_falls_back_to_control_repo(tmp_path):
+    # No (or missing) workdir -> the control repo, never an inherited/unknown cwd.
+    from coscience.substrate import Substrate
+    from coscience.models import Program
+    from coscience.pm_agent import gather_context
+    sub = Substrate(tmp_path / "repo")
+    sub.save_program(Program(id="p1", title="t", goals="g", workdir="/no/such/dir"))
+    assert gather_context(sub, "p1").workdir == str(sub.repo_root)

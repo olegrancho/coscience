@@ -119,7 +119,20 @@ def gather_context(substrate, program_id: str) -> PMContext:
         human_guidance=guidance,
         ideas=idea_dicts, proposed_count=proposed_count, max_proposed=MAX_PROPOSED,
         model=program.pm_model,
+        workdir=_resolve_workdir(substrate, program.workdir),
     )
+
+
+def _resolve_workdir(substrate, workdir: str) -> str:
+    """The cwd the PM's headless claude session should run in: the program's
+    project folder if it set one (and it exists on disk), else the control repo.
+    Mirrors Worker._agent_cwd so the planner explores the same tree as its workers,
+    instead of inheriting whatever directory the loop process was launched from."""
+    if workdir:
+        p = os.path.expanduser(workdir)
+        if os.path.isdir(p):
+            return p
+    return str(substrate.repo_root)
 
 
 @dataclass

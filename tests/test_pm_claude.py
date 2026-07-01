@@ -95,6 +95,61 @@ def test_parse_response_takes_first_of_multiple_blocks():
     assert parse_response(text).report == "real"
 
 
+def test_run_threads_workdir_to_invoke():
+    seen = {}
+
+    def fake_invoke(prompt, model="", cwd=""):
+        seen["cwd"] = cwd
+        return json.dumps({"report": "ok", "proposals": []})
+
+    ctx = _ctx()
+    ctx.workdir = "/tmp/project-x"
+    ClaudeCodeReasoner(invoke=fake_invoke).run(ctx)
+    assert seen["cwd"] == "/tmp/project-x"
+
+
+def test_default_invoke_runs_claude_in_workdir(monkeypatch):
+    import coscience.pm_claude as m
+    captured = {}
+
+    class _Proc:
+        returncode = 0
+        stdout = json.dumps({"result": "hi", "usage": {}})
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        captured["cwd"] = kw.get("cwd")
+        return _Proc()
+
+    monkeypatch.setattr(m.subprocess, "run", fake_run)
+    ClaudeCodeReasoner()._default_invoke("prompt", cwd="/tmp/proj")
+    assert captured["cwd"] == "/tmp/proj"
+
+
+def test_chat_reply_runs_in_workdir(monkeypatch):
+    import coscience.pm_claude as m
+    captured = {}
+
+    class _Proc:
+        returncode = 0
+        stdout = "reply"
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        captured["cwd"] = kw.get("cwd")
+        return _Proc()
+
+    monkeypatch.setattr(m.subprocess, "run", fake_run)
+    ctx = _ctx()
+    ctx.workdir = "/tmp/proj"
+    assert m.chat_reply(ctx, [], "hi?") == "reply"
+    assert captured["cwd"] == "/tmp/proj"
+
+
+def test_render_prompt_notes_working_directory():
+    assert "working directory" in render_prompt(_ctx())
+
+
 def test_render_prompt_includes_guidance():
     from coscience.pm_claude import render_prompt
     from coscience.pm_reasoner import PMContext

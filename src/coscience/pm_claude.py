@@ -59,6 +59,10 @@ a small set of PROPOSED SPRINTS (concrete next experiments, which humans approve
 an IDEA POOL (short, vague candidate directions you grow and prune over time). You only
 PROPOSE and curate; humans approve sprints.
 
+Your session runs in this program's working directory. If the goals refer to "this
+folder", "the data here", or "existing work", they mean your current working
+directory — inspect it there; do NOT go hunting up the filesystem tree.
+
 PROGRAM GOALS:
 {context.goals}{guidance_block}
 
@@ -188,13 +192,15 @@ class ClaudeCodeReasoner:
         self._invoke = invoke or self._default_invoke
         self.last_cost: dict | None = None     # {cost, tokens} of the most recent call
 
-    def _default_invoke(self, prompt: str, model: str = "") -> str:
+    def _default_invoke(self, prompt: str, model: str = "", cwd: str = "") -> str:
         # --output-format json gives us the reply text plus cost/token usage in one
         # envelope; we unwrap `result` and stash the cost for the dashboard.
         cmd = [self.claude_bin, "-p", prompt, "--output-format", "json"]
         if model:
             cmd += ["--model", model]
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        # Run in the program's workdir so the tool-enabled session explores that
+        # tree, not whatever cwd the loop process happened to launch from.
+        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd or None)
         if proc.returncode != 0:
             raise PMReasonerError(
                 f"claude exited {proc.returncode}: {(proc.stderr or '')[:200]}")
@@ -210,10 +216,16 @@ class ClaudeCodeReasoner:
             return proc.stdout or ""
 
     def run(self, context: PMContext) -> PMCycleOutput:
+        prompt = render_prompt(context)
+        # Injected invokes (tests) may take fewer args; degrade prompt+model+cwd ->
+        # prompt+model -> prompt so the seam stays easy to fake.
         try:
-            out = self._invoke(render_prompt(context), context.model)
-        except TypeError:                              # injected invoke may take prompt only
-            out = self._invoke(render_prompt(context))
+            out = self._invoke(prompt, context.model, context.workdir)
+        except TypeError:
+            try:
+                out = self._invoke(prompt, context.model)
+            except TypeError:
+                out = self._invoke(prompt)
         return parse_response(out)
 
 
@@ -233,6 +245,9 @@ human overseer. Answer their questions about the program clearly and concisely. 
 explain your reasoning, discuss trade-offs, and suggest what could be done next — but you
 do NOT take actions here; the human acts via the dashboard (approve/propose/comment/guide).
 Reply in plain prose or markdown. Do NOT output JSON.
+
+Your session runs in this program's working directory; "this folder"/"the data here"
+means your current working directory — inspect it there, don't search the wider tree.
 
 PROGRAM GOALS:
 {context.goals}
@@ -263,7 +278,7 @@ def chat_reply(context: PMContext, history: list[dict], message: str,
     cmd = [claude_bin, "-p", prompt, "--output-format", "text"]
     if context.model:
         cmd += ["--model", context.model]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=context.workdir or None)
     if proc.returncode != 0:
         raise PMReasonerError(f"claude exited {proc.returncode}: {(proc.stderr or '')[:200]}")
     return (proc.stdout or "").strip()

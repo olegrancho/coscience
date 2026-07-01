@@ -37,6 +37,7 @@ class PMContext:
     proposed_count: int = 0                            # sprints already in 'proposed'
     max_proposed: int = 4                              # cap the PM may not exceed
     model: str = ""                                    # Claude model for this PM cycle; "" = default
+    workdir: str = ""                                  # resolved cwd for the reasoner's claude session ("" = inherit)
 
     @property
     def free_slots(self) -> int:
