@@ -351,7 +351,41 @@ class Service:
     def _idea_public(i: Idea) -> dict:
         return {"id": i.id, "text": i.text, "source": i.source, "pinned": i.pinned,
                 "protected": i.protected, "comments": list(i.comments),
-                "created_at": i.created_at}
+                "created_at": i.created_at, "demoted": i.demoted}
+
+    def demote_sprint(self, sprint_id: str) -> dict:
+        """Demote a proposed/approved sprint into a non-promotable idea. The idea
+        is flagged 'demoted' (the PM may not promote it back); a human can lift that.
+        The sprint is canceled so it leaves the board."""
+        sprint = self._load_sprint(sprint_id)
+        if sprint.status not in (SprintStatus.PROPOSED, SprintStatus.APPROVED):
+            raise ValueError(
+                f"only a proposed or approved sprint can be demoted (is {sprint.status.value})")
+        if not sprint.program:
+            raise ValueError("sprint has no program to hold the idea")
+        summary, ideas = self.substrate.load_ideas(sprint.program)
+        text = (sprint.title or sprint.goals or sprint.id).strip()
+        idea = Idea(id=uuid4().hex[:8], text=text, source="human",
+                    demoted=True, created_at=time.time())
+        ideas.append(idea)
+        self.substrate.save_ideas(sprint.program, summary, ideas)
+        sprint.status = SprintStatus.CANCELED
+        self.substrate.save_sprint(sprint)
+        self.substrate.commit(f"sprint {sprint_id} demoted to idea {idea.id}")
+        return {"sprint_id": sprint_id, "idea": self._idea_public(idea)}
+
+    def set_idea_demoted(self, program_id: str, idea_id: str, demoted: bool) -> dict:
+        """Lift or set an idea's demoted status (a human decision the PM can't make)."""
+        self._require_program(program_id)
+        summary, ideas = self.substrate.load_ideas(program_id)
+        target = next((i for i in ideas if i.id == idea_id), None)
+        if target is None:
+            raise NotFoundError(idea_id)
+        target.demoted = demoted
+        self.substrate.save_ideas(program_id, summary, ideas)
+        self.substrate.commit(
+            f"program {program_id}: idea {idea_id} {'demoted' if demoted else 'un-demoted'}")
+        return self._idea_public(target)
 
     def list_ideas(self, program_id: str) -> dict:
         self._require_program(program_id)

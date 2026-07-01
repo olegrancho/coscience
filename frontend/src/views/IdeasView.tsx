@@ -31,6 +31,7 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
   const togglePin = () => act(() => api.setIdeaPin(programId, idea.id, !idea.pinned),
     "Couldn't change pin");
   const del = () => act(() => api.deleteIdea(programId, idea.id), "Couldn't delete");
+  const liftDemote = () => act(() => api.setIdeaDemoted(programId, idea.id, false), "Couldn't lift demotion");
   const addComment = () => {
     if (!comment.trim()) return;
     act(async () => { await api.addIdeaComment(programId, idea.id, comment.trim()); setComment(""); },
@@ -38,7 +39,7 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
   };
 
   // protected-but-not-pinned (e.g. a human comment) — show why it can't be auto-pruned
-  const autoProtected = idea.protected && !idea.pinned;
+  const autoProtected = idea.protected && !idea.pinned && !idea.demoted;
 
   return (
     <div style={{ border: "1px solid var(--hairline)", borderRadius: 8, overflow: "hidden" }}>
@@ -54,10 +55,18 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
             {idea.comments.length > 0 && (
               <Text size="xs" c="dimmed">{idea.comments.length} comment{idea.comments.length === 1 ? "" : "s"}</Text>
             )}
+            {idea.demoted && (
+              <Text size="xs" fw={600} style={{ color: "var(--signal)" }}
+                title="Demoted from a sprint — the AI can't promote it back">demoted</Text>
+            )}
             {autoProtected && <Text size="xs" c="dimmed">protected</Text>}
           </Group>
         </div>
         <Group gap={4} wrap="nowrap">
+          {idea.demoted && (
+            <ActionIcon variant="subtle" color="teal" onClick={liftDemote} aria-label="lift demotion"
+              title="Lift demotion — let the AI promote it to a sprint again">↑</ActionIcon>
+          )}
           <ActionIcon variant={idea.pinned ? "filled" : "subtle"} color="signal" onClick={togglePin}
             aria-label={idea.pinned ? "unpin" : "pin"} title={idea.pinned ? "Unpin (let the AI prune it)" : "Pin (protect from AI pruning)"}>
             📌

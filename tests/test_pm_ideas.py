@@ -72,6 +72,19 @@ def test_pm_deletes_only_unprotected_own_ideas(substrate):
     assert sorted(i.id for i in ideas) == ["b", "c"]   # only 'a' pruned
 
 
+def test_demoted_idea_is_not_promotable(substrate):
+    # A demoted idea must not be promoted into a sprint, even if the reasoner tries.
+    _prog(substrate)
+    substrate.save_ideas("p1", "", [Idea(id="seed", text="dead end", source="human", demoted=True)])
+    out = PMCycleOutput(proposals=[_prop("from-seed", from_idea="seed")])
+    summary = pm_beat(substrate, "p1", FakeReasoner([out]))
+    assert summary["submitted"] == []                           # promotion blocked
+    assert not (substrate.sprint_dir("p1-c0-from-seed") / "sprint.md").is_file()
+    _s, ideas = substrate.load_ideas("p1")
+    assert [i.id for i in ideas] == ["seed"]                    # idea stays in the pool
+    assert ideas[0].protected is True                           # and PM can't delete it
+
+
 def test_promotion_creates_sprint_and_removes_idea(substrate):
     _prog(substrate)
     substrate.save_ideas("p1", "", [Idea(id="seed", text="big idea", source="pm")])

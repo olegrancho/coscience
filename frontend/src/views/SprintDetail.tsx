@@ -2,7 +2,7 @@ import { Button, Card, Group, Loader, SegmentedControl, SimpleGrid, Stack, Text,
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
@@ -179,6 +179,7 @@ function WorkingDocs({ sprintId, live }: { sprintId: string; live: boolean }) {
 
 export default function SprintDetail() {
   const { id = "" } = useParams();
+  const nav = useNavigate();
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [comment, setComment] = useState("");
@@ -208,6 +209,14 @@ export default function SprintDetail() {
   const reject = async () => {
     try { await api.rejectSprint(id); notifications.show({ color: "gray", title: "Rejected", message: "Canceled — it won't run." }); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't reject", message: String(e) }); }
+  };
+  const demote = async () => {
+    if (!window.confirm("Demote this experiment to an idea? The AI won't be able to promote it back to a sprint (you can lift that later in the idea pool).")) return;
+    try {
+      await api.demoteSprint(id);
+      notifications.show({ color: "teal", title: "Demoted to idea", message: "Moved to the idea pool as a demoted idea; the AI can't re-promote it." });
+      nav(`/programs/${prog}`);
+    } catch (e) { notifications.show({ color: "red", title: "Couldn't demote", message: String(e) }); }
   };
   const setModel = async (model: string) => {
     const live = s.status === "executing" && s.agent_running;
@@ -239,6 +248,9 @@ export default function SprintDetail() {
           <Group gap={8} wrap="nowrap">
             {actions.includes("approve") && <Button color="signal" onClick={approve}>Approve</Button>}
             {actions.includes("reject") && <Button variant="default" onClick={reject}>Reject</Button>}
+            {(s.status === "proposed" || s.status === "approved") &&
+              <Button variant="subtle" color="gray" onClick={demote}
+                      title="Move this experiment to the idea pool; the AI can't promote it back">Demote</Button>}
             {actions.includes("edit") && <Button variant="light" color="machine" onClick={() => setEditing(true)}>Edit</Button>}
           </Group>
         </Group>

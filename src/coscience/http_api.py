@@ -85,6 +85,10 @@ class IdeaPinIn(BaseModel):
     pinned: bool
 
 
+class IdeaDemoteIn(BaseModel):
+    demoted: bool = True
+
+
 class SprintCommentIn(BaseModel):
     text: str = Field(min_length=1)
     target: str = "worker"          # 'worker' (steers the agent) or 'pm' (steers the planner)
@@ -163,6 +167,15 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         return service.get_sprint(sprint_id)
+
+    @api.post("/sprints/{sprint_id}/demote")
+    def demote_sprint(sprint_id: str) -> dict:
+        try:
+            return service.demote_sprint(sprint_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     @api.patch("/sprints/{sprint_id}")
     def patch_sprint(sprint_id: str, body: SprintPatch) -> dict:
@@ -289,6 +302,13 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def pin_idea(program_id: str, idea_id: str, body: IdeaPinIn) -> dict:
         try:
             return service.set_idea_pin(program_id, idea_id, body.pinned)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"not found: {program_id}/{idea_id}")
+
+    @api.post("/programs/{program_id}/ideas/{idea_id}/demote")
+    def demote_idea(program_id: str, idea_id: str, body: IdeaDemoteIn) -> dict:
+        try:
+            return service.set_idea_demoted(program_id, idea_id, body.demoted)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"not found: {program_id}/{idea_id}")
 

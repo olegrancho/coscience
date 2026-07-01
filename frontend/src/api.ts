@@ -10,6 +10,7 @@ export interface IdeaComment { id: string; text: string; added_at: number }
 export interface Idea {
   id: string; text: string; source: "pm" | "human";
   pinned: boolean; protected: boolean; comments: IdeaComment[]; created_at: number;
+  demoted: boolean;
 }
 export interface IdeaPool { summary: string; ideas: Idea[] }
 export interface SprintComment { id: string; text: string; added_at: number; target: "worker" | "pm" }
@@ -101,6 +102,13 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pinned }),
     }).then(j<Idea>),
+  setIdeaDemoted: (id: string, ideaId: string, demoted: boolean) =>
+    fetch(`/api/programs/${id}/ideas/${ideaId}/demote`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ demoted }),
+    }).then(j<Idea>),
+  demoteSprint: (id: string) =>
+    fetch(`/api/sprints/${id}/demote`, { method: "POST" }).then(j<{ sprint_id: string; idea: Idea }>),
   addIdeaComment: (id: string, ideaId: string, text: string) =>
     fetch(`/api/programs/${id}/ideas/${ideaId}/comments`, {
       method: "POST", headers: { "Content-Type": "application/json" },

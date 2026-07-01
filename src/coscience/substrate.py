@@ -269,6 +269,7 @@ class Substrate:
                 comments=[{"id": str(c["id"]), "text": str(c["text"]),
                            "added_at": float(c["added_at"])} for c in n.get("comments", [])],
                 created_at=float(n.get("created_at", 0.0)),
+                demoted=bool(n.get("demoted", False)),
             ))
         return str(fm.get("summary", "")), ideas
 
@@ -280,7 +281,8 @@ class Substrate:
             "summary": summary,
             "ideas": [
                 {"id": i.id, "text": i.text, "source": i.source, "pinned": i.pinned,
-                 "comments": list(i.comments), "created_at": i.created_at}
+                 "comments": list(i.comments), "created_at": i.created_at,
+                 **({"demoted": True} if i.demoted else {})}
                 for i in ideas
             ],
         }

@@ -243,6 +243,31 @@ def test_add_sprint_comment_missing_raises(tmp_path):
         Service(tmp_path).add_sprint_comment("nope", "x")
 
 
+def test_demote_sprint_becomes_a_demoted_idea_and_cancels(tmp_path):
+    from coscience.models import Program, ProgramStatus
+    svc = Service(tmp_path)
+    svc.substrate.save_program(Program(id="p1", title="P", goals="g", status=ProgramStatus.ACTIVE))
+    svc.submit_sprint(id="p1-s", goals="explore a dead end", plan=["a"], program="p1")
+    out = svc.demote_sprint("p1-s")
+    assert out["idea"]["demoted"] is True
+    assert svc.get_sprint("p1-s")["status"] == "canceled"       # sprint left the board
+    ideas = svc.list_ideas("p1")["ideas"]
+    assert len(ideas) == 1 and ideas[0]["demoted"] is True and ideas[0]["protected"] is True
+    # human can lift the demoted status
+    lifted = svc.set_idea_demoted("p1", ideas[0]["id"], False)
+    assert lifted["demoted"] is False
+
+
+def test_demote_rejects_executing_sprint(tmp_path):
+    from coscience.models import Program, ProgramStatus
+    svc = Service(tmp_path)
+    svc.substrate.save_program(Program(id="p1", title="P", goals="g", status=ProgramStatus.ACTIVE))
+    svc.submit_sprint(id="p1-s", goals="g", plan=["a"], program="p1")
+    _executing(svc, "p1-s")
+    with pytest.raises(ValueError):
+        svc.demote_sprint("p1-s")
+
+
 def test_sprint_model_round_trips_and_is_editable_while_executing(tmp_path):
     svc = Service(tmp_path)
     svc.submit_sprint(id="sp1", goals="g", plan=["a"])

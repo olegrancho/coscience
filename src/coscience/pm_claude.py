@@ -44,6 +44,8 @@ def render_prompt(context: PMContext) -> str:
         flags = []
         if i.get("source") == "human":
             flags.append("human")
+        if i.get("demoted"):
+            flags.append("DEMOTED — do NOT promote to a sprint")
         if i.get("protected"):
             flags.append("PROTECTED")
         if i.get("comments"):

@@ -84,12 +84,14 @@ class Idea:
     pinned: bool = False                # pin == protect
     comments: list[dict] = field(default_factory=list)  # [{id, text, added_at}]
     created_at: float = 0.0
+    demoted: bool = False               # demoted from a sprint; PM may not re-promote it
 
     @property
     def protected(self) -> bool:
-        """Whether the PM is forbidden from deleting this idea. Human-proposed
-        ideas, pinned ideas, and any idea a human has commented on are protected."""
-        return self.source == "human" or self.pinned or bool(self.comments)
+        """Whether the PM is forbidden from deleting this idea. Human-proposed,
+        pinned, commented-on, or demoted ideas are protected — a demoted idea is a
+        human 'do not pursue as a sprint' decision the PM must not undo by deleting."""
+        return self.source == "human" or self.pinned or bool(self.comments) or self.demoted
 
 
 @dataclass

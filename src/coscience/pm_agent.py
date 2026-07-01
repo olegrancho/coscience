@@ -108,7 +108,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
     guidance = [n["text"] for n in substrate.load_guidance(program_id)]
     _summary, ideas = substrate.load_ideas(program_id)
     idea_dicts = [{"id": i.id, "text": i.text, "source": i.source,
-                   "protected": i.protected,
+                   "protected": i.protected, "demoted": i.demoted,
                    "comments": [c["text"] for c in i.comments]} for i in ideas]
     proposed_count = sum(1 for s in open_sprints if s["status"] == SprintStatus.PROPOSED.value)
     return PMContext(
@@ -292,6 +292,12 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                         if s.program == program_id)
     slots = MAX_PROPOSED - open_proposed
     for prop in staged.output.proposals:
+        # A demoted idea is a human "do not pursue as a sprint" — the PM may not
+        # promote it back, whatever the reasoner returns.
+        if prop.from_idea:
+            src = ideas_by_id.get(prop.from_idea)
+            if src is not None and src.demoted:
+                continue
         sid = proposal_id(program_id, cycle, prop.suffix)
         exists = (substrate.sprint_dir(sid) / "sprint.md").is_file()
         if not exists:
