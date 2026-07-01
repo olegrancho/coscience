@@ -26,7 +26,7 @@ export default function Overview() {
   };
   const approve = useMutation({
     mutationFn: api.approveSprint,
-    onSuccess: () => { notifications.show({ color: "teal", title: "Approved", message: "It'll run when compute is free." }); refresh(); },
+    onSuccess: () => { notifications.show({ color: "teal", title: "Approved", message: "Authorized — open it and press Run to release it to the scheduler." }); refresh(); },
     onError: (e) => notifications.show({ color: "red", title: "Couldn't approve", message: String(e) }),
   });
   const reject = useMutation({
@@ -204,7 +204,7 @@ export default function Overview() {
       <Card padding="lg" radius="md" style={{ border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" }}>
         <div className="eyebrow" style={{ marginBottom: 14 }}>recent results</div>
         {recent.length === 0 ? (
-          <Text size="sm" c="dimmed">No results yet. Approved experiments produce results when the dispatcher runs them.</Text>
+          <Text size="sm" c="dimmed">No results yet. Experiments produce results once released to run and the dispatcher picks them up.</Text>
         ) : (
           <Stack gap={10}>
             {recent.map((r) => (

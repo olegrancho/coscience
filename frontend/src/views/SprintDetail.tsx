@@ -1,4 +1,4 @@
-import { Button, Card, Group, Loader, SegmentedControl, SimpleGrid, Stack, Text, Textarea } from "@mantine/core";
+import { ActionIcon, Button, Card, Group, Loader, Menu, SegmentedControl, SimpleGrid, Stack, Text, Textarea, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -6,7 +6,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
-import { BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge } from "../components/ui";
+import { BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, voterId } from "../components/ui";
 import SprintEditModal from "../components/SprintEditModal";
 
 /** Inline result: shows a clamped preview that unfolds in place, plus a link to
@@ -215,7 +215,7 @@ export default function SprintDetail() {
   const [commentTarget, setCommentTarget] = useState<"worker" | "pm">("worker");
   const prog = programOf(id);
   const sprint = useQuery({
-    queryKey: ["sprint", id], queryFn: () => api.getSprint(id),
+    queryKey: ["sprint", id], queryFn: () => api.getSprint(id, voterId()),
     refetchInterval: (q) => (q.state.data?.status === "executing" ? 5000 : false),
   });
   const program = useQuery({ queryKey: ["program", prog], queryFn: () => api.getProgram(prog), enabled: !!prog });
@@ -232,12 +232,26 @@ export default function SprintDetail() {
   const resources = Object.entries(s.resources_required);
 
   const approve = async () => {
-    try { await api.approveSprint(id); notifications.show({ color: "teal", title: "Approved", message: "It'll run when compute is free." }); refresh(); }
+    try { await api.approveSprint(id); notifications.show({ color: "teal", title: "Approved", message: "Authorized — release it with Run when you're ready." }); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't approve", message: String(e) }); }
   };
+  const run = async () => {
+    try { await api.runSprint(id); notifications.show({ color: "teal", title: "Released to run", message: "Queued — it starts as soon as a resource slot is free." }); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't run", message: String(e) }); }
+  };
+  const sendBack = async () => {
+    try { await api.sendBackSprint(id); notifications.show({ color: "gray", title: "Sent back", message: "Returned to Proposed for reconsideration." }); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't send back", message: String(e) }); }
+  };
   const reject = async () => {
-    try { await api.rejectSprint(id); notifications.show({ color: "gray", title: "Rejected", message: "Canceled — it won't run." }); refresh(); }
-    catch (e) { notifications.show({ color: "red", title: "Couldn't reject", message: String(e) }); }
+    try { await api.rejectSprint(id); notifications.show({ color: "gray", title: "Canceled", message: "This sprint won't run." }); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't cancel", message: String(e) }); }
+  };
+  const vote = async (value: number) => {
+    try {
+      const votes = await api.voteSprint(id, voterId(), value);
+      qc.setQueryData(["sprint", id], (old: typeof s | undefined) => (old ? { ...old, votes } : old));
+    } catch (e) { notifications.show({ color: "red", title: "Couldn't vote", message: String(e) }); }
   };
   const demote = async () => {
     if (!window.confirm("Demote this experiment to an idea? The AI won't be able to promote it back to a sprint (you can lift that later in the idea pool).")) return;
@@ -275,18 +289,48 @@ export default function SprintDetail() {
             {s.title || s.goals || s.id}
           </h1>
           <Group gap={8} wrap="nowrap">
-            {actions.includes("approve") && <Button color="signal" onClick={approve}>Approve</Button>}
-            {actions.includes("reject") && <Button variant="default" onClick={reject}>Reject</Button>}
-            {(s.status === "proposed" || s.status === "approved") &&
-              <Button variant="subtle" color="gray" onClick={demote}
-                      title="Move this experiment to the idea pool; the AI can't promote it back">Demote</Button>}
-            {actions.includes("edit") && <Button variant="light" color="machine" onClick={() => setEditing(true)}>Edit</Button>}
+            {actions.includes("approve") && (
+              <Tooltip label="Authorize this sprint. It won't start until it's released with Run." withArrow openDelay={300}>
+                <Button color="signal" onClick={approve}>Approve</Button>
+              </Tooltip>
+            )}
+            {actions.includes("run") && (
+              <Tooltip label="Release to the scheduler — runs as soon as a resource slot is free (may queue)." withArrow openDelay={300}>
+                <Button color="signal" onClick={run}>Run</Button>
+              </Tooltip>
+            )}
+            {actions.includes("sendBack") && (
+              <Tooltip label="Return to Proposed for reconsideration." withArrow openDelay={300}>
+                <Button variant="default" onClick={sendBack}>Send back</Button>
+              </Tooltip>
+            )}
+            {(actions.includes("edit") || actions.includes("reject") || actions.includes("demote")) && (
+              <Menu position="bottom-end" withArrow>
+                <Menu.Target>
+                  <Tooltip label="More actions" withArrow openDelay={300}>
+                    <ActionIcon variant="default" aria-label="more actions" size="lg">⋯</ActionIcon>
+                  </Tooltip>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  {actions.includes("edit") &&
+                    <Menu.Item onClick={() => setEditing(true)}>Edit goals / plan / resources…</Menu.Item>}
+                  {actions.includes("reject") &&
+                    <Menu.Item color="red" onClick={reject}>{s.status === "queued" ? "Cancel (pull from queue)" : "Reject (cancel)"}</Menu.Item>}
+                  {actions.includes("demote") &&
+                    <Menu.Item onClick={demote}>Demote to idea…</Menu.Item>}
+                </Menu.Dropdown>
+              </Menu>
+            )}
           </Group>
         </Group>
         <Group gap={10} mt={9} align="center">
           <StatusBadge status={s.status} />
           <span className="mono" style={{ fontSize: 12, color: "var(--ink-faint)" }}>ref {s.id}</span>
+          {s.status === "queued" && (
+            <span style={{ fontSize: 12, color: "var(--st-queued)" }}>waiting for a compute slot…</span>
+          )}
           {s.status === "executing" && <LiveActivity activity={s.activity} agentRunning={s.agent_running} />}
+          <span style={{ marginLeft: "auto" }}><VoteControl votes={s.votes} onVote={vote} /></span>
         </Group>
         {s.summary && <Text mt={12} style={{ maxWidth: 620, color: "var(--ink-muted)", lineHeight: 1.55 }}>{s.summary}</Text>}
       </div>

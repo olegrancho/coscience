@@ -10,7 +10,7 @@ def test_preemption_kills_the_victims_agent(substrate):
     # V (low priority, preemptible) holds the GPU with a running agent.
     agent = FakeAgent(linger=10**6)
     substrate.save_sprint(Sprint(
-        id="V", status=SprintStatus.APPROVED, goals="g", plan=["long work"],
+        id="V", status=SprintStatus.QUEUED, goals="g", plan=["long work"],
         resources_required={"gpu": 1.0}, priority=0))
     disp = Dispatcher(substrate, agent, ResourcePool({"gpu": 1.0}),
                       SchedulerPolicy(aging_interval=0.0))
@@ -22,7 +22,7 @@ def test_preemption_kills_the_victims_agent(substrate):
 
     # H (high priority) arrives and needs the same GPU.
     substrate.save_sprint(Sprint(
-        id="H", status=SprintStatus.APPROVED, goals="g", plan=["go"],
+        id="H", status=SprintStatus.QUEUED, goals="g", plan=["go"],
         resources_required={"gpu": 1.0}, priority=9))
     disp.run_one_cycle(now=1.0)            # H preempts V
 

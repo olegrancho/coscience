@@ -61,6 +61,11 @@ class SprintPatch(BaseModel):
     model: str | None = None
 
 
+class VoteIn(BaseModel):
+    by: str                       # opaque per-browser voter id
+    value: int                    # +1 👍, -1 👎, 0 clear (toggling handled server-side)
+
+
 class ProgramStatusIn(BaseModel):
     status: str
 
@@ -132,9 +137,9 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         return service.get_sprint(body.id)
 
     @api.get("/sprints/{sprint_id}")
-    def get_sprint(sprint_id: str) -> dict:
+    def get_sprint(sprint_id: str, viewer: str = "") -> dict:
         try:
-            return service.get_sprint(sprint_id)
+            return service.get_sprint(sprint_id, viewer=viewer)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
 
@@ -167,7 +172,38 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             service.approve_sprint(sprint_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         return service.get_sprint(sprint_id)
+
+    @api.post("/sprints/{sprint_id}/run")
+    def run_sprint(sprint_id: str) -> dict:
+        try:
+            service.run_sprint(sprint_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        return service.get_sprint(sprint_id)
+
+    @api.post("/sprints/{sprint_id}/send_back")
+    def send_back_sprint(sprint_id: str) -> dict:
+        try:
+            service.send_back_sprint(sprint_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        return service.get_sprint(sprint_id)
+
+    @api.post("/sprints/{sprint_id}/vote")
+    def vote_sprint(sprint_id: str, body: VoteIn) -> dict:
+        try:
+            return service.vote_sprint(sprint_id, body.by, body.value)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     @api.post("/sprints/{sprint_id}/reject")
     def reject_sprint(sprint_id: str) -> dict:

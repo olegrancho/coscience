@@ -21,6 +21,7 @@
   /* status hues (derive from the two voices) */
   --st-proposed: #d9810f;
   --st-approved: #1b9a85;
+  --st-queued: #6a7fd0;
   --st-executing: #1f8fb0;
   --st-done: #4f9d5d;
   --st-paused: #7a8a85;

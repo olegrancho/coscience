@@ -142,10 +142,13 @@ def test_reject_via_http(client):
     assert r.json()["status"] == "canceled"
 
 
-def test_reject_non_proposed_is_422(client):
-    client.post("/api/sprints", json={"id": "sp1", "goals": "g",
-                                      "plan": ["true"]})
+def test_reject_approved_then_terminal_is_422(client):
+    # Reject/Cancel now works on approved (a pre-run state) -> canceled; rejecting
+    # a terminal (already-canceled) sprint is the 422.
+    client.post("/api/sprints", json={"id": "sp1", "goals": "g", "plan": ["true"]})
     client.post("/api/sprints/sp1/approve")
+    r = client.post("/api/sprints/sp1/reject")
+    assert r.status_code == 200 and r.json()["status"] == "canceled"
     assert client.post("/api/sprints/sp1/reject").status_code == 422
 
 

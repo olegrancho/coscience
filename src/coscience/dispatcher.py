@@ -13,7 +13,7 @@ from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
 from coscience.worker import Worker
 
-_ELIGIBLE = (SprintStatus.APPROVED, SprintStatus.EXECUTING)
+_ELIGIBLE = (SprintStatus.QUEUED, SprintStatus.EXECUTING)
 
 
 @dataclass
@@ -73,7 +73,7 @@ class Dispatcher:
             if self.ledger.acquire(sprint.id, sprint.resources_required, now, ttl,
                                    priority=eff, preemptible=sprint.preemptible):
                 report.granted += 1
-                if sprint.status == SprintStatus.APPROVED:
+                if sprint.status == SprintStatus.QUEUED:
                     sprint.status = SprintStatus.EXECUTING
                     self.substrate.save_sprint(sprint)
 
@@ -93,7 +93,7 @@ class Dispatcher:
                 if self.ledger.acquire(cand.id, cand.resources_required, now, ttl,
                                        priority=cand_eff, preemptible=cand.preemptible):
                     report.granted += 1
-                    if cand.status == SprintStatus.APPROVED:
+                    if cand.status == SprintStatus.QUEUED:
                         cand.status = SprintStatus.EXECUTING
                         self.substrate.save_sprint(cand)
 

@@ -95,6 +95,17 @@ def test_parse_response_takes_first_of_multiple_blocks():
     assert parse_response(text).report == "real"
 
 
+def test_parse_response_reads_reopen_ids():
+    out = parse_response(json.dumps({"report": "r", "proposals": [],
+                                     "reopen_ids": ["p1-c0-a", "p1-c1-b"]}))
+    assert out.reopen_ids == ["p1-c0-a", "p1-c1-b"]
+
+
+def test_render_prompt_notes_report_structure():
+    p = render_prompt(_ctx())
+    assert "Findings" in p and "Rationale" in p          # report must always carry these
+
+
 def test_run_threads_workdir_to_invoke():
     seen = {}
 

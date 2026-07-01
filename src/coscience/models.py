@@ -12,9 +12,10 @@ class ProgramStatus(StrEnum):
 
 
 class SprintStatus(StrEnum):
-    PROPOSED = "proposed"
-    APPROVED = "approved"
-    EXECUTING = "executing"
+    PROPOSED = "proposed"      # PM/human suggested it; awaiting review
+    APPROVED = "approved"      # human authorized it; held until released to run
+    QUEUED = "queued"          # released to the scheduler; runs when a resource slot frees
+    EXECUTING = "executing"    # lease granted; the worker agent is running
     DONE = "done"
     CANCELED = "canceled"
     FAILED = "failed"          # agent failed repeatedly; terminal until a human acts
@@ -54,6 +55,7 @@ class Sprint:
     created_at: float | None = None   # wall-clock of first save; orders sprints by appearance
     comments: list[dict] = field(default_factory=list)  # human feedback [{id, text, added_at}]
     model: str = ""                   # Claude model for this sprint's worker; "" = launcher default
+    votes: list[dict] = field(default_factory=list)  # 👍/👎 signal [{by, value:+1|-1, at}]; one per voter
 
 
 @dataclass

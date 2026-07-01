@@ -13,7 +13,7 @@ def test_preempted_sprint_is_killed_then_resumes_and_both_complete(substrate):
     # agents 'running' long enough for the preemption to actually happen.
     agent = FakeAgent(linger=3)
     substrate.save_sprint(Sprint(
-        id="V", status=SprintStatus.APPROVED, goals="g", plan=["long work"],
+        id="V", status=SprintStatus.QUEUED, goals="g", plan=["long work"],
         resources_required={"gpu": 1.0}, priority=0))
     disp = Dispatcher(substrate, agent, ResourcePool({"gpu": 1.0}),
                       SchedulerPolicy(aging_interval=0.0))
@@ -22,7 +22,7 @@ def test_preempted_sprint_is_killed_then_resumes_and_both_complete(substrate):
     assert substrate.load_progress("V").agent_token
 
     substrate.save_sprint(Sprint(
-        id="H", status=SprintStatus.APPROVED, goals="g", plan=["go"],
+        id="H", status=SprintStatus.QUEUED, goals="g", plan=["go"],
         resources_required={"gpu": 1.0}, priority=9))
 
     h_done_first = False

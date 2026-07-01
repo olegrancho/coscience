@@ -1,5 +1,5 @@
 export interface ProgramRow { id: string; title: string; status: string; goals: string }
-export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string }
+export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string; votes: VoteTally }
 export interface PMActivation { at: number; cycle: number; triggers: string[]; submitted: string[]; forced: boolean }
 export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
@@ -16,12 +16,14 @@ export interface IdeaPool { summary: string; ideas: Idea[] }
 export interface ChatMessage { role: "user" | "pm"; text: string; at: number }
 export interface SprintComment { id: string; text: string; added_at: number; target: "worker" | "pm" }
 export interface SprintActivity { label: string; active: boolean; at: number }
+export interface VoteTally { up: number; down: number; mine: number }
 export interface SprintRow {
   id: string; status: string; title: string; summary: string;
   goals: string; program: string | null;
   priority: number; steps: number; results: string[];
   rationale: string; resources_required: Record<string, number>;
   started_at: number | null; model: string; activity: SprintActivity | null;
+  votes: VoteTally;
 }
 export interface UsageWindow { pct: number; resets: string }
 export interface RunAgg {
@@ -38,7 +40,7 @@ export interface Sprint {
   resources_required: Record<string, number>; rationale: string; plan: string[];
   program: string | null; results: string[]; comments: SprintComment[];
   agent_running: boolean; started_at: number | null; error: string; lease: unknown | null;
-  model: string; activity: SprintActivity | null;
+  model: string; activity: SprintActivity | null; votes: VoteTally;
 }
 export interface SprintFile {
   name: string; label: string; kind: string; size: number;
@@ -122,7 +124,8 @@ export const api = {
       body: JSON.stringify({ text }),
     }).then(j<Idea>),
   listSprints: () => fetch("/api/sprints").then(j<SprintRow[]>),
-  getSprint: (id: string) => fetch(`/api/sprints/${id}`).then(j<Sprint>),
+  getSprint: (id: string, viewer?: string) =>
+    fetch(`/api/sprints/${id}${viewer ? `?viewer=${encodeURIComponent(viewer)}` : ""}`).then(j<Sprint>),
   getSprintFiles: (id: string) => fetch(`/api/sprints/${id}/files`).then(j<SprintFile[]>),
   getSprintFile: (id: string, name: string) =>
     fetch(`/api/sprints/${id}/files/${encodeURIComponent(name)}`).then(j<SprintFile>),
@@ -139,8 +142,17 @@ export const api = {
     }).then(j<Sprint>),
   approveSprint: (id: string) =>
     fetch(`/api/sprints/${id}/approve`, { method: "POST" }).then(j<Sprint>),
+  runSprint: (id: string) =>
+    fetch(`/api/sprints/${id}/run`, { method: "POST" }).then(j<Sprint>),
+  sendBackSprint: (id: string) =>
+    fetch(`/api/sprints/${id}/send_back`, { method: "POST" }).then(j<Sprint>),
   rejectSprint: (id: string) =>
     fetch(`/api/sprints/${id}/reject`, { method: "POST" }).then(j<Sprint>),
+  voteSprint: (id: string, by: string, value: number) =>
+    fetch(`/api/sprints/${id}/vote`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ by, value }),
+    }).then(j<VoteTally>),
   editSprint: (id: string, patch: SprintPatch) =>
     fetch(`/api/sprints/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },

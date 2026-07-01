@@ -65,16 +65,66 @@ class Service:
         return id
 
     def approve_sprint(self, sprint_id: str) -> None:
+        """Human authorization: proposed -> approved. Cleared to run, but held
+        until released with run_sprint (by you or the PM)."""
         sprint = self._load_sprint(sprint_id)
+        if sprint.status != SprintStatus.PROPOSED:
+            raise ValueError(f"can only approve a proposed sprint; {sprint_id} is {sprint.status.value}")
         sprint.status = SprintStatus.APPROVED
         self.substrate.save_sprint(sprint)
 
-    def reject_sprint(self, sprint_id: str) -> None:
+    def run_sprint(self, sprint_id: str) -> None:
+        """Release an approved sprint to the scheduler: approved -> queued. The
+        dispatcher runs it as soon as a resource slot frees (it may wait in queue)."""
         sprint = self._load_sprint(sprint_id)
-        if sprint.status != SprintStatus.PROPOSED:
-            raise ValueError(f"can only reject a proposed sprint; {sprint_id} is {sprint.status.value}")
+        if sprint.status != SprintStatus.APPROVED:
+            raise ValueError(f"can only run an approved sprint; {sprint_id} is {sprint.status.value}")
+        sprint.status = SprintStatus.QUEUED
+        self.substrate.save_sprint(sprint)
+
+    def send_back_sprint(self, sprint_id: str) -> None:
+        """Return an approved sprint to proposed for reconsideration."""
+        sprint = self._load_sprint(sprint_id)
+        if sprint.status != SprintStatus.APPROVED:
+            raise ValueError(f"can only send back an approved sprint; {sprint_id} is {sprint.status.value}")
+        sprint.status = SprintStatus.PROPOSED
+        self.substrate.save_sprint(sprint)
+
+    _REJECTABLE = (SprintStatus.PROPOSED, SprintStatus.APPROVED, SprintStatus.QUEUED)
+
+    def reject_sprint(self, sprint_id: str) -> None:
+        """Cancel a pre-execution sprint (proposed / approved / queued)."""
+        sprint = self._load_sprint(sprint_id)
+        if sprint.status not in self._REJECTABLE:
+            raise ValueError(f"can only cancel a pre-run sprint; {sprint_id} is {sprint.status.value}")
         sprint.status = SprintStatus.CANCELED
         self.substrate.save_sprint(sprint)
+
+    def vote_sprint(self, sprint_id: str, by: str, value: int) -> dict:
+        """Record a 👍/👎 on a sprint. `value` is +1, -1, or 0 (clear). One vote
+        per `by` (a browser id) — re-voting the same way clears it (toggle),
+        voting the other way switches. Returns the tally."""
+        by = str(by).strip()
+        if not by:
+            raise ValueError("voter id is required")
+        if value not in (-1, 0, 1):
+            raise ValueError("vote must be +1, -1, or 0")
+        sprint = self._load_sprint(sprint_id)
+        prior = next((v for v in sprint.votes if v["by"] == by), None)
+        sprint.votes = [v for v in sprint.votes if v["by"] != by]
+        # toggle: same direction again -> cleared; else set the new direction
+        if value != 0 and not (prior and prior["value"] == value):
+            sprint.votes.append({"by": by, "value": value, "at": time.time()})
+        self.substrate.save_sprint(sprint)
+        self.substrate.commit(f"sprint {sprint_id}: vote")
+        return self._vote_tally(sprint, by)
+
+    @staticmethod
+    def _vote_tally(sprint, viewer: str = "") -> dict:
+        up = sum(1 for v in sprint.votes if v["value"] > 0)
+        down = sum(1 for v in sprint.votes if v["value"] < 0)
+        mine = next((v["value"] for v in sprint.votes if v["by"] == viewer), 0) if viewer else 0
+        return {"up": up, "down": down, "mine": mine}
 
     def edit_sprint(self, sprint_id: str, *, goals=None, plan=None, priority=None,
                     resources_required=None, preemptible=None, model=None) -> None:
@@ -140,6 +190,7 @@ class Service:
                 "started_at": started,
                 "model": sprint.model,
                 "activity": activity,
+                "votes": self._vote_tally(sprint),
             })
         return rows
 
@@ -147,7 +198,7 @@ class Service:
         from coscience.claude_executor import read_activity
         return read_activity(self.substrate.sprint_dir(sprint_id))
 
-    def get_sprint(self, sprint_id: str) -> dict:
+    def get_sprint(self, sprint_id: str, viewer: str = "") -> dict:
         sprint = self._load_sprint(sprint_id)
         progress = self.substrate.load_progress(sprint_id)
         lease = self._ledger().lease_for(sprint_id)
@@ -166,6 +217,7 @@ class Service:
             "results": list(sprint.results),
             "plan": list(sprint.plan),
             "comments": list(sprint.comments),
+            "votes": self._vote_tally(sprint, viewer),
             "agent_running": bool(progress.agent_token),
             "started_at": progress.started_at,
             "activity": self._activity(sprint_id) if sprint.status == SprintStatus.EXECUTING else None,
@@ -296,7 +348,8 @@ class Service:
             "activations": list(reversed(pm.activations)),   # newest first, for the timeline
             "last_run": pm.last_run,
             "sprints": [{"id": s.id, "status": s.status.value, "goals": s.goals,
-                         "title": s.title, "results": list(s.results), "model": s.model}
+                         "title": s.title, "results": list(s.results), "model": s.model,
+                         "votes": self._vote_tally(s)}
                         for s in sprints],
         }
 

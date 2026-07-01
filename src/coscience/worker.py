@@ -101,10 +101,10 @@ class Worker:
         executing = self.substrate.iter_sprints(status=SprintStatus.EXECUTING)
         if executing:
             return executing[0]
-        approved = self.substrate.iter_sprints(status=SprintStatus.APPROVED)
-        if not approved:
+        queued = self.substrate.iter_sprints(status=SprintStatus.QUEUED)
+        if not queued:
             return None
-        sprint = approved[0]
+        sprint = queued[0]
         sprint.status = SprintStatus.EXECUTING
         self.substrate.save_sprint(sprint)
         self.substrate.commit(f"sprint {sprint.id}: start executing")

@@ -15,7 +15,7 @@ def fake_agent(monkeypatch):
 
 def _seed(repo, sid, req=None):
     Substrate(repo).save_sprint(Sprint(
-        id=sid, status=SprintStatus.APPROVED, goals="g",
+        id=sid, status=SprintStatus.QUEUED, goals="g",
         plan=["do the work"], resources_required=req or {}))
 
 

@@ -1,8 +1,53 @@
 import type { CSSProperties, ReactNode } from "react";
-import { Stack, Text } from "@mantine/core";
+import { Stack, Text, Tooltip } from "@mantine/core";
 import { Link } from "react-router-dom";
-import type { RunAgg, SprintActivity, Usage } from "../api";
+import type { RunAgg, SprintActivity, Usage, VoteTally } from "../api";
 import { SPRINT_STATE_ORDER, statusVar } from "./status";
+
+/** A stable per-browser id so 👍/👎 counts reflect distinct people without auth.
+ *  Not identifying — just enough to enforce one vote per browser and toggle it. */
+export function voterId(): string {
+  const KEY = "coscience.voter";
+  let v = localStorage.getItem(KEY);
+  if (!v) { v = Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem(KEY, v); }
+  return v;
+}
+
+/** 👍/👎 on a sprint. Read-only shows the tally; interactive lets you toggle your
+ *  own vote (highlighted). Optimistic — `onVote(value)` persists and returns the
+ *  fresh tally. */
+export function VoteControl(
+  { votes, onVote, size = "sm" }:
+  { votes: VoteTally; onVote?: (value: number) => void; size?: "sm" | "xs" },
+) {
+  const fs = size === "xs" ? 12 : 13;
+  const btn = (dir: 1 | -1, glyph: string, count: number, tip: string) => {
+    const on = votes.mine === dir;
+    const body = (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: fs,
+        color: on ? (dir > 0 ? "var(--st-done)" : "var(--signal)") : "var(--ink-muted)",
+        fontWeight: on ? 700 : 500 }}>
+        <span>{glyph}</span><span className="mono">{count}</span>
+      </span>
+    );
+    if (!onVote) return body;
+    return (
+      <Tooltip label={tip} withArrow openDelay={300}>
+        <button type="button" onClick={() => onVote(dir)}
+          style={{ background: "none", border: "none", cursor: "pointer", padding: "1px 4px",
+            borderRadius: 6, lineHeight: 1 }}>
+          {body}
+        </button>
+      </Tooltip>
+    );
+  };
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      {btn(1, "👍", votes.up, votes.mine === 1 ? "Remove your 👍" : "Thumbs up")}
+      {btn(-1, "👎", votes.down, votes.mine === -1 ? "Remove your 👎" : "Thumbs down")}
+    </span>
+  );
+}
 
 /** "2h ago" / "3d ago" / "Jun 27" — with the exact local time on hover. */
 function relTime(at: number): string {

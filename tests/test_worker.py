@@ -7,7 +7,7 @@ from coscience.worker import Worker
 
 
 def _approved(sid, plan=("do the thing",), program=None, title="", summary=""):
-    return Sprint(id=sid, status=SprintStatus.APPROVED, goals="g", plan=list(plan),
+    return Sprint(id=sid, status=SprintStatus.QUEUED, goals="g", plan=list(plan),
                   program=program, title=title, summary=summary)
 
 

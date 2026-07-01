@@ -15,7 +15,7 @@ def fake_agent(monkeypatch):
 
 def _approved(repo, sid, plan=("do the work",)):
     Substrate(repo).save_sprint(Sprint(
-        id=sid, status=SprintStatus.APPROVED, goals="g", plan=list(plan)))
+        id=sid, status=SprintStatus.QUEUED, goals="g", plan=list(plan)))
 
 
 def test_run_once_idle(tmp_path):

@@ -6,7 +6,7 @@ import { Link, useParams } from "react-router-dom";
 import { type Components } from "react-markdown";
 import Md from "../components/Md";
 import { api } from "../api";
-import { BackLink, EmptyState, ModelSelect, RelTime, StatusBadge } from "../components/ui";
+import { BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -198,7 +198,7 @@ export default function ProgramDetail() {
         const counts = p.sprints.reduce<Record<string, number>>((a, s) => {
           a[s.status] = (a[s.status] ?? 0) + 1; return a;
         }, {});
-        const order = ["proposed", "approved", "executing", "failed", "done", "canceled"];
+        const order = ["proposed", "approved", "queued", "executing", "failed", "done", "canceled"];
         return (
           <Card padding="lg" radius="md" style={cardStyle}>
             <Group justify="space-between" align="center" mb={12} wrap="nowrap">
@@ -226,6 +226,7 @@ export default function ProgramDetail() {
                       <Text size="sm" truncate>{s.title || s.goals || s.id}</Text>
                     </Link>
                     <Group gap={12} wrap="nowrap">
+                      {(s.votes.up > 0 || s.votes.down > 0) && <VoteControl votes={s.votes} size="xs" />}
                       {s.results.length > 0 && (
                         <Link to={`/results/${s.results[0]}`} className="view" style={{ fontSize: 13 }}>result →</Link>
                       )}

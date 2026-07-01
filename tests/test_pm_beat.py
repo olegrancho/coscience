@@ -107,6 +107,22 @@ def test_beat_reasons_again_after_idea_comment(substrate):
     assert summary["submitted"] == ["p1-c1-b"]
 
 
+def test_pm_reopens_approved_only(substrate):
+    # The PM may pull an APPROVED sprint back to PROPOSED (obsolete), but must not
+    # touch a QUEUED one (a human deliberately released it).
+    from coscience.models import Sprint
+    from coscience.pm_reasoner import FakeReasoner
+    _prog(substrate)
+    substrate.save_sprint(Sprint(id="p1-appr", status=SprintStatus.APPROVED,
+                                 goals="g", plan=["x"], program="p1"))
+    substrate.save_sprint(Sprint(id="p1-queued", status=SprintStatus.QUEUED,
+                                 goals="g", plan=["x"], program="p1"))
+    out = PMCycleOutput(report="r", reopen_ids=["p1-appr", "p1-queued"])
+    pm_beat(substrate, "p1", FakeReasoner([out]), force=True)
+    assert substrate.load_sprint("p1-appr").status == SprintStatus.PROPOSED
+    assert substrate.load_sprint("p1-queued").status == SprintStatus.QUEUED  # untouched
+
+
 def test_rerun_same_cycle_is_idempotent(substrate):
     # Stage a cycle, then run twice from the same staged state (simulating a
     # crash before clear). The reasoner must NOT be called, and no duplicate.

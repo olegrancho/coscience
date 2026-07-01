@@ -105,7 +105,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
             err = substrate.load_progress(s.id).last_error
             failed.append({"id": s.id, "goals": s.goals, "error": err})
         elif s.status in (SprintStatus.PROPOSED, SprintStatus.APPROVED,
-                          SprintStatus.EXECUTING):
+                          SprintStatus.QUEUED, SprintStatus.EXECUTING):
             open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals})
     guidance = [n["text"] for n in substrate.load_guidance(program_id)]
     _summary, ideas = substrate.load_ideas(program_id)
@@ -378,6 +378,21 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             except (TypeError, ValueError):
                 pass
         substrate.save_sprint(sp)
+
+    # --- reopen: pull an APPROVED sprint back to PROPOSED when results made it
+    # obsolete. Guarded to approved sprints of this program only — the PM must not
+    # touch queued/executing work (a human deliberately released those).
+    reopened: list[str] = []
+    for sid in staged.output.reopen_ids:
+        sid = str(sid)
+        if not (substrate.sprint_dir(sid) / "sprint.md").is_file():
+            continue
+        sp = substrate.load_sprint(sid)
+        if sp.program != program_id or sp.status != SprintStatus.APPROVED:
+            continue
+        sp.status = SprintStatus.PROPOSED
+        substrate.save_sprint(sp)
+        reopened.append(sid)
 
     substrate.save_report(program_id, staged.output.report)
 

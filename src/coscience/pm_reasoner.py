@@ -66,6 +66,7 @@ class PMCycleOutput:
     new_ideas: list[str] = field(default_factory=list)      # vague directions to record (PM-sourced)
     delete_idea_ids: list[str] = field(default_factory=list)  # PM ideas to prune (protected ones ignored)
     sprint_edits: list[dict] = field(default_factory=list)   # revisions to still-proposed sprints (from PM feedback)
+    reopen_ids: list[str] = field(default_factory=list)      # approved sprints to send back to proposed (now obsolete)
 
 
 class Reasoner(Protocol):

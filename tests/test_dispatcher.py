@@ -7,7 +7,7 @@ from coscience.scheduler import SchedulerPolicy
 
 
 def _approved(sid, req=None, prio=0):
-    return Sprint(id=sid, status=SprintStatus.APPROVED, goals="g", plan=["do the work"],
+    return Sprint(id=sid, status=SprintStatus.QUEUED, goals="g", plan=["do the work"],
                   resources_required=req or {}, priority=prio)
 
 

@@ -30,7 +30,8 @@ def test_submit_then_list_and_get(tmp_path):
     assert rows == [{"id": "sp1", "status": "proposed", "title": "", "summary": "",
                      "goals": "cure", "program": None, "priority": 3, "steps": 1,
                      "results": [], "rationale": "", "resources_required": {"gpu": 1.0},
-                     "started_at": None, "model": "", "activity": None}]
+                     "started_at": None, "model": "", "activity": None,
+                     "votes": {"up": 0, "down": 0, "mine": 0}}]
     detail = svc.get_sprint("sp1")
     assert detail["status"] == "proposed"
     assert detail["resources_required"] == {"gpu": 1.0}
@@ -77,10 +78,23 @@ def test_reject_moves_proposed_to_canceled(tmp_path):
     assert svc.get_sprint("sp1")["status"] == "canceled"
 
 
-def test_reject_non_proposed_raises(tmp_path):
+def test_reject_allowed_through_queued(tmp_path):
+    # Reject/Cancel is allowed on any pre-run state: proposed, approved, queued.
+    svc = Service(tmp_path)
+    for st in ("proposed", "approved", "queued"):
+        svc.submit_sprint(id=f"sp-{st}", goals="g", plan=["true"])
+        if st in ("approved", "queued"):
+            svc.approve_sprint(f"sp-{st}")
+        if st == "queued":
+            svc.run_sprint(f"sp-{st}")
+        svc.reject_sprint(f"sp-{st}")
+        assert svc.get_sprint(f"sp-{st}")["status"] == "canceled"
+
+
+def test_reject_executing_raises(tmp_path):
     svc = Service(tmp_path)
     svc.submit_sprint(id="sp1", goals="g", plan=["true"])
-    svc.approve_sprint("sp1")
+    _executing(svc, "sp1")
     with pytest.raises(ValueError):
         svc.reject_sprint("sp1")
 
@@ -88,6 +102,58 @@ def test_reject_non_proposed_raises(tmp_path):
 def test_reject_missing_raises_notfound(tmp_path):
     with pytest.raises(NotFoundError):
         Service(tmp_path).reject_sprint("nope")
+
+
+def test_approve_run_send_back_flow(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["true"])
+    svc.approve_sprint("sp1")
+    assert svc.get_sprint("sp1")["status"] == "approved"
+    svc.run_sprint("sp1")                                  # release to the scheduler
+    assert svc.get_sprint("sp1")["status"] == "queued"
+    # can't approve/run/send-back from the wrong state
+    with pytest.raises(ValueError):
+        svc.approve_sprint("sp1")
+    with pytest.raises(ValueError):
+        svc.run_sprint("sp1")
+    with pytest.raises(ValueError):
+        svc.send_back_sprint("sp1")
+
+
+def test_send_back_returns_approved_to_proposed(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["true"])
+    svc.approve_sprint("sp1")
+    svc.send_back_sprint("sp1")
+    assert svc.get_sprint("sp1")["status"] == "proposed"
+
+
+def test_run_requires_approval(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["true"])   # still proposed
+    with pytest.raises(ValueError):
+        svc.run_sprint("sp1")
+
+
+def test_vote_toggle_switch_and_tally(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["true"])
+    assert svc.vote_sprint("sp1", "alice", 1) == {"up": 1, "down": 0, "mine": 1}
+    assert svc.vote_sprint("sp1", "bob", 1) == {"up": 2, "down": 0, "mine": 1}
+    # alice switches to 👎
+    assert svc.vote_sprint("sp1", "alice", -1) == {"up": 1, "down": 1, "mine": -1}
+    # alice votes 👎 again -> toggles off
+    assert svc.vote_sprint("sp1", "alice", -1) == {"up": 1, "down": 0, "mine": 0}
+    # tally visible to a non-voter has mine=0
+    assert svc.get_sprint("sp1")["votes"] == {"up": 1, "down": 0, "mine": 0}
+    assert svc.get_sprint("sp1", viewer="bob")["votes"] == {"up": 1, "down": 0, "mine": 1}
+
+
+def test_vote_rejects_bad_value(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["true"])
+    with pytest.raises(ValueError):
+        svc.vote_sprint("sp1", "alice", 2)
 
 
 def _executing(svc, sid):

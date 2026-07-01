@@ -44,6 +44,8 @@ class Substrate:
                        "added_at": float(c["added_at"]),
                        "target": str(c.get("target", "worker"))} for c in fm.get("comments", [])],
             model=str(fm.get("model", "")),
+            votes=[{"by": str(v["by"]), "value": int(v["value"]), "at": float(v["at"])}
+                   for v in fm.get("votes", [])],
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
@@ -79,6 +81,8 @@ class Substrate:
             fm["comments"] = list(sprint.comments)
         if sprint.model:
             fm["model"] = sprint.model
+        if sprint.votes:
+            fm["votes"] = list(sprint.votes)
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))
 

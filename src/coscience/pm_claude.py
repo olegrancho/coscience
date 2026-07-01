@@ -92,7 +92,7 @@ pending now, so you have {context.free_slots} free slot(s). Propose/promote AT M
 if that is 0, propose nothing and instead curate the idea pool.
 
 Respond with ONLY a JSON object (no prose outside it) of this shape:
-{{"report": "<program-status summary as STRUCTURED markdown, NOT one run-on paragraph: a bold one-line headline, then a blank line, then a few short paragraphs and/or '-' bullet points, with a blank line between blocks. Put real newlines in the JSON string (escaped as \\n).>",
+{{"report": "<program-status report as STRUCTURED markdown a reader understands at a glance, WITHOUT needing prior context. Always cover, in THIS order, each under a bold heading: **Findings** — the most important and most recent results so far and what they mean (if none yet, say so plainly); **Rationale** — why the currently proposed experiments are the right next moves; **Status & next steps** — where the program stands and what happens next. Do NOT reduce the report to just next steps (e.g. 'waiting for results') — the findings and rationale must always be there. NOT one run-on paragraph: a bold one-line headline, a blank line, then the headed sections with short paragraphs and/or '-' bullets, a blank line between blocks. Put real newlines in the JSON string (escaped as \\n).>",
   "ideas_summary": "<short markdown summary of the whole idea pool: themes, what's promising, what you pruned and why>",
   "new_ideas": ["<a one-paragraph candidate direction>", "..."],
   "delete_idea_ids": ["<id of one of YOUR non-protected ideas to prune>", "..."],
@@ -101,6 +101,9 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
       "goals": "<rewritten objective, optional>", "plan": ["<revised step>", "..."],
       "summary": "<optional>", "title": "<optional>", "priority": <int, optional>}}
   ],
+  "reopen_ids": ["<id of an APPROVED sprint (see OPEN SPRINTS) that recent results have made
+                 obsolete or redundant; it returns to 'proposed' for reconsideration. Only
+                 approved sprints — never queued/running ones. Omit/empty if none.>"],
   "proposals": [
     {{"suffix": "<short-slug>",
       "title": "<=8 words naming the experiment, e.g. 'Cross-validate the witness pair'>",
@@ -180,6 +183,7 @@ def parse_response(text: str) -> PMCycleOutput:
         new_ideas=[str(s) for s in data.get("new_ideas", [])],
         delete_idea_ids=[str(s) for s in data.get("delete_idea_ids", [])],
         sprint_edits=edits,
+        reopen_ids=[str(s) for s in data.get("reopen_ids", [])],
     )
 
 

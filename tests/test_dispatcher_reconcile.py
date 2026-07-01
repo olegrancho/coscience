@@ -19,7 +19,7 @@ def test_leaseless_running_agent_is_reconciled_killed(substrate):
     assert agent.is_running(token)
 
     # A higher-priority sprint claims the single GPU, so ORPH cannot be re-adopted.
-    substrate.save_sprint(Sprint(id="HOG", status=SprintStatus.APPROVED, goals="g",
+    substrate.save_sprint(Sprint(id="HOG", status=SprintStatus.QUEUED, goals="g",
                                  plan=["go"], resources_required={"gpu": 1.0}, priority=9))
     disp = Dispatcher(substrate, agent, ResourcePool({"gpu": 1.0}),
                       SchedulerPolicy(aging_interval=0.0))
