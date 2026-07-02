@@ -19,6 +19,7 @@ export default function ProgramDetail() {
   const [replanning, setReplanning] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
   const [showAll, setShowAll] = useState(false);
+  const [ideasExpanded, setIdeasExpanded] = useState(false);
 
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
   const guidance = useQuery({ queryKey: ["guidance", id], queryFn: () => api.listGuidance(id) });
@@ -256,7 +257,14 @@ export default function ProgramDetail() {
           <Link to={`/programs/${id}/ideas`} className="view" style={{ fontSize: 13 }}>open ideas →</Link>
         </Group>
         {ideas.data?.summary.trim()
-          ? <Text size="sm" c="dimmed" lineClamp={2}>{ideas.data.summary.replace(/[#*`>_]/g, "")}</Text>
+          ? (
+            <div onClick={() => setIdeasExpanded((v) => !v)} style={{ cursor: "pointer" }}
+                 title={ideasExpanded ? "Click to collapse" : "Click to read the full summary"}>
+              {ideasExpanded
+                ? <div className="report-leaf"><Md>{ideas.data.summary}</Md></div>
+                : <Text size="sm" c="dimmed" lineClamp={2}>{ideas.data.summary.replace(/[#*`>_]/g, "")}</Text>}
+            </div>
+          )
           : <Text size="sm" c="dimmed">A pool of candidate directions the AI grows, prunes, and promotes into experiments.</Text>}
       </Card>
 
