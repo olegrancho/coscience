@@ -22,6 +22,9 @@ export function VoteControl(
 ) {
   const fs = size === "xs" ? 12 : 13;
   const btn = (dir: 1 | -1, glyph: string, count: number, tip: string) => {
+    // Read-only (stats) view: hide a direction with no votes — e.g. no 👎 tally
+    // clutter in the experiments table. Interactive view keeps both to vote on.
+    if (!onVote && count === 0) return null;
     const on = votes.mine === dir;
     const body = (
       <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: fs,
