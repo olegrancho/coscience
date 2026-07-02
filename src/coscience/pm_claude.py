@@ -22,7 +22,7 @@ def render_prompt(context: PMContext) -> str:
         return "\n".join(fmt(i) for i in items) or "(none)"
 
     open_block = _lines(context.open_sprints,
-                        lambda s: f"- {s['id']} [{s['status']}]: {s['goals']}")
+                        lambda s: f"- {s['id']} [{s['status']}, priority {s.get('priority', 0)}]: {s['goals']}")
     done_block = _lines(context.completed,
                         lambda s: f"- {s['id']}: {s['goals']} -> result: {s['result']}")
     failed_block = _lines(context.failed,
@@ -66,7 +66,11 @@ directory — inspect it there; do NOT go hunting up the filesystem tree.
 PROGRAM GOALS:
 {context.goals}{guidance_block}
 
-OPEN SPRINTS (already proposed/approved/running — do not duplicate these):
+OPEN SPRINTS (already proposed/approved/queued/running — do not duplicate these).
+APPROVED sprints are a human-authorized queue that YOU manage: decide when each should
+run and in what order. Release one into production with release_ids when it's the right
+next thing (dependencies satisfied, worth the compute); retune ordering with priority in
+sprint_edits. You need not release them all at once — sequence them as results land.
 {open_block}
 
 COMPLETED SPRINTS AND RESULTS (use these to decide what is most valuable next):
@@ -104,6 +108,9 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
   "reopen_ids": ["<id of an APPROVED sprint (see OPEN SPRINTS) that recent results have made
                  obsolete or redundant; it returns to 'proposed' for reconsideration. Only
                  approved sprints — never queued/running ones. Omit/empty if none.>"],
+  "release_ids": ["<id of an APPROVED sprint to release into production now — it becomes
+                 'queued' and the scheduler runs it as compute frees. Release the ones whose
+                 time has come; hold the rest. Only approved sprints. Omit/empty if none.>"],
   "proposals": [
     {{"suffix": "<short-slug>",
       "title": "<=8 words naming the experiment, e.g. 'Cross-validate the witness pair'>",
@@ -125,6 +132,10 @@ Run the program by curating ideas, not by piling on sprints:
   slot: emit a proposal with `from_idea` set to that idea's id (it leaves the pool).
 - Ideas marked PROTECTED (human-proposed, pinned, or commented-on) are off-limits to
   deletion — treat human comments on them as direction.
+- MANAGE THE APPROVED QUEUE: these are authorized and waiting on you. Each cycle, release
+  (release_ids) the approved sprint(s) that should run next and hold the rest until their
+  prerequisites/prior results are in; use priority to order what's pending. Don't leave
+  authorized work sitting idle with no reason — if it's ready and useful, release it.
 
 Each sprint is carried out by a capable autonomous research agent that plans and does
 the work itself. So:
@@ -184,6 +195,7 @@ def parse_response(text: str) -> PMCycleOutput:
         delete_idea_ids=[str(s) for s in data.get("delete_idea_ids", [])],
         sprint_edits=edits,
         reopen_ids=[str(s) for s in data.get("reopen_ids", [])],
+        release_ids=[str(s) for s in data.get("release_ids", [])],
     )
 
 

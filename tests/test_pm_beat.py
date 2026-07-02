@@ -123,6 +123,34 @@ def test_pm_reopens_approved_only(substrate):
     assert substrate.load_sprint("p1-queued").status == SprintStatus.QUEUED  # untouched
 
 
+def test_pm_releases_approved_into_production(substrate):
+    # The approved pool is the PM's queue: release_ids moves an approved sprint to
+    # queued; a non-approved id is ignored.
+    from coscience.models import Sprint
+    from coscience.pm_reasoner import FakeReasoner
+    _prog(substrate)
+    substrate.save_sprint(Sprint(id="p1-a", status=SprintStatus.APPROVED, goals="g", plan=["x"], program="p1"))
+    substrate.save_sprint(Sprint(id="p1-b", status=SprintStatus.PROPOSED, goals="g", plan=["x"], program="p1"))
+    out = PMCycleOutput(report="r", release_ids=["p1-a", "p1-b"])
+    pm_beat(substrate, "p1", FakeReasoner([out]), force=True)
+    assert substrate.load_sprint("p1-a").status == SprintStatus.QUEUED
+    assert substrate.load_sprint("p1-b").status == SprintStatus.PROPOSED  # not approved -> untouched
+
+
+def test_pm_reprioritizes_approved_queue(substrate):
+    from coscience.models import Sprint
+    from coscience.pm_reasoner import FakeReasoner
+    _prog(substrate)
+    substrate.save_sprint(Sprint(id="p1-a", status=SprintStatus.APPROVED, goals="orig",
+                                 plan=["x"], program="p1", priority=0))
+    out = PMCycleOutput(report="r", sprint_edits=[
+        {"sprint_id": "p1-a", "priority": 7, "goals": "should be ignored while approved"}])
+    pm_beat(substrate, "p1", FakeReasoner([out]), force=True)
+    sp = substrate.load_sprint("p1-a")
+    assert sp.priority == 7            # priority retunable on the approved queue
+    assert sp.goals == "orig"          # goals still locked once approved
+
+
 def test_rerun_same_cycle_is_idempotent(substrate):
     # Stage a cycle, then run twice from the same staged state (simulating a
     # crash before clear). The reasoner must NOT be called, and no duplicate.

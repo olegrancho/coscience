@@ -182,7 +182,7 @@ export default function SprintDetail() {
   const resources = Object.entries(s.resources_required);
 
   const approve = async () => {
-    try { await api.approveSprint(id); notifications.show({ color: "teal", title: "Approved", message: "Authorized — release it with Run when you're ready." }); refresh(); }
+    try { await api.approveSprint(id); notifications.show({ color: "teal", title: "Approved", message: "Added to the PM's queue — it schedules and runs it when ready. Use Run to force it now." }); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't approve", message: String(e) }); }
   };
   const run = async () => {
@@ -240,7 +240,7 @@ export default function SprintDetail() {
           </h1>
           <Group gap={8} wrap="nowrap">
             {actions.includes("approve") && (
-              <Tooltip label="Authorize this sprint. It won't start until it's released with Run." withArrow openDelay={300}>
+              <Tooltip label="Authorize this sprint — it joins the PM's queue to schedule and run. (Run forces it now.)" withArrow openDelay={300}>
                 <Button color="signal" onClick={approve}>Approve</Button>
               </Tooltip>
             )}

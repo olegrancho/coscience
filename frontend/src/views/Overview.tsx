@@ -26,7 +26,7 @@ export default function Overview() {
   };
   const approve = useMutation({
     mutationFn: api.approveSprint,
-    onSuccess: () => { notifications.show({ color: "teal", title: "Approved", message: "Authorized — open it and press Run to release it to the scheduler." }); refresh(); },
+    onSuccess: () => { notifications.show({ color: "teal", title: "Approved", message: "Added to the PM's queue — it schedules and runs it when ready." }); refresh(); },
     onError: (e) => notifications.show({ color: "red", title: "Couldn't approve", message: String(e) }),
   });
   const reject = useMutation({

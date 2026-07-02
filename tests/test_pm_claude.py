@@ -101,6 +101,17 @@ def test_parse_response_reads_reopen_ids():
     assert out.reopen_ids == ["p1-c0-a", "p1-c1-b"]
 
 
+def test_parse_response_reads_release_ids():
+    out = parse_response(json.dumps({"report": "r", "proposals": [],
+                                     "release_ids": ["p1-c0-a"]}))
+    assert out.release_ids == ["p1-c0-a"]
+
+
+def test_render_prompt_explains_the_approved_queue():
+    p = render_prompt(_ctx())
+    assert "release_ids" in p and "APPROVED" in p
+
+
 def test_render_prompt_notes_report_structure():
     p = render_prompt(_ctx())
     assert "Findings" in p and "Rationale" in p          # report must always carry these

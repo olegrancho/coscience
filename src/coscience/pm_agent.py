@@ -106,7 +106,8 @@ def gather_context(substrate, program_id: str) -> PMContext:
             failed.append({"id": s.id, "goals": s.goals, "error": err})
         elif s.status in (SprintStatus.PROPOSED, SprintStatus.APPROVED,
                           SprintStatus.QUEUED, SprintStatus.EXECUTING):
-            open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals})
+            open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals,
+                                 "priority": s.priority})
     guidance = [n["text"] for n in substrate.load_guidance(program_id)]
     _summary, ideas = substrate.load_ideas(program_id)
     idea_dicts = [{"id": i.id, "text": i.text, "source": i.source,
@@ -356,28 +357,49 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     new_summary = staged.output.ideas_summary or summary_text
     substrate.save_ideas(program_id, new_summary, list(ideas_by_id.values()))
 
-    # --- sprint revisions from PM-targeted feedback (only while still proposed) ---
+    # --- sprint revisions from PM-targeted feedback. Goals/plan/title/summary are
+    # editable only while proposed (locked once a human approves); priority the PM
+    # may retune on the approved queue and the run-queue too, so it can order what
+    # runs next. ---
+    _EDITABLE = (SprintStatus.PROPOSED, SprintStatus.APPROVED, SprintStatus.QUEUED)
     for edit in staged.output.sprint_edits:
         sid = str(edit.get("sprint_id", ""))
         if not sid or not (substrate.sprint_dir(sid) / "sprint.md").is_file():
             continue
         sp = substrate.load_sprint(sid)
-        if sp.program != program_id or sp.status != SprintStatus.PROPOSED:
-            continue                                   # locked once a human approves
-        if edit.get("goals"):
-            sp.goals = str(edit["goals"])
-        if edit.get("plan") is not None:
-            sp.plan = [str(x) for x in edit["plan"]]
-        if edit.get("summary") is not None:
-            sp.summary = str(edit["summary"])
-        if edit.get("title") is not None:
-            sp.title = str(edit["title"])
+        if sp.program != program_id or sp.status not in _EDITABLE:
+            continue
+        if sp.status == SprintStatus.PROPOSED:
+            if edit.get("goals"):
+                sp.goals = str(edit["goals"])
+            if edit.get("plan") is not None:
+                sp.plan = [str(x) for x in edit["plan"]]
+            if edit.get("summary") is not None:
+                sp.summary = str(edit["summary"])
+            if edit.get("title") is not None:
+                sp.title = str(edit["title"])
         if edit.get("priority") is not None:
             try:
                 sp.priority = int(edit["priority"])
             except (TypeError, ValueError):
                 pass
         substrate.save_sprint(sp)
+
+    # --- release: put an APPROVED sprint into production (-> queued). The approved
+    # pool is the PM's managed queue; it releases items here as it sees need, and the
+    # dispatcher runs queued sprints by priority as compute frees. Guarded to this
+    # program's approved sprints. ---
+    released: list[str] = []
+    for sid in staged.output.release_ids:
+        sid = str(sid)
+        if not (substrate.sprint_dir(sid) / "sprint.md").is_file():
+            continue
+        sp = substrate.load_sprint(sid)
+        if sp.program != program_id or sp.status != SprintStatus.APPROVED:
+            continue
+        sp.status = SprintStatus.QUEUED
+        substrate.save_sprint(sp)
+        released.append(sid)
 
     # --- reopen: pull an APPROVED sprint back to PROPOSED when results made it
     # obsolete. Guarded to approved sprints of this program only — the PM must not
