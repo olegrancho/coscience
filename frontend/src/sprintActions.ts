@@ -7,7 +7,7 @@ export type SprintStatus =
 export type Action = "approve" | "run" | "sendBack" | "reject" | "edit" | "demote";
 
 export function availableActions(status: SprintStatus): Action[] {
-  if (status === "proposed") return ["approve", "edit", "reject", "demote"];
+  if (status === "proposed") return ["approve", "run", "edit", "reject", "demote"];
   if (status === "approved") return ["run", "sendBack", "edit", "reject", "demote"];
   if (status === "queued") return ["reject", "edit"];
   if (status === "executing") return ["edit"];

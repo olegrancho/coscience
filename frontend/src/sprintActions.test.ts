@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { availableActions, editableFields } from "./sprintActions";
 
 describe("availableActions", () => {
-  it("offers approve + edit/reject/demote for proposed", () => {
-    expect(availableActions("proposed").sort()).toEqual(["approve", "demote", "edit", "reject"]);
+  it("offers approve + run + edit/reject/demote for proposed", () => {
+    expect(availableActions("proposed").sort()).toEqual(["approve", "demote", "edit", "reject", "run"]);
   });
   it("offers run + send back for approved", () => {
     expect(availableActions("approved").sort()).toEqual(["demote", "edit", "reject", "run", "sendBack"]);

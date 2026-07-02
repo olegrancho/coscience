@@ -128,9 +128,18 @@ def test_send_back_returns_approved_to_proposed(tmp_path):
     assert svc.get_sprint("sp1")["status"] == "proposed"
 
 
-def test_run_requires_approval(tmp_path):
+def test_run_allowed_from_proposed_directly(tmp_path):
+    # Run is a one-step authorize+release from proposed, not only from approved.
     svc = Service(tmp_path)
-    svc.submit_sprint(id="sp1", goals="g", plan=["true"])   # still proposed
+    svc.submit_sprint(id="sp1", goals="g", plan=["true"])   # proposed
+    svc.run_sprint("sp1")
+    assert svc.get_sprint("sp1")["status"] == "queued"
+
+
+def test_run_rejected_once_executing(tmp_path):
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["true"])
+    _executing(svc, "sp1")
     with pytest.raises(ValueError):
         svc.run_sprint("sp1")
 

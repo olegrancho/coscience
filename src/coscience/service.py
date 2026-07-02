@@ -74,11 +74,12 @@ class Service:
         self.substrate.save_sprint(sprint)
 
     def run_sprint(self, sprint_id: str) -> None:
-        """Release an approved sprint to the scheduler: approved -> queued. The
-        dispatcher runs it as soon as a resource slot frees (it may wait in queue)."""
+        """Release a sprint to the scheduler -> queued. Allowed from proposed (a
+        one-step authorize+run) or approved; the dispatcher runs it as soon as a
+        resource slot frees (it may wait in queue)."""
         sprint = self._load_sprint(sprint_id)
-        if sprint.status != SprintStatus.APPROVED:
-            raise ValueError(f"can only run an approved sprint; {sprint_id} is {sprint.status.value}")
+        if sprint.status not in (SprintStatus.PROPOSED, SprintStatus.APPROVED):
+            raise ValueError(f"can only run a proposed or approved sprint; {sprint_id} is {sprint.status.value}")
         sprint.status = SprintStatus.QUEUED
         self.substrate.save_sprint(sprint)
 

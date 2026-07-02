@@ -244,7 +244,7 @@ export default function SprintDetail() {
                 <Button color="signal" onClick={approve}>Approve</Button>
               </Tooltip>
             )}
-            {actions.includes("run") && (
+            {actions.includes("run") && s.status === "approved" && (
               <Tooltip label="Release to the scheduler — runs as soon as a resource slot is free (may queue)." withArrow openDelay={300}>
                 <Button color="signal" onClick={run}>Run</Button>
               </Tooltip>
@@ -259,7 +259,8 @@ export default function SprintDetail() {
                 <Button variant="default" color="red" onClick={reject}>{s.status === "queued" ? "Cancel" : "Reject"}</Button>
               </Tooltip>
             )}
-            {(actions.includes("edit") || actions.includes("demote")) && (
+            {(actions.includes("edit") || actions.includes("demote")
+              || (actions.includes("run") && s.status === "proposed")) && (
               <Menu position="bottom-end" withArrow>
                 <Menu.Target>
                   <Tooltip label="More actions" withArrow openDelay={300}>
@@ -267,6 +268,8 @@ export default function SprintDetail() {
                   </Tooltip>
                 </Menu.Target>
                 <Menu.Dropdown>
+                  {actions.includes("run") && s.status === "proposed" &&
+                    <Menu.Item onClick={run}>Run now (approve &amp; release)</Menu.Item>}
                   {actions.includes("edit") &&
                     <Menu.Item onClick={() => setEditing(true)}>Edit goals / plan / resources…</Menu.Item>}
                   {actions.includes("demote") &&
