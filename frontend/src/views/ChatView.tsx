@@ -84,59 +84,67 @@ export default function ChatView() {
         </Text>
       </div>
 
-      {/* conversation switcher — the list of chats, full width */}
-      <Card padding="sm" radius="md" style={cardStyle}>
-        <Group justify="space-between" wrap="nowrap" align="center">
-          <Group gap={6} style={{ flexWrap: "wrap", minWidth: 0 }}>
+      <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
+        {/* thread list — hangs off to the left of the conversation, scrolls past ~10 */}
+        <div style={{ width: 176, flexShrink: 0, position: "sticky", top: 16,
+                      maxHeight: "calc(100vh - 120px)", overflowY: "auto" }}>
+          <Button fullWidth size="xs" variant="light" color="machine" mb={8}
+                  loading={create.isPending} onClick={() => create.mutate()}>+ New chat</Button>
+          <Stack gap={2}>
             {(chats.data ?? []).map((c) => (
               <button key={c.id} type="button" onClick={() => setActive(c.id)}
-                style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer",
-                  padding: "5px 10px", borderRadius: 999, fontSize: 13,
-                  border: "1px solid " + (c.id === active ? "var(--machine)" : "var(--hairline)"),
+                style={{ display: "flex", alignItems: "center", gap: 6, width: "100%",
+                  textAlign: "left", cursor: "pointer", padding: "6px 9px", borderRadius: 7,
+                  border: "none", fontSize: 13,
                   background: c.id === active ? "var(--machine-weak)" : "transparent",
+                  boxShadow: c.id === active ? "inset 2px 0 0 var(--machine)" : "none",
                   color: c.id === active ? "var(--ink)" : "var(--ink-muted)" }}>
-                <span style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
                 {c.busy && <Loader size={11} color="machine" />}
                 {c.scope === "full" && <span title="Full access" style={{ fontSize: 10 }}>🔧</span>}
               </button>
             ))}
-            <Button size="xs" variant="subtle" color="machine" loading={create.isPending}
-                    onClick={() => create.mutate()}>+ New</Button>
-          </Group>
-          {active && (
-            <Group gap={8} wrap="nowrap">
-              {t?.scope === "full" && (
-                <Tooltip label="This chat can run commands and edit files in the workdir." withArrow>
-                  <Badge size="sm" color="orange" variant="light">full access</Badge>
-                </Tooltip>
-              )}
-              <SegmentedControl
-                size="xs" value={t?.scope ?? "read"} disabled={setScope.isPending || busy}
-                onChange={(v) => setScope.mutate(v as ChatScope)}
-                data={[{ label: "Read-only", value: "read" }, { label: "Full", value: "full" }]}
-              />
-              <Menu position="bottom-end" withArrow>
-                <Menu.Target>
-                  <ActionIcon variant="subtle" color="gray" aria-label="chat actions">⋯</ActionIcon>
-                </Menu.Target>
-                <Menu.Dropdown>
-                  <Menu.Item onClick={doRename}>Rename…</Menu.Item>
-                  <Menu.Item color="red" onClick={() => doDelete(active, t?.title ?? "")}>Delete…</Menu.Item>
-                </Menu.Dropdown>
-              </Menu>
-            </Group>
-          )}
-        </Group>
-      </Card>
+            {chats.data?.length === 0 && <Text size="xs" c="dimmed" ta="center" py={8}>No chats yet.</Text>}
+          </Stack>
+        </div>
 
-      {/* active conversation — full body width */}
-      <Stack gap="md">
+        {/* active conversation — at the main body width */}
+        <Stack gap="md" style={{ flex: 1, minWidth: 0 }}>
           {!active ? (
             <Card padding="lg" radius="md" style={cardStyle}>
-              <Text size="sm" c="dimmed">Start a new chat above to talk to the planner.</Text>
+              <Text size="sm" c="dimmed">Start a new chat on the left to talk to the planner.</Text>
             </Card>
           ) : (
             <>
+              <Card padding="sm" radius="md" style={cardStyle}>
+                <Group justify="space-between" wrap="nowrap">
+                  <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
+                    <Text fw={600} size="sm" truncate>{t?.title ?? "…"}</Text>
+                    {t?.scope === "full" && (
+                      <Tooltip label="This chat can run commands and edit files in the workdir." withArrow>
+                        <Badge size="sm" color="orange" variant="light">full access</Badge>
+                      </Tooltip>
+                    )}
+                  </Group>
+                  <Group gap={8} wrap="nowrap">
+                    <SegmentedControl
+                      size="xs" value={t?.scope ?? "read"} disabled={setScope.isPending || busy}
+                      onChange={(v) => setScope.mutate(v as ChatScope)}
+                      data={[{ label: "Read-only", value: "read" }, { label: "Full", value: "full" }]}
+                    />
+                    <Menu position="bottom-end" withArrow>
+                      <Menu.Target>
+                        <ActionIcon variant="subtle" color="gray" aria-label="chat actions">⋯</ActionIcon>
+                      </Menu.Target>
+                      <Menu.Dropdown>
+                        <Menu.Item onClick={doRename}>Rename…</Menu.Item>
+                        <Menu.Item color="red" onClick={() => doDelete(active, t?.title ?? "")}>Delete…</Menu.Item>
+                      </Menu.Dropdown>
+                    </Menu>
+                  </Group>
+                </Group>
+              </Card>
+
               <Card padding="lg" radius="md" style={cardStyle}>
                 {thread.isLoading ? <Loader color="machine" /> : (t?.messages.length ?? 0) === 0 && !busy ? (
                   <Text size="sm" c="dimmed">No messages yet — ask the planner something below.</Text>
@@ -182,7 +190,8 @@ export default function ChatView() {
               </Card>
             </>
           )}
-      </Stack>
+        </Stack>
+      </div>
     </Stack>
   );
 }
