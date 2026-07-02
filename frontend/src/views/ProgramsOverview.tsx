@@ -36,9 +36,15 @@ export default function ProgramsOverview() {
             const c = counts[p.id] ?? {};
             const total = Object.values(c).reduce((a, b) => a + b, 0);
             const waiting = p.status === "active" ? (c.proposed ?? 0) : 0;
+            const paused = p.status === "paused";
             return (
               <Card key={p.id} component={Link} to={`/programs/${p.id}`} padding="lg" radius="md"
-                style={{ border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)", textDecoration: "none", color: "inherit" }}>
+                style={{ border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)",
+                  textDecoration: "none", color: "inherit",
+                  // paused programs go quiet: dimmed + desaturated so active ones stand out
+                  background: paused ? "var(--paper)" : undefined,
+                  opacity: paused ? 0.6 : 1,
+                  filter: paused ? "grayscale(1)" : undefined }}>
                 <Group justify="space-between" mb={7} wrap="nowrap">
                   <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
                     {p.status === "active" && <Heartbeat />}
