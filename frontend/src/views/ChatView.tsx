@@ -15,6 +15,7 @@ export default function ChatView() {
   const qc = useQueryClient();
   const [active, setActive] = useState<string>("");
   const [draft, setDraft] = useState("");
+  const [expanded, setExpanded] = useState(false);
 
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
   const chats = useQuery({
@@ -70,6 +71,18 @@ export default function ChatView() {
     if (window.confirm(`Delete chat “${title}”? This can't be undone.`)) del.mutate(tid);
   };
 
+  // Show the 3 most-recent chats by default; unfold for the rest. Always keep the
+  // active one visible even if it's older, so its highlight doesn't vanish.
+  const sorted = [...(chats.data ?? [])].sort((a, b) => b.last_at - a.last_at);
+  let visible = sorted;
+  if (!expanded && sorted.length > 3) {
+    const top = sorted.slice(0, 3);
+    visible = active && !top.some((c) => c.id === active)
+      ? [...top.slice(0, 2), sorted.find((c) => c.id === active)!]
+      : top;
+  }
+  const hiddenCount = sorted.length - visible.length;
+
   return (
     <Stack gap="lg">
       <div>
@@ -84,32 +97,36 @@ export default function ChatView() {
         </Text>
       </div>
 
-      <div style={{ position: "relative" }}>
-        {/* thread list — hangs in the left gutter, off the main content column */}
-        <div style={{ position: "absolute", top: 0, right: "100%", marginRight: 20, width: 172,
-                      maxHeight: "calc(100vh - 120px)", overflowY: "auto" }}>
-          <Button fullWidth size="xs" variant="light" color="machine" mb={8}
-                  loading={create.isPending} onClick={() => create.mutate()}>+ New chat</Button>
-          <Stack gap={2}>
-            {(chats.data ?? []).map((c) => (
-              <button key={c.id} type="button" onClick={() => setActive(c.id)}
-                style={{ display: "flex", alignItems: "center", gap: 6, width: "100%",
-                  textAlign: "left", cursor: "pointer", padding: "6px 9px", borderRadius: 7,
-                  border: "none", fontSize: 13,
-                  background: c.id === active ? "var(--machine-weak)" : "transparent",
-                  boxShadow: c.id === active ? "inset 2px 0 0 var(--machine)" : "none",
-                  color: c.id === active ? "var(--ink)" : "var(--ink-muted)" }}>
-                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
-                {c.busy && <Loader size={11} color="machine" />}
-                {c.scope === "full" && <span title="Full access" style={{ fontSize: 10 }}>🔧</span>}
-              </button>
-            ))}
-            {chats.data?.length === 0 && <Text size="xs" c="dimmed" ta="center" py={8}>No chats yet.</Text>}
-          </Stack>
-        </div>
+      {/* chat switcher — top row, 3 shown by default, unfold for the rest */}
+      <Card padding="xs" radius="md" style={cardStyle}>
+        <Group gap={6} style={{ flexWrap: "wrap" }}>
+          {visible.map((c) => (
+            <button key={c.id} type="button" onClick={() => setActive(c.id)}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer",
+                padding: "5px 11px", borderRadius: 999, fontSize: 13,
+                border: "1px solid " + (c.id === active ? "var(--machine)" : "var(--hairline)"),
+                background: c.id === active ? "var(--machine-weak)" : "transparent",
+                color: c.id === active ? "var(--ink)" : "var(--ink-muted)" }}>
+              <span style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
+              {c.busy && <Loader size={11} color="machine" />}
+              {c.scope === "full" && <span title="Full access" style={{ fontSize: 10 }}>🔧</span>}
+            </button>
+          ))}
+          {!expanded && hiddenCount > 0 && (
+            <button type="button" className="linklike" onClick={() => setExpanded(true)}
+                    style={{ fontSize: 13, padding: "5px 8px" }}>+{hiddenCount} more</button>
+          )}
+          {expanded && sorted.length > 3 && (
+            <button type="button" className="linklike" onClick={() => setExpanded(false)}
+                    style={{ fontSize: 13, padding: "5px 8px" }}>Show fewer</button>
+          )}
+          <Button size="xs" variant="subtle" color="machine" loading={create.isPending}
+                  onClick={() => create.mutate()}>+ New</Button>
+        </Group>
+      </Card>
 
-        {/* active conversation — the standard body column, same edges as every page */}
-        <Stack gap="md" style={{ minWidth: 0 }}>
+      {/* active conversation — the standard body column, same edges as every page */}
+      <Stack gap="md" style={{ minWidth: 0 }}>
           {!active ? (
             <Card padding="lg" radius="md" style={cardStyle}>
               <Text size="sm" c="dimmed">Start a new chat on the left to talk to the planner.</Text>
@@ -190,8 +207,7 @@ export default function ChatView() {
               </Card>
             </>
           )}
-        </Stack>
-      </div>
+      </Stack>
     </Stack>
   );
 }
