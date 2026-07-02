@@ -11,7 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from coscience.ledger import Ledger
-from coscience.models import Sprint, SprintStatus, Program, ProgramStatus, Idea
+from coscience.models import Sprint, SprintStatus, Program, ProgramStatus, Idea, ChatThread
 from coscience.resources import ResourcePool, load_pool
 from coscience.substrate import Substrate
 
@@ -401,34 +401,153 @@ class Service:
             raise NotFoundError(program_id)
 
     # --- PM chat (ask the planner clarifying questions; answer-only) ---
-    def list_chat(self, program_id: str) -> list[dict]:
-        self._require_program(program_id)
-        return self.substrate.load_chat(program_id)
+    @staticmethod
+    def _chat_public(thread: ChatThread, live: str = "") -> dict:
+        return {"id": thread.id, "title": thread.title, "scope": thread.scope,
+                "created_at": thread.created_at, "turns_done": thread.turns_done,
+                "busy": thread.pending, "messages": list(thread.messages), "live": live}
 
-    def chat(self, program_id: str, message: str, chat_fn=None) -> dict:
-        """Post a message to the PM chat and get its reply. `chat_fn(context, history,
-        message) -> str` is injectable for tests; the default shells the reasoner with
-        the program context. The thread is persisted (capped) in chat.md."""
+    def _migrate_legacy_chat(self, program_id: str) -> None:
+        """One-time: fold a pre-threads chat.md into a single imported thread."""
+        if self.substrate.list_chat_threads(program_id):
+            return
+        old = self.substrate.load_chat(program_id)
+        if not old:
+            return
+        t = ChatThread(id=uuid4().hex[:8], title="Imported chat", scope="read",
+                       session_id=str(uuid4()), created_at=old[0].get("at", time.time()),
+                       messages=old)
+        self.substrate.save_chat_thread(program_id, t)
+        (self.substrate.program_dir(program_id) / "chat.md").unlink(missing_ok=True)
+        self.substrate.commit(f"program {program_id}: migrate chat to a thread")
+
+    def _collect_if_ready(self, program_id: str, thread: ChatThread) -> ChatThread:
+        """If a turn is in flight, collect it once its exit sentinel appears (append
+        the PM reply, capture the session id, clear busy). Lazy — driven by polling."""
+        if not thread.pending:
+            return thread
+        from coscience import chat_agent
+        from coscience.executor import is_running
+        tdir = self.substrate.chat_thread_dir(program_id, thread.id)
+        text, sid, status = chat_agent.collect_turn(tdir)
+        if status == "running":
+            if thread.agent_token and not is_running(thread.agent_token):  # died, no exit
+                thread.messages.append({"role": "pm", "at": time.time(),
+                    "text": "_(The chat agent stopped before replying — send the message again.)_"})
+                thread.pending, thread.agent_token = False, ""
+                thread.messages = thread.messages[-200:]
+                self.substrate.save_chat_thread(program_id, thread)
+                self.substrate.commit(f"program {program_id}: chat {thread.id} interrupted")
+            return thread
+        reply = text if status == "ok" else (text or "_(The agent exited with an error.)_")
+        thread.messages.append({"role": "pm", "text": reply, "at": time.time()})
+        thread.pending, thread.agent_token = False, ""
+        thread.turns_done += 1
+        if sid:
+            thread.session_id = sid
+        thread.messages = thread.messages[-200:]
+        self.substrate.save_chat_thread(program_id, thread)
+        self.substrate.commit(f"program {program_id}: chat {thread.id} reply")
+        return thread
+
+    def list_chats(self, program_id: str) -> list[dict]:
         self._require_program(program_id)
+        self._migrate_legacy_chat(program_id)
+        out = []
+        for t in self.substrate.list_chat_threads(program_id):
+            t = self._collect_if_ready(program_id, t)
+            out.append({"id": t.id, "title": t.title, "scope": t.scope,
+                        "created_at": t.created_at, "busy": t.pending,
+                        "messages": len(t.messages),
+                        "last_at": t.messages[-1]["at"] if t.messages else t.created_at})
+        return out
+
+    def create_chat(self, program_id: str, title: str = "") -> dict:
+        self._require_program(program_id)
+        t = ChatThread(id=uuid4().hex[:8], title=(str(title).strip() or "New chat"),
+                       scope="read", session_id=str(uuid4()), created_at=time.time())
+        self.substrate.save_chat_thread(program_id, t)
+        self.substrate.commit(f"program {program_id}: new chat {t.id}")
+        return self._chat_public(t)
+
+    def _thread_or_404(self, program_id: str, thread_id: str) -> ChatThread:
+        self._require_program(program_id)
+        t = self.substrate.load_chat_thread(program_id, thread_id)
+        if t is None:
+            raise NotFoundError(thread_id)
+        return t
+
+    def get_chat_thread(self, program_id: str, thread_id: str) -> dict:
+        thread = self._collect_if_ready(program_id, self._thread_or_404(program_id, thread_id))
+        live = ""
+        if thread.pending:
+            out = self.substrate.chat_thread_dir(program_id, thread_id) / "turn.out"
+            live = out.read_text() if out.exists() else ""
+        return self._chat_public(thread, live=live)
+
+    def rename_chat(self, program_id: str, thread_id: str, title: str) -> dict:
+        thread = self._thread_or_404(program_id, thread_id)
+        title = str(title).strip()
+        if not title:
+            raise ValueError("title is required")
+        thread.title = title[:120]
+        self.substrate.save_chat_thread(program_id, thread)
+        self.substrate.commit(f"program {program_id}: rename chat {thread_id}")
+        return self._chat_public(thread)
+
+    def set_chat_scope(self, program_id: str, thread_id: str, scope: str) -> dict:
+        if scope not in ("read", "full"):
+            raise ValueError("scope must be 'read' or 'full'")
+        thread = self._thread_or_404(program_id, thread_id)
+        thread.scope = scope
+        self.substrate.save_chat_thread(program_id, thread)
+        self.substrate.commit(f"program {program_id}: chat {thread_id} scope -> {scope}")
+        return self._chat_public(thread)
+
+    def delete_chat(self, program_id: str, thread_id: str) -> None:
+        self._thread_or_404(program_id, thread_id)
+        self.substrate.delete_chat_thread(program_id, thread_id)
+        self.substrate.commit(f"program {program_id}: delete chat {thread_id}")
+
+    def post_chat_message(self, program_id: str, thread_id: str, message: str,
+                          launch=None) -> dict:
+        """Append the human message and launch a detached, resumable chat turn in the
+        program workdir. Returns immediately with busy=True; the reply is collected
+        on a later poll. `launch(**kwargs)->token` is injectable for tests."""
+        from coscience import chat_agent
+        thread = self._thread_or_404(program_id, thread_id)
         message = str(message).strip()
         if not message:
             raise ValueError("message is required")
-        history = self.substrate.load_chat(program_id)
+        if thread.pending:
+            raise ValueError("this chat is still working on the previous message")
+        thread.messages.append({"role": "user", "text": message, "at": time.time()})
         from coscience.worker import claude_usage_ok
-        if chat_fn is None and not claude_usage_ok():
-            reply = "_(Claude usage is exhausted — please try again after the reset.)_"
+        if launch is None and not claude_usage_ok():
+            thread.messages.append({"role": "pm", "at": time.time(),
+                "text": "_(Claude usage is exhausted — please try again after the reset.)_"})
+            thread.messages = thread.messages[-200:]
+            self.substrate.save_chat_thread(program_id, thread)
+            self.substrate.commit(f"program {program_id}: chat {thread_id} (usage paused)")
+            return self._chat_public(thread)
+        program = self.substrate.load_program(program_id)
+        workdir = chat_agent.resolve_workdir(self.substrate, program.workdir)
+        resume = thread.turns_done > 0
+        if resume:
+            prompt = message
         else:
             from coscience.pm_agent import gather_context
-            from coscience.pm_claude import chat_reply
-            context = gather_context(self.substrate, program_id)
-            reply = (chat_fn or chat_reply)(context, list(history), message)
-        now = time.time()
-        history.append({"role": "user", "text": message, "at": now})
-        history.append({"role": "pm", "text": reply, "at": time.time()})
-        history = history[-200:]                          # bound the stored thread
-        self.substrate.save_chat(program_id, history)
-        self.substrate.commit(f"program {program_id}: pm chat")
-        return {"reply": reply, "messages": history}
+            ctx = gather_context(self.substrate, program_id)
+            prompt = chat_agent.render_preamble(ctx, thread.scope) + "\n\nHuman: " + message
+        launch = launch or chat_agent.launch_turn
+        token = launch(thread_dir=self.substrate.chat_thread_dir(program_id, thread_id),
+                       workdir=workdir, prompt=prompt, scope=thread.scope,
+                       session_id=thread.session_id, resume=resume, model=program.pm_model)
+        thread.pending, thread.agent_token = True, str(token)
+        thread.messages = thread.messages[-200:]
+        self.substrate.save_chat_thread(program_id, thread)
+        self.substrate.commit(f"program {program_id}: chat {thread_id} message")
+        return self._chat_public(thread)
 
     def list_guidance(self, program_id: str) -> list[dict]:
         self._require_program(program_id)

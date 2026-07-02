@@ -59,6 +59,23 @@ class Sprint:
 
 
 @dataclass
+class ChatThread:
+    """One interactive PM chat: a resumable Claude session in the program workdir.
+    `scope` gates tools (read = explore/read-only, full = run/edit like a worker);
+    `session_id` carries continuity across turns; `pending`/`agent_token` track the
+    detached turn currently streaming into turn.out."""
+    id: str
+    title: str = "New chat"
+    scope: str = "read"                # "read" | "full"
+    session_id: str = ""               # Claude session uuid for --resume
+    created_at: float = 0.0
+    turns_done: int = 0                # completed turns (0 => first turn sets the session)
+    pending: bool = False              # a turn is in flight (streaming into turn.out)
+    agent_token: str = ""              # detached turn's process token
+    messages: list[dict] = field(default_factory=list)  # [{role, text, at}]
+
+
+@dataclass
 class Result:
     id: str
     sprint: str

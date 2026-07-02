@@ -86,6 +86,15 @@ class ChatIn(BaseModel):
     message: str = Field(min_length=1)
 
 
+class ChatCreateIn(BaseModel):
+    title: str = ""
+
+
+class ChatPatchIn(BaseModel):
+    title: str | None = None
+    scope: str | None = None       # "read" | "full"
+
+
 class IdeaIn(BaseModel):
     text: str = Field(min_length=1)
 
@@ -299,21 +308,55 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
 
-    @api.get("/programs/{program_id}/chat")
-    def get_chat(program_id: str) -> list[dict]:
+    @api.get("/programs/{program_id}/chats")
+    def list_chats(program_id: str) -> list[dict]:
         try:
-            return service.list_chat(program_id)
+            return service.list_chats(program_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
 
-    @api.post("/programs/{program_id}/chat")
-    def post_chat(program_id: str, body: ChatIn) -> dict:
+    @api.post("/programs/{program_id}/chats", status_code=201)
+    def create_chat(program_id: str, body: ChatCreateIn) -> dict:
         try:
-            return service.chat(program_id, body.message)
+            return service.create_chat(program_id, body.title)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.get("/programs/{program_id}/chats/{thread_id}")
+    def get_chat_thread(program_id: str, thread_id: str) -> dict:
+        try:
+            return service.get_chat_thread(program_id, thread_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
+
+    @api.post("/programs/{program_id}/chats/{thread_id}/messages")
+    def post_chat_message(program_id: str, thread_id: str, body: ChatIn) -> dict:
+        try:
+            return service.post_chat_message(program_id, thread_id, body.message)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.patch("/programs/{program_id}/chats/{thread_id}")
+    def patch_chat(program_id: str, thread_id: str, body: ChatPatchIn) -> dict:
+        try:
+            if body.scope is not None:
+                service.set_chat_scope(program_id, thread_id, body.scope)
+            if body.title is not None:
+                return service.rename_chat(program_id, thread_id, body.title)
+            return service.get_chat_thread(program_id, thread_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.delete("/programs/{program_id}/chats/{thread_id}", status_code=204)
+    def delete_chat(program_id: str, thread_id: str) -> None:
+        try:
+            service.delete_chat(program_id, thread_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
 
     @api.get("/programs/{program_id}/guidance")
     def list_guidance(program_id: str) -> list[dict]:

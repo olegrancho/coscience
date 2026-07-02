@@ -8,33 +8,89 @@ from coscience.pm_runner import pm_run_once
 from coscience.pm_reasoner import FakeReasoner, PMCycleOutput, ProposedSprint
 
 
+def _fake_launch(reply="stub reply", session="sess-1"):
+    """A launch() stand-in: write a finished stream-json turn synchronously so the
+    next poll collects it — no real claude call."""
+    def launch(*, thread_dir, workdir, prompt, scope, session_id, resume, model):
+        thread_dir.mkdir(parents=True, exist_ok=True)
+        (thread_dir / "turn.out").write_text(
+            json.dumps({"type": "assistant"}) + "\n"
+            + json.dumps({"type": "result", "result": f"{reply}: {prompt.splitlines()[-1]}",
+                          "session_id": session, "total_cost_usd": 0.0, "usage": {}}) + "\n")
+        (thread_dir / "turn.exit").write_text("0")
+        return "fake:token"
+    return launch
+
+
+def test_chat_thread_flow(tmp_path):
+    svc = Service(tmp_path)
+    svc.substrate.save_program(Program(id="p1", title="P", goals="cure",
+                                       status=ProgramStatus.ACTIVE))
+    t = svc.create_chat("p1", "My chat")
+    tid = t["id"]
+    assert t["scope"] == "read" and t["title"] == "My chat"
+
+    posted = svc.post_chat_message("p1", tid, "what's next?", launch=_fake_launch())
+    assert posted["busy"] is True and posted["messages"][-1]["role"] == "user"
+
+    got = svc.get_chat_thread("p1", tid)                 # poll collects the reply
+    assert got["busy"] is False
+    assert got["messages"][-1]["role"] == "pm" and "what's next?" in got["messages"][-1]["text"]
+
+    thread = svc.substrate.load_chat_thread("p1", tid)
+    assert thread.session_id == "sess-1" and thread.turns_done == 1
+
+    seen = {}
+    def spy(**kw):
+        seen.update(kw)
+        return _fake_launch(session="sess-1")(**kw)
+    svc.post_chat_message("p1", tid, "and then?", launch=spy)
+    assert seen["resume"] is True and seen["prompt"] == "and then?"  # 2nd turn resumes
+
+
+def test_chat_rename_scope_delete(tmp_path):
+    svc = Service(tmp_path)
+    svc.substrate.save_program(Program(id="p1", title="P", goals="g", status=ProgramStatus.ACTIVE))
+    tid = svc.create_chat("p1")["id"]
+    assert svc.rename_chat("p1", tid, "renamed")["title"] == "renamed"
+    assert svc.set_chat_scope("p1", tid, "full")["scope"] == "full"
+    with pytest.raises(ValueError):
+        svc.set_chat_scope("p1", tid, "bogus")
+    svc.delete_chat("p1", tid)
+    assert svc.list_chats("p1") == []
+    with pytest.raises(NotFoundError):
+        svc.get_chat_thread("p1", tid)
+
+
+def test_chat_migrates_legacy_single_chat(tmp_path):
+    svc = Service(tmp_path)
+    svc.substrate.save_program(Program(id="p1", title="P", goals="g", status=ProgramStatus.ACTIVE))
+    svc.substrate.save_chat("p1", [{"role": "user", "text": "old", "at": 1.0},
+                                   {"role": "pm", "text": "reply", "at": 2.0}])
+    chats = svc.list_chats("p1")                          # first access migrates
+    assert len(chats) == 1 and chats[0]["messages"] == 2
+    assert not (svc.substrate.program_dir("p1") / "chat.md").exists()
+
+
 def test_pm_chat_appends_and_persists(tmp_path):
     svc = Service(tmp_path)
     svc.substrate.save_program(Program(id="p1", title="P", goals="cure",
                                        status=ProgramStatus.ACTIVE))
-
-    seen = {}
-    def fake_chat(context, history, message):
-        seen["goals"] = context.goals
-        seen["history_len"] = len(history)          # prior turns, excluding this message
-        return f"answer to: {message}"
-
-    out = svc.chat("p1", "what's next?", chat_fn=fake_chat)
-    assert out["reply"] == "answer to: what's next?"
-    assert seen["goals"] == "cure" and seen["history_len"] == 0
-    msgs = svc.list_chat("p1")
-    assert [m["role"] for m in msgs] == ["user", "pm"]
-    assert msgs[0]["text"] == "what's next?"
-    svc.chat("p1", "and after that?", chat_fn=fake_chat)   # follow-up sees prior turns
-    assert seen["history_len"] == 2
-    assert len(svc.list_chat("p1")) == 4
+    tid = svc.create_chat("p1")["id"]
+    svc.post_chat_message("p1", tid, "what's next?", launch=_fake_launch("answer to"))
+    out = svc.get_chat_thread("p1", tid)
+    assert out["messages"][-1]["text"].startswith("answer to")
+    roles = [m["role"] for m in out["messages"]]
+    assert roles == ["user", "pm"]
+    assert out["messages"][0]["text"] == "what's next?"
 
 
 def test_pm_chat_rejects_empty(tmp_path):
     svc = Service(tmp_path)
     svc.substrate.save_program(Program(id="p1", title="P", goals="g"))
+    tid = svc.create_chat("p1")["id"]
     with pytest.raises(ValueError):
-        svc.chat("p1", "   ", chat_fn=lambda *a: "x")
+        svc.post_chat_message("p1", tid, "   ", launch=_fake_launch())
 
 
 def test_list_and_get_program(tmp_path):

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from coscience.frontmatter_io import parse, serialize
 from coscience.models import (Sprint, SprintStatus, ProgressState, Result, Program,
-                              ProgramStatus, PMState, Idea)
+                              ProgramStatus, PMState, Idea, ChatThread)
 
 
 class Substrate:
@@ -272,6 +272,55 @@ class Substrate:
         d.mkdir(parents=True, exist_ok=True)
         fm = {"type": "chat", "messages": messages}
         (d / "chat.md").write_text(serialize(fm, f"# PM chat {program_id}\n"))
+
+    # --- multi-thread PM chat (each thread is one resumable claude session) ---
+    def chats_dir(self, program_id: str) -> Path:
+        return self.program_dir(program_id) / "chats"
+
+    def chat_thread_dir(self, program_id: str, thread_id: str) -> Path:
+        return self.chats_dir(program_id) / thread_id
+
+    def list_chat_threads(self, program_id: str) -> list[ChatThread]:
+        d = self.chats_dir(program_id)
+        threads = [self.load_chat_thread(program_id, sub.name)
+                   for sub in (d.iterdir() if d.is_dir() else [])
+                   if (sub / "thread.md").is_file()]
+        threads = [t for t in threads if t is not None]
+        threads.sort(key=lambda t: t.created_at)
+        return threads
+
+    def load_chat_thread(self, program_id: str, thread_id: str) -> "ChatThread | None":
+        path = self.chat_thread_dir(program_id, thread_id) / "thread.md"
+        if not path.is_file():
+            return None
+        fm, _ = parse(path.read_text())
+        return ChatThread(
+            id=thread_id,
+            title=str(fm.get("title", "New chat")),
+            scope=str(fm.get("scope", "read")),
+            session_id=str(fm.get("session_id", "")),
+            created_at=float(fm.get("created_at", 0.0)),
+            turns_done=int(fm.get("turns_done", 0)),
+            pending=bool(fm.get("pending", False)),
+            agent_token=str(fm.get("agent_token", "")),
+            messages=[{"role": str(m.get("role", "user")), "text": str(m.get("text", "")),
+                       "at": float(m.get("at", 0.0))} for m in fm.get("messages", [])],
+        )
+
+    def save_chat_thread(self, program_id: str, thread: ChatThread) -> None:
+        d = self.chat_thread_dir(program_id, thread.id)
+        d.mkdir(parents=True, exist_ok=True)
+        fm = {"type": "chat_thread", "title": thread.title, "scope": thread.scope,
+              "session_id": thread.session_id, "created_at": thread.created_at,
+              "turns_done": thread.turns_done, "pending": thread.pending,
+              "agent_token": thread.agent_token, "messages": thread.messages}
+        (d / "thread.md").write_text(serialize(fm, f"# Chat {thread.id}\n"))
+
+    def delete_chat_thread(self, program_id: str, thread_id: str) -> None:
+        import shutil
+        d = self.chat_thread_dir(program_id, thread_id)
+        if d.is_dir():
+            shutil.rmtree(d)
 
     # --- ideas (a pool of candidate directions + the PM's summary of it) ---
     def load_ideas(self, program_id: str) -> tuple[str, list[Idea]]:

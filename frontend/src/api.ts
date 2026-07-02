@@ -14,6 +14,15 @@ export interface Idea {
 }
 export interface IdeaPool { summary: string; ideas: Idea[] }
 export interface ChatMessage { role: "user" | "pm"; text: string; at: number }
+export type ChatScope = "read" | "full";
+export interface ChatThreadSummary {
+  id: string; title: string; scope: ChatScope; created_at: number;
+  busy: boolean; messages: number; last_at: number;
+}
+export interface ChatThread {
+  id: string; title: string; scope: ChatScope; created_at: number;
+  turns_done: number; busy: boolean; messages: ChatMessage[]; live: string;
+}
 export interface SprintComment { id: string; text: string; added_at: number; target: "worker" | "pm" }
 export interface SprintActivity { label: string; active: boolean; at: number }
 export interface VoteTally { up: number; down: number; mine: number }
@@ -76,12 +85,26 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model }),
     }).then(j<{ id: string; pm_model: string }>),
-  getChat: (id: string) => fetch(`/api/programs/${id}/chat`).then(j<ChatMessage[]>),
-  sendChat: (id: string, message: string) =>
-    fetch(`/api/programs/${id}/chat`, {
+  listChats: (id: string) => fetch(`/api/programs/${id}/chats`).then(j<ChatThreadSummary[]>),
+  createChat: (id: string, title = "") =>
+    fetch(`/api/programs/${id}/chats`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    }).then(j<ChatThread>),
+  getChatThread: (id: string, tid: string) =>
+    fetch(`/api/programs/${id}/chats/${tid}`).then(j<ChatThread>),
+  sendChatMessage: (id: string, tid: string, message: string) =>
+    fetch(`/api/programs/${id}/chats/${tid}/messages`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),
-    }).then(j<{ reply: string; messages: ChatMessage[] }>),
+    }).then(j<ChatThread>),
+  patchChat: (id: string, tid: string, patch: { title?: string; scope?: ChatScope }) =>
+    fetch(`/api/programs/${id}/chats/${tid}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }).then(j<ChatThread>),
+  deleteChat: (id: string, tid: string) =>
+    fetch(`/api/programs/${id}/chats/${tid}`, { method: "DELETE" }).then(j<void>),
   replan: (id: string) =>
     fetch(`/api/programs/${id}/replan`, { method: "POST" }).then(
       j<{ program: string; cycle: number; submitted: string[]; skipped?: boolean; busy?: boolean; throttled?: boolean }>),
