@@ -84,61 +84,59 @@ export default function ChatView() {
         </Text>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "200px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
-        {/* thread list */}
-        <Card padding="sm" radius="md" style={cardStyle}>
-          <Button fullWidth size="xs" color="machine" mb={8} loading={create.isPending}
-                  onClick={() => create.mutate()}>+ New chat</Button>
-          <Stack gap={2}>
+      {/* conversation switcher — the list of chats, full width */}
+      <Card padding="sm" radius="md" style={cardStyle}>
+        <Group justify="space-between" wrap="nowrap" align="center">
+          <Group gap={6} style={{ flexWrap: "wrap", minWidth: 0 }}>
             {(chats.data ?? []).map((c) => (
-              <div key={c.id}
-                onClick={() => setActive(c.id)}
-                style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 8px",
-                  borderRadius: 7, cursor: "pointer",
-                  background: c.id === active ? "var(--machine-weak)" : "transparent" }}>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 13, whiteSpace: "nowrap",
-                  overflow: "hidden", textOverflow: "ellipsis" }}>{c.title}</span>
+              <button key={c.id} type="button" onClick={() => setActive(c.id)}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer",
+                  padding: "5px 10px", borderRadius: 999, fontSize: 13,
+                  border: "1px solid " + (c.id === active ? "var(--machine)" : "var(--hairline)"),
+                  background: c.id === active ? "var(--machine-weak)" : "transparent",
+                  color: c.id === active ? "var(--ink)" : "var(--ink-muted)" }}>
+                <span style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.title}</span>
                 {c.busy && <Loader size={11} color="machine" />}
                 {c.scope === "full" && <span title="Full access" style={{ fontSize: 10 }}>🔧</span>}
-                <ActionIcon size="xs" variant="subtle" color="gray" aria-label="delete chat"
-                  onClick={(e) => { e.stopPropagation(); doDelete(c.id, c.title); }}>✕</ActionIcon>
-              </div>
+              </button>
             ))}
-            {chats.data?.length === 0 && (
-              <Text size="xs" c="dimmed" ta="center" py={8}>No chats yet.</Text>
-            )}
-          </Stack>
-        </Card>
+            <Button size="xs" variant="subtle" color="machine" loading={create.isPending}
+                    onClick={() => create.mutate()}>+ New</Button>
+          </Group>
+          {active && (
+            <Group gap={8} wrap="nowrap">
+              {t?.scope === "full" && (
+                <Tooltip label="This chat can run commands and edit files in the workdir." withArrow>
+                  <Badge size="sm" color="orange" variant="light">full access</Badge>
+                </Tooltip>
+              )}
+              <SegmentedControl
+                size="xs" value={t?.scope ?? "read"} disabled={setScope.isPending || busy}
+                onChange={(v) => setScope.mutate(v as ChatScope)}
+                data={[{ label: "Read-only", value: "read" }, { label: "Full", value: "full" }]}
+              />
+              <Menu position="bottom-end" withArrow>
+                <Menu.Target>
+                  <ActionIcon variant="subtle" color="gray" aria-label="chat actions">⋯</ActionIcon>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Item onClick={doRename}>Rename…</Menu.Item>
+                  <Menu.Item color="red" onClick={() => doDelete(active, t?.title ?? "")}>Delete…</Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
+            </Group>
+          )}
+        </Group>
+      </Card>
 
-        {/* active thread */}
-        <Stack gap="md">
+      {/* active conversation — full body width */}
+      <Stack gap="md">
           {!active ? (
             <Card padding="lg" radius="md" style={cardStyle}>
-              <Text size="sm" c="dimmed">Pick a chat on the left, or start a new one.</Text>
+              <Text size="sm" c="dimmed">Start a new chat above to talk to the planner.</Text>
             </Card>
           ) : (
             <>
-              <Card padding="sm" radius="md" style={cardStyle}>
-                <Group justify="space-between" wrap="nowrap">
-                  <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-                    <Text fw={600} size="sm" truncate>{t?.title ?? "…"}</Text>
-                    <ActionIcon size="xs" variant="subtle" color="gray" aria-label="rename" onClick={doRename}>✎</ActionIcon>
-                  </Group>
-                  <Group gap={8} wrap="nowrap">
-                    {t?.scope === "full" && (
-                      <Tooltip label="This chat can run commands and edit files in the workdir." withArrow>
-                        <Badge size="sm" color="orange" variant="light">full access</Badge>
-                      </Tooltip>
-                    )}
-                    <SegmentedControl
-                      size="xs" value={t?.scope ?? "read"} disabled={setScope.isPending || busy}
-                      onChange={(v) => setScope.mutate(v as ChatScope)}
-                      data={[{ label: "Read-only", value: "read" }, { label: "Full", value: "full" }]}
-                    />
-                  </Group>
-                </Group>
-              </Card>
-
               <Card padding="lg" radius="md" style={cardStyle}>
                 {thread.isLoading ? <Loader color="machine" /> : (t?.messages.length ?? 0) === 0 && !busy ? (
                   <Text size="sm" c="dimmed">No messages yet — ask the planner something below.</Text>
@@ -184,8 +182,7 @@ export default function ChatView() {
               </Card>
             </>
           )}
-        </Stack>
-      </div>
+      </Stack>
     </Stack>
   );
 }
