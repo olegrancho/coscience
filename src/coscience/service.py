@@ -30,7 +30,13 @@ class Service:
     def __init__(self, repo_root, pool: ResourcePool | None = None):
         self.repo_root = Path(repo_root)
         self.substrate = Substrate(self.repo_root)
-        self.pool = pool if pool is not None else load_pool(self.repo_root)
+        self._pool_override = pool     # tests may inject a fixed pool
+
+    @property
+    def pool(self) -> ResourcePool:
+        # Read .coscience/resources.yaml live so capacity edits show without a server
+        # restart (an injected pool, if any, wins — for tests). It's a tiny file.
+        return self._pool_override if self._pool_override is not None else load_pool(self.repo_root)
 
     def _ledger(self) -> Ledger:
         ledger = Ledger(self.pool, self.repo_root / ".coscience" / "leases.json")
