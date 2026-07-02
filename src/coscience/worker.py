@@ -6,6 +6,7 @@ its result and mark the sprint done; if it died mid-run, clear it so a later bea
 relaunches and the agent resumes from its scratchpad."""
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import re
@@ -36,6 +37,28 @@ def _read_cost(sprint_dir) -> tuple:
         return None, None
 
 
+def _usage_ok_from_output(out: str, now: "datetime.datetime | None" = None,
+                          threshold: float = 100.0, max_cache_age: float = 900.0) -> bool:
+    """Decide launch-safety from usage.py's line. Fails OPEN on a STALE cache: the
+    script only serves cached data when its live fetch fails, and a cached reading
+    reflects a window that may have RESET since — trusting its percentage would pin
+    the pause past the reset (agents never respawning). If the cache is older than
+    max_cache_age, ignore the percentage and allow launching (a dead-on-arrival
+    agent is cheaply detected and retried). Fresh/live readings are trusted."""
+    m = re.search(r"\[cached (\S+)\]", out)
+    if m:
+        now = now or datetime.datetime.now(datetime.timezone.utc)
+        try:
+            fetched = datetime.datetime.strptime(
+                m.group(1), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+            if (now - fetched).total_seconds() > max_cache_age:
+                return True
+        except (ValueError, TypeError):
+            return True                                   # unparseable stamp -> don't pin
+    pcts = [float(x) for x in re.findall(r"(\d+)%", out)]
+    return max(pcts, default=0.0) < threshold
+
+
 def claude_usage_ok(threshold: float = 100.0) -> bool:
     """True if it's safe to launch a Claude agent — neither the 5-hour nor the
     weekly usage window is exhausted. Fails open: if usage can't be read, returns
@@ -45,8 +68,7 @@ def claude_usage_ok(threshold: float = 100.0) -> bool:
                              capture_output=True, text=True, timeout=10).stdout
     except Exception:
         return True
-    pcts = [float(x) for x in re.findall(r"(\d+)%", out)]
-    return max(pcts, default=0.0) < threshold
+    return _usage_ok_from_output(out, threshold=threshold)
 
 
 class Worker:
