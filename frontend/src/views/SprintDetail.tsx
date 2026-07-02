@@ -304,7 +304,12 @@ export default function SprintDetail() {
                 <Button variant="default" onClick={sendBack}>Send back</Button>
               </Tooltip>
             )}
-            {(actions.includes("edit") || actions.includes("reject") || actions.includes("demote")) && (
+            {actions.includes("reject") && (
+              <Tooltip label={s.status === "queued" ? "Pull it out of the run queue and cancel." : "Cancel this sprint — it won't run."} withArrow openDelay={300}>
+                <Button variant="default" color="red" onClick={reject}>{s.status === "queued" ? "Cancel" : "Reject"}</Button>
+              </Tooltip>
+            )}
+            {(actions.includes("edit") || actions.includes("demote")) && (
               <Menu position="bottom-end" withArrow>
                 <Menu.Target>
                   <Tooltip label="More actions" withArrow openDelay={300}>
@@ -314,8 +319,6 @@ export default function SprintDetail() {
                 <Menu.Dropdown>
                   {actions.includes("edit") &&
                     <Menu.Item onClick={() => setEditing(true)}>Edit goals / plan / resources…</Menu.Item>}
-                  {actions.includes("reject") &&
-                    <Menu.Item color="red" onClick={reject}>{s.status === "queued" ? "Cancel (pull from queue)" : "Reject (cancel)"}</Menu.Item>}
                   {actions.includes("demote") &&
                     <Menu.Item onClick={demote}>Demote to idea…</Menu.Item>}
                 </Menu.Dropdown>
