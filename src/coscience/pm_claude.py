@@ -70,7 +70,9 @@ OPEN SPRINTS (already proposed/approved/queued/running — do not duplicate thes
 APPROVED sprints are a human-authorized queue that YOU manage: decide when each should
 run and in what order. Release one into production with release_ids when it's the right
 next thing (dependencies satisfied, worth the compute); retune ordering with priority in
-sprint_edits. You need not release them all at once — sequence them as results land.
+sprint_edits. You need not release them all at once — sequence them as results land. And if
+an approved sprint no longer makes sense to run or needs serious rework, send it back to
+'proposed' (reopen_ids) rather than releasing it.
 {open_block}
 
 COMPLETED SPRINTS AND RESULTS (use these to decide what is most valuable next):
@@ -105,8 +107,9 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
       "goals": "<rewritten objective, optional>", "plan": ["<revised step>", "..."],
       "summary": "<optional>", "title": "<optional>", "priority": <int, optional>}}
   ],
-  "reopen_ids": ["<id of an APPROVED sprint (see OPEN SPRINTS) that recent results have made
-                 obsolete or redundant; it returns to 'proposed' for reconsideration. Only
+  "reopen_ids": ["<id of an APPROVED sprint (see OPEN SPRINTS) to send back to 'proposed' for
+                 reconsideration: results made it obsolete/redundant, it no longer makes sense
+                 to run at all, or it needs serious rework before it's worth running. Only
                  approved sprints — never queued/running ones. Omit/empty if none.>"],
   "release_ids": ["<id of an APPROVED sprint to release into production now — it becomes
                  'queued' and the scheduler runs it as compute frees. Release the ones whose
