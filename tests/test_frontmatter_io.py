@@ -28,3 +28,15 @@ def test_serialize_roundtrips():
     fm2, body2 = parse(out)
     assert fm2 == fm
     assert body2.strip() == "some notes"
+
+
+def test_roundtrips_frontmatter_value_containing_triple_dash():
+    # Regression: a chat message stored in frontmatter that contains a markdown
+    # table separator (|---|---|) or a `---` rule must not be mistaken for the
+    # closing fence. Previously parse() split on the bare '---' substring and
+    # truncated the YAML -> ScannerError.
+    reply = "Summary:\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n---\n\nDone."
+    fm = {"type": "chat", "messages": [{"role": "pm", "text": reply, "at": 1.0}]}
+    fm2, body = parse(serialize(fm, ""))
+    assert fm2["messages"][0]["text"] == reply
+    assert body == ""
