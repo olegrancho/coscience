@@ -84,7 +84,7 @@ export default function ChatView() {
         </Text>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 16, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "200px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
         {/* thread list */}
         <Card padding="sm" radius="md" style={cardStyle}>
           <Button fullWidth size="xs" color="machine" mb={8} loading={create.isPending}
@@ -146,7 +146,8 @@ export default function ChatView() {
                   <Stack gap={12}>
                     {(t?.messages ?? []).map((m, i) => (
                       <div key={i} style={{
-                        alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "82%",
+                        alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                        maxWidth: m.role === "user" ? "72%" : "90%",
                         background: m.role === "user" ? "var(--machine-weak)" : "var(--paper)",
                         border: "1px solid var(--hairline)", borderRadius: 10, padding: "9px 13px",
                       }}>
