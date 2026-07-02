@@ -187,7 +187,7 @@ export default function App() {
 
       <AppShell.Main>
         <div className="app-canvas" style={{ minHeight: "calc(100vh - 52px)", padding: "26px 30px" }}>
-          <div style={{ maxWidth: pathname.includes("/chat") ? 1180 : 980, margin: "0 auto" }}>
+          <div style={{ maxWidth: 980, margin: "0 auto" }}>
             <Routes>
               <Route path="/" element={<Overview />} />
               <Route path="/programs" element={<Programs />} />

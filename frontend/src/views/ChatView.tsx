@@ -84,9 +84,9 @@ export default function ChatView() {
         </Text>
       </div>
 
-      <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
-        {/* thread list — hangs off to the left of the conversation, scrolls past ~10 */}
-        <div style={{ width: 176, flexShrink: 0, position: "sticky", top: 16,
+      <div style={{ position: "relative" }}>
+        {/* thread list — hangs in the left gutter, off the main content column */}
+        <div style={{ position: "absolute", top: 0, right: "100%", marginRight: 20, width: 172,
                       maxHeight: "calc(100vh - 120px)", overflowY: "auto" }}>
           <Button fullWidth size="xs" variant="light" color="machine" mb={8}
                   loading={create.isPending} onClick={() => create.mutate()}>+ New chat</Button>
@@ -108,8 +108,8 @@ export default function ChatView() {
           </Stack>
         </div>
 
-        {/* active conversation — at the main body width */}
-        <Stack gap="md" style={{ flex: 1, minWidth: 0 }}>
+        {/* active conversation — the standard body column, same edges as every page */}
+        <Stack gap="md" style={{ minWidth: 0 }}>
           {!active ? (
             <Card padding="lg" radius="md" style={cardStyle}>
               <Text size="sm" c="dimmed">Start a new chat on the left to talk to the planner.</Text>
