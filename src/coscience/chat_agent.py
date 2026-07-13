@@ -47,11 +47,33 @@ def render_preamble(context, scope: str) -> str:
         "TOOLS — FULL: you may run commands and create/edit files in the working "
         "directory, acting as a hands-on research assistant. Make changes only when "
         "the conversation clearly calls for it, and say what you did.")
+    # Full scope can start processes, so it must know its session is disposable:
+    # a backgrounded task or a "watch it and tell me when done" plan is killed the
+    # moment this turn's process exits. The only resilient path is OS-level detach.
+    longrun_note = "" if scope == "read" else """
+LONG-RUNNING WORK — YOUR SESSION IS EPHEMERAL:
+This chat turn is a one-shot process that ENDS the instant you send your reply. Anything
+you launch as a background task, and anything that depends on a watcher/notification/hook
+firing later to finish or check it, is KILLED when the turn ends — it will NEVER complete.
+Do not start background tasks and rely on being re-invoked to collect them; that mechanism
+does not exist here.
+For work that outlasts a single reply, do ONE of these instead:
+- If it finishes in seconds, run it SYNCHRONOUSLY and wait for it in THIS turn before replying.
+- If it is genuinely long, DETACH it from your session at the OS level so it survives on its
+  own: `nohup <cmd> > <name>.log 2>&1 & disown` (or `setsid ...`), writing its log into this
+  working directory. Then in your reply state the exact command, the logfile path, and the
+  PID. On a LATER turn, re-read that logfile to check progress — never assume something
+  watched it for you.
+- Best for substantial research jobs: propose a SPRINT rather than an ad-hoc background task.
+  Sprints are the platform's durable, resumable mechanism built exactly for work that spans
+  many sessions.
+"""
     return f"""You are the PM (planning) agent for a research program, in a direct chat with the
 human overseer. Answer clearly and use your tools when it helps. Your session runs in
 this program's working directory.
 
 {scope_note}
+{longrun_note}
 
 PROGRAM GOALS:
 {context.goals}
