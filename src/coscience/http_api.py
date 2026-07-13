@@ -13,11 +13,12 @@ from functools import lru_cache
 from pathlib import Path
 
 import uvicorn
-from fastapi import APIRouter, FastAPI, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from coscience import auth
 from coscience.service import NotFoundError, Service, service_from_env
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -112,17 +113,61 @@ class SprintCommentIn(BaseModel):
     target: str = "worker"          # 'worker' (steers the agent) or 'pm' (steers the planner)
 
 
+class LoginIn(BaseModel):
+    username: str
+
+
 def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     app = FastAPI(title=title, version="0.0.0")
-    api = APIRouter(prefix="/api")
 
-    @api.get("/health")
+    COOKIE = "coscience_user"
+
+    def current_user(request: Request) -> "auth.User | None":
+        users = auth.load_users(service.repo_root)
+        if not users:
+            return None                                   # auth disabled (empty registry)
+        uname = auth.verify_cookie(request.cookies.get(COOKIE, ""), service.repo_root)
+        u = users.get(uname)
+        if u is None:
+            raise HTTPException(status_code=401, detail="not authenticated")
+        return u
+
+    pub = APIRouter(prefix="/api")                          # open endpoints
+    api = APIRouter(prefix="/api", dependencies=[Depends(current_user)])  # gated
+
+    @pub.get("/health")
     def health() -> dict:
         return {"status": "ok"}
 
-    @api.get("/version")
+    @pub.get("/version")
     def version() -> dict:
         return {"sha": server_version()}
+
+    @pub.get("/users")
+    def list_users() -> list[dict]:
+        return [{"username": u.username, "name": u.name, "initials": u.initials}
+                for u in auth.load_users(service.repo_root).values()]
+
+    @pub.get("/me")
+    def me(user: "auth.User | None" = Depends(current_user)) -> dict:
+        return {"user": None if user is None else
+                {"username": user.username, "name": user.name, "initials": user.initials},
+                "required": bool(auth.load_users(service.repo_root))}
+
+    @pub.post("/login")
+    def login(body: LoginIn, response: Response) -> dict:
+        u = auth.load_users(service.repo_root).get(body.username.strip())
+        if u is None:
+            raise HTTPException(status_code=401, detail="unknown user")
+        response.set_cookie(COOKIE, auth.make_cookie(u.username, service.repo_root),
+                            httponly=True, samesite="lax", path="/",
+                            max_age=60 * 60 * 24 * 30)
+        return {"username": u.username, "name": u.name, "initials": u.initials}
+
+    @pub.post("/logout")
+    def logout(response: Response) -> dict:
+        response.delete_cookie(COOKIE, path="/")
+        return {"ok": True}
 
     @api.get("/sprints")
     def list_sprints(status: str | None = Query(default=None)) -> list[dict]:
@@ -427,6 +472,7 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
+    app.include_router(pub)
     app.include_router(api)
     return app
 
