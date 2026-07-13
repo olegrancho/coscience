@@ -212,18 +212,21 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=404, detail=f"file not found: {name}")
 
     @api.post("/sprints/{sprint_id}/comments", status_code=201)
-    def comment_sprint(sprint_id: str, body: SprintCommentIn) -> dict:
+    def comment_sprint(sprint_id: str, body: SprintCommentIn,
+                       user: "auth.User | None" = Depends(current_user)) -> dict:
         try:
-            return service.add_sprint_comment(sprint_id, body.text, target=body.target)
+            return service.add_sprint_comment(sprint_id, body.text, target=body.target,
+                                              by=(user.username if user else ""))
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
     @api.post("/sprints/{sprint_id}/approve")
-    def approve_sprint(sprint_id: str) -> dict:
+    def approve_sprint(sprint_id: str,
+                       user: "auth.User | None" = Depends(current_user)) -> dict:
         try:
-            service.approve_sprint(sprint_id)
+            service.approve_sprint(sprint_id, by=(user.username if user else ""))
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
         except ValueError as exc:
@@ -231,9 +234,10 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         return service.get_sprint(sprint_id)
 
     @api.post("/sprints/{sprint_id}/run")
-    def run_sprint(sprint_id: str) -> dict:
+    def run_sprint(sprint_id: str,
+                   user: "auth.User | None" = Depends(current_user)) -> dict:
         try:
-            service.run_sprint(sprint_id)
+            service.run_sprint(sprint_id, by=(user.username if user else ""))
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
         except ValueError as exc:
@@ -241,9 +245,10 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         return service.get_sprint(sprint_id)
 
     @api.post("/sprints/{sprint_id}/send_back")
-    def send_back_sprint(sprint_id: str) -> dict:
+    def send_back_sprint(sprint_id: str,
+                         user: "auth.User | None" = Depends(current_user)) -> dict:
         try:
-            service.send_back_sprint(sprint_id)
+            service.send_back_sprint(sprint_id, by=(user.username if user else ""))
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
         except ValueError as exc:
@@ -251,18 +256,21 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         return service.get_sprint(sprint_id)
 
     @api.post("/sprints/{sprint_id}/vote")
-    def vote_sprint(sprint_id: str, body: VoteIn) -> dict:
+    def vote_sprint(sprint_id: str, body: VoteIn,
+                    user: "auth.User | None" = Depends(current_user)) -> dict:
+        by = user.username if user else body.by
         try:
-            return service.vote_sprint(sprint_id, body.by, body.value)
+            return service.vote_sprint(sprint_id, by, body.value)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
     @api.post("/sprints/{sprint_id}/reject")
-    def reject_sprint(sprint_id: str) -> dict:
+    def reject_sprint(sprint_id: str,
+                      user: "auth.User | None" = Depends(current_user)) -> dict:
         try:
-            service.reject_sprint(sprint_id)
+            service.reject_sprint(sprint_id, by=(user.username if user else ""))
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
         except ValueError as exc:
@@ -270,9 +278,10 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         return service.get_sprint(sprint_id)
 
     @api.post("/sprints/{sprint_id}/demote")
-    def demote_sprint(sprint_id: str) -> dict:
+    def demote_sprint(sprint_id: str,
+                      user: "auth.User | None" = Depends(current_user)) -> dict:
         try:
-            return service.demote_sprint(sprint_id)
+            return service.demote_sprint(sprint_id, by=(user.username if user else ""))
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
         except ValueError as exc:
@@ -375,9 +384,11 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=404, detail="chat not found")
 
     @api.post("/programs/{program_id}/chats/{thread_id}/messages")
-    def post_chat_message(program_id: str, thread_id: str, body: ChatIn) -> dict:
+    def post_chat_message(program_id: str, thread_id: str, body: ChatIn,
+                          user: "auth.User | None" = Depends(current_user)) -> dict:
         try:
-            return service.post_chat_message(program_id, thread_id, body.message)
+            return service.post_chat_message(program_id, thread_id, body.message,
+                                             by=(user.username if user else ""))
         except NotFoundError:
             raise HTTPException(status_code=404, detail="chat not found")
         except ValueError as exc:
@@ -433,9 +444,11 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
 
     @api.post("/programs/{program_id}/ideas", status_code=201)
-    def add_idea(program_id: str, body: IdeaIn) -> dict:
+    def add_idea(program_id: str, body: IdeaIn,
+                user: "auth.User | None" = Depends(current_user)) -> dict:
         try:
-            return service.add_idea(program_id, body.text, source="human")
+            return service.add_idea(program_id, body.text, source="human",
+                                    by=(user.username if user else ""))
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
         except ValueError as exc:
@@ -464,9 +477,11 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=404, detail=f"not found: {program_id}/{idea_id}")
 
     @api.post("/programs/{program_id}/ideas/{idea_id}/comments", status_code=201)
-    def comment_idea(program_id: str, idea_id: str, body: GuidanceIn) -> dict:
+    def comment_idea(program_id: str, idea_id: str, body: GuidanceIn,
+                     user: "auth.User | None" = Depends(current_user)) -> dict:
         try:
-            return service.add_idea_comment(program_id, idea_id, body.text)
+            return service.add_idea_comment(program_id, idea_id, body.text,
+                                            by=(user.username if user else ""))
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"not found: {program_id}/{idea_id}")
         except ValueError as exc:

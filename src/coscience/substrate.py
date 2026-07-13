@@ -42,7 +42,8 @@ class Substrate:
             created_at=None if fm.get("created_at") is None else float(fm["created_at"]),
             comments=[{"id": str(c["id"]), "text": str(c["text"]),
                        "added_at": float(c["added_at"]),
-                       "target": str(c.get("target", "worker"))} for c in fm.get("comments", [])],
+                       "target": str(c.get("target", "worker")),
+                       "by": str(c.get("by", ""))} for c in fm.get("comments", [])],
             model=str(fm.get("model", "")),
             votes=[{"by": str(v["by"]), "value": int(v["value"]), "at": float(v["at"])}
                    for v in fm.get("votes", [])],
@@ -309,7 +310,8 @@ class Substrate:
             pending=bool(fm.get("pending", False)),
             agent_token=str(fm.get("agent_token", "")),
             messages=[{"role": str(m.get("role", "user")), "text": str(m.get("text", "")),
-                       "at": float(m.get("at", 0.0))} for m in fm.get("messages", [])],
+                       "at": float(m.get("at", 0.0)), "by": str(m.get("by", ""))}
+                      for m in fm.get("messages", [])],
         )
 
     def save_chat_thread(self, program_id: str, thread: ChatThread) -> None:
@@ -342,7 +344,8 @@ class Substrate:
                 by=str(n.get("by", "")),
                 pinned=bool(n.get("pinned", False)),
                 comments=[{"id": str(c["id"]), "text": str(c["text"]),
-                           "added_at": float(c["added_at"])} for c in n.get("comments", [])],
+                           "added_at": float(c["added_at"]),
+                           "by": str(c.get("by", ""))} for c in n.get("comments", [])],
                 created_at=float(n.get("created_at", 0.0)),
                 demoted=bool(n.get("demoted", False)),
             ))
