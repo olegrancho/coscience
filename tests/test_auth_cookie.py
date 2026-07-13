@@ -19,3 +19,7 @@ def test_secret_persisted_and_stable(tmp_path):
     assert (tmp_path / ".coscience" / "secret").is_file()
     c2 = auth.make_cookie("stroganov", tmp_path)   # same secret reused
     assert c1 == c2
+
+
+def test_non_ascii_cookie_rejected(tmp_path):
+    assert auth.verify_cookie("ünícode.sig", tmp_path) == ""
