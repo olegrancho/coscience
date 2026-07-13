@@ -79,6 +79,8 @@ def verify_cookie(value: str, repo_root) -> str:
     """Username if the signed cookie is valid and untampered, else ''."""
     if not value or "." not in value:
         return ""
+    if not value.isascii():
+        return ""
     username = value.rpartition(".")[0]
     if hmac.compare_digest(value, make_cookie(username, repo_root)):
         return username
