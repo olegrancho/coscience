@@ -46,6 +46,8 @@ class Substrate:
             model=str(fm.get("model", "")),
             votes=[{"by": str(v["by"]), "value": int(v["value"]), "at": float(v["at"])}
                    for v in fm.get("votes", [])],
+            decisions=[{"by": str(d.get("by", "")), "action": str(d.get("action", "")),
+                        "at": float(d.get("at", 0.0))} for d in fm.get("decisions", [])],
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
@@ -83,6 +85,8 @@ class Substrate:
             fm["model"] = sprint.model
         if sprint.votes:
             fm["votes"] = list(sprint.votes)
+        if sprint.decisions:
+            fm["decisions"] = list(sprint.decisions)
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))
 
@@ -335,6 +339,7 @@ class Substrate:
             ideas.append(Idea(
                 id=str(n["id"]), text=str(n["text"]),
                 source=str(n.get("source", "human")),
+                by=str(n.get("by", "")),
                 pinned=bool(n.get("pinned", False)),
                 comments=[{"id": str(c["id"]), "text": str(c["text"]),
                            "added_at": float(c["added_at"])} for c in n.get("comments", [])],
@@ -351,6 +356,7 @@ class Substrate:
             "summary": summary,
             "ideas": [
                 {"id": i.id, "text": i.text, "source": i.source, "pinned": i.pinned,
+                 "by": i.by,
                  "comments": list(i.comments), "created_at": i.created_at,
                  **({"demoted": True} if i.demoted else {})}
                 for i in ideas
