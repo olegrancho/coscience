@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Group, Select, Stack, Text, Tooltip } from "@mantine/core";
+import { Button, Select, Stack, Text, Tooltip } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type CurrentUser } from "./api";
 
@@ -54,6 +54,7 @@ function Login() {
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const me = useMe();
   if (me.isLoading) return null;
+  if (me.isError) return <Login />;            // 401 when registry seeded + not logged in
   if (me.data?.required && !me.data.user) return <Login />;
   return <>{children}</>;
 }
