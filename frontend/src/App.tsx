@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import { AppShell, Group, Text } from "@mantine/core";
 import { Link, Route, Routes, useLocation } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
+import { useMe, UserChip } from "./auth";
 import { Heartbeat } from "./components/ui";
 import Overview from "./views/Overview";
 import Programs from "./views/ProgramsOverview";
@@ -148,6 +149,19 @@ function VersionBanner() {
   );
 }
 
+function UserMenu() {
+  const me = useMe();
+  const qc = useQueryClient();
+  if (!me.data?.user) return null;
+  return (
+    <Group gap={10} wrap="nowrap">
+      <UserChip username={me.data.user.username} />
+      <button type="button" className="linklike"
+        onClick={async () => { await api.logout(); qc.invalidateQueries(); }}>log out</button>
+    </Group>
+  );
+}
+
 export default function App() {
   const { pathname } = useLocation();
   const active = activeSection(pathname);
@@ -156,6 +170,7 @@ export default function App() {
       <AppShell.Header style={{ background: "var(--card)", borderBottom: "1px solid var(--hairline)" }}>
         <Group h="100%" px="lg" justify="flex-end" wrap="nowrap">
           <VersionBanner />
+          <UserMenu />
           <Group gap={7} wrap="nowrap">
             <span className="heartbeat" />
             <Text className="mono" size="xs" c="dimmed">live · refreshes every 10s</Text>

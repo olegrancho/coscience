@@ -7,6 +7,7 @@ import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
 import { api, type ChatScope } from "../api";
 import { BackLink, RelTime } from "../components/ui";
+import { UserChip } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
@@ -174,7 +175,10 @@ export default function ChatView() {
                         background: m.role === "user" ? "var(--machine-weak)" : "var(--paper)",
                         border: "1px solid var(--hairline)", borderRadius: 10, padding: "9px 13px",
                       }}>
-                        <Text size="xs" c="dimmed" mb={3}>{m.role === "user" ? "You" : "PM"} · <RelTime at={m.at} /></Text>
+                        <Group gap={5} mb={3} wrap="nowrap">
+                          {m.role === "user" ? <UserChip username={m.by} /> : <Text size="xs" c="dimmed">PM</Text>}
+                          <Text size="xs" c="dimmed">· <RelTime at={m.at} /></Text>
+                        </Group>
                         {m.role === "pm"
                           ? <div className="md-tight"><Md>{m.text}</Md></div>
                           : <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>{m.text}</Text>}

@@ -19,6 +19,7 @@ import "@mantine/notifications/styles.css";
 import "./styles.css";
 import { theme } from "./theme";
 import App from "./App";
+import { AuthGate } from "./auth";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchInterval: 10000, refetchOnWindowFocus: true } },
@@ -30,7 +31,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <Notifications position="top-right" />
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <App />
+          <AuthGate>
+            <App />
+          </AuthGate>
         </BrowserRouter>
       </QueryClientProvider>
     </MantineProvider>

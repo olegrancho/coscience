@@ -9,6 +9,7 @@ import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
 import { BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, voterId } from "../components/ui";
 import SprintEditModal from "../components/SprintEditModal";
+import { useMe, UserChip } from "../auth";
 
 /** Inline result: shows a clamped preview that unfolds in place, plus a link to
  *  the full report page. Long reports start folded; short ones show whole. */
@@ -164,8 +165,10 @@ export default function SprintDetail() {
   const [comment, setComment] = useState("");
   const [commentTarget, setCommentTarget] = useState<"worker" | "pm">("worker");
   const prog = programOf(id);
+  const me = useMe();
+  const voter = me.data?.user?.username ?? voterId();
   const sprint = useQuery({
-    queryKey: ["sprint", id], queryFn: () => api.getSprint(id, voterId()),
+    queryKey: ["sprint", id], queryFn: () => api.getSprint(id, voter),
     refetchInterval: (q) => (q.state.data?.status === "executing" ? 5000 : false),
   });
   const program = useQuery({ queryKey: ["program", prog], queryFn: () => api.getProgram(prog), enabled: !!prog });
@@ -199,7 +202,7 @@ export default function SprintDetail() {
   };
   const vote = async (value: number) => {
     try {
-      const votes = await api.voteSprint(id, voterId(), value);
+      const votes = await api.voteSprint(id, voter, value);
       qc.setQueryData(["sprint", id], (old: typeof s | undefined) => (old ? { ...old, votes } : old));
     } catch (e) { notifications.show({ color: "red", title: "Couldn't vote", message: String(e) }); }
   };
@@ -289,6 +292,11 @@ export default function SprintDetail() {
           <span style={{ marginLeft: "auto" }}><VoteControl votes={s.votes} onVote={vote} /></span>
         </Group>
         {s.summary && <Text mt={12} style={{ maxWidth: 620, color: "var(--ink-muted)", lineHeight: 1.55 }}>{s.summary}</Text>}
+        {(s.decisions ?? []).map((d, i) => (
+          <div key={i} style={{ fontSize: 12, color: "var(--ink-muted)" }}>
+            {d.action} by <UserChip username={d.by} /> · <RelTime at={d.at} />
+          </div>
+        ))}
       </div>
 
       {s.title && s.goals && s.goals !== s.title && (
@@ -330,6 +338,7 @@ export default function SprintDetail() {
                     background: toPm ? "var(--signal-weak)" : "var(--machine-weak)" }}>
                     {toPm ? "→ planner" : "→ agent"}
                   </span>
+                  <UserChip username={c.by} />
                   <Text size="xs" c="dimmed"><RelTime at={c.added_at} /></Text>
                 </Group>
               </div>
