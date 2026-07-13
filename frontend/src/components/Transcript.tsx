@@ -30,11 +30,25 @@ export function parseTranscript(raw: string): Turn[] {
   return turns;
 }
 
+/** True if raw contains at least one parseable stream-json event line. Lets us tell
+ *  a warming-up event stream (only a `system`/`init` event so far → nothing to render
+ *  yet) apart from a genuine plain-text log we should show verbatim. */
+function hasJsonEvents(raw: string): boolean {
+  for (const line of raw.split("\n")) {
+    const t = line.trim();
+    if (!t.startsWith("{")) continue;
+    try { const ev = JSON.parse(t); if (ev && typeof ev.type === "string") return true; } catch { /* not JSON */ }
+  }
+  return false;
+}
+
 export function Transcript({ raw }: { raw: string }) {
   const turns = parseTranscript(raw);
   if (!turns.length) {
-    // Not a parseable event stream (plain-text log, or truncated to a fragment
-    // with no whole JSON line) — fall back to showing it verbatim.
+    // A valid event stream with nothing to show yet (e.g. only the init event on the
+    // first poll) — show a placeholder, NOT the raw JSON. Only fall back to verbatim
+    // for genuine plain-text logs with no JSON events at all.
+    if (hasJsonEvents(raw)) return <Text size="sm" c="dimmed">Starting up — no agent activity yet.</Text>;
     return raw.trim()
       ? <pre className="mono" style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word",
              fontSize: 12.5, lineHeight: 1.5, maxHeight: 440, overflow: "auto" }}>{raw}</pre>

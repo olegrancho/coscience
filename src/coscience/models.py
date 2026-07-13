@@ -67,6 +67,7 @@ class ChatThread:
     id: str
     title: str = "New chat"
     scope: str = "read"                # "read" | "full"
+    announced_scope: str = ""          # scope last told to the model; on change, next turn re-announces
     session_id: str = ""               # Claude session uuid for --resume
     created_at: float = 0.0
     turns_done: int = 0                # completed turns (0 => first turn sets the session)

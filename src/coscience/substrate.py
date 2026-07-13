@@ -298,6 +298,7 @@ class Substrate:
             id=thread_id,
             title=str(fm.get("title", "New chat")),
             scope=str(fm.get("scope", "read")),
+            announced_scope=str(fm.get("announced_scope", "")),
             session_id=str(fm.get("session_id", "")),
             created_at=float(fm.get("created_at", 0.0)),
             turns_done=int(fm.get("turns_done", 0)),
@@ -311,6 +312,7 @@ class Substrate:
         d = self.chat_thread_dir(program_id, thread.id)
         d.mkdir(parents=True, exist_ok=True)
         fm = {"type": "chat_thread", "title": thread.title, "scope": thread.scope,
+              "announced_scope": thread.announced_scope,
               "session_id": thread.session_id, "created_at": thread.created_at,
               "turns_done": thread.turns_done, "pending": thread.pending,
               "agent_token": thread.agent_token, "messages": thread.messages}

@@ -541,11 +541,18 @@ class Service:
         workdir = chat_agent.resolve_workdir(self.substrate, program.workdir)
         resume = thread.turns_done > 0
         if resume:
-            prompt = message
+            # The preamble (with the TOOLS/scope line) went out only on turn 1. If the
+            # scope changed since it was last announced, tell the resumed session now —
+            # else it keeps acting on its original scope (e.g. thinks it's still read-only).
+            if thread.scope != thread.announced_scope:
+                prompt = chat_agent.scope_change_notice(thread.scope) + "\n\nHuman: " + message
+            else:
+                prompt = message
         else:
             from coscience.pm_agent import gather_context
             ctx = gather_context(self.substrate, program_id)
             prompt = chat_agent.render_preamble(ctx, thread.scope) + "\n\nHuman: " + message
+        thread.announced_scope = thread.scope
         launch = launch or chat_agent.launch_turn
         token = launch(thread_dir=self.substrate.chat_thread_dir(program_id, thread_id),
                        workdir=workdir, prompt=prompt, scope=thread.scope,

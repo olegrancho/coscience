@@ -92,6 +92,24 @@ STANDING GUIDANCE:
 """
 
 
+def scope_change_notice(scope: str) -> str:
+    """Prepended to the next turn's message when a thread's scope changed mid-session.
+    The preamble (with its TOOLS line) is only sent on the first turn, so a resumed
+    session otherwise keeps believing it has the original scope. This tells it."""
+    if scope == "full":
+        return (
+            "[SYSTEM] Your tool scope for this chat has been changed to FULL: you may now run "
+            "commands and create/edit files in the working directory (permission prompts are "
+            "bypassed). You were previously read-only — act on this new capability when the "
+            "conversation calls for it, and say what you did. Note: your session is ephemeral — "
+            "it ends when you reply. Do not start background tasks that rely on a watcher to "
+            "finish them; run short work synchronously, detach long work at the OS level "
+            "(nohup/setsid into a logfile), or propose a sprint.")
+    return (
+        "[SYSTEM] Your tool scope for this chat has been changed to READ-ONLY: you may explore "
+        "and read files, but can no longer run commands or edit files.")
+
+
 def _turn_shell(claude_bin, prompt, scope, session_id, resume, model, out, exitf) -> str:
     parts = [claude_bin, "-p", shlex.quote(prompt)]
     parts += ["--resume", shlex.quote(session_id)] if resume else ["--session-id", shlex.quote(session_id)]
