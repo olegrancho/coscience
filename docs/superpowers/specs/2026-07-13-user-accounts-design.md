@@ -84,6 +84,13 @@ read live per request, matching the resource-pool live-read pattern).
 simple gate, and the login is frictionless (pick a name). Unauthenticated API
 calls return 401; the frontend shows the login screen.
 
+**Empty-registry bypass (rollout + safety):** if `.coscience/users.yaml` is
+absent or lists no users, auth is **disabled** — the gate passes anonymously and
+attributed actions record `by=""` (rendered "—"). This preserves today's
+behavior until a deployment is seeded, avoids bricking the app if the registry is
+missing, and keeps the existing (auth-less) test suite valid. Auth turns on the
+moment the registry has at least one user.
+
 ## 5. Attribution (server-derived)
 
 A `by: <username>` field is stamped from `current_user` on every human write:
