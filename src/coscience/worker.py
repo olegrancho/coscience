@@ -183,6 +183,13 @@ class Worker:
         # 3) agent ended -> collect. Only a clean exit (status 'ok') is a result;
         # a crash, kill, or usage limit must NOT be laundered into a "done" sprint.
         text, status = self.agent.collect(sprint_dir)
+        # A feedback.out line written just before the agent exited would otherwise
+        # never be harvested (the "still running" beat above is the only other
+        # call site) — sweep once more now that the process is done.
+        try:
+            feedback_harvest.harvest_feedback(self.substrate, sprint.id)
+        except Exception:
+            pass
         progress.agent_token = ""
         # One Claude invocation just ended (clean, failed, or interrupted) — record it
         # with whatever cost/tokens the agent reported, so the dashboard can show spend.

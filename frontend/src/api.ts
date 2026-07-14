@@ -23,7 +23,6 @@ export interface ChatThread {
   id: string; title: string; scope: ChatScope; created_at: number;
   turns_done: number; busy: boolean; messages: ChatMessage[]; live: string;
 }
-export interface SprintComment { id: string; text: string; added_at: number; target: "worker" | "pm"; by?: string }
 export interface FeedbackMessage { role: "human" | "pm" | "worker"; text: string; by?: string; at: number }
 export interface FeedbackThreadT { id: string; target: "pm" | "worker"; status: "open" | "complete"; agent_unseen: boolean; created_at: number; messages: FeedbackMessage[] }
 export interface SprintActivity { label: string; active: boolean; at: number }

@@ -233,8 +233,9 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.add_sprint_comment(sprint_id, body.text, target=body.target,
                                               by=(user.username if user else ""),
                                               thread_id=body.thread_id)
-        except NotFoundError:
-            raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+        except NotFoundError as exc:
+            missing = exc.args[0] if exc.args else sprint_id
+            raise HTTPException(status_code=404, detail=f"not found: {missing}")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
