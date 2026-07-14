@@ -27,11 +27,12 @@ def render_prompt(context: PMContext) -> str:
                         lambda s: f"- {s['id']}: {s['goals']} -> result: {s['result']}")
     failed_block = _lines(context.failed,
                           lambda s: f"- {s['id']}: {s['goals']} -> FAILED: {s['error']}")
-    feedback_block = _lines(
-        context.sprint_feedback,
-        lambda f: (f"- {f['sprint_id']} [{f['status']}, "
-                   f"{'EDITABLE' if f['editable'] else 'locked — propose a follow-up instead'}]: "
-                   + " | ".join(f["comments"])))
+    def _feedback_line(f):
+        history = " | ".join(f"{m['role']}: {m['text']}" for m in f["messages"])
+        return (f"- {f['sprint_id']} [{f['status']}, "
+                f"{'EDITABLE' if f['editable'] else 'locked — propose a follow-up instead'}, "
+                f"thread {f['thread_id']}]: {history}")
+    feedback_block = _lines(context.sprint_feedback, _feedback_line)
     prior_block = ", ".join(context.prior_proposals) or "(none)"
     guidance_block = ""
     if context.human_guidance:
@@ -83,9 +84,12 @@ propose a corrected/rescoped sprint, change the approach, or record an idea; do 
 blindly re-propose the same thing):
 {failed_block}
 
-HUMAN FEEDBACK ADDRESSED TO YOU about specific sprints (act on each: if it is
-EDITABLE, revise that sprint via sprint_edits; if it is locked, propose a follow-up
-or adjust your plan instead):
+HUMAN FEEDBACK ADDRESSED TO YOU about specific sprints — each shown as an open thread id
+and its message history (act on each: if it is EDITABLE, revise that sprint via
+sprint_edits; if it is locked, propose a follow-up or adjust your plan instead).
+FEEDBACK THREADS: for each open thread shown, take the action it asks for (edit the
+sprint, change compute, propose, curate) AND add a short thread_replies entry saying
+what you did. If you can't, say why.
 {feedback_block}
 
 PRIOR PROPOSALS you already made (do NOT repeat their intent): {prior_block}
@@ -115,6 +119,8 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
   "release_ids": ["<id of an APPROVED sprint to release into production now — it becomes
                  'queued' and the scheduler runs it as compute frees. Release the ones whose
                  time has come; hold the rest. Only approved sprints. Omit/empty if none.>"],
+  "thread_replies": [{{"thread_id": "<id of an open feedback thread shown above>",
+                       "text": "<short reply: what you did in response, or why you can't>"}}],
   "proposals": [
     {{"suffix": "<short-slug>",
       "title": "<=8 words naming the experiment, e.g. 'Cross-validate the witness pair'>",
@@ -202,6 +208,8 @@ def parse_response(text: str) -> PMCycleOutput:
         sprint_edits=edits,
         reopen_ids=[str(s) for s in data.get("reopen_ids", [])],
         release_ids=[str(s) for s in data.get("release_ids", [])],
+        thread_replies=[dict(r) for r in data.get("thread_replies", [])
+                        if isinstance(r, dict) and r.get("thread_id")],
     )
 
 

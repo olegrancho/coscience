@@ -70,6 +70,7 @@ class PMCycleOutput:
     sprint_edits: list[dict] = field(default_factory=list)   # revisions to still-proposed sprints (from PM feedback)
     reopen_ids: list[str] = field(default_factory=list)      # approved sprints to send back to proposed (now obsolete)
     release_ids: list[str] = field(default_factory=list)     # approved sprints to release into production (-> queued)
+    thread_replies: list[dict] = field(default_factory=list)  # [{thread_id, text}] PM answers to open feedback threads
 
 
 class Reasoner(Protocol):

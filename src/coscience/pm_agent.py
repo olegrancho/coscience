@@ -11,7 +11,7 @@ import re
 import time
 from dataclasses import dataclass
 
-from coscience import usage_meter
+from coscience import threads, usage_meter
 from coscience.models import Sprint, SprintStatus, Idea
 from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
 
@@ -31,8 +31,8 @@ def _context_payload(context: PMContext) -> dict:
                          if s["status"] != SprintStatus.PROPOSED.value),
         "completed": sorted((s["id"], s["result"]) for s in context.completed),
         "failed": sorted((s["id"], s["error"]) for s in context.failed),
-        "sprint_feedback": sorted((f["sprint_id"], c)
-                                  for f in context.sprint_feedback for c in f["comments"]),
+        "sprint_feedback": sorted((f["sprint_id"], f["thread_id"], f["messages"][-1]["text"])
+                                  for f in context.sprint_feedback),
         # Human idea signal re-triggers the PM; its own pm-sourced ideas/summary do not.
         "human_ideas": sorted(i["text"] for i in context.ideas if i.get("source") == "human"),
         # gather_context flattens idea comments to plain strings (not dicts), same as
@@ -84,15 +84,18 @@ def gather_context(substrate, program_id: str) -> PMContext:
     for s in substrate.iter_sprints():
         if s.program != program_id:
             continue
-        pm_notes = [c["text"] for c in s.comments if c.get("target") == "pm"]
-        if pm_notes and s.status != SprintStatus.CANCELED:
-            sprint_feedback.append({
-                "sprint_id": s.id, "goals": s.goals, "status": s.status.value,
-                # PM may revise a sprint only until a human approves it; after that
-                # the spec is locked and the PM responds by proposing a follow-up.
-                "editable": s.status == SprintStatus.PROPOSED,
-                "comments": pm_notes,
-            })
+        for th in s.threads:
+            if th.get("target") == "pm" and threads.needs_reply(th) and s.status != SprintStatus.CANCELED:
+                sprint_feedback.append({
+                    "sprint_id": s.id, "goals": s.goals, "status": s.status.value,
+                    # PM may revise a sprint while it is still proposed/approved/queued;
+                    # once executing/done/failed the spec is locked and the PM should
+                    # respond by proposing a follow-up instead.
+                    "editable": s.status in (SprintStatus.PROPOSED, SprintStatus.APPROVED,
+                                             SprintStatus.QUEUED),
+                    "thread_id": th["id"],
+                    "messages": [{"role": m["role"], "text": m["text"]} for m in th["messages"]],
+                })
         if s.status == SprintStatus.DONE:
             result = ""
             if s.results:
@@ -388,6 +391,22 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         if isinstance(edit.get("resources_required"), dict):
             sp.resources_required = coerce_resources(edit["resources_required"])
         substrate.save_sprint(sp)
+
+    # --- thread replies: the PM's answer to each open sprint feedback thread it
+    # acted on (edited, released, proposed a follow-up, or explained why not).
+    # Appended as a 'pm' message on the matching still-open thread. ---
+    replies = {r["thread_id"]: r["text"] for r in staged.output.thread_replies if r.get("thread_id")}
+    if replies:
+        for s in substrate.iter_sprints():
+            if s.program != program_id:
+                continue
+            touched = False
+            for th in s.threads:
+                if th["id"] in replies and threads.needs_reply(th):
+                    threads.append(th, "pm", replies[th["id"]], "", now=now_ts)
+                    touched = True
+            if touched:
+                substrate.save_sprint(s)
 
     # --- release: put an APPROVED sprint into production (-> queued). The approved
     # pool is the PM's managed queue; it releases items here as it sees need, and the
