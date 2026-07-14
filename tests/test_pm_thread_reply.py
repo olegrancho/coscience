@@ -43,3 +43,18 @@ def test_pm_reply_ignores_unmatched_or_answered_thread(substrate):
     out = PMCycleOutput(report="r", thread_replies=[{"thread_id": "nope", "text": "ignored"}])
     pm_beat(substrate, "p1", FakeReasoner([out]), force=True)
     assert substrate.load_sprint("p1-c0-y").threads == []
+
+
+def test_pm_reply_missing_text_does_not_crash(substrate):
+    # LLM may emit a thread_replies entry without a `text` field — must not KeyError
+    # (which would abort the whole tick); the thread stays awaiting a reply.
+    _prog(substrate)
+    s = Sprint(id="p1-c0-z", status=SprintStatus.QUEUED, goals="g", plan=["a"], program="p1")
+    th = threads.new_thread("pm", "please answer", "u", now=1.0)
+    s.threads.append(th)
+    substrate.save_sprint(s)
+    out = PMCycleOutput(report="r", thread_replies=[{"thread_id": th["id"]}])  # no "text"
+    pm_beat(substrate, "p1", FakeReasoner([out]), force=True)                  # must not raise
+    got = substrate.load_sprint("p1-c0-z").threads[0]
+    assert got["messages"][-1]["role"] == "human"     # no junk reply appended
+    assert threads.needs_reply(got) is True           # still open for a real reply

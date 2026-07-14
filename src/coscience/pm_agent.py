@@ -395,7 +395,11 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     # --- thread replies: the PM's answer to each open sprint feedback thread it
     # acted on (edited, released, proposed a follow-up, or explained why not).
     # Appended as a 'pm' message on the matching still-open thread. ---
-    replies = {r["thread_id"]: r["text"] for r in staged.output.thread_replies if r.get("thread_id")}
+    # Guard both keys — the LLM may omit `text`; skip such entries rather than
+    # KeyError-crashing the whole PM tick (which loops over every active program).
+    replies = {r["thread_id"]: str(r.get("text") or "")
+               for r in staged.output.thread_replies
+               if r.get("thread_id") and r.get("text")}
     if replies:
         for s in substrate.iter_sprints():
             if s.program != program_id:
