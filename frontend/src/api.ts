@@ -26,6 +26,8 @@ export interface ChatThread {
   turns_done: number; busy: boolean; messages: ChatMessage[]; live: string;
 }
 export interface SprintComment { id: string; text: string; added_at: number; target: "worker" | "pm"; by?: string }
+export interface FeedbackMessage { role: "human" | "pm" | "worker"; text: string; by?: string; at: number }
+export interface FeedbackThreadT { id: string; target: "pm" | "worker"; status: "open" | "complete"; agent_unseen: boolean; created_at: number; messages: FeedbackMessage[] }
 export interface SprintActivity { label: string; active: boolean; at: number }
 export interface VoteTally { up: number; down: number; mine: number }
 export interface SprintRow {
@@ -49,7 +51,7 @@ export interface Sprint {
   id: string; status: string; title: string; summary: string;
   goals: string; priority: number; preemptible: boolean;
   resources_required: Record<string, number>; rationale: string; plan: string[];
-  program: string | null; results: string[]; comments: SprintComment[];
+  program: string | null; results: string[]; threads: FeedbackThreadT[];
   agent_running: boolean; started_at: number | null; error: string; lease: unknown | null;
   model: string; activity: SprintActivity | null; votes: VoteTally;
   decisions?: { by: string; action: string; at: number }[];
@@ -163,11 +165,15 @@ export const api = {
   getSprintFiles: (id: string) => fetch(`/api/sprints/${id}/files`).then(j<SprintFile[]>),
   getSprintFile: (id: string, name: string) =>
     fetch(`/api/sprints/${id}/files/${encodeURIComponent(name)}`).then(j<SprintFile>),
-  addSprintComment: (id: string, text: string, target: "worker" | "pm") =>
+  addSprintComment: (id: string, text: string, target: "worker" | "pm", threadId?: string) =>
     fetch(`/api/sprints/${id}/comments`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, target }),
-    }).then(j<SprintComment>),
+      body: JSON.stringify({ text, target, thread_id: threadId ?? "" }),
+    }).then(j<FeedbackThreadT>),
+  completeSprintThread: (id: string, tid: string) =>
+    fetch(`/api/sprints/${id}/threads/${tid}/complete`, { method: "POST" }).then(j<FeedbackThreadT>),
+  seenSprintThread: (id: string, tid: string) =>
+    fetch(`/api/sprints/${id}/threads/${tid}/seen`, { method: "POST" }).then(j<FeedbackThreadT>),
   submitSprint: (body: { id: string; goals: string; plan: string[]; program?: string;
                          priority?: number; resources_required?: Record<string, number> }) =>
     fetch("/api/sprints", {

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
+import { FeedbackThread } from "../components/FeedbackThread";
 import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
 import { BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, voterId } from "../components/ui";
@@ -235,6 +236,20 @@ export default function SprintDetail() {
     try { await api.addSprintComment(id, comment.trim(), commentTarget); setComment(""); notifications.show({ color: "teal", title: "Comment added", message: msg }); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't comment", message: String(e) }); }
   };
+  const replyThread = async (target: "worker" | "pm", tid: string, text: string) => {
+    try { await api.addSprintComment(id, text, target, tid); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't reply", message: String(e) }); }
+  };
+  const completeThread = async (tid: string) => {
+    try { await api.completeSprintThread(id, tid); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't complete", message: String(e) }); }
+  };
+  const seenThread = async (tid: string) => {
+    try { await api.seenSprintThread(id, tid); refresh(); }
+    catch { /* best-effort — not worth surfacing */ }
+  };
+  const pmThreads = s.threads.filter((t) => t.target === "pm");
+  const workerThreads = s.threads.filter((t) => t.target === "worker");
 
   return (
     <Stack gap="lg">
@@ -337,25 +352,31 @@ export default function SprintDetail() {
       )}
 
       <Card padding="lg" radius="md" style={cardStyle}>
-        <div className="eyebrow" style={{ marginBottom: 10 }}>your feedback{s.comments.length ? ` · ${s.comments.length}` : ""}</div>
-        <Stack gap={10}>
-          {s.comments.map((c) => {
-            const toPm = c.target === "pm";
-            return (
-              <div key={c.id} style={{ background: isMine(c.by) ? "var(--paper)" : OTHER_SHADE, borderRadius: 8, padding: "8px 12px" }}>
-                <div className="md-tight"><Md>{c.text}</Md></div>
-                <Group gap={8} mt={3} wrap="nowrap">
-                  <span className="mono" style={{ fontSize: 10.5, padding: "0px 6px", borderRadius: 999,
-                    color: toPm ? "var(--signal)" : "var(--machine)",
-                    background: toPm ? "var(--signal-weak)" : "var(--machine-weak)" }}>
-                    {toPm ? "→ planner" : "→ agent"}
-                  </span>
-                  <UserChip username={c.by} />
-                  <Text size="xs" c="dimmed"><RelTime at={c.added_at} /></Text>
-                </Group>
-              </div>
-            );
-          })}
+        <div className="eyebrow" style={{ marginBottom: 10 }}>your feedback{s.threads.length ? ` · ${s.threads.length}` : ""}</div>
+        <Stack gap={16}>
+          {pmThreads.length > 0 && (
+            <Stack gap={8}>
+              <Text size="xs" fw={600} c="dimmed">to the planner</Text>
+              {pmThreads.map((t) => (
+                <FeedbackThread key={t.id} thread={t}
+                  onReply={(text) => replyThread("pm", t.id, text)}
+                  onComplete={() => completeThread(t.id)}
+                  onSeen={() => seenThread(t.id)} />
+              ))}
+            </Stack>
+          )}
+          {workerThreads.length > 0 && (
+            <Stack gap={8}>
+              <Text size="xs" fw={600} c="dimmed">to the agent</Text>
+              {workerThreads.map((t) => (
+                <FeedbackThread key={t.id} thread={t}
+                  onReply={(text) => replyThread("worker", t.id, text)}
+                  onComplete={() => completeThread(t.id)}
+                  onSeen={() => seenThread(t.id)}
+                  respondsNow={s.status === "executing"} />
+              ))}
+            </Stack>
+          )}
           <SegmentedControl size="xs" value={commentTarget} onChange={(v) => setCommentTarget(v as "worker" | "pm")}
             data={[{ label: "To the agent", value: "worker" }, { label: "To the planner (AI)", value: "pm" }]} />
           <Text size="xs" c="dimmed">
