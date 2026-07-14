@@ -21,7 +21,10 @@ export default function ProgramsOverview() {
     const pid = progOf(s);
     (counts[pid] ??= {})[s.status] = (counts[pid]?.[s.status] ?? 0) + 1;
   }
-  const progs = programs.data ?? [];
+  // Active programs first; paused/closed sink to the bottom so they don't distract
+  // from running work. Stable sort keeps each group's existing order.
+  const rank = (s: string) => (s === "active" ? 0 : s === "paused" ? 1 : 2);
+  const progs = [...(programs.data ?? [])].sort((a, b) => rank(a.status) - rank(b.status));
 
   return (
     <>
