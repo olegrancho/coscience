@@ -5,8 +5,9 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { api, type Idea } from "../api";
-import { BackLink, EmptyState, RelTime } from "../components/ui";
-import { UserChip, useIsMine, OTHER_SHADE } from "../auth";
+import { BackLink, EmptyState } from "../components/ui";
+import { FeedbackThread } from "../components/FeedbackThread";
+import { UserChip } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
@@ -24,7 +25,6 @@ function SourceChip({ source }: { source: Idea["source"] }) {
 function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea; onChange: () => void }) {
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState("");
-  const isMine = useIsMine();
 
   const act = async (fn: () => Promise<unknown>, fail: string) => {
     try { await fn(); onChange(); }
@@ -39,6 +39,14 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
     act(async () => { await api.addIdeaComment(programId, idea.id, comment.trim()); setComment(""); },
       "Couldn't comment");
   };
+  // Idea threads always target the PM — it reads and answers every cycle, so
+  // (unlike a worker thread) it always "responds now".
+  const replyThread = (tid: string, text: string) =>
+    act(() => api.addIdeaComment(programId, idea.id, text, tid), "Couldn't reply");
+  const completeThread = (tid: string) =>
+    act(() => api.completeIdeaThread(programId, idea.id, tid), "Couldn't complete");
+  const seenThread = (tid: string) =>
+    act(() => api.seenIdeaThread(programId, idea.id, tid), "Couldn't mark seen");
 
   // protected-but-not-pinned (e.g. a human comment) — show why it can't be auto-pruned
   const autoProtected = idea.protected && !idea.pinned && !idea.demoted;
@@ -56,8 +64,8 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
           <Group gap={8} mt={5} wrap="nowrap">
             <SourceChip source={idea.source} />
             {idea.by && <UserChip username={idea.by} />}
-            {idea.comments.length > 0 && (
-              <Text size="xs" c="dimmed">{idea.comments.length} comment{idea.comments.length === 1 ? "" : "s"}</Text>
+            {idea.threads.length > 0 && (
+              <Text size="xs" c="dimmed">{idea.threads.length} thread{idea.threads.length === 1 ? "" : "s"}</Text>
             )}
             {idea.demoted && (
               <Text size="xs" fw={600} style={{ color: "var(--signal)" }}
@@ -81,16 +89,14 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
 
       {open && (
         <div style={{ padding: "0 12px 12px 33px", borderTop: "1px solid var(--hairline)" }}>
-          {idea.comments.length > 0 && (
-            <Stack gap={6} mt={10}>
-              {idea.comments.map((c) => (
-                <div key={c.id} style={{ background: isMine(c.by) ? "var(--paper)" : OTHER_SHADE, borderRadius: 8, padding: "7px 11px" }}>
-                  <div className="md-tight"><Md>{c.text}</Md></div>
-                  <Group gap={8} mt={2} wrap="nowrap">
-                    <UserChip username={c.by} />
-                    <Text size="xs" c="dimmed"><RelTime at={c.added_at} /></Text>
-                  </Group>
-                </div>
+          {idea.threads.length > 0 && (
+            <Stack gap={8} mt={10}>
+              {idea.threads.map((t) => (
+                <FeedbackThread key={t.id} thread={t}
+                  onReply={(text) => replyThread(t.id, text)}
+                  onComplete={() => completeThread(t.id)}
+                  onSeen={() => seenThread(t.id)}
+                  respondsNow />
               ))}
             </Stack>
           )}

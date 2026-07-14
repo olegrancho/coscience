@@ -33,6 +33,11 @@ def render_prompt(context: PMContext) -> str:
                 f"{'EDITABLE' if f['editable'] else 'locked — propose a follow-up instead'}, "
                 f"thread {f['thread_id']}]: {history}")
     feedback_block = _lines(context.sprint_feedback, _feedback_line)
+
+    def _idea_feedback_line(f):
+        history = " | ".join(f"{m['role']}: {m['text']}" for m in f["messages"])
+        return f"- idea [{f['idea_id']}], thread {f['thread_id']}: {history}"
+    idea_feedback_block = _lines(context.idea_feedback, _idea_feedback_line)
     prior_block = ", ".join(context.prior_proposals) or "(none)"
     guidance_block = ""
     if context.human_guidance:
@@ -49,8 +54,6 @@ def render_prompt(context: PMContext) -> str:
             flags.append("DEMOTED — do NOT promote to a sprint")
         if i.get("protected"):
             flags.append("PROTECTED")
-        if i.get("comments"):
-            flags.append("comments: " + " | ".join(i["comments"]))
         tag = f" ({'; '.join(flags)})" if flags else ""
         return f"- [{i['id']}] {i['text']}{tag}"
     ideas_block = _lines(context.ideas, _idea_line)
@@ -92,6 +95,13 @@ sprint, change compute, propose, curate) AND add a short thread_replies entry sa
 what you did. If you can't, say why.
 {feedback_block}
 
+HUMAN FEEDBACK ADDRESSED TO YOU about specific pool ideas below — same thread_replies
+mechanism as sprint feedback: react to it (develop the idea, promote it, revise the idea
+pool, or curate accordingly) AND add a thread_replies entry with that idea's thread id
+saying what you did, or why not.
+IDEA FEEDBACK:
+{idea_feedback_block}
+
 PRIOR PROPOSALS you already made (do NOT repeat their intent): {prior_block}
 
 IDEA POOL (id in brackets; you may delete only your own non-PROTECTED ideas):
@@ -119,7 +129,8 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
   "release_ids": ["<id of an APPROVED sprint to release into production now — it becomes
                  'queued' and the scheduler runs it as compute frees. Release the ones whose
                  time has come; hold the rest. Only approved sprints. Omit/empty if none.>"],
-  "thread_replies": [{{"thread_id": "<id of an open feedback thread shown above>",
+  "thread_replies": [{{"thread_id": "<id of an open feedback thread shown above,
+                       whether on a sprint or a pool idea>",
                        "text": "<short reply: what you did in response, or why you can't>"}}],
   "proposals": [
     {{"suffix": "<short-slug>",

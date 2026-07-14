@@ -104,7 +104,7 @@ class Idea:
     source: str = "human"               # "pm" | "human"
     by: str = ""                        # username who added it (human-added); "" if unknown/PM
     pinned: bool = False                # pin == protect
-    comments: list[dict] = field(default_factory=list)  # [{id, text, added_at}]
+    threads: list[dict] = field(default_factory=list)  # feedback threads (see coscience.threads); always target "pm"
     created_at: float = 0.0
     demoted: bool = False               # demoted from a sprint; PM may not re-promote it
 
@@ -113,7 +113,7 @@ class Idea:
         """Whether the PM is forbidden from deleting this idea. Human-proposed,
         pinned, commented-on, or demoted ideas are protected — a demoted idea is a
         human 'do not pursue as a sprint' decision the PM must not undo by deleting."""
-        return self.source == "human" or self.pinned or bool(self.comments) or self.demoted
+        return self.source == "human" or self.pinned or bool(self.threads) or self.demoted
 
 
 @dataclass

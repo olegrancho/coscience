@@ -108,6 +108,11 @@ class IdeaDemoteIn(BaseModel):
     demoted: bool = True
 
 
+class IdeaCommentIn(BaseModel):
+    text: str = Field(min_length=1)
+    thread_id: str = ""            # append to an existing thread instead of starting one
+
+
 class SprintCommentIn(BaseModel):
     text: str = Field(min_length=1)
     target: str = "worker"          # 'worker' (steers the agent) or 'pm' (steers the planner)
@@ -503,15 +508,32 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=404, detail=f"not found: {program_id}/{idea_id}")
 
     @api.post("/programs/{program_id}/ideas/{idea_id}/comments", status_code=201)
-    def comment_idea(program_id: str, idea_id: str, body: GuidanceIn,
+    def comment_idea(program_id: str, idea_id: str, body: IdeaCommentIn,
                      user: "auth.User | None" = Depends(current_user)) -> dict:
         try:
             return service.add_idea_comment(program_id, idea_id, body.text,
-                                            by=(user.username if user else ""))
+                                            by=(user.username if user else ""),
+                                            thread_id=body.thread_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"not found: {program_id}/{idea_id}")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.post("/programs/{program_id}/ideas/{idea_id}/threads/{tid}/complete")
+    def complete_idea_thread(program_id: str, idea_id: str, tid: str,
+                             user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.complete_idea_thread(program_id, idea_id, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+
+    @api.post("/programs/{program_id}/ideas/{idea_id}/threads/{tid}/seen")
+    def seen_idea_thread(program_id: str, idea_id: str, tid: str,
+                         user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.seen_idea_thread(program_id, idea_id, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
 
     app.include_router(pub)
     app.include_router(api)

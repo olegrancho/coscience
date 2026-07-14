@@ -34,7 +34,10 @@ def test_pin_and_comment(client):
     assert r.status_code == 200 and r.json()["pinned"] is True
     r = client.post(f"/api/programs/p1/ideas/{iid}/comments", json={"text": "keep it"})
     assert r.status_code == 201
-    assert r.json()["comments"][0]["text"] == "keep it"
+    assert r.json()["messages"][0]["text"] == "keep it"
+    pool = client.get("/api/programs/p1/ideas").json()["ideas"]
+    idea = next(i for i in pool if i["id"] == iid)
+    assert idea["threads"][0]["messages"][0]["text"] == "keep it"
 
 
 def test_empty_idea_is_422(client):

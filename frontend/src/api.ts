@@ -8,10 +8,9 @@ export interface Program extends ProgramRow {
   activations: PMActivation[]; last_run: number | null;
 }
 export interface GuidanceNote { id: string; text: string; added_at: number }
-export interface IdeaComment { id: string; text: string; added_at: number; by?: string }
 export interface Idea {
   id: string; text: string; source: "pm" | "human"; by?: string;
-  pinned: boolean; protected: boolean; comments: IdeaComment[]; created_at: number;
+  pinned: boolean; protected: boolean; threads: FeedbackThreadT[]; created_at: number;
   demoted: boolean;
 }
 export interface IdeaPool { summary: string; ideas: Idea[] }
@@ -154,11 +153,15 @@ export const api = {
     }).then(j<Idea>),
   demoteSprint: (id: string) =>
     fetch(`/api/sprints/${id}/demote`, { method: "POST" }).then(j<{ sprint_id: string; idea: Idea }>),
-  addIdeaComment: (id: string, ideaId: string, text: string) =>
+  addIdeaComment: (id: string, ideaId: string, text: string, threadId?: string) =>
     fetch(`/api/programs/${id}/ideas/${ideaId}/comments`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    }).then(j<Idea>),
+      body: JSON.stringify({ text, thread_id: threadId ?? "" }),
+    }).then(j<FeedbackThreadT>),
+  completeIdeaThread: (id: string, ideaId: string, tid: string) =>
+    fetch(`/api/programs/${id}/ideas/${ideaId}/threads/${tid}/complete`, { method: "POST" }).then(j<FeedbackThreadT>),
+  seenIdeaThread: (id: string, ideaId: string, tid: string) =>
+    fetch(`/api/programs/${id}/ideas/${ideaId}/threads/${tid}/seen`, { method: "POST" }).then(j<FeedbackThreadT>),
   listSprints: () => fetch("/api/sprints").then(j<SprintRow[]>),
   getSprint: (id: string, viewer?: string) =>
     fetch(`/api/sprints/${id}${viewer ? `?viewer=${encodeURIComponent(viewer)}` : ""}`).then(j<Sprint>),

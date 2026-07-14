@@ -35,7 +35,8 @@ class PMContext:
     sprint_feedback: list[dict] = field(default_factory=list)  # human notes addressed to the PM
     prior_proposals: list[str] = field(default_factory=list)
     human_guidance: list[str] = field(default_factory=list)
-    ideas: list[dict] = field(default_factory=list)   # current idea pool (id/text/source/protected/comments)
+    ideas: list[dict] = field(default_factory=list)   # current idea pool (id/text/source/protected/demoted)
+    idea_feedback: list[dict] = field(default_factory=list)  # open human-last threads on pool ideas (always target "pm")
     proposed_count: int = 0                            # sprints already in 'proposed'
     max_proposed: int = 4                              # cap the PM may not exceed
     model: str = ""                                    # Claude model for this PM cycle; "" = default

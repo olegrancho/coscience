@@ -620,7 +620,8 @@ class Service:
     @staticmethod
     def _idea_public(i: Idea) -> dict:
         return {"id": i.id, "text": i.text, "source": i.source, "by": i.by,
-                "pinned": i.pinned, "protected": i.protected, "comments": list(i.comments),
+                "pinned": i.pinned, "protected": i.protected,
+                "threads": [threads.public(t) for t in i.threads],
                 "created_at": i.created_at, "demoted": i.demoted}
 
     def demote_sprint(self, sprint_id: str, by: str = "") -> dict:
@@ -699,20 +700,52 @@ class Service:
         self.substrate.commit(f"program {program_id}: idea {idea_id} {'pinned' if pinned else 'unpinned'}")
         return self._idea_public(target)
 
-    def add_idea_comment(self, program_id: str, idea_id: str, text: str, by: str = "") -> dict:
-        self._require_program(program_id)
+    def add_idea_comment(self, program_id: str, idea_id: str, text: str, by: str = "",
+                         thread_id: str = "") -> dict:
+        """Start or continue a feedback thread on an idea. Idea threads always
+        target the PM — there's no worker running against a pool idea. With
+        `thread_id`, appends a human message to that thread instead of starting
+        a new one (reopening it if it was marked complete)."""
         text = text.strip()
         if not text:
             raise ValueError("comment text is required")
+        self._require_program(program_id)
         summary, ideas = self.substrate.load_ideas(program_id)
         target = next((i for i in ideas if i.id == idea_id), None)
         if target is None:
             raise NotFoundError(idea_id)
-        target.comments.append({"id": uuid4().hex[:8], "text": text,
-                                "added_at": time.time(), "by": str(by or "")})
+        if thread_id:
+            t = next((x for x in target.threads if x["id"] == thread_id), None)
+            if t is None:
+                raise NotFoundError(thread_id)
+            threads.append(t, "human", text, by, now=time.time())
+        else:
+            t = threads.new_thread("pm", text, by, now=time.time())
+            target.threads.append(t)
         self.substrate.save_ideas(program_id, summary, ideas)
         self.substrate.commit(f"program {program_id}: comment on idea {idea_id}")
-        return self._idea_public(target)
+        return threads.public(t)
+
+    def complete_idea_thread(self, program_id: str, idea_id: str, thread_id: str) -> dict:
+        return self._mutate_idea_thread(program_id, idea_id, thread_id,
+                                        lambda t: t.update(status="complete"))
+
+    def seen_idea_thread(self, program_id: str, idea_id: str, thread_id: str) -> dict:
+        return self._mutate_idea_thread(program_id, idea_id, thread_id,
+                                        lambda t: t.update(agent_unseen=False))
+
+    def _mutate_idea_thread(self, program_id: str, idea_id: str, thread_id: str, fn) -> dict:
+        summary, ideas = self.substrate.load_ideas(program_id)
+        target = next((i for i in ideas if i.id == idea_id), None)
+        if target is None:
+            raise NotFoundError(idea_id)
+        t = next((x for x in target.threads if x["id"] == thread_id), None)
+        if t is None:
+            raise NotFoundError(thread_id)
+        fn(t)
+        self.substrate.save_ideas(program_id, summary, ideas)
+        self.substrate.commit(f"program {program_id}: idea {idea_id} thread {thread_id}")
+        return threads.public(t)
 
     # --- results ---
     def list_results(self) -> list[dict]:

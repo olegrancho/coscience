@@ -340,16 +340,20 @@ class Substrate:
         if not path.is_file():
             return "", []
         fm, _ = parse(path.read_text())
+        from coscience import threads as _th
         ideas = []
         for n in fm.get("ideas", []):
+            if "threads" in n:
+                idea_threads = list(n.get("threads") or [])
+            else:  # back-compat: adapt legacy comments (idea threads always target the PM)
+                idea_threads = [_th.adapt_legacy(c, "pm", now=float(c.get("added_at", time.time())))
+                                for c in n.get("comments", [])]
             ideas.append(Idea(
                 id=str(n["id"]), text=str(n["text"]),
                 source=str(n.get("source", "human")),
                 by=str(n.get("by", "")),
                 pinned=bool(n.get("pinned", False)),
-                comments=[{"id": str(c["id"]), "text": str(c["text"]),
-                           "added_at": float(c["added_at"]),
-                           "by": str(c.get("by", ""))} for c in n.get("comments", [])],
+                threads=idea_threads,
                 created_at=float(n.get("created_at", 0.0)),
                 demoted=bool(n.get("demoted", False)),
             ))
@@ -364,7 +368,7 @@ class Substrate:
             "ideas": [
                 {"id": i.id, "text": i.text, "source": i.source, "pinned": i.pinned,
                  "by": i.by,
-                 "comments": list(i.comments), "created_at": i.created_at,
+                 "threads": list(i.threads), "created_at": i.created_at,
                  **({"demoted": True} if i.demoted else {})}
                 for i in ideas
             ],

@@ -92,16 +92,18 @@ def test_beat_reasons_again_after_a_result_lands(substrate):
 
 
 def test_beat_reasons_again_after_idea_comment(substrate):
-    # Regression: a human comment on an idea must re-trigger the PM. gather_context
-    # flattens idea comments to plain strings, so context_fingerprint must index
-    # them as strings — it previously did comment["text"] and raised TypeError,
-    # crashing every beat (the PM froze silently the moment any idea got a comment).
+    # Regression: a human comment (feedback thread) on an idea must re-trigger the
+    # PM. gather_context surfaces open idea threads as idea_feedback dicts, so
+    # context_fingerprint must index them structurally — it previously did
+    # comment["text"] on a flattened string and raised TypeError, crashing every
+    # beat (the PM froze silently the moment any idea got a comment).
+    from coscience import threads
     from coscience.models import Idea
     from coscience.pm_reasoner import FakeReasoner
     _prog(substrate)
     pm_beat(substrate, "p1", FakeReasoner([_out("a")]))    # records fingerprint (no comments)
     substrate.save_ideas("p1", "", [Idea(id="i1", text="try X", source="pm",
-        comments=[{"id": "c1", "text": "promising — pursue it", "added_at": 1.0}])])
+        threads=[threads.new_thread("pm", "promising — pursue it", "", now=1.0)])])
     summary = pm_beat(substrate, "p1", FakeReasoner([_out("b")]))
     assert summary["skipped"] is False
     assert summary["submitted"] == ["p1-c1-b"]
