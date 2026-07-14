@@ -4,7 +4,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type CurrentUser } from "./api";
 
 export function useMe() {
-  return useQuery({ queryKey: ["me"], queryFn: api.me });
+  // /api/me is a soft 200 endpoint; no retry/poll — auth state changes only on
+  // login/logout, which invalidate this query explicitly.
+  return useQuery({ queryKey: ["me"], queryFn: api.me, retry: false, refetchInterval: false });
 }
 
 /** Initials avatar + name for an attributed action. Resolves display from the
@@ -54,7 +56,7 @@ function Login() {
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const me = useMe();
   if (me.isLoading) return null;
-  if (me.isError) return <Login />;            // 401 when registry seeded + not logged in
+  // /api/me always 200: seeded + logged-out => {required:true, user:null} => Login.
   if (me.data?.required && !me.data.user) return <Login />;
   return <>{children}</>;
 }

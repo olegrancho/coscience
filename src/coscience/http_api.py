@@ -122,15 +122,20 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
 
     COOKIE = "coscience_user"
 
-    def current_user(request: Request) -> "auth.User | None":
+    def _resolve_user(request: Request) -> "tuple[auth.User | None, bool]":
+        """(user, required) without raising. required=False means auth is disabled
+        (empty registry). user is None when disabled OR when no valid cookie."""
         users = auth.load_users(service.repo_root)
         if not users:
-            return None                                   # auth disabled (empty registry)
+            return None, False                            # auth disabled (empty registry)
         uname = auth.verify_cookie(request.cookies.get(COOKIE, ""), service.repo_root)
-        u = users.get(uname)
-        if u is None:
+        return users.get(uname), True
+
+    def current_user(request: Request) -> "auth.User | None":
+        user, required = _resolve_user(request)
+        if required and user is None:
             raise HTTPException(status_code=401, detail="not authenticated")
-        return u
+        return user                                       # None only when auth disabled
 
     pub = APIRouter(prefix="/api")                          # open endpoints
     api = APIRouter(prefix="/api", dependencies=[Depends(current_user)])  # gated
@@ -149,10 +154,13 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
                 for u in auth.load_users(service.repo_root).values()]
 
     @pub.get("/me")
-    def me(user: "auth.User | None" = Depends(current_user)) -> dict:
+    def me(request: Request) -> dict:
+        # Soft endpoint — ALWAYS 200 (never 401), so the frontend gate reads a clean
+        # {user, required} without treating logged-out as a retryable error.
+        user, required = _resolve_user(request)
         return {"user": None if user is None else
                 {"username": user.username, "name": user.name, "initials": user.initials},
-                "required": bool(auth.load_users(service.repo_root))}
+                "required": required}
 
     @pub.post("/login")
     def login(body: LoginIn, response: Response) -> dict:

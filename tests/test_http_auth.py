@@ -19,7 +19,9 @@ def test_gate_blocks_when_seeded(tmp_path):
     c = TestClient(build_app(_svc(tmp_path)))
     assert c.get("/api/health").status_code == 200          # open
     assert c.get("/api/sprints").status_code == 401         # gated
-    assert c.get("/api/me").status_code == 401
+    # /api/me is a soft endpoint: 200 with required=true, user=null when logged out
+    me = c.get("/api/me")
+    assert me.status_code == 200 and me.json() == {"user": None, "required": True}
 
 
 def test_login_me_logout(tmp_path):
