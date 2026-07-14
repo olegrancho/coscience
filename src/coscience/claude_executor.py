@@ -24,6 +24,7 @@ def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
     program = ""
     prior = "None yet."
     comments = ""
+    assess_section = ""
     if context is not None:
         program = f"{context.program_title}: {context.program_goal}".strip(": ").strip()
         if context.prior_results:
@@ -41,6 +42,15 @@ def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
                 "\n\nTo answer a reviewer's feedback thread, append one JSON line "
                 '{"thread_id": "<id>", "text": "<short reply>"} to '
                 f"{feedback_out} (one line per reply; do not rewrite earlier lines).")
+        if context.assess_reason:
+            assess_section = f"""
+## Resuming to check a detached job ({context.assess_reason})
+A previous run launched a detached job ("{context.job_note}"); its output is at
+{context.job_out}. Read it and decide: if the goal is met, produce the final result;
+if the job needs more time and is still healthy, re-declare job.json with a new wake
+time; if it failed, either relaunch it or report the failure. If you abandon a
+still-running job, kill it first.
+"""
     return f"""# Sprint: {sprint.title or sprint.id}
 
 You are an autonomous research agent. Carry out this sprint end to end, unattended.
@@ -91,12 +101,26 @@ Objective:
    its output and there is no mechanism to wake you back up to check on it. Run each
    command and WAIT for it to finish before moving on. If a job is too large to finish
    before you approach the usage window, checkpoint to the scratchpad and STOP (rule 2)
-   — you resume on the next run; never background it to get around the limit.
+   — you resume on the next run; never background it to get around the limit; unless
+   you use the DETACHED-JOB PROTOCOL below.
 5. When the sprint is genuinely COMPLETE — all the real work finished, not merely
    started — print your findings as your final message: the answer, how you reached
    it, the key evidence/witnesses, and any caveats. That final message is recorded as
    the sprint result, so it must describe finished work, never "I kicked off X".
-"""
+
+## Long jobs: the detached-job protocol
+If a job is too long to finish in this session, you MAY hand it to the platform instead of
+running it foreground:
+1. Launch it detached, capturing its pid and streaming output to a file in THIS sprint folder:
+   `nohup <cmd> > <out_file> 2>&1 & echo $!`
+2. Write `<sprint_dir>/job.json`:
+   {{"pid": <the pid>, "cmd": "<cmd>", "out_file": "<out_file>",
+    "expected_seconds": <your estimate>, "wake_after_seconds": <when to bring you back>,
+    "max_seconds": <hard cap>, "note": "<short description>"}}
+3. End your turn. The platform keeps the sprint running, waits for the job (or until
+   wake_after_seconds), then launches you again to check its output. You MUST fill
+   expected_seconds, wake_after_seconds, and max_seconds honestly.
+{assess_section}"""
 
 
 class ClaudeAgent:

@@ -116,6 +116,7 @@ class Worker:
             humans = [m["text"] for m in t.get("messages", []) if m["role"] == "human"]
             if humans:
                 feedback_threads.append({"thread_id": t["id"], "text": humans[-1]})
+        progress = self.substrate.load_progress(sprint.id)
         return ExecutionContext(
             program_title=program_title, program_goal=program_goal,
             sprint_title=sprint.title, sprint_summary=sprint.summary,
@@ -128,6 +129,11 @@ class Worker:
             # one (and it exists), else the control repo. Sprint metadata/scratchpad
             # still live in the control repo (absolute paths); only the cwd changes.
             repo_root=self._agent_cwd(workdir),
+            # Set only when this launch is resuming to check a detached job (see
+            # run_sprint_beat step A); "" on a normal launch.
+            assess_reason=progress.assess_reason,
+            job_out=progress.job_out,
+            job_note=progress.job_note,
         )
 
     def _agent_cwd(self, workdir: str):
