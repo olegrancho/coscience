@@ -316,9 +316,9 @@ def test_add_sprint_comment_any_status(tmp_path):
     s = svc.substrate.load_sprint("sp1")
     s.status = SprintStatus.DONE                       # commenting allowed even when done
     svc.substrate.save_sprint(s)
-    c = svc.add_sprint_comment("sp1", "please double-check the boundary case")
-    assert c["text"] == "please double-check the boundary case" and c["id"]
-    assert svc.get_sprint("sp1")["comments"] == [c]
+    t = svc.add_sprint_comment("sp1", "please double-check the boundary case")
+    assert t["messages"][0]["text"] == "please double-check the boundary case" and t["id"]
+    assert svc.get_sprint("sp1")["threads"] == [t]
 
 
 def test_sprint_comment_target_routing(tmp_path):

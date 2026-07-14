@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
+from coscience import threads
 from coscience.ledger import Ledger
 from coscience.models import Sprint, SprintStatus, Program, ProgramStatus, Idea, ChatThread
 from coscience.resources import ResourcePool, load_pool
@@ -231,7 +232,7 @@ class Service:
             "model": sprint.model,
             "results": list(sprint.results),
             "plan": list(sprint.plan),
-            "comments": list(sprint.comments),
+            "threads": [threads.public(t) for t in sprint.threads],
             "decisions": list(sprint.decisions),
             "votes": self._vote_tally(sprint, viewer),
             "agent_running": bool(progress.agent_token),
@@ -253,23 +254,46 @@ class Service:
                 "runs": usage_meter.run_stats(self.repo_root)}
 
     def add_sprint_comment(self, sprint_id: str, text: str, target: str = "worker",
-                           by: str = "") -> dict:
-        """Append a human comment to a sprint. Allowed in any status — it's
-        feedback, not an edit. `target` routes it: 'worker' (the running agent
-        reads it as direction) or 'pm' (the planner reads it and may revise the
-        sprint or propose a follow-up)."""
+                           by: str = "", thread_id: str = "") -> dict:
+        """Start or continue a feedback thread on a sprint. Allowed in any
+        status — it's feedback, not an edit. `target` routes a new thread:
+        'worker' (the running agent reads it as direction) or 'pm' (the
+        planner reads it and may revise the sprint or propose a follow-up).
+        With `thread_id`, appends a human message to that thread instead
+        (reopening it if it was marked complete)."""
         text = text.strip()
         if not text:
             raise ValueError("comment text is required")
         if target not in ("worker", "pm"):
             raise ValueError("target must be 'worker' or 'pm'")
         sprint = self._load_sprint(sprint_id)
-        comment = {"id": uuid4().hex[:8], "text": text, "added_at": time.time(),
-                   "target": target, "by": str(by or "")}
-        sprint.comments.append(comment)
+        if thread_id:
+            t = next((x for x in sprint.threads if x["id"] == thread_id), None)
+            if t is None:
+                raise NotFoundError(thread_id)
+            threads.append(t, "human", text, by, now=time.time())
+        else:
+            t = threads.new_thread(target, text, by, now=time.time())
+            sprint.threads.append(t)
         self.substrate.save_sprint(sprint)
-        self.substrate.commit(f"sprint {sprint_id}: comment added ({target})")
-        return comment
+        self.substrate.commit(f"sprint {sprint_id}: feedback ({target})")
+        return threads.public(t)
+
+    def complete_sprint_thread(self, sprint_id: str, thread_id: str) -> dict:
+        return self._mutate_sprint_thread(sprint_id, thread_id, lambda t: t.update(status="complete"))
+
+    def seen_sprint_thread(self, sprint_id: str, thread_id: str) -> dict:
+        return self._mutate_sprint_thread(sprint_id, thread_id, lambda t: t.update(agent_unseen=False))
+
+    def _mutate_sprint_thread(self, sprint_id: str, thread_id: str, fn) -> dict:
+        sprint = self._load_sprint(sprint_id)
+        t = next((x for x in sprint.threads if x["id"] == thread_id), None)
+        if t is None:
+            raise NotFoundError(thread_id)
+        fn(t)
+        self.substrate.save_sprint(sprint)
+        self.substrate.commit(f"sprint {sprint_id}: thread {thread_id}")
+        return threads.public(t)
 
     # Files surfaced in the UI as the agent's "working documents", with a
     # friendly label + kind and the order they should display in.

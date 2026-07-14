@@ -104,8 +104,8 @@ class Worker:
             sprint_title=sprint.title, sprint_summary=sprint.summary,
             sprint_goals=sprint.goals, plan=list(sprint.plan),
             prior_results=prior,
-            human_comments=[c["text"] for c in sprint.comments
-                            if c.get("target", "worker") == "worker"],
+            human_comments=[m["text"] for t in sprint.threads if t.get("target") == "worker"
+                            for m in t["messages"] if m["role"] == "human"],
             # The agent's working directory: the program's project folder if it set
             # one (and it exists), else the control repo. Sprint metadata/scratchpad
             # still live in the control repo (absolute paths); only the cwd changes.

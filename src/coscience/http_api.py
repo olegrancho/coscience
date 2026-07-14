@@ -111,6 +111,7 @@ class IdeaDemoteIn(BaseModel):
 class SprintCommentIn(BaseModel):
     text: str = Field(min_length=1)
     target: str = "worker"          # 'worker' (steers the agent) or 'pm' (steers the planner)
+    thread_id: str = ""            # append to an existing thread instead of starting one
 
 
 class LoginIn(BaseModel):
@@ -224,11 +225,28 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
                        user: "auth.User | None" = Depends(current_user)) -> dict:
         try:
             return service.add_sprint_comment(sprint_id, body.text, target=body.target,
-                                              by=(user.username if user else ""))
+                                              by=(user.username if user else ""),
+                                              thread_id=body.thread_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.post("/sprints/{sprint_id}/threads/{tid}/complete")
+    def complete_sprint_thread(sprint_id: str, tid: str,
+                               user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.complete_sprint_thread(sprint_id, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+
+    @api.post("/sprints/{sprint_id}/threads/{tid}/seen")
+    def seen_sprint_thread(sprint_id: str, tid: str,
+                           user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.seen_sprint_thread(sprint_id, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
 
     @api.post("/sprints/{sprint_id}/approve")
     def approve_sprint(sprint_id: str,
