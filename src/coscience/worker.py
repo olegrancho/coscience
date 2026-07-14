@@ -334,14 +334,24 @@ class Worker:
         return BeatOutcome.COMPLETED
 
     def stop_sprint(self, sprint: Sprint) -> list[str]:
-        """Stop the sprint's running agent and clear it so a later beat relaunches
-        (the agent resumes from its scratchpad). Returns [sprint.id] if one was
-        stopped, else []."""
+        """Stop the sprint's running agent and/or its tracked detached job, and
+        clear whichever was set so a later beat relaunches (the agent resumes
+        from its scratchpad). Returns [sprint.id] if either was stopped, else []."""
         progress = self.substrate.load_progress(sprint.id)
-        if not progress.agent_token:
+        stopped = False
+        if progress.agent_token:
+            self.agent.stop(progress.agent_token)
+            progress.agent_token = ""
+            stopped = True
+        if progress.job_token:
+            try:
+                self._terminate(progress.job_token)
+            except Exception:
+                pass
+            progress.job_token = ""
+            stopped = True
+        if not stopped:
             return []
-        self.agent.stop(progress.agent_token)
-        progress.agent_token = ""
         self.substrate.save_progress(progress)
         self.substrate.commit(f"sprint {sprint.id}: agent stopped")
         return [sprint.id]
