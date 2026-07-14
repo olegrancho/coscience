@@ -251,20 +251,23 @@ class Substrate:
         (d / "pm.md").write_text(serialize(fm, f"# PM state {state.program_id}\n"))
 
     def load_guidance(self, program_id: str) -> list[dict]:
+        """Standing guidance to the PM, stored as feedback threads (each always
+        target "pm" — there's no worker to steer with guidance)."""
         path = self.program_dir(program_id) / "guidance.md"
         if not path.is_file():
             return []
         fm, _ = parse(path.read_text())
-        out = []
-        for n in fm.get("notes", []):
-            out.append({"id": str(n["id"]), "text": str(n["text"]),
-                        "added_at": float(n["added_at"])})
-        return out
+        from coscience import threads as _th
+        if "threads" in fm:
+            return list(fm.get("threads") or [])
+        # back-compat: adapt legacy {id,text,added_at} notes
+        return [_th.adapt_legacy(n, "pm", now=float(n.get("added_at", time.time())))
+                for n in fm.get("notes", [])]
 
-    def save_guidance(self, program_id: str, notes: list[dict]) -> None:
+    def save_guidance(self, program_id: str, threads_list: list[dict]) -> None:
         d = self.program_dir(program_id)
         d.mkdir(parents=True, exist_ok=True)
-        fm = {"type": "guidance", "notes": notes}
+        fm = {"type": "guidance", "threads": list(threads_list)}
         (d / "guidance.md").write_text(serialize(fm, f"# Guidance {program_id}\n"))
 
     # --- PM chat (a Q&A thread with the planner) ---

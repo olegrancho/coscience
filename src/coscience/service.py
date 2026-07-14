@@ -601,20 +601,52 @@ class Service:
 
     def list_guidance(self, program_id: str) -> list[dict]:
         self._require_program(program_id)
-        return self.substrate.load_guidance(program_id)
+        return [threads.public(t) for t in self.substrate.load_guidance(program_id)]
 
-    def add_guidance(self, program_id: str, text: str) -> dict:
+    def add_guidance(self, program_id: str, text: str, by: str = "", thread_id: str = "") -> dict:
+        """Start or continue a standing-guidance feedback thread for the PM. Guidance
+        threads always target the PM. With `thread_id`, appends a human message to
+        that thread instead of starting a new one (reopening it if it was complete)."""
+        text = text.strip()
+        if not text:
+            raise ValueError("guidance text is required")
         self._require_program(program_id)
-        notes = self.substrate.load_guidance(program_id)
-        note = {"id": uuid4().hex[:8], "text": text, "added_at": time.time()}
-        notes.append(note)
-        self.substrate.save_guidance(program_id, notes)
-        return note
+        guidance_threads = self.substrate.load_guidance(program_id)
+        if thread_id:
+            t = next((x for x in guidance_threads if x["id"] == thread_id), None)
+            if t is None:
+                raise NotFoundError(thread_id)
+            threads.append(t, "human", text, by, now=time.time())
+        else:
+            t = threads.new_thread("pm", text, by, now=time.time())
+            guidance_threads.append(t)
+        self.substrate.save_guidance(program_id, guidance_threads)
+        self.substrate.commit(f"program {program_id}: guidance added")
+        return threads.public(t)
 
-    def remove_guidance(self, program_id: str, note_id: str) -> None:
+    def remove_guidance(self, program_id: str, thread_id: str) -> None:
         self._require_program(program_id)
-        notes = [n for n in self.substrate.load_guidance(program_id) if n["id"] != note_id]
-        self.substrate.save_guidance(program_id, notes)
+        guidance_threads = [t for t in self.substrate.load_guidance(program_id) if t["id"] != thread_id]
+        self.substrate.save_guidance(program_id, guidance_threads)
+
+    def complete_guidance_thread(self, program_id: str, thread_id: str) -> dict:
+        return self._mutate_guidance_thread(program_id, thread_id,
+                                            lambda t: t.update(status="complete"))
+
+    def seen_guidance_thread(self, program_id: str, thread_id: str) -> dict:
+        return self._mutate_guidance_thread(program_id, thread_id,
+                                            lambda t: t.update(agent_unseen=False))
+
+    def _mutate_guidance_thread(self, program_id: str, thread_id: str, fn) -> dict:
+        self._require_program(program_id)
+        guidance_threads = self.substrate.load_guidance(program_id)
+        t = next((x for x in guidance_threads if x["id"] == thread_id), None)
+        if t is None:
+            raise NotFoundError(thread_id)
+        fn(t)
+        self.substrate.save_guidance(program_id, guidance_threads)
+        self.substrate.commit(f"program {program_id}: guidance thread {thread_id}")
+        return threads.public(t)
 
     # --- ideas ---
     @staticmethod

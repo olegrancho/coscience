@@ -7,7 +7,6 @@ export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
   activations: PMActivation[]; last_run: number | null;
 }
-export interface GuidanceNote { id: string; text: string; added_at: number }
 export interface Idea {
   id: string; text: string; source: "pm" | "human"; by?: string;
   pinned: boolean; protected: boolean; threads: FeedbackThreadT[]; created_at: number;
@@ -125,14 +124,16 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workdir }),
     }).then(j<{ id: string; workdir: string; exists: boolean }>),
-  listGuidance: (id: string) => fetch(`/api/programs/${id}/guidance`).then(j<GuidanceNote[]>),
-  addGuidance: (id: string, text: string) =>
+  listGuidance: (id: string) => fetch(`/api/programs/${id}/guidance`).then(j<FeedbackThreadT[]>),
+  addGuidance: (id: string, text: string, threadId?: string) =>
     fetch(`/api/programs/${id}/guidance`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    }).then(j<GuidanceNote>),
-  removeGuidance: (id: string, noteId: string) =>
-    fetch(`/api/programs/${id}/guidance/${noteId}`, { method: "DELETE" }).then(j<void>),
+      body: JSON.stringify({ text, thread_id: threadId ?? "" }),
+    }).then(j<FeedbackThreadT>),
+  completeGuidanceThread: (id: string, tid: string) =>
+    fetch(`/api/programs/${id}/guidance/${tid}/complete`, { method: "POST" }).then(j<FeedbackThreadT>),
+  seenGuidanceThread: (id: string, tid: string) =>
+    fetch(`/api/programs/${id}/guidance/${tid}/seen`, { method: "POST" }).then(j<FeedbackThreadT>),
   listIdeas: (id: string) => fetch(`/api/programs/${id}/ideas`).then(j<IdeaPool>),
   addIdea: (id: string, text: string) =>
     fetch(`/api/programs/${id}/ideas`, {

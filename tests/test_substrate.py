@@ -84,8 +84,23 @@ def test_commit_records_changes_in_git(tmp_path):
 
 def test_guidance_round_trip(tmp_path):
     from coscience.substrate import Substrate
+    from coscience import threads
     sub = Substrate(tmp_path)
     assert sub.load_guidance("p1") == []
-    notes = [{"id": "a1", "text": "focus on assays", "added_at": 1.0}]
-    sub.save_guidance("p1", notes)
-    assert sub.load_guidance("p1") == notes
+    guidance_threads = [threads.new_thread("pm", "focus on assays", "u", now=1.0)]
+    sub.save_guidance("p1", guidance_threads)
+    assert sub.load_guidance("p1") == guidance_threads
+
+
+def test_legacy_guidance_notes_adapt_to_threads(tmp_path):
+    from coscience.substrate import Substrate
+    sub = Substrate(tmp_path)
+    # write a guidance.md with the OLD notes shape, no threads key
+    d = sub.program_dir("p1"); d.mkdir(parents=True, exist_ok=True)
+    (d / "guidance.md").write_text(
+        "---\ntype: guidance\nnotes:\n  - id: a1\n    text: legacy note\n    added_at: 5.0\n"
+        "---\n# Guidance p1\n")
+    got = sub.load_guidance("p1")
+    assert len(got) == 1
+    assert got[0]["target"] == "pm"
+    assert got[0]["messages"][0]["text"] == "legacy note"

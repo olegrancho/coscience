@@ -105,7 +105,8 @@ def test_activation_log_records_trigger_and_submitted(substrate):
     assert acts[0]["triggers"] == ["first cycle"]
     assert acts[0]["submitted"] == ["p1-c0-a"]
     # add guidance -> next activation names guidance as the trigger
-    substrate.save_guidance("p1", [{"id": "g1", "text": "focus on X", "added_at": 1.0}])
+    from coscience import threads as _threads
+    substrate.save_guidance("p1", [_threads.new_thread("pm", "focus on X", "u", now=1.0, tid="g1")])
     pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="r2")]))
     acts = substrate.load_pm_state("p1").activations
     assert len(acts) == 2

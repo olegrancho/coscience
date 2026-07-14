@@ -34,7 +34,8 @@ class PMContext:
     failed: list[dict] = field(default_factory=list)   # sprints that failed, with why
     sprint_feedback: list[dict] = field(default_factory=list)  # human notes addressed to the PM
     prior_proposals: list[str] = field(default_factory=list)
-    human_guidance: list[str] = field(default_factory=list)
+    human_guidance: list[str] = field(default_factory=list)  # standing guidance, latest text per thread
+    guidance_feedback: list[dict] = field(default_factory=list)  # open human-last guidance threads (always target "pm")
     ideas: list[dict] = field(default_factory=list)   # current idea pool (id/text/source/protected/demoted)
     idea_feedback: list[dict] = field(default_factory=list)  # open human-last threads on pool ideas (always target "pm")
     proposed_count: int = 0                            # sprints already in 'proposed'

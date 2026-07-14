@@ -38,6 +38,11 @@ def render_prompt(context: PMContext) -> str:
         history = " | ".join(f"{m['role']}: {m['text']}" for m in f["messages"])
         return f"- idea [{f['idea_id']}], thread {f['thread_id']}: {history}"
     idea_feedback_block = _lines(context.idea_feedback, _idea_feedback_line)
+
+    def _guidance_feedback_line(f):
+        history = " | ".join(f"{m['role']}: {m['text']}" for m in f["messages"])
+        return f"- thread {f['thread_id']}: {history}"
+    guidance_feedback_block = _lines(context.guidance_feedback, _guidance_feedback_line)
     prior_block = ", ".join(context.prior_proposals) or "(none)"
     guidance_block = ""
     if context.human_guidance:
@@ -102,6 +107,13 @@ saying what you did, or why not.
 IDEA FEEDBACK:
 {idea_feedback_block}
 
+GUIDANCE FEEDBACK ADDRESSED TO YOU — new standing-guidance messages open below need your
+action: same thread_replies mechanism as sprint/idea feedback — weigh each into your
+proposals/idea curation (adjust plans, curate ideas, whatever it calls for) AND add a
+thread_replies entry with that guidance thread's id saying what you did, or why not.
+GUIDANCE FEEDBACK:
+{guidance_feedback_block}
+
 PRIOR PROPOSALS you already made (do NOT repeat their intent): {prior_block}
 
 IDEA POOL (id in brackets; you may delete only your own non-PROTECTED ideas):
@@ -130,7 +142,7 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
                  'queued' and the scheduler runs it as compute frees. Release the ones whose
                  time has come; hold the rest. Only approved sprints. Omit/empty if none.>"],
   "thread_replies": [{{"thread_id": "<id of an open feedback thread shown above,
-                       whether on a sprint or a pool idea>",
+                       whether on a sprint, a pool idea, or standing guidance>",
                        "text": "<short reply: what you did in response, or why you can't>"}}],
   "proposals": [
     {{"suffix": "<short-slug>",

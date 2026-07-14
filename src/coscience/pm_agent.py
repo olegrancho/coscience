@@ -26,7 +26,10 @@ def _context_payload(context: PMContext) -> dict:
     input, so proposing does not re-trigger the next cycle."""
     return {
         "goals": context.goals,
-        "guidance": sorted(context.human_guidance),
+        # Keyed on (thread_id, last-human-text) — same shape as idea_comments below —
+        # so a new guidance message re-triggers the PM even if other guidance is unchanged.
+        "guidance": sorted((f["thread_id"], f["messages"][-1]["text"])
+                           for f in context.guidance_feedback),
         "active": sorted((s["id"], s["status"]) for s in context.open_sprints
                          if s["status"] != SprintStatus.PROPOSED.value),
         "completed": sorted((s["id"], s["result"]) for s in context.completed),
@@ -112,7 +115,14 @@ def gather_context(substrate, program_id: str) -> PMContext:
                           SprintStatus.QUEUED, SprintStatus.EXECUTING):
             open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals,
                                  "priority": s.priority})
-    guidance = [n["text"] for n in substrate.load_guidance(program_id)]
+    guidance_threads = substrate.load_guidance(program_id)
+    # Standing guidance shown every cycle as background context (latest text per
+    # thread, whether open or already addressed) plus the open threads the PM must
+    # act on and reply to, same mechanism as idea_feedback below.
+    guidance = [th["messages"][-1]["text"] for th in guidance_threads if th.get("messages")]
+    guidance_feedback = [{"thread_id": th["id"],
+                          "messages": [{"role": m["role"], "text": m["text"]} for m in th["messages"]]}
+                         for th in guidance_threads if threads.needs_reply(th)]
     _summary, ideas = substrate.load_ideas(program_id)
     idea_dicts = [{"id": i.id, "text": i.text, "source": i.source,
                    "protected": i.protected, "demoted": i.demoted} for i in ideas]
@@ -131,7 +141,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
         open_sprints=open_sprints, completed=completed, failed=failed,
         sprint_feedback=sprint_feedback,
         prior_proposals=list(pm.proposed_ids),
-        human_guidance=guidance,
+        human_guidance=guidance, guidance_feedback=guidance_feedback,
         ideas=idea_dicts, idea_feedback=idea_feedback,
         proposed_count=proposed_count, max_proposed=MAX_PROPOSED,
         model=program.pm_model,
@@ -404,9 +414,10 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
 
     # --- thread replies: the PM's answer to each open feedback thread it acted on
     # (edited, released, proposed a follow-up, or explained why not). One reply
-    # map, applied across BOTH surfaces a thread id can belong to — sprints first,
-    # then pool ideas — since the LLM doesn't say which one it's answering.
-    # Appended as a 'pm' message on the matching still-open thread. ---
+    # map, applied across every surface a thread id can belong to — sprints,
+    # then pool ideas, then standing guidance — since the LLM doesn't say which
+    # one it's answering. Appended as a 'pm' message on the matching still-open
+    # thread. ---
     # Guard both keys — the LLM may omit `text`; skip such entries rather than
     # KeyError-crashing the whole PM tick (which loops over every active program).
     replies = {r["thread_id"]: str(r.get("text") or "")
@@ -432,6 +443,15 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                     touched_ideas = True
         if touched_ideas:
             substrate.save_ideas(program_id, new_summary, list(ideas_by_id.values()))
+
+        touched_guidance = False
+        guidance_threads = substrate.load_guidance(program_id)
+        for th in guidance_threads:
+            if th["id"] in replies and threads.needs_reply(th):
+                threads.append(th, "pm", replies[th["id"]], "", now=now_ts)
+                touched_guidance = True
+        if touched_guidance:
+            substrate.save_guidance(program_id, guidance_threads)
 
     # --- release: put an APPROVED sprint into production (-> queued). The approved
     # pool is the PM's managed queue; it releases items here as it sees need, and the
