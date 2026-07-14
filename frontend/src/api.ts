@@ -10,7 +10,7 @@ export interface Program extends ProgramRow {
 export interface GuidanceNote { id: string; text: string; added_at: number }
 export interface IdeaComment { id: string; text: string; added_at: number; by?: string }
 export interface Idea {
-  id: string; text: string; source: "pm" | "human";
+  id: string; text: string; source: "pm" | "human"; by?: string;
   pinned: boolean; protected: boolean; comments: IdeaComment[]; created_at: number;
   demoted: boolean;
 }

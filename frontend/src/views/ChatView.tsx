@@ -7,13 +7,14 @@ import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
 import { api, type ChatScope } from "../api";
 import { BackLink, RelTime } from "../components/ui";
-import { UserChip } from "../auth";
+import { UserChip, useIsMine, OTHER_SHADE } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
 export default function ChatView() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
+  const isMine = useIsMine();
   const [active, setActive] = useState<string>("");
   const [draft, setDraft] = useState("");
   const [expanded, setExpanded] = useState(false);
@@ -172,7 +173,8 @@ export default function ChatView() {
                       <div key={i} style={{
                         alignSelf: m.role === "user" ? "flex-end" : "flex-start",
                         maxWidth: m.role === "user" ? "72%" : "90%",
-                        background: m.role === "user" ? "var(--machine-weak)" : "var(--paper)",
+                        background: m.role !== "user" ? "var(--paper)"
+                          : isMine(m.by) ? "var(--machine-weak)" : OTHER_SHADE,
                         border: "1px solid var(--hairline)", borderRadius: 10, padding: "9px 13px",
                       }}>
                         <Group gap={5} mb={3} wrap="nowrap">

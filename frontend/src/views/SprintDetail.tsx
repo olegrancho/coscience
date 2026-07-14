@@ -9,7 +9,7 @@ import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
 import { BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, voterId } from "../components/ui";
 import SprintEditModal from "../components/SprintEditModal";
-import { useMe, UserChip } from "../auth";
+import { useMe, useIsMine, UserChip, OTHER_SHADE } from "../auth";
 
 /** Inline result: shows a clamped preview that unfolds in place, plus a link to
  *  the full report page. Long reports start folded; short ones show whole. */
@@ -164,13 +164,16 @@ export default function SprintDetail() {
   const [editing, setEditing] = useState(false);
   const [comment, setComment] = useState("");
   const [commentTarget, setCommentTarget] = useState<"worker" | "pm">("worker");
-  const prog = programOf(id);
   const me = useMe();
+  const isMine = useIsMine();
   const voter = me.data?.user?.username ?? voterId();
   const sprint = useQuery({
     queryKey: ["sprint", id], queryFn: () => api.getSprint(id, voter),
     refetchInterval: (q) => (q.state.data?.status === "executing" ? 5000 : false),
   });
+  // Use the sprint's real program; the id-prefix guess is only a pre-load fallback
+  // (sprint ids aren't always "<program>-..."), which made the breadcrumb link dead.
+  const prog = sprint.data?.program ?? programOf(id);
   const program = useQuery({ queryKey: ["program", prog], queryFn: () => api.getProgram(prog), enabled: !!prog });
   const refresh = () => qc.invalidateQueries({ queryKey: ["sprint", id] });
 
@@ -292,11 +295,20 @@ export default function SprintDetail() {
           <span style={{ marginLeft: "auto" }}><VoteControl votes={s.votes} onVote={vote} /></span>
         </Group>
         {s.summary && <Text mt={12} style={{ maxWidth: 620, color: "var(--ink-muted)", lineHeight: 1.55 }}>{s.summary}</Text>}
-        {(s.decisions ?? []).map((d, i) => (
-          <div key={i} style={{ fontSize: 12, color: "var(--ink-muted)" }}>
-            {d.action} by <UserChip username={d.by} /> · <RelTime at={d.at} />
+        {(s.decisions ?? []).length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div className="eyebrow" style={{ marginBottom: 5 }}>decision log</div>
+            <Stack gap={4}>
+              {s.decisions!.map((d, i) => (
+                <Group key={i} gap={6} wrap="nowrap"
+                  style={{ fontSize: 12, color: "var(--ink-muted)", background: isMine(d.by) ? "transparent" : OTHER_SHADE,
+                           borderRadius: 6, padding: "3px 8px", width: "fit-content" }}>
+                  <b style={{ color: "var(--ink)" }}>{d.action}</b> by <UserChip username={d.by} /> · <RelTime at={d.at} />
+                </Group>
+              ))}
+            </Stack>
           </div>
-        ))}
+        )}
       </div>
 
       {s.title && s.goals && s.goals !== s.title && (
@@ -330,7 +342,7 @@ export default function SprintDetail() {
           {s.comments.map((c) => {
             const toPm = c.target === "pm";
             return (
-              <div key={c.id} style={{ background: "var(--paper)", borderRadius: 8, padding: "8px 12px" }}>
+              <div key={c.id} style={{ background: isMine(c.by) ? "var(--paper)" : OTHER_SHADE, borderRadius: 8, padding: "8px 12px" }}>
                 <div className="md-tight"><Md>{c.text}</Md></div>
                 <Group gap={8} mt={3} wrap="nowrap">
                   <span className="mono" style={{ fontSize: 10.5, padding: "0px 6px", borderRadius: 999,

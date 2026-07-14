@@ -232,6 +232,7 @@ class Service:
             "results": list(sprint.results),
             "plan": list(sprint.plan),
             "comments": list(sprint.comments),
+            "decisions": list(sprint.decisions),
             "votes": self._vote_tally(sprint, viewer),
             "agent_running": bool(progress.agent_token),
             "started_at": progress.started_at,
@@ -594,8 +595,8 @@ class Service:
     # --- ideas ---
     @staticmethod
     def _idea_public(i: Idea) -> dict:
-        return {"id": i.id, "text": i.text, "source": i.source, "pinned": i.pinned,
-                "protected": i.protected, "comments": list(i.comments),
+        return {"id": i.id, "text": i.text, "source": i.source, "by": i.by,
+                "pinned": i.pinned, "protected": i.protected, "comments": list(i.comments),
                 "created_at": i.created_at, "demoted": i.demoted}
 
     def demote_sprint(self, sprint_id: str, by: str = "") -> dict:

@@ -9,6 +9,18 @@ export function useMe() {
   return useQuery({ queryKey: ["me"], queryFn: api.me, retry: false, refetchInterval: false });
 }
 
+/** Subtle background for an attributed item authored by SOMEONE ELSE, so a
+ *  viewer's own actions read as default and teammates' stand out. "transparent"
+ *  for my own (or unattributed) items. */
+export const OTHER_SHADE = "rgba(120,120,120,0.10)";
+
+/** Returns `isMine(username)` — true when the username is the logged-in user.
+ *  Always false when auth is disabled or the item is unattributed. */
+export function useIsMine(): (username?: string) => boolean {
+  const me = useMe().data?.user?.username;
+  return (username?: string) => !!me && !!username && username === me;
+}
+
 /** Initials avatar + name for an attributed action. Resolves display from the
  *  registry; falls back to the raw username, or "—" when unattributed. */
 export function UserChip({ username }: { username?: string }) {

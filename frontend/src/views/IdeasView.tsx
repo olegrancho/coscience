@@ -6,6 +6,7 @@ import { useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { api, type Idea } from "../api";
 import { BackLink, EmptyState, RelTime } from "../components/ui";
+import { UserChip, useIsMine, OTHER_SHADE } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
@@ -23,6 +24,7 @@ function SourceChip({ source }: { source: Idea["source"] }) {
 function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea; onChange: () => void }) {
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState("");
+  const isMine = useIsMine();
 
   const act = async (fn: () => Promise<unknown>, fail: string) => {
     try { await fn(); onChange(); }
@@ -53,6 +55,7 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
           <div className={"md-tight" + (open ? "" : " clamp2")}><Md>{idea.text}</Md></div>
           <Group gap={8} mt={5} wrap="nowrap">
             <SourceChip source={idea.source} />
+            {idea.by && <UserChip username={idea.by} />}
             {idea.comments.length > 0 && (
               <Text size="xs" c="dimmed">{idea.comments.length} comment{idea.comments.length === 1 ? "" : "s"}</Text>
             )}
@@ -81,9 +84,12 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
           {idea.comments.length > 0 && (
             <Stack gap={6} mt={10}>
               {idea.comments.map((c) => (
-                <div key={c.id} style={{ background: "var(--paper)", borderRadius: 8, padding: "7px 11px" }}>
+                <div key={c.id} style={{ background: isMine(c.by) ? "var(--paper)" : OTHER_SHADE, borderRadius: 8, padding: "7px 11px" }}>
                   <div className="md-tight"><Md>{c.text}</Md></div>
-                  <Text size="xs" c="dimmed" mt={2}><RelTime at={c.added_at} /></Text>
+                  <Group gap={8} mt={2} wrap="nowrap">
+                    <UserChip username={c.by} />
+                    <Text size="xs" c="dimmed"><RelTime at={c.added_at} /></Text>
+                  </Group>
                 </div>
               ))}
             </Stack>
