@@ -83,9 +83,19 @@ Objective:
 3. Use your best judgment. Derive decisions from the goal, the guidance, and sane
    defaults, and keep moving. Only stop for something truly irreversible or a real
    blocker; record such calls in the scratchpad.
-4. When the sprint is done, print your findings as your final message — the answer,
-   how you reached it, the key evidence/witnesses, and any caveats. That final message
-   is recorded as the sprint result.
+4. Do the work IN THIS SESSION, in the FOREGROUND, and finish it here. Do NOT launch
+   long-running work as a detached / background process (`nohup … &`, a bare `&`,
+   `at`, cron, or a self-scheduled wake-up) and then end your turn. This Claude
+   session is what the platform tracks: when it exits cleanly the sprint is marked
+   DONE and anything still running in the background is orphaned — no one collects
+   its output and there is no mechanism to wake you back up to check on it. Run each
+   command and WAIT for it to finish before moving on. If a job is too large to finish
+   before you approach the usage window, checkpoint to the scratchpad and STOP (rule 2)
+   — you resume on the next run; never background it to get around the limit.
+5. When the sprint is genuinely COMPLETE — all the real work finished, not merely
+   started — print your findings as your final message: the answer, how you reached
+   it, the key evidence/witnesses, and any caveats. That final message is recorded as
+   the sprint result, so it must describe finished work, never "I kicked off X".
 """
 
 
