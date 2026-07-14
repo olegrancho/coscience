@@ -93,33 +93,49 @@ Objective:
 3. Use your best judgment. Derive decisions from the goal, the guidance, and sane
    defaults, and keep moving. Only stop for something truly irreversible or a real
    blocker; record such calls in the scratchpad.
-4. Do the work IN THIS SESSION, in the FOREGROUND, and finish it here. Do NOT launch
-   long-running work as a detached / background process (`nohup … &`, a bare `&`,
-   `at`, cron, or a self-scheduled wake-up) and then end your turn. This Claude
-   session is what the platform tracks: when it exits cleanly the sprint is marked
-   DONE and anything still running in the background is orphaned — no one collects
-   its output and there is no mechanism to wake you back up to check on it. Run each
-   command and WAIT for it to finish before moving on. If a job is too large to finish
-   before you approach the usage window, checkpoint to the scratchpad and STOP (rule 2)
-   — you resume on the next run; never background it to get around the limit; unless
-   you use the DETACHED-JOB PROTOCOL below.
+4. Do the work IN THIS SESSION, in the FOREGROUND, and finish it here. Run each
+   command and WAIT for it to finish before moving on.
+
+   *** READ THIS — the #1 way sprints silently fail ***
+   The moment your turn ends, this session is gone and the sprint is finalized from
+   whatever you printed. If you started a training run / sweep / eval with `&`,
+   `nohup`, `setsid`, `disown`, `at`, or cron and then ended your turn WITHOUT the
+   DETACHED-JOB PROTOCOL below, that process is ORPHANED: nobody collects its output,
+   the sprint is marked DONE from your premature message, and your real results are
+   lost. This has already happened on multiple sprints — do NOT repeat it.
+   Rules of thumb:
+   - Something finishes in seconds → run it foreground and wait.
+   - Something takes minutes/hours (model training, temperature sweeps, big evals) →
+     you have exactly TWO legal choices: (a) run it foreground and wait for it in this
+     session, or (b) use the DETACHED-JOB PROTOCOL below (background it AND write
+     job.json). There is no third option. A backgrounded process with no job.json = lost work.
+   - Approaching the usage window → checkpoint to the scratchpad and STOP (rule 2); you
+     resume next run. Never background something to dodge the limit.
 5. When the sprint is genuinely COMPLETE — all the real work finished, not merely
    started — print your findings as your final message: the answer, how you reached
    it, the key evidence/witnesses, and any caveats. That final message is recorded as
    the sprint result, so it must describe finished work, never "I kicked off X".
 
-## Long jobs: the detached-job protocol
-If a job is too long to finish in this session, you MAY hand it to the platform instead of
-running it foreground:
-1. Launch it detached, capturing its pid and streaming output to a file in THIS sprint folder:
-   `nohup <cmd> > <out_file> 2>&1 & echo $!`
-2. Write `<sprint_dir>/job.json`:
+## Long jobs: the DETACHED-JOB PROTOCOL (the ONLY correct way to background anything)
+If a job outlives this turn, you MUST do ALL THREE steps — background it, declare it,
+then exit. Backgrounding without step 2 loses your work.
+1. Launch it detached, capturing its pid, streaming output to a file in THIS sprint folder:
+   `nohup <cmd> > <out_file> 2>&1 & echo $!`   # the printed number is <pid>
+2. Write `<sprint_dir>/job.json` (this is what tells the platform to wait for you):
    {{"pid": <the pid>, "cmd": "<cmd>", "out_file": "<out_file>",
     "expected_seconds": <your estimate>, "wake_after_seconds": <when to bring you back>,
     "max_seconds": <hard cap>, "note": "<short description>"}}
-3. End your turn. The platform keeps the sprint running, waits for the job (or until
-   wake_after_seconds), then launches you again to check its output. You MUST fill
-   expected_seconds, wake_after_seconds, and max_seconds honestly.
+3. End your turn. The platform keeps the sprint EXECUTING, waits for the job (or until
+   wake_after_seconds), then launches you again to read <out_file> and finish. Fill
+   expected_seconds / wake_after_seconds / max_seconds honestly.
+
+   Worked example — a temperature sweep that takes ~40 min:
+     PID=$(nohup python temp_sweep.py > temp_sweep.out 2>&1 & echo $!)
+     # then write {scratchpad.parent}/job.json:
+     {{"pid": <PID>, "cmd": "python temp_sweep.py", "out_file": "temp_sweep.out",
+      "expected_seconds": 2400, "wake_after_seconds": 2700, "max_seconds": 5400,
+      "note": "InfoNCE temperature sweep, legacy pair"}}
+     # then end your turn. Do NOT print "sweep started" as if the sprint were done.
 {assess_section}"""
 
 
