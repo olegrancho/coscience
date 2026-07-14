@@ -56,6 +56,7 @@ class Sprint:
     comments: list[dict] = field(default_factory=list)  # human feedback [{id, text, added_at}]
     model: str = ""                   # Claude model for this sprint's worker; "" = launcher default
     votes: list[dict] = field(default_factory=list)  # 👍/👎 signal [{by, value:+1|-1, at}]; one per voter
+    decisions: list[dict] = field(default_factory=list)  # governance trail [{by, action, at}]
 
 
 @dataclass
@@ -101,6 +102,7 @@ class Idea:
     id: str
     text: str
     source: str = "human"               # "pm" | "human"
+    by: str = ""                        # username who added it (human-added); "" if unknown/PM
     pinned: bool = False                # pin == protect
     comments: list[dict] = field(default_factory=list)  # [{id, text, added_at}]
     created_at: float = 0.0

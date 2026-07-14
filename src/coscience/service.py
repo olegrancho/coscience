@@ -70,16 +70,17 @@ class Service:
         self.substrate.save_sprint(sprint)
         return id
 
-    def approve_sprint(self, sprint_id: str) -> None:
+    def approve_sprint(self, sprint_id: str, by: str = "") -> None:
         """Human authorization: proposed -> approved. Cleared to run, but held
         until released with run_sprint (by you or the PM)."""
         sprint = self._load_sprint(sprint_id)
         if sprint.status != SprintStatus.PROPOSED:
             raise ValueError(f"can only approve a proposed sprint; {sprint_id} is {sprint.status.value}")
         sprint.status = SprintStatus.APPROVED
+        self._decide(sprint, by, "approve")
         self.substrate.save_sprint(sprint)
 
-    def run_sprint(self, sprint_id: str) -> None:
+    def run_sprint(self, sprint_id: str, by: str = "") -> None:
         """Release a sprint to the scheduler -> queued. Allowed from proposed (a
         one-step authorize+run) or approved; the dispatcher runs it as soon as a
         resource slot frees (it may wait in queue)."""
@@ -87,24 +88,27 @@ class Service:
         if sprint.status not in (SprintStatus.PROPOSED, SprintStatus.APPROVED):
             raise ValueError(f"can only run a proposed or approved sprint; {sprint_id} is {sprint.status.value}")
         sprint.status = SprintStatus.QUEUED
+        self._decide(sprint, by, "run")
         self.substrate.save_sprint(sprint)
 
-    def send_back_sprint(self, sprint_id: str) -> None:
+    def send_back_sprint(self, sprint_id: str, by: str = "") -> None:
         """Return an approved sprint to proposed for reconsideration."""
         sprint = self._load_sprint(sprint_id)
         if sprint.status != SprintStatus.APPROVED:
             raise ValueError(f"can only send back an approved sprint; {sprint_id} is {sprint.status.value}")
         sprint.status = SprintStatus.PROPOSED
+        self._decide(sprint, by, "send_back")
         self.substrate.save_sprint(sprint)
 
     _REJECTABLE = (SprintStatus.PROPOSED, SprintStatus.APPROVED, SprintStatus.QUEUED)
 
-    def reject_sprint(self, sprint_id: str) -> None:
+    def reject_sprint(self, sprint_id: str, by: str = "") -> None:
         """Cancel a pre-execution sprint (proposed / approved / queued)."""
         sprint = self._load_sprint(sprint_id)
         if sprint.status not in self._REJECTABLE:
             raise ValueError(f"can only cancel a pre-run sprint; {sprint_id} is {sprint.status.value}")
         sprint.status = SprintStatus.CANCELED
+        self._decide(sprint, by, "reject")
         self.substrate.save_sprint(sprint)
 
     def vote_sprint(self, sprint_id: str, by: str, value: int) -> dict:
@@ -125,6 +129,10 @@ class Service:
         self.substrate.save_sprint(sprint)
         self.substrate.commit(f"sprint {sprint_id}: vote")
         return self._vote_tally(sprint, by)
+
+    @staticmethod
+    def _decide(sprint, by: str, action: str) -> None:
+        sprint.decisions.append({"by": str(by or ""), "action": action, "at": time.time()})
 
     @staticmethod
     def _vote_tally(sprint, viewer: str = "") -> dict:
@@ -224,6 +232,7 @@ class Service:
             "results": list(sprint.results),
             "plan": list(sprint.plan),
             "comments": list(sprint.comments),
+            "decisions": list(sprint.decisions),
             "votes": self._vote_tally(sprint, viewer),
             "agent_running": bool(progress.agent_token),
             "started_at": progress.started_at,
@@ -243,7 +252,8 @@ class Service:
         return {"budget": usage_meter.read_budget(),
                 "runs": usage_meter.run_stats(self.repo_root)}
 
-    def add_sprint_comment(self, sprint_id: str, text: str, target: str = "worker") -> dict:
+    def add_sprint_comment(self, sprint_id: str, text: str, target: str = "worker",
+                           by: str = "") -> dict:
         """Append a human comment to a sprint. Allowed in any status — it's
         feedback, not an edit. `target` routes it: 'worker' (the running agent
         reads it as direction) or 'pm' (the planner reads it and may revise the
@@ -254,7 +264,8 @@ class Service:
         if target not in ("worker", "pm"):
             raise ValueError("target must be 'worker' or 'pm'")
         sprint = self._load_sprint(sprint_id)
-        comment = {"id": uuid4().hex[:8], "text": text, "added_at": time.time(), "target": target}
+        comment = {"id": uuid4().hex[:8], "text": text, "added_at": time.time(),
+                   "target": target, "by": str(by or "")}
         sprint.comments.append(comment)
         self.substrate.save_sprint(sprint)
         self.substrate.commit(f"sprint {sprint_id}: comment added ({target})")
@@ -517,7 +528,7 @@ class Service:
         self.substrate.commit(f"program {program_id}: delete chat {thread_id}")
 
     def post_chat_message(self, program_id: str, thread_id: str, message: str,
-                          launch=None) -> dict:
+                          by: str = "", launch=None) -> dict:
         """Append the human message and launch a detached, resumable chat turn in the
         program workdir. Returns immediately with busy=True; the reply is collected
         on a later poll. `launch(**kwargs)->token` is injectable for tests."""
@@ -528,7 +539,8 @@ class Service:
             raise ValueError("message is required")
         if thread.pending:
             raise ValueError("this chat is still working on the previous message")
-        thread.messages.append({"role": "user", "text": message, "at": time.time()})
+        thread.messages.append({"role": "user", "text": message, "at": time.time(),
+                                "by": str(by or "")})
         from coscience.worker import claude_usage_ok
         if launch is None and not claude_usage_ok():
             thread.messages.append({"role": "pm", "at": time.time(),
@@ -583,11 +595,11 @@ class Service:
     # --- ideas ---
     @staticmethod
     def _idea_public(i: Idea) -> dict:
-        return {"id": i.id, "text": i.text, "source": i.source, "pinned": i.pinned,
-                "protected": i.protected, "comments": list(i.comments),
+        return {"id": i.id, "text": i.text, "source": i.source, "by": i.by,
+                "pinned": i.pinned, "protected": i.protected, "comments": list(i.comments),
                 "created_at": i.created_at, "demoted": i.demoted}
 
-    def demote_sprint(self, sprint_id: str) -> dict:
+    def demote_sprint(self, sprint_id: str, by: str = "") -> dict:
         """Demote a proposed/approved sprint into a non-promotable idea. The idea
         is flagged 'demoted' (the PM may not promote it back); a human can lift that.
         The sprint is canceled so it leaves the board."""
@@ -604,6 +616,7 @@ class Service:
         ideas.append(idea)
         self.substrate.save_ideas(sprint.program, summary, ideas)
         sprint.status = SprintStatus.CANCELED
+        self._decide(sprint, by, "demote")
         self.substrate.save_sprint(sprint)
         self.substrate.commit(f"sprint {sprint_id} demoted to idea {idea.id}")
         return {"sprint_id": sprint_id, "idea": self._idea_public(idea)}
@@ -626,13 +639,14 @@ class Service:
         summary, ideas = self.substrate.load_ideas(program_id)
         return {"summary": summary, "ideas": [self._idea_public(i) for i in ideas]}
 
-    def add_idea(self, program_id: str, text: str, source: str = "human") -> dict:
+    def add_idea(self, program_id: str, text: str, source: str = "human", by: str = "") -> dict:
         self._require_program(program_id)
         text = text.strip()
         if not text:
             raise ValueError("idea text is required")
         summary, ideas = self.substrate.load_ideas(program_id)
-        idea = Idea(id=uuid4().hex[:8], text=text, source=source, created_at=time.time())
+        idea = Idea(id=uuid4().hex[:8], text=text, source=source, created_at=time.time(),
+                    by=str(by or ""))
         ideas.append(idea)
         self.substrate.save_ideas(program_id, summary, ideas)
         self.substrate.commit(f"program {program_id}: idea added ({source})")
@@ -661,7 +675,7 @@ class Service:
         self.substrate.commit(f"program {program_id}: idea {idea_id} {'pinned' if pinned else 'unpinned'}")
         return self._idea_public(target)
 
-    def add_idea_comment(self, program_id: str, idea_id: str, text: str) -> dict:
+    def add_idea_comment(self, program_id: str, idea_id: str, text: str, by: str = "") -> dict:
         self._require_program(program_id)
         text = text.strip()
         if not text:
@@ -670,7 +684,8 @@ class Service:
         target = next((i for i in ideas if i.id == idea_id), None)
         if target is None:
             raise NotFoundError(idea_id)
-        target.comments.append({"id": uuid4().hex[:8], "text": text, "added_at": time.time()})
+        target.comments.append({"id": uuid4().hex[:8], "text": text,
+                                "added_at": time.time(), "by": str(by or "")})
         self.substrate.save_ideas(program_id, summary, ideas)
         self.substrate.commit(f"program {program_id}: comment on idea {idea_id}")
         return self._idea_public(target)

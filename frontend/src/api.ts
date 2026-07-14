@@ -1,3 +1,5 @@
+export interface CurrentUser { username: string; name: string; initials: string }
+export interface MeResponse { user: CurrentUser | null; required: boolean }
 export interface ProgramRow { id: string; title: string; status: string; goals: string }
 export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string; votes: VoteTally }
 export interface PMActivation { at: number; cycle: number; triggers: string[]; submitted: string[]; forced: boolean }
@@ -6,14 +8,14 @@ export interface Program extends ProgramRow {
   activations: PMActivation[]; last_run: number | null;
 }
 export interface GuidanceNote { id: string; text: string; added_at: number }
-export interface IdeaComment { id: string; text: string; added_at: number }
+export interface IdeaComment { id: string; text: string; added_at: number; by?: string }
 export interface Idea {
-  id: string; text: string; source: "pm" | "human";
+  id: string; text: string; source: "pm" | "human"; by?: string;
   pinned: boolean; protected: boolean; comments: IdeaComment[]; created_at: number;
   demoted: boolean;
 }
 export interface IdeaPool { summary: string; ideas: Idea[] }
-export interface ChatMessage { role: "user" | "pm"; text: string; at: number }
+export interface ChatMessage { role: "user" | "pm"; text: string; at: number; by?: string }
 export type ChatScope = "read" | "full";
 export interface ChatThreadSummary {
   id: string; title: string; scope: ChatScope; created_at: number;
@@ -23,7 +25,7 @@ export interface ChatThread {
   id: string; title: string; scope: ChatScope; created_at: number;
   turns_done: number; busy: boolean; messages: ChatMessage[]; live: string;
 }
-export interface SprintComment { id: string; text: string; added_at: number; target: "worker" | "pm" }
+export interface SprintComment { id: string; text: string; added_at: number; target: "worker" | "pm"; by?: string }
 export interface SprintActivity { label: string; active: boolean; at: number }
 export interface VoteTally { up: number; down: number; mine: number }
 export interface SprintRow {
@@ -50,6 +52,7 @@ export interface Sprint {
   program: string | null; results: string[]; comments: SprintComment[];
   agent_running: boolean; started_at: number | null; error: string; lease: unknown | null;
   model: string; activity: SprintActivity | null; votes: VoteTally;
+  decisions?: { by: string; action: string; at: number }[];
 }
 export interface SprintFile {
   name: string; label: string; kind: string; size: number;
@@ -72,6 +75,14 @@ export interface SprintPatch {
 }
 
 export const api = {
+  me: () => fetch("/api/me").then(j<MeResponse>),
+  listUsers: () => fetch("/api/users").then(j<CurrentUser[]>),
+  login: (username: string) =>
+    fetch("/api/login", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username }),
+    }).then(j<CurrentUser>),
+  logout: () => fetch("/api/logout", { method: "POST" }).then(j<{ ok: boolean }>),
   getVersion: () => fetch("/api/version").then(j<{ sha: string }>),
   listPrograms: () => fetch("/api/programs").then(j<ProgramRow[]>),
   getProgram: (id: string) => fetch(`/api/programs/${id}`).then(j<Program>),
