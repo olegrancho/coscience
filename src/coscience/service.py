@@ -218,6 +218,19 @@ class Service:
         sprint = self._load_sprint(sprint_id)
         progress = self.substrate.load_progress(sprint_id)
         lease = self._ledger().lease_for(sprint_id)
+        if progress.job_token:
+            agent_state = "sleeping"
+        elif progress.agent_token:
+            agent_state = "running"
+        else:
+            agent_state = "idle"
+        job = None
+        if progress.job_token:
+            job = {"note": progress.job_note, "out_file": progress.job_out,
+                   "started_at": progress.job_started_at,
+                   "expected_seconds": progress.job_expected_seconds,
+                   "next_wake": progress.job_next_wake,
+                   "max_seconds": progress.job_max_seconds}
         return {
             "id": sprint.id,
             "status": sprint.status.value,
@@ -236,6 +249,8 @@ class Service:
             "decisions": list(sprint.decisions),
             "votes": self._vote_tally(sprint, viewer),
             "agent_running": bool(progress.agent_token),
+            "agent_state": agent_state,
+            "job": job,
             "started_at": progress.started_at,
             "activity": self._activity(sprint_id) if sprint.status == SprintStatus.EXECUTING else None,
             "error": progress.last_error if sprint.status == SprintStatus.FAILED else "",
@@ -245,6 +260,18 @@ class Service:
                 "priority": lease.priority, "preemptible": lease.preemptible,
             },
         }
+
+    def wake_sprint(self, sprint_id: str) -> dict:
+        """Nudge a sleeping detached job to wake early: sets job_next_wake to now
+        so the next worker beat assesses it, instead of waiting out its declared
+        wake_after_seconds. A no-op (beyond the 404 check) if no job is tracked."""
+        self._load_sprint(sprint_id)                 # 404 if missing
+        progress = self.substrate.load_progress(sprint_id)
+        if progress.job_token:
+            progress.job_next_wake = time.time()
+            self.substrate.save_progress(progress)
+            self.substrate.commit(f"sprint {sprint_id}: wake requested")
+        return self.get_sprint(sprint_id)
 
     def usage_stats(self) -> dict:
         """Claude usage for the dashboard: the rolling 5h/weekly budget plus how

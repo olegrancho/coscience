@@ -256,6 +256,10 @@ export default function SprintDetail() {
     try { await api.seenSprintThread(id, tid); refresh(); }
     catch { /* best-effort — not worth surfacing */ }
   };
+  const wake = async () => {
+    try { await api.wakeSprint(id); notifications.show({ color: "teal", title: "Waking the agent", message: "It'll check the job on the next beat." }); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't wake", message: String(e) }); }
+  };
   const pmThreads = s.threads.filter((t) => t.target === "pm");
   const workerThreads = s.threads.filter((t) => t.target === "worker");
 
@@ -317,6 +321,17 @@ export default function SprintDetail() {
           {s.status === "executing" && <LiveActivity activity={s.activity} agentRunning={s.agent_running} />}
           <span style={{ marginLeft: "auto" }}><VoteControl votes={s.votes} onVote={vote} /></span>
         </Group>
+        {s.agent_state === "sleeping" && s.job && (
+          <Card withBorder padding="sm" mt={10} style={{ background: "var(--paper)" }}>
+            <Group justify="space-between" wrap="nowrap">
+              <div>
+                <Text size="sm" fw={600}>💤 Agent sleeping — waiting on a detached job</Text>
+                <Text size="xs" c="dimmed">{s.job.note || "(job)"} · expected ~{Math.round(s.job.expected_seconds / 60)}m · next check <RelTime at={s.job.next_wake} /></Text>
+              </div>
+              <Button size="xs" onClick={wake}>Wake now</Button>
+            </Group>
+          </Card>
+        )}
         {s.summary && <Text mt={12} style={{ maxWidth: 620, color: "var(--ink-muted)", lineHeight: 1.55 }}>{s.summary}</Text>}
         {(s.decisions ?? []).length > 0 && (
           <div style={{ marginTop: 14 }}>

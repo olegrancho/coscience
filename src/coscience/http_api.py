@@ -212,6 +212,14 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
 
+    @api.post("/sprints/{sprint_id}/wake")
+    def wake_sprint(sprint_id: str,
+                    user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.wake_sprint(sprint_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+
     @api.get("/sprints/{sprint_id}/files")
     def sprint_files(sprint_id: str) -> list[dict]:
         try:

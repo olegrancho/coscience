@@ -30,6 +30,10 @@ class ExecutionContext:
     feedback_threads: list[dict] = field(default_factory=list)  # open worker threads
                                                                # [{thread_id, text}] the agent may reply to
     repo_root: Path | None = None
+    assess_reason: str = ""  # "" normal run; else why the agent is resuming to check a
+                              # detached job ("finished"/"timed out"/"wake")
+    job_out: str = ""        # path to the detached job's captured output (set when assessing)
+    job_note: str = ""       # the job's own short description (set when assessing)
 
 
 def launch_detached(command: str, cwd: "str | Path | None" = None) -> str:

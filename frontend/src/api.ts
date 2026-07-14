@@ -52,6 +52,9 @@ export interface Sprint {
   agent_running: boolean; started_at: number | null; error: string; lease: unknown | null;
   model: string; activity: SprintActivity | null; votes: VoteTally;
   decisions?: { by: string; action: string; at: number }[];
+  agent_state?: "running" | "sleeping" | "idle";
+  job?: { note: string; out_file: string; started_at: number | null;
+          expected_seconds: number; next_wake: number; max_seconds: number } | null;
 }
 export interface SprintFile {
   name: string; label: string; kind: string; size: number;
@@ -208,6 +211,8 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ by, value }),
     }).then(j<VoteTally>),
+  wakeSprint: (id: string) =>
+    fetch(`/api/sprints/${id}/wake`, { method: "POST" }).then(j<Sprint>),
   editSprint: (id: string, patch: SprintPatch) =>
     fetch(`/api/sprints/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },

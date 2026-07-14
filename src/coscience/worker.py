@@ -15,6 +15,8 @@ import time
 
 from coscience import feedback_harvest, usage_meter
 from coscience.executor import ExecutionContext
+from coscience.executor import is_running as _job_is_running
+from coscience.executor import process_token, terminate_detached as _terminate
 from coscience.models import BeatOutcome, Result, Sprint, SprintStatus
 from coscience.substrate import Substrate
 
@@ -22,6 +24,9 @@ _USAGE_SCRIPT = os.path.expanduser("~/.claude/skills/usage/usage.py")
 # After this many real (non-usage) failures, a sprint is marked FAILED rather than
 # relaunched forever — so a deterministically-broken sprint can't burn usage.
 MAX_AGENT_FAILURES = 3
+# Hard cap on how long a declared detached job may run before the watchdog kills
+# it, regardless of what the job itself claimed. Overridable for tests/ops.
+JOB_MAX_SECONDS = float(os.environ.get("COSCIENCE_JOB_MAX_SECONDS", 7 * 24 * 3600))
 # Messages a dead-on-arrival agent prints instead of doing work — must not be
 # mistaken for a real result.
 _USAGE_LIMIT_RE = re.compile(r"(session|usage|rate) limit|hit your .*limit|limit ·", re.I)
@@ -72,11 +77,16 @@ def claude_usage_ok(threshold: float = 100.0) -> bool:
 
 
 class Worker:
-    def __init__(self, substrate: Substrate, agent, usage_gate=None):
+    def __init__(self, substrate: Substrate, agent, usage_gate=None,
+                 job_alive=None, terminate=None):
         self.substrate = substrate
         self.agent = agent
         # callable () -> bool; True = ok to launch. Default checks real usage.
         self._usage_gate = usage_gate
+        # callable (token) -> bool; True = the detached job is still alive.
+        self._job_alive = job_alive or _job_is_running
+        # callable (token) -> None; stop an overrun detached job.
+        self._terminate = terminate or _terminate
 
     def _build_context(self, sprint: Sprint) -> ExecutionContext:
         """Gather the program goal, sprint description and prior results so the
@@ -106,6 +116,7 @@ class Worker:
             humans = [m["text"] for m in t.get("messages", []) if m["role"] == "human"]
             if humans:
                 feedback_threads.append({"thread_id": t["id"], "text": humans[-1]})
+        progress = self.substrate.load_progress(sprint.id)
         return ExecutionContext(
             program_title=program_title, program_goal=program_goal,
             sprint_title=sprint.title, sprint_summary=sprint.summary,
@@ -118,6 +129,11 @@ class Worker:
             # one (and it exists), else the control repo. Sprint metadata/scratchpad
             # still live in the control repo (absolute paths); only the cwd changes.
             repo_root=self._agent_cwd(workdir),
+            # Set only when this launch is resuming to check a detached job (see
+            # run_sprint_beat step A); "" on a normal launch.
+            assess_reason=progress.assess_reason,
+            job_out=progress.job_out,
+            job_note=progress.job_note,
         )
 
     def _agent_cwd(self, workdir: str):
@@ -152,9 +168,86 @@ class Worker:
     def _usage_ok(self) -> bool:
         return (self._usage_gate or claude_usage_ok)()
 
+    def _read_job_json(self, sprint_dir):
+        """Read + normalize a declared detached job's job.json. Returns a clean dict
+        {pid:int, out_file, note, expected_seconds, wake_after_seconds, max_seconds}
+        or None (absent / unreadable / malformed). job.json is agent-authored free-form
+        JSON, so bad values (non-int pid, "5 minutes", negatives) are expected — a
+        present-but-malformed file is DELETED so it can't crash every subsequent beat."""
+        f = sprint_dir / "job.json"
+        if not f.is_file():
+            return None
+        try:
+            d = json.loads(f.read_text())
+            if not isinstance(d, dict):
+                raise ValueError("job.json is not an object")
+            pid = int(d["pid"])                        # required; raises if missing/non-int
+            if pid <= 0:
+                raise ValueError("pid must be positive")
+
+            def _num(key):
+                try:
+                    return max(0.0, float(d.get(key, 0) or 0))
+                except (TypeError, ValueError):
+                    return 0.0
+
+            return {"pid": pid, "out_file": str(d.get("out_file", "")),
+                    "note": str(d.get("note", "")),
+                    "expected_seconds": _num("expected_seconds"),
+                    "wake_after_seconds": _num("wake_after_seconds"),
+                    "max_seconds": _num("max_seconds")}
+        except (json.JSONDecodeError, ValueError, TypeError, KeyError, OSError):
+            try:
+                f.unlink(missing_ok=True)              # drop the poison; treat as no job
+            except OSError:
+                pass
+            return None
+
+    def _reap_job(self, progress) -> None:
+        """Kill any still-tracked detached job and clear all job fields. Backstop for
+        the done/failed paths so a job left tracked (e.g. an assess run that finished
+        without handling a still-live job) can't be orphaned past sprint end."""
+        if progress.job_token:
+            try:
+                self._terminate(progress.job_token)
+            except Exception:
+                pass
+        progress.job_token = ""
+        progress.job_out = progress.job_note = progress.assess_reason = ""
+        progress.job_next_wake = progress.job_max_seconds = 0.0
+        progress.job_started_at = None
+
     def run_sprint_beat(self, sprint: Sprint) -> BeatOutcome:
         progress = self.substrate.load_progress(sprint.id)
         sprint_dir = self.substrate.sprint_dir(sprint.id)
+
+        # A) sleeping on a tracked detached job (no agent runs it) — cheap check
+        # only. If the agent process is (still) running, fall through to the
+        # normal launched/running/collect handling below instead.
+        # Sleeping == a tracked job with no agent session running it. (Using
+        # agent_token, not is_running, so that during a wake/assess run — agent_token
+        # set, job_token kept — this branch stays OUT of the way and the agent is
+        # collected normally in step 3.)
+        if progress.job_token and not progress.agent_token:
+            now = time.time()
+            if not self._job_alive(progress.job_token):
+                progress.assess_reason = "finished"
+                progress.job_token = ""                   # job gone; nothing to track
+            elif progress.job_max_seconds and progress.job_started_at is not None \
+                    and now - progress.job_started_at > progress.job_max_seconds:
+                self._terminate(progress.job_token)
+                progress.assess_reason = "timed out"
+                progress.job_token = ""                   # killed
+            elif progress.job_next_wake and now >= progress.job_next_wake:
+                # Job still alive — keep tracking it (watchdog stays armed) while the
+                # assess run checks in. If that run finishes/fails without handling the
+                # job, the done/failed path reaps it (below) so it can't be orphaned.
+                progress.assess_reason = "wake"
+            else:
+                return BeatOutcome.PROGRESSED            # keep waiting; lease held
+            self.substrate.save_progress(progress)
+            self.substrate.commit(f"sprint {sprint.id}: job ended ({progress.assess_reason}), assessing")
+            # fall through to step 1, which launches an assess agent (assess_reason set)
 
         # 1) no agent yet -> launch one, unless Claude usage is exhausted
         if not progress.agent_token:
@@ -163,6 +256,10 @@ class Worker:
                 # arrival and print a limit message. Leave the sprint claimed; a
                 # later beat retries once usage frees up.
                 return BeatOutcome.IDLE
+            # Drop any stale job.json left by a prior crashed/interrupted attempt, so
+            # only a declaration written DURING this run's clean exit is recorded
+            # (else a leftover file gets misattributed to this run's result).
+            (sprint_dir / "job.json").unlink(missing_ok=True)
             ctx = self._build_context(sprint)
             token = self.agent.start(sprint, ctx, sprint_dir, ctx.repo_root)
             progress.agent_token = token
@@ -211,6 +308,7 @@ class Worker:
             if progress.failures >= MAX_AGENT_FAILURES:
                 sprint.status = SprintStatus.FAILED
                 self.substrate.save_sprint(sprint)
+                self._reap_job(progress)        # terminal: don't leave a job orphaned
                 self.substrate.save_progress(progress)
                 self.substrate.commit(
                     f"sprint {sprint.id}: FAILED after {progress.failures} attempts")
@@ -219,6 +317,27 @@ class Worker:
             self.substrate.commit(
                 f"sprint {sprint.id}: attempt {progress.failures} failed, will retry")
             return BeatOutcome.PROGRESSED
+
+        # A clean exit that declared a detached job takes precedence over the
+        # normal done path: the agent's final message is premature (the real
+        # work is still running detached), so ignore it and start sleeping on
+        # the job instead.
+        job = self._read_job_json(sprint_dir)
+        if status == "ok" and job is not None:
+            now = time.time()
+            progress.job_token = process_token(job["pid"])
+            progress.job_out = job["out_file"]
+            progress.job_note = job["note"]
+            progress.job_started_at = now
+            progress.job_expected_seconds = job["expected_seconds"]
+            progress.job_next_wake = now + job["wake_after_seconds"]
+            progress.job_max_seconds = min(job["max_seconds"] or JOB_MAX_SECONDS, JOB_MAX_SECONDS)
+            progress.assess_reason = ""
+            progress.agent_token = ""
+            (sprint_dir / "job.json").unlink(missing_ok=True)     # consume it
+            self.substrate.save_progress(progress)
+            self.substrate.commit(f"sprint {sprint.id}: detached job declared ({progress.job_note})")
+            return BeatOutcome.PROGRESSED                          # stay executing, sleep on the job
 
         result = Result(
             id=f"{sprint.id}-result", sprint=sprint.id,
@@ -230,19 +349,30 @@ class Worker:
         sprint.results = [result.id]
         self.substrate.save_sprint(sprint)
         progress.agent_token = ""
+        self._reap_job(progress)            # kill + clear any still-tracked detached job
         self.substrate.save_progress(progress)
         self.substrate.commit(f"sprint {sprint.id}: done, result {result.id}")
         return BeatOutcome.COMPLETED
 
     def stop_sprint(self, sprint: Sprint) -> list[str]:
-        """Stop the sprint's running agent and clear it so a later beat relaunches
-        (the agent resumes from its scratchpad). Returns [sprint.id] if one was
-        stopped, else []."""
+        """Stop the sprint's running agent and/or its tracked detached job, and
+        clear whichever was set so a later beat relaunches (the agent resumes
+        from its scratchpad). Returns [sprint.id] if either was stopped, else []."""
         progress = self.substrate.load_progress(sprint.id)
-        if not progress.agent_token:
+        stopped = False
+        if progress.agent_token:
+            self.agent.stop(progress.agent_token)
+            progress.agent_token = ""
+            stopped = True
+        if progress.job_token:
+            try:
+                self._terminate(progress.job_token)
+            except Exception:
+                pass
+            progress.job_token = ""
+            stopped = True
+        if not stopped:
             return []
-        self.agent.stop(progress.agent_token)
-        progress.agent_token = ""
         self.substrate.save_progress(progress)
         self.substrate.commit(f"sprint {sprint.id}: agent stopped")
         return [sprint.id]

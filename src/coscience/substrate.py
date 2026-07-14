@@ -123,6 +123,14 @@ class Substrate:
             started_at=None if started is None else float(started),
             failures=int(fm.get("failures", 0)),
             last_error=str(fm.get("last_error", "")),
+            job_token=str(fm.get("job_token", "")),
+            job_out=str(fm.get("job_out", "")),
+            job_note=str(fm.get("job_note", "")),
+            job_started_at=(None if fm.get("job_started_at") is None else float(fm["job_started_at"])),
+            job_expected_seconds=float(fm.get("job_expected_seconds", 0.0)),
+            job_next_wake=float(fm.get("job_next_wake", 0.0)),
+            job_max_seconds=float(fm.get("job_max_seconds", 0.0)),
+            assess_reason=str(fm.get("assess_reason", "")),
         )
 
     def save_progress(self, progress: ProgressState) -> None:
@@ -131,6 +139,14 @@ class Substrate:
             "started_at": progress.started_at,
             "failures": progress.failures,
             "last_error": progress.last_error,
+            "job_token": progress.job_token,
+            "job_out": progress.job_out,
+            "job_note": progress.job_note,
+            "job_started_at": progress.job_started_at,
+            "job_expected_seconds": progress.job_expected_seconds,
+            "job_next_wake": progress.job_next_wake,
+            "job_max_seconds": progress.job_max_seconds,
+            "assess_reason": progress.assess_reason,
         }
         d = self.sprint_dir(progress.sprint_id)
         d.mkdir(parents=True, exist_ok=True)
