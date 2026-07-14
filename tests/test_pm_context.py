@@ -34,12 +34,31 @@ def test_gather_context_includes_human_guidance(tmp_path):
     from coscience.substrate import Substrate
     from coscience.models import Program
     from coscience.pm_agent import gather_context
+    from coscience import threads as _threads
     sub = Substrate(tmp_path)
     sub.save_program(Program(id="p1", title="t", goals="g"))
-    sub.save_guidance("p1", [{"id": "a", "text": "focus on assays", "added_at": 1.0},
-                             {"id": "b", "text": "avoid mice", "added_at": 2.0}])
+    sub.save_guidance("p1", [_threads.new_thread("pm", "focus on assays", "u", now=1.0, tid="a"),
+                             _threads.new_thread("pm", "avoid mice", "u", now=2.0, tid="b")])
     ctx = gather_context(sub, "p1")
     assert ctx.human_guidance == ["focus on assays", "avoid mice"]
+    assert len(ctx.guidance_feedback) == 2
+    assert ctx.guidance_feedback[0]["thread_id"] == "a"
+    assert ctx.guidance_feedback[0]["messages"][-1] == {"role": "human", "text": "focus on assays"}
+
+
+def test_gather_context_excludes_completed_guidance_from_feedback(tmp_path):
+    from coscience.substrate import Substrate
+    from coscience.models import Program
+    from coscience.pm_agent import gather_context
+    from coscience import threads as _threads
+    sub = Substrate(tmp_path)
+    sub.save_program(Program(id="p1", title="t", goals="g"))
+    th = _threads.new_thread("pm", "handled already", "u", now=1.0)
+    th["status"] = "complete"
+    sub.save_guidance("p1", [th])
+    ctx = gather_context(sub, "p1")
+    assert ctx.human_guidance == ["handled already"]  # still shown as standing guidance
+    assert ctx.guidance_feedback == []                # but not as an open feedback item
 
 
 def test_gather_context_empty_guidance(tmp_path):
@@ -48,7 +67,9 @@ def test_gather_context_empty_guidance(tmp_path):
     from coscience.pm_agent import gather_context
     sub = Substrate(tmp_path)
     sub.save_program(Program(id="p1", title="t", goals="g"))
-    assert gather_context(sub, "p1").human_guidance == []
+    ctx = gather_context(sub, "p1")
+    assert ctx.human_guidance == []
+    assert ctx.guidance_feedback == []
 
 
 def test_gather_context_resolves_workdir_to_project_folder(tmp_path):

@@ -13,7 +13,7 @@ import re
 import subprocess
 import time
 
-from coscience import usage_meter
+from coscience import feedback_harvest, usage_meter
 from coscience.executor import ExecutionContext
 from coscience.models import BeatOutcome, Result, Sprint, SprintStatus
 from coscience.substrate import Substrate
@@ -99,13 +99,21 @@ class Worker:
                 except OSError:
                     continue
                 prior.append(f"## {s.title or s.id}\n{summary[:1000]}")
+        feedback_threads = []
+        for t in sprint.threads:
+            if t.get("target") != "worker" or t.get("status") != "open":
+                continue
+            humans = [m["text"] for m in t.get("messages", []) if m["role"] == "human"]
+            if humans:
+                feedback_threads.append({"thread_id": t["id"], "text": humans[-1]})
         return ExecutionContext(
             program_title=program_title, program_goal=program_goal,
             sprint_title=sprint.title, sprint_summary=sprint.summary,
             sprint_goals=sprint.goals, plan=list(sprint.plan),
             prior_results=prior,
-            human_comments=[c["text"] for c in sprint.comments
-                            if c.get("target", "worker") == "worker"],
+            human_comments=[m["text"] for t in sprint.threads if t.get("target") == "worker"
+                            for m in t["messages"] if m["role"] == "human"],
+            feedback_threads=feedback_threads,
             # The agent's working directory: the program's project folder if it set
             # one (and it exists), else the control repo. Sprint metadata/scratchpad
             # still live in the control repo (absolute paths); only the cwd changes.
@@ -163,13 +171,25 @@ class Worker:
             self.substrate.commit(f"sprint {sprint.id}: agent launched")
             return BeatOutcome.PROGRESSED
 
-        # 2) agent still working -> leave it
+        # 2) agent still working -> leave it (but harvest any feedback.out replies it
+        # wrote this beat, so a human's follow-up gets answered while the agent runs)
         if self.agent.is_running(progress.agent_token):
+            try:
+                feedback_harvest.harvest_feedback(self.substrate, sprint.id)
+            except Exception:
+                pass
             return BeatOutcome.PROGRESSED
 
         # 3) agent ended -> collect. Only a clean exit (status 'ok') is a result;
         # a crash, kill, or usage limit must NOT be laundered into a "done" sprint.
         text, status = self.agent.collect(sprint_dir)
+        # A feedback.out line written just before the agent exited would otherwise
+        # never be harvested (the "still running" beat above is the only other
+        # call site) — sweep once more now that the process is done.
+        try:
+            feedback_harvest.harvest_feedback(self.substrate, sprint.id)
+        except Exception:
+            pass
         progress.agent_token = ""
         # One Claude invocation just ended (clean, failed, or interrupted) — record it
         # with whatever cost/tokens the agent reported, so the dashboard can show spend.

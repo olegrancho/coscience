@@ -24,6 +24,13 @@ class Substrate:
         # plan is natural-language suggested steps; tolerate legacy [{id,run}] entries
         plan = [s if isinstance(s, str) else str(s.get("run") or s.get("text") or s)
                 for s in fm.get("plan", [])]
+        import time as _t
+        from coscience import threads as _th
+        if "threads" in fm:
+            sprint_threads = list(fm.get("threads") or [])
+        else:  # back-compat: adapt legacy comments (target defaults to worker)
+            sprint_threads = [_th.adapt_legacy(c, "worker", now=float(c.get("added_at", _t.time())))
+                              for c in fm.get("comments", [])]
         return Sprint(
             id=sprint_id,
             status=SprintStatus(fm["status"]),
@@ -40,10 +47,7 @@ class Substrate:
             title=str(fm.get("title", "")),
             summary=str(fm.get("summary", "")),
             created_at=None if fm.get("created_at") is None else float(fm["created_at"]),
-            comments=[{"id": str(c["id"]), "text": str(c["text"]),
-                       "added_at": float(c["added_at"]),
-                       "target": str(c.get("target", "worker")),
-                       "by": str(c.get("by", ""))} for c in fm.get("comments", [])],
+            threads=sprint_threads,
             model=str(fm.get("model", "")),
             votes=[{"by": str(v["by"]), "value": int(v["value"]), "at": float(v["at"])}
                    for v in fm.get("votes", [])],
@@ -80,8 +84,8 @@ class Substrate:
             sprint.created_at = time.time()
         if sprint.created_at is not None:
             fm["created_at"] = sprint.created_at
-        if sprint.comments:
-            fm["comments"] = list(sprint.comments)
+        if sprint.threads:
+            fm["threads"] = list(sprint.threads)
         if sprint.model:
             fm["model"] = sprint.model
         if sprint.votes:
@@ -247,20 +251,23 @@ class Substrate:
         (d / "pm.md").write_text(serialize(fm, f"# PM state {state.program_id}\n"))
 
     def load_guidance(self, program_id: str) -> list[dict]:
+        """Standing guidance to the PM, stored as feedback threads (each always
+        target "pm" — there's no worker to steer with guidance)."""
         path = self.program_dir(program_id) / "guidance.md"
         if not path.is_file():
             return []
         fm, _ = parse(path.read_text())
-        out = []
-        for n in fm.get("notes", []):
-            out.append({"id": str(n["id"]), "text": str(n["text"]),
-                        "added_at": float(n["added_at"])})
-        return out
+        from coscience import threads as _th
+        if "threads" in fm:
+            return list(fm.get("threads") or [])
+        # back-compat: adapt legacy {id,text,added_at} notes
+        return [_th.adapt_legacy(n, "pm", now=float(n.get("added_at", time.time())))
+                for n in fm.get("notes", [])]
 
-    def save_guidance(self, program_id: str, notes: list[dict]) -> None:
+    def save_guidance(self, program_id: str, threads_list: list[dict]) -> None:
         d = self.program_dir(program_id)
         d.mkdir(parents=True, exist_ok=True)
-        fm = {"type": "guidance", "notes": notes}
+        fm = {"type": "guidance", "threads": list(threads_list)}
         (d / "guidance.md").write_text(serialize(fm, f"# Guidance {program_id}\n"))
 
     # --- PM chat (a Q&A thread with the planner) ---
@@ -336,16 +343,20 @@ class Substrate:
         if not path.is_file():
             return "", []
         fm, _ = parse(path.read_text())
+        from coscience import threads as _th
         ideas = []
         for n in fm.get("ideas", []):
+            if "threads" in n:
+                idea_threads = list(n.get("threads") or [])
+            else:  # back-compat: adapt legacy comments (idea threads always target the PM)
+                idea_threads = [_th.adapt_legacy(c, "pm", now=float(c.get("added_at", time.time())))
+                                for c in n.get("comments", [])]
             ideas.append(Idea(
                 id=str(n["id"]), text=str(n["text"]),
                 source=str(n.get("source", "human")),
                 by=str(n.get("by", "")),
                 pinned=bool(n.get("pinned", False)),
-                comments=[{"id": str(c["id"]), "text": str(c["text"]),
-                           "added_at": float(c["added_at"]),
-                           "by": str(c.get("by", ""))} for c in n.get("comments", [])],
+                threads=idea_threads,
                 created_at=float(n.get("created_at", 0.0)),
                 demoted=bool(n.get("demoted", False)),
             ))
@@ -360,7 +371,7 @@ class Substrate:
             "ideas": [
                 {"id": i.id, "text": i.text, "source": i.source, "pinned": i.pinned,
                  "by": i.by,
-                 "comments": list(i.comments), "created_at": i.created_at,
+                 "threads": list(i.threads), "created_at": i.created_at,
                  **({"demoted": True} if i.demoted else {})}
                 for i in ideas
             ],

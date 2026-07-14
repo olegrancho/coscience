@@ -27,11 +27,22 @@ def render_prompt(context: PMContext) -> str:
                         lambda s: f"- {s['id']}: {s['goals']} -> result: {s['result']}")
     failed_block = _lines(context.failed,
                           lambda s: f"- {s['id']}: {s['goals']} -> FAILED: {s['error']}")
-    feedback_block = _lines(
-        context.sprint_feedback,
-        lambda f: (f"- {f['sprint_id']} [{f['status']}, "
-                   f"{'EDITABLE' if f['editable'] else 'locked — propose a follow-up instead'}]: "
-                   + " | ".join(f["comments"])))
+    def _feedback_line(f):
+        history = " | ".join(f"{m['role']}: {m['text']}" for m in f["messages"])
+        return (f"- {f['sprint_id']} [{f['status']}, "
+                f"{'EDITABLE' if f['editable'] else 'locked — propose a follow-up instead'}, "
+                f"thread {f['thread_id']}]: {history}")
+    feedback_block = _lines(context.sprint_feedback, _feedback_line)
+
+    def _idea_feedback_line(f):
+        history = " | ".join(f"{m['role']}: {m['text']}" for m in f["messages"])
+        return f"- idea [{f['idea_id']}], thread {f['thread_id']}: {history}"
+    idea_feedback_block = _lines(context.idea_feedback, _idea_feedback_line)
+
+    def _guidance_feedback_line(f):
+        history = " | ".join(f"{m['role']}: {m['text']}" for m in f["messages"])
+        return f"- thread {f['thread_id']}: {history}"
+    guidance_feedback_block = _lines(context.guidance_feedback, _guidance_feedback_line)
     prior_block = ", ".join(context.prior_proposals) or "(none)"
     guidance_block = ""
     if context.human_guidance:
@@ -48,8 +59,6 @@ def render_prompt(context: PMContext) -> str:
             flags.append("DEMOTED — do NOT promote to a sprint")
         if i.get("protected"):
             flags.append("PROTECTED")
-        if i.get("comments"):
-            flags.append("comments: " + " | ".join(i["comments"]))
         tag = f" ({'; '.join(flags)})" if flags else ""
         return f"- [{i['id']}] {i['text']}{tag}"
     ideas_block = _lines(context.ideas, _idea_line)
@@ -83,10 +92,27 @@ propose a corrected/rescoped sprint, change the approach, or record an idea; do 
 blindly re-propose the same thing):
 {failed_block}
 
-HUMAN FEEDBACK ADDRESSED TO YOU about specific sprints (act on each: if it is
-EDITABLE, revise that sprint via sprint_edits; if it is locked, propose a follow-up
-or adjust your plan instead):
+HUMAN FEEDBACK ADDRESSED TO YOU about specific sprints — each shown as an open thread id
+and its message history (act on each: if it is EDITABLE, revise that sprint via
+sprint_edits; if it is locked, propose a follow-up or adjust your plan instead).
+FEEDBACK THREADS: for each open thread shown, take the action it asks for (edit the
+sprint, change compute, propose, curate) AND add a short thread_replies entry saying
+what you did. If you can't, say why.
 {feedback_block}
+
+HUMAN FEEDBACK ADDRESSED TO YOU about specific pool ideas below — same thread_replies
+mechanism as sprint feedback: react to it (develop the idea, promote it, revise the idea
+pool, or curate accordingly) AND add a thread_replies entry with that idea's thread id
+saying what you did, or why not.
+IDEA FEEDBACK:
+{idea_feedback_block}
+
+GUIDANCE FEEDBACK ADDRESSED TO YOU — new standing-guidance messages open below need your
+action: same thread_replies mechanism as sprint/idea feedback — weigh each into your
+proposals/idea curation (adjust plans, curate ideas, whatever it calls for) AND add a
+thread_replies entry with that guidance thread's id saying what you did, or why not.
+GUIDANCE FEEDBACK:
+{guidance_feedback_block}
 
 PRIOR PROPOSALS you already made (do NOT repeat their intent): {prior_block}
 
@@ -105,7 +131,8 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
   "sprint_edits": [
     {{"sprint_id": "<an EDITABLE (still-proposed) sprint to revise per feedback>",
       "goals": "<rewritten objective, optional>", "plan": ["<revised step>", "..."],
-      "summary": "<optional>", "title": "<optional>", "priority": <int, optional>}}
+      "summary": "<optional>", "title": "<optional>", "priority": <int, optional>,
+      "resources_required": {{}} or null}}
   ],
   "reopen_ids": ["<id of an APPROVED sprint (see OPEN SPRINTS) to send back to 'proposed' for
                  reconsideration: results made it obsolete/redundant, it no longer makes sense
@@ -114,6 +141,9 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
   "release_ids": ["<id of an APPROVED sprint to release into production now — it becomes
                  'queued' and the scheduler runs it as compute frees. Release the ones whose
                  time has come; hold the rest. Only approved sprints. Omit/empty if none.>"],
+  "thread_replies": [{{"thread_id": "<id of an open feedback thread shown above,
+                       whether on a sprint, a pool idea, or standing guidance>",
+                       "text": "<short reply: what you did in response, or why you can't>"}}],
   "proposals": [
     {{"suffix": "<short-slug>",
       "title": "<=8 words naming the experiment, e.g. 'Cross-validate the witness pair'>",
@@ -150,6 +180,8 @@ the work itself. So:
   `printf`, file redirects, or any executable command in `plan`.
 `resources_required` maps a resource name to a NUMBER only (e.g. {{"cpu": 1}} or {{"gpu": 2}}),
 or {{}} — never put notes or prose in it; put caveats in `rationale`.
+You may also change an editable sprint's resources_required (compute) here in response to
+feedback — e.g. drop a gpu the environment can't provide and run on cpu.
 `title` is a short headline; `summary` is the skimmable gist; `goals` is the full objective.
 """
 
@@ -199,6 +231,8 @@ def parse_response(text: str) -> PMCycleOutput:
         sprint_edits=edits,
         reopen_ids=[str(s) for s in data.get("reopen_ids", [])],
         release_ids=[str(s) for s in data.get("release_ids", [])],
+        thread_replies=[dict(r) for r in data.get("thread_replies", [])
+                        if isinstance(r, dict) and r.get("thread_id")],
     )
 
 

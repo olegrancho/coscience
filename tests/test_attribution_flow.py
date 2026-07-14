@@ -27,7 +27,7 @@ def test_comment_actor_is_server_derived_not_client(tmp_path):
     c, svc = _client(tmp_path)
     # client tries to spoof a different author in the body — must be ignored
     r = c.post("/api/sprints/s1/comments", json={"text": "hi", "target": "pm", "by": "apathak"})
-    assert r.status_code == 201 and r.json()["by"] == "stroganov"
+    assert r.status_code == 201 and r.json()["messages"][0]["by"] == "stroganov"
 
 
 def test_vote_uses_username_when_authed(tmp_path):

@@ -53,9 +53,11 @@ def test_pin_protects_and_unpin_releases(tmp_path):
 def test_comment_protects_and_shows(tmp_path):
     svc = _svc(tmp_path)
     idea = svc.add_idea("p1", "pm lead", source="pm")
-    updated = svc.add_idea_comment("p1", idea["id"], "promising, keep it")
+    thread = svc.add_idea_comment("p1", idea["id"], "promising, keep it")
+    assert thread["messages"][0]["text"] == "promising, keep it"
+    updated = next(i for i in svc.list_ideas("p1")["ideas"] if i["id"] == idea["id"])
     assert updated["protected"] is True
-    assert updated["comments"][0]["text"] == "promising, keep it"
+    assert updated["threads"][0]["messages"][0]["text"] == "promising, keep it"
     with pytest.raises(ValueError):
         svc.delete_idea("p1", idea["id"], by="pm")
 

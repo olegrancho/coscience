@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { type Components } from "react-markdown";
 import Md from "../components/Md";
+import { FeedbackThread } from "../components/FeedbackThread";
 import { api } from "../api";
 import { BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
@@ -59,9 +60,25 @@ export default function ProgramDetail() {
     try { await api.addGuidance(id, note.trim()); setNote(""); notifications.show({ color: "teal", title: "Guidance added", message: "The AI will weigh it next cycle." }); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't add", message: String(e) }); }
   };
-  const delNote = async (nid: string) => {
-    try { await api.removeGuidance(id, nid); refresh(); }
-    catch (e) { notifications.show({ color: "red", title: "Couldn't remove", message: String(e) }); }
+  const replyGuidance = async (tid: string, text: string) => {
+    try { await api.addGuidance(id, text, tid); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't reply", message: String(e) }); }
+  };
+  const completeGuidance = async (tid: string) => {
+    try { await api.completeGuidanceThread(id, tid); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't complete", message: String(e) }); }
+  };
+  const reopenGuidance = async (tid: string) => {
+    try { await api.reopenGuidanceThread(id, tid); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't reopen", message: String(e) }); }
+  };
+  const deleteGuidance = async (tid: string) => {
+    try { await api.deleteGuidance(id, tid); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't delete", message: String(e) }); }
+  };
+  const seenGuidance = async (tid: string) => {
+    try { await api.seenGuidanceThread(id, tid); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't mark seen", message: String(e) }); }
   };
   const setPmModel = async (model: string) => {
     try { await api.setProgramModel(id, model); notifications.show({ color: "teal", title: "Planner model set", message: model ? `The PM will plan on ${model}.` : "Back to the default model." }); refresh(); }
@@ -165,13 +182,15 @@ export default function ProgramDetail() {
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 4 }}>your guidance to the AI</div>
-        <Text size="xs" c="dimmed" mb="sm">Standing notes the AI weighs every cycle. Remove one when it's handled.</Text>
+        <Text size="xs" c="dimmed" mb="sm">Standing direction the AI weighs every cycle and replies to — mark a thread complete once it's handled.</Text>
         <Stack gap={8}>
-          {(guidance.data ?? []).map((g) => (
-            <Group key={g.id} justify="space-between" wrap="nowrap" style={{ background: "var(--paper)", borderRadius: 8, padding: "8px 12px" }}>
-              <Text size="sm">{g.text}</Text>
-              <ActionIcon variant="subtle" color="gray" onClick={() => delNote(g.id)} aria-label="remove">✕</ActionIcon>
-            </Group>
+          {(guidance.data ?? []).map((t) => (
+            <FeedbackThread key={t.id} thread={t}
+              onReply={(text) => replyGuidance(t.id, text)}
+              onComplete={() => completeGuidance(t.id)}
+              onReopen={() => reopenGuidance(t.id)}
+              onDelete={() => deleteGuidance(t.id)}
+              onSeen={() => seenGuidance(t.id)} />
           ))}
           <Group gap={8}>
             <TextInput style={{ flex: 1 }} placeholder="Add a note for the AI…" value={note}

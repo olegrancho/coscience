@@ -26,6 +26,24 @@ def test_staging_roundtrip_carries_cycle(substrate):
     assert staged == StagedCycle(cycle=5, output=out)
 
 
+def test_staging_roundtrip_carries_thread_replies_and_reopen_release_ids(substrate):
+    # A crash between the staging commit and clear_staging replays the staged
+    # cycle from disk — these three fields must survive that round trip or a
+    # PM reply/reopen/release silently drops (and never auto-retries).
+    out = PMCycleOutput(
+        report="the report",
+        thread_replies=[{"thread_id": "t1", "text": "reply text"}],
+        reopen_ids=["s1"],
+        release_ids=["s2"],
+    )
+    write_staging(substrate, "p1", 5, out)
+    staged = read_staging(substrate, "p1")
+    assert staged == StagedCycle(cycle=5, output=out)
+    assert staged.output.thread_replies == [{"thread_id": "t1", "text": "reply text"}]
+    assert staged.output.reopen_ids == ["s1"]
+    assert staged.output.release_ids == ["s2"]
+
+
 def test_clear_staging(substrate):
     write_staging(substrate, "p1", 0, PMCycleOutput(report="r"))
     clear_staging(substrate, "p1")

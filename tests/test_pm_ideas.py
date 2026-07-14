@@ -105,7 +105,8 @@ def test_activation_log_records_trigger_and_submitted(substrate):
     assert acts[0]["triggers"] == ["first cycle"]
     assert acts[0]["submitted"] == ["p1-c0-a"]
     # add guidance -> next activation names guidance as the trigger
-    substrate.save_guidance("p1", [{"id": "g1", "text": "focus on X", "added_at": 1.0}])
+    from coscience import threads as _threads
+    substrate.save_guidance("p1", [_threads.new_thread("pm", "focus on X", "u", now=1.0, tid="g1")])
     pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="r2")]))
     acts = substrate.load_pm_state("p1").activations
     assert len(acts) == 2
@@ -184,8 +185,10 @@ def test_failed_sprint_retriggers_pm(substrate):
 
 
 def _with_pm_note(sid, status, goals="g"):
-    return Sprint(id=sid, status=status, goals=goals, plan=["a"], program="p1",
-                  comments=[{"id": "c1", "text": "rework this", "added_at": 1.0, "target": "pm"}])
+    from coscience import threads
+    s = Sprint(id=sid, status=status, goals=goals, plan=["a"], program="p1")
+    s.threads.append(threads.new_thread("pm", "rework this", "u", now=1.0))
+    return s
 
 
 def test_pm_edits_proposed_sprint_from_feedback(substrate):
@@ -206,14 +209,16 @@ def test_pm_cannot_edit_once_approved(substrate):
 
 
 def test_context_surfaces_pm_feedback_only(substrate):
+    from coscience import threads
     _prog(substrate)
-    substrate.save_sprint(Sprint(id="p1-s", status=SprintStatus.PROPOSED, goals="g", plan=[], program="p1",
-        comments=[{"id": "c1", "text": "extend it", "added_at": 1.0, "target": "pm"},
-                  {"id": "c2", "text": "agent note", "added_at": 2.0, "target": "worker"}]))
+    s = Sprint(id="p1-s", status=SprintStatus.PROPOSED, goals="g", plan=[], program="p1")
+    s.threads.append(threads.new_thread("pm", "extend it", "u", now=1.0))
+    s.threads.append(threads.new_thread("worker", "agent note", "u", now=2.0))
+    substrate.save_sprint(s)
     fb = gather_context(substrate, "p1").sprint_feedback
     assert len(fb) == 1
     assert fb[0]["sprint_id"] == "p1-s" and fb[0]["editable"] is True
-    assert fb[0]["comments"] == ["extend it"]            # worker note excluded
+    assert fb[0]["messages"] == [{"role": "human", "text": "extend it"}]   # worker thread excluded
 
 
 def test_context_exposes_pool_and_slots(substrate):

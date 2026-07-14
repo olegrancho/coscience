@@ -14,7 +14,9 @@ def coerce_resources(raw) -> dict[str, float]:
     'CPU-bound; ~30 min wall clock') or extra keys. Keep only entries whose value
     is a real number; silently drop the rest rather than crashing the PM cycle."""
     out: dict[str, float] = {}
-    for k, v in (raw or {}).items():
+    if not isinstance(raw, dict):   # LLM may emit a string/list here — treat as empty, don't crash
+        return out
+    for k, v in raw.items():
         try:
             out[str(k)] = float(v)
         except (TypeError, ValueError):
@@ -32,8 +34,10 @@ class PMContext:
     failed: list[dict] = field(default_factory=list)   # sprints that failed, with why
     sprint_feedback: list[dict] = field(default_factory=list)  # human notes addressed to the PM
     prior_proposals: list[str] = field(default_factory=list)
-    human_guidance: list[str] = field(default_factory=list)
-    ideas: list[dict] = field(default_factory=list)   # current idea pool (id/text/source/protected/comments)
+    human_guidance: list[str] = field(default_factory=list)  # standing guidance, latest text per thread
+    guidance_feedback: list[dict] = field(default_factory=list)  # open human-last guidance threads (always target "pm")
+    ideas: list[dict] = field(default_factory=list)   # current idea pool (id/text/source/protected/demoted)
+    idea_feedback: list[dict] = field(default_factory=list)  # open human-last threads on pool ideas (always target "pm")
     proposed_count: int = 0                            # sprints already in 'proposed'
     max_proposed: int = 4                              # cap the PM may not exceed
     model: str = ""                                    # Claude model for this PM cycle; "" = default
@@ -68,6 +72,7 @@ class PMCycleOutput:
     sprint_edits: list[dict] = field(default_factory=list)   # revisions to still-proposed sprints (from PM feedback)
     reopen_ids: list[str] = field(default_factory=list)      # approved sprints to send back to proposed (now obsolete)
     release_ids: list[str] = field(default_factory=list)     # approved sprints to release into production (-> queued)
+    thread_replies: list[dict] = field(default_factory=list)  # [{thread_id, text}] PM answers to open feedback threads
 
 
 class Reasoner(Protocol):

@@ -11,7 +11,7 @@ import re
 import time
 from dataclasses import dataclass
 
-from coscience import usage_meter
+from coscience import threads, usage_meter
 from coscience.models import Sprint, SprintStatus, Idea
 from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
 
@@ -26,18 +26,22 @@ def _context_payload(context: PMContext) -> dict:
     input, so proposing does not re-trigger the next cycle."""
     return {
         "goals": context.goals,
-        "guidance": sorted(context.human_guidance),
+        # Keyed on (thread_id, last-human-text) — same shape as idea_comments below —
+        # so a new guidance message re-triggers the PM even if other guidance is unchanged.
+        "guidance": sorted((f["thread_id"], f["messages"][-1]["text"])
+                           for f in context.guidance_feedback),
         "active": sorted((s["id"], s["status"]) for s in context.open_sprints
                          if s["status"] != SprintStatus.PROPOSED.value),
         "completed": sorted((s["id"], s["result"]) for s in context.completed),
         "failed": sorted((s["id"], s["error"]) for s in context.failed),
-        "sprint_feedback": sorted((f["sprint_id"], c)
-                                  for f in context.sprint_feedback for c in f["comments"]),
+        "sprint_feedback": sorted((f["sprint_id"], f["thread_id"], f["messages"][-1]["text"])
+                                  for f in context.sprint_feedback),
         # Human idea signal re-triggers the PM; its own pm-sourced ideas/summary do not.
         "human_ideas": sorted(i["text"] for i in context.ideas if i.get("source") == "human"),
-        # gather_context flattens idea comments to plain strings (not dicts), same as
-        # sprint_feedback above — index them as strings.
-        "idea_comments": sorted(str(c) for i in context.ideas for c in i.get("comments", [])),
+        # A human message on an idea thread re-triggers the PM, same shape as
+        # sprint_feedback above (idea_id instead of sprint_id).
+        "idea_comments": sorted((f["idea_id"], f["thread_id"], f["messages"][-1]["text"])
+                                for f in context.idea_feedback),
     }
 
 
@@ -84,15 +88,18 @@ def gather_context(substrate, program_id: str) -> PMContext:
     for s in substrate.iter_sprints():
         if s.program != program_id:
             continue
-        pm_notes = [c["text"] for c in s.comments if c.get("target") == "pm"]
-        if pm_notes and s.status != SprintStatus.CANCELED:
-            sprint_feedback.append({
-                "sprint_id": s.id, "goals": s.goals, "status": s.status.value,
-                # PM may revise a sprint only until a human approves it; after that
-                # the spec is locked and the PM responds by proposing a follow-up.
-                "editable": s.status == SprintStatus.PROPOSED,
-                "comments": pm_notes,
-            })
+        for th in s.threads:
+            if th.get("target") == "pm" and threads.needs_reply(th) and s.status != SprintStatus.CANCELED:
+                sprint_feedback.append({
+                    "sprint_id": s.id, "goals": s.goals, "status": s.status.value,
+                    # PM may revise a sprint while it is still proposed/approved/queued;
+                    # once executing/done/failed the spec is locked and the PM should
+                    # respond by proposing a follow-up instead.
+                    "editable": s.status in (SprintStatus.PROPOSED, SprintStatus.APPROVED,
+                                             SprintStatus.QUEUED),
+                    "thread_id": th["id"],
+                    "messages": [{"role": m["role"], "text": m["text"]} for m in th["messages"]],
+                })
         if s.status == SprintStatus.DONE:
             result = ""
             if s.results:
@@ -108,19 +115,35 @@ def gather_context(substrate, program_id: str) -> PMContext:
                           SprintStatus.QUEUED, SprintStatus.EXECUTING):
             open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals,
                                  "priority": s.priority})
-    guidance = [n["text"] for n in substrate.load_guidance(program_id)]
+    guidance_threads = substrate.load_guidance(program_id)
+    # Standing guidance shown every cycle as background context (latest text per
+    # thread, whether open or already addressed) plus the open threads the PM must
+    # act on and reply to, same mechanism as idea_feedback below.
+    guidance = [th["messages"][-1]["text"] for th in guidance_threads if th.get("messages")]
+    guidance_feedback = [{"thread_id": th["id"],
+                          "messages": [{"role": m["role"], "text": m["text"]} for m in th["messages"]]}
+                         for th in guidance_threads if threads.needs_reply(th)]
     _summary, ideas = substrate.load_ideas(program_id)
     idea_dicts = [{"id": i.id, "text": i.text, "source": i.source,
-                   "protected": i.protected, "demoted": i.demoted,
-                   "comments": [c["text"] for c in i.comments]} for i in ideas]
+                   "protected": i.protected, "demoted": i.demoted} for i in ideas]
+    idea_feedback: list[dict] = []
+    for i in ideas:
+        # Idea threads are always target "pm" — no worker runs against a pool idea.
+        for th in i.threads:
+            if threads.needs_reply(th):
+                idea_feedback.append({
+                    "idea_id": i.id, "thread_id": th["id"],
+                    "messages": [{"role": m["role"], "text": m["text"]} for m in th["messages"]],
+                })
     proposed_count = sum(1 for s in open_sprints if s["status"] == SprintStatus.PROPOSED.value)
     return PMContext(
         program_id=program_id, goals=program.goals, cycle=pm.cycle,
         open_sprints=open_sprints, completed=completed, failed=failed,
         sprint_feedback=sprint_feedback,
         prior_proposals=list(pm.proposed_ids),
-        human_guidance=guidance,
-        ideas=idea_dicts, proposed_count=proposed_count, max_proposed=MAX_PROPOSED,
+        human_guidance=guidance, guidance_feedback=guidance_feedback,
+        ideas=idea_dicts, idea_feedback=idea_feedback,
+        proposed_count=proposed_count, max_proposed=MAX_PROPOSED,
         model=program.pm_model,
         workdir=_resolve_workdir(substrate, program.workdir),
     )
@@ -174,6 +197,9 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
         "new_ideas": list(output.new_ideas),
         "delete_idea_ids": list(output.delete_idea_ids),
         "sprint_edits": list(output.sprint_edits),
+        "reopen_ids": list(output.reopen_ids),
+        "release_ids": list(output.release_ids),
+        "thread_replies": list(output.thread_replies),
         "proposals": [
             {"suffix": p.suffix, "goals": p.goals, "plan": p.plan,
              "priority": p.priority, "resources_required": p.resources_required,
@@ -198,6 +224,9 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         new_ideas=list(data.get("new_ideas", [])),
         delete_idea_ids=list(data.get("delete_idea_ids", [])),
         sprint_edits=list(data.get("sprint_edits", [])),
+        reopen_ids=list(data.get("reopen_ids", [])),
+        release_ids=list(data.get("release_ids", [])),
+        thread_replies=list(data.get("thread_replies", [])),
         proposals=[ProposedSprint(**p) for p in data.get("proposals", [])],
     )
     return StagedCycle(cycle=int(data["cycle"]), output=output,
@@ -383,7 +412,52 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 sp.priority = int(edit["priority"])
             except (TypeError, ValueError):
                 pass
+        # Only a real dict applies ({} clears); a malformed non-dict value from the
+        # LLM is ignored (leaves compute unchanged) rather than wiping it.
+        if isinstance(edit.get("resources_required"), dict):
+            sp.resources_required = coerce_resources(edit["resources_required"])
         substrate.save_sprint(sp)
+
+    # --- thread replies: the PM's answer to each open feedback thread it acted on
+    # (edited, released, proposed a follow-up, or explained why not). One reply
+    # map, applied across every surface a thread id can belong to — sprints,
+    # then pool ideas, then standing guidance — since the LLM doesn't say which
+    # one it's answering. Appended as a 'pm' message on the matching still-open
+    # thread. ---
+    # Guard both keys — the LLM may omit `text`; skip such entries rather than
+    # KeyError-crashing the whole PM tick (which loops over every active program).
+    replies = {r["thread_id"]: str(r.get("text") or "")
+               for r in staged.output.thread_replies
+               if r.get("thread_id") and r.get("text")}
+    if replies:
+        for s in substrate.iter_sprints():
+            if s.program != program_id:
+                continue
+            touched = False
+            for th in s.threads:
+                if th["id"] in replies and threads.needs_reply(th):
+                    threads.append(th, "pm", replies[th["id"]], "", now=now_ts)
+                    touched = True
+            if touched:
+                substrate.save_sprint(s)
+
+        touched_ideas = False
+        for idea in ideas_by_id.values():
+            for th in idea.threads:
+                if th["id"] in replies and threads.needs_reply(th):
+                    threads.append(th, "pm", replies[th["id"]], "", now=now_ts)
+                    touched_ideas = True
+        if touched_ideas:
+            substrate.save_ideas(program_id, new_summary, list(ideas_by_id.values()))
+
+        touched_guidance = False
+        guidance_threads = substrate.load_guidance(program_id)
+        for th in guidance_threads:
+            if th["id"] in replies and threads.needs_reply(th):
+                threads.append(th, "pm", replies[th["id"]], "", now=now_ts)
+                touched_guidance = True
+        if touched_guidance:
+            substrate.save_guidance(program_id, guidance_threads)
 
     # --- release: put an APPROVED sprint into production (-> queued). The approved
     # pool is the PM's managed queue; it releases items here as it sees need, and the
