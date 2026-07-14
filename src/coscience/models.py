@@ -53,7 +53,7 @@ class Sprint:
     title: str = ""
     summary: str = ""
     created_at: float | None = None   # wall-clock of first save; orders sprints by appearance
-    comments: list[dict] = field(default_factory=list)  # human feedback [{id, text, added_at}]
+    threads: list[dict] = field(default_factory=list)  # feedback threads (see coscience.threads)
     model: str = ""                   # Claude model for this sprint's worker; "" = launcher default
     votes: list[dict] = field(default_factory=list)  # 👍/👎 signal [{by, value:+1|-1, at}]; one per voter
     decisions: list[dict] = field(default_factory=list)  # governance trail [{by, action, at}]

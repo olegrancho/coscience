@@ -24,6 +24,13 @@ class Substrate:
         # plan is natural-language suggested steps; tolerate legacy [{id,run}] entries
         plan = [s if isinstance(s, str) else str(s.get("run") or s.get("text") or s)
                 for s in fm.get("plan", [])]
+        import time as _t
+        from coscience import threads as _th
+        if "threads" in fm:
+            sprint_threads = list(fm.get("threads") or [])
+        else:  # back-compat: adapt legacy comments (target defaults to worker)
+            sprint_threads = [_th.adapt_legacy(c, "worker", now=float(c.get("added_at", _t.time())))
+                              for c in fm.get("comments", [])]
         return Sprint(
             id=sprint_id,
             status=SprintStatus(fm["status"]),
@@ -40,10 +47,7 @@ class Substrate:
             title=str(fm.get("title", "")),
             summary=str(fm.get("summary", "")),
             created_at=None if fm.get("created_at") is None else float(fm["created_at"]),
-            comments=[{"id": str(c["id"]), "text": str(c["text"]),
-                       "added_at": float(c["added_at"]),
-                       "target": str(c.get("target", "worker")),
-                       "by": str(c.get("by", ""))} for c in fm.get("comments", [])],
+            threads=sprint_threads,
             model=str(fm.get("model", "")),
             votes=[{"by": str(v["by"]), "value": int(v["value"]), "at": float(v["at"])}
                    for v in fm.get("votes", [])],
@@ -80,8 +84,8 @@ class Substrate:
             sprint.created_at = time.time()
         if sprint.created_at is not None:
             fm["created_at"] = sprint.created_at
-        if sprint.comments:
-            fm["comments"] = list(sprint.comments)
+        if sprint.threads:
+            fm["threads"] = list(sprint.threads)
         if sprint.model:
             fm["model"] = sprint.model
         if sprint.votes:
