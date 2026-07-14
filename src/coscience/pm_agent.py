@@ -383,7 +383,9 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 sp.priority = int(edit["priority"])
             except (TypeError, ValueError):
                 pass
-        if "resources_required" in edit and edit["resources_required"] is not None:
+        # Only a real dict applies ({} clears); a malformed non-dict value from the
+        # LLM is ignored (leaves compute unchanged) rather than wiping it.
+        if isinstance(edit.get("resources_required"), dict):
             sp.resources_required = coerce_resources(edit["resources_required"])
         substrate.save_sprint(sp)
 

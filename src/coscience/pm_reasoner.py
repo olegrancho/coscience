@@ -14,7 +14,9 @@ def coerce_resources(raw) -> dict[str, float]:
     'CPU-bound; ~30 min wall clock') or extra keys. Keep only entries whose value
     is a real number; silently drop the rest rather than crashing the PM cycle."""
     out: dict[str, float] = {}
-    for k, v in (raw or {}).items():
+    if not isinstance(raw, dict):   # LLM may emit a string/list here — treat as empty, don't crash
+        return out
+    for k, v in raw.items():
         try:
             out[str(k)] = float(v)
         except (TypeError, ValueError):
