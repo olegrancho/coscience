@@ -31,3 +31,25 @@ def test_leaseless_running_agent_is_reconciled_killed(substrate):
     assert report.reconciled == 1
     assert token in agent.stopped                         # orphan agent killed
     assert substrate.load_progress("ORPH").agent_token == ""
+
+
+def test_leaseless_sleeping_job_is_reconciled(substrate):
+    # A SLEEPING sprint (tracked detached job, no running agent) that goes leaseless
+    # must also be reaped — else its detached job runs with no lease.
+    orph = Sprint(id="ORPH", status=SprintStatus.EXECUTING, goals="g", plan=["work"],
+                  resources_required={"gpu": 1.0}, priority=0)
+    substrate.save_sprint(orph)
+    prog = substrate.load_progress("ORPH")
+    prog.job_token, prog.job_out = "1:1", "j.out"
+    prog.job_started_at, prog.job_max_seconds = 0.0, 9e18
+    substrate.save_progress(prog)
+    # A higher-priority sprint claims the single GPU, so ORPH cannot be re-adopted.
+    substrate.save_sprint(Sprint(id="HOG", status=SprintStatus.QUEUED, goals="g",
+                                 plan=["go"], resources_required={"gpu": 1.0}, priority=9))
+    disp = Dispatcher(substrate, FakeAgent(), ResourcePool({"gpu": 1.0}),
+                      SchedulerPolicy(aging_interval=0.0))
+    report = disp.run_one_cycle(now=0.0)
+    disp.ledger.load()
+    assert disp.ledger.lease_for("ORPH") is None
+    assert report.reconciled == 1
+    assert substrate.load_progress("ORPH").job_token == ""     # sleeping job reaped

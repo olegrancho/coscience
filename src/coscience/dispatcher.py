@@ -104,7 +104,10 @@ class Dispatcher:
         # ledger.
         for sprint in eligible:
             if self.ledger.lease_for(sprint.id) is None:
-                if self.worker.agent_running(sprint.id):
+                # A sleeping sprint (no live agent, but a tracked detached job) must
+                # also be reaped when leaseless — else its job runs with no lease.
+                if self.worker.agent_running(sprint.id) \
+                        or self.substrate.load_progress(sprint.id).job_token:
                     self.worker.stop_sprint(sprint)
                     report.reconciled += 1
 

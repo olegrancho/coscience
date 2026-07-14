@@ -86,6 +86,26 @@ def test_malformed_job_json_ignored_and_removed(tmp_path):
     assert not (sub.sprint_dir("s1") / "job.json").exists()   # poison removed
 
 
+def test_wake_relaunches_and_done_reaps_live_job(tmp_path):
+    # On a wake with the job still alive, job_token is KEPT (watchdog stays armed);
+    # when the assess run finishes without handling it, the done backstop kills it.
+    sub = Substrate(tmp_path); _queued(sub)
+    s = sub.load_sprint("s1"); s.status = SprintStatus.EXECUTING; sub.save_sprint(s)
+    prog = sub.load_progress("s1")
+    prog.job_token = "1:1"; prog.job_out = "j.out"
+    prog.job_started_at = time.time(); prog.job_max_seconds = 9e18
+    prog.job_next_wake = 1.0                       # in the past -> wake now
+    sub.save_progress(prog)
+    killed = []
+    w = Worker(sub, FakeAgent(collect_result=("assessed, all good", "ok")),
+               job_alive=lambda t: True, terminate=lambda t: killed.append(t))
+    w.run_sprint_beat(sub.load_sprint("s1"))      # wake: keep job_token, launch assess
+    assert sub.load_progress("s1").job_token == "1:1"     # still tracked during assess
+    w.run_sprint_beat(sub.load_sprint("s1"))      # assess exits ok, no new job -> done + reap
+    assert sub.load_sprint("s1").status == SprintStatus.DONE
+    assert killed == ["1:1"]                       # backstop killed the still-live job
+
+
 def test_stale_job_json_cleared_on_launch(tmp_path):
     # A job.json left by a prior crashed attempt must be cleared at launch, so a
     # fresh clean run that declares no job isn't misattributed to the stale file.

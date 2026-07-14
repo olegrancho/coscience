@@ -203,6 +203,20 @@ class Worker:
                 pass
             return None
 
+    def _reap_job(self, progress) -> None:
+        """Kill any still-tracked detached job and clear all job fields. Backstop for
+        the done/failed paths so a job left tracked (e.g. an assess run that finished
+        without handling a still-live job) can't be orphaned past sprint end."""
+        if progress.job_token:
+            try:
+                self._terminate(progress.job_token)
+            except Exception:
+                pass
+        progress.job_token = ""
+        progress.job_out = progress.job_note = progress.assess_reason = ""
+        progress.job_next_wake = progress.job_max_seconds = 0.0
+        progress.job_started_at = None
+
     def run_sprint_beat(self, sprint: Sprint) -> BeatOutcome:
         progress = self.substrate.load_progress(sprint.id)
         sprint_dir = self.substrate.sprint_dir(sprint.id)
@@ -210,19 +224,27 @@ class Worker:
         # A) sleeping on a tracked detached job (no agent runs it) — cheap check
         # only. If the agent process is (still) running, fall through to the
         # normal launched/running/collect handling below instead.
-        if progress.job_token and not self.agent.is_running(progress.agent_token):
+        # Sleeping == a tracked job with no agent session running it. (Using
+        # agent_token, not is_running, so that during a wake/assess run — agent_token
+        # set, job_token kept — this branch stays OUT of the way and the agent is
+        # collected normally in step 3.)
+        if progress.job_token and not progress.agent_token:
             now = time.time()
             if not self._job_alive(progress.job_token):
                 progress.assess_reason = "finished"
+                progress.job_token = ""                   # job gone; nothing to track
             elif progress.job_max_seconds and progress.job_started_at is not None \
                     and now - progress.job_started_at > progress.job_max_seconds:
                 self._terminate(progress.job_token)
                 progress.assess_reason = "timed out"
+                progress.job_token = ""                   # killed
             elif progress.job_next_wake and now >= progress.job_next_wake:
+                # Job still alive — keep tracking it (watchdog stays armed) while the
+                # assess run checks in. If that run finishes/fails without handling the
+                # job, the done/failed path reaps it (below) so it can't be orphaned.
                 progress.assess_reason = "wake"
             else:
                 return BeatOutcome.PROGRESSED            # keep waiting; lease held
-            progress.job_token = ""                       # stop tracking; assess run takes over
             self.substrate.save_progress(progress)
             self.substrate.commit(f"sprint {sprint.id}: job ended ({progress.assess_reason}), assessing")
             # fall through to step 1, which launches an assess agent (assess_reason set)
@@ -286,6 +308,7 @@ class Worker:
             if progress.failures >= MAX_AGENT_FAILURES:
                 sprint.status = SprintStatus.FAILED
                 self.substrate.save_sprint(sprint)
+                self._reap_job(progress)        # terminal: don't leave a job orphaned
                 self.substrate.save_progress(progress)
                 self.substrate.commit(
                     f"sprint {sprint.id}: FAILED after {progress.failures} attempts")
@@ -326,9 +349,7 @@ class Worker:
         sprint.results = [result.id]
         self.substrate.save_sprint(sprint)
         progress.agent_token = ""
-        progress.job_out = progress.job_note = progress.assess_reason = ""
-        progress.job_next_wake = progress.job_max_seconds = 0.0
-        progress.job_started_at = None
+        self._reap_job(progress)            # kill + clear any still-tracked detached job
         self.substrate.save_progress(progress)
         self.substrate.commit(f"sprint {sprint.id}: done, result {result.id}")
         return BeatOutcome.COMPLETED
