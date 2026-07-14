@@ -1,0 +1,72 @@
+import json, time
+from coscience.substrate import Substrate
+from coscience.models import Sprint, SprintStatus, BeatOutcome
+from coscience.worker import Worker
+
+
+class FakeAgent:
+    """Agent that, on start, optionally writes a job.json (to simulate the worker
+    declaring a detached job), and on collect returns a canned (text, status)."""
+    def __init__(self, on_start=None, collect_result=("done text", "ok")):
+        self.on_start, self._collect = on_start, collect_result
+        self.started, self.stopped = [], []
+    def start(self, sprint, ctx, sprint_dir, repo_root=None):
+        self.started.append(sprint.id)
+        if self.on_start:
+            self.on_start(sprint_dir)
+        return "agent-token"
+    def is_running(self, token):
+        return False            # agent exits immediately after start
+    def stop(self, token):
+        self.stopped.append(token)
+    def collect(self, sprint_dir):
+        return self._collect
+
+
+def _queued(sub, sid="s1"):
+    sub.save_sprint(Sprint(id=sid, status=SprintStatus.QUEUED, goals="g", plan=["a"], program="p1"))
+
+
+def test_ok_exit_with_live_job_stays_executing(tmp_path):
+    sub = Substrate(tmp_path); _queued(sub)
+    def write_job(sprint_dir):
+        (sprint_dir / "job.json").write_text(json.dumps(
+            {"pid": 1, "out_file": "j.out", "expected_seconds": 5,
+             "wake_after_seconds": 10, "max_seconds": 60, "note": "train"}))
+    w = Worker(sub, FakeAgent(on_start=write_job), job_alive=lambda t: True)
+    w.run_one_beat()                       # claim -> launch agent
+    out = w.run_one_beat()                 # agent exited + job.json declared
+    sp = sub.load_sprint("s1")
+    assert sp.status == SprintStatus.EXECUTING          # NOT done
+    prog = sub.load_progress("s1")
+    assert prog.job_token and prog.job_note == "train"
+    assert not (sub.sprint_dir("s1") / "job.json").exists()   # consumed
+    assert sp.results == []
+
+
+def test_dead_job_relaunches_assess_then_done(tmp_path):
+    sub = Substrate(tmp_path); _queued(sub)
+    prog = sub.load_progress("s1")
+    prog.job_token, prog.job_out, prog.job_note = "1:1", "j.out", "train"
+    prog.job_next_wake = time.time() + 9999; prog.job_max_seconds = 9999
+    sub.save_sprint(sub.load_sprint("s1"))
+    s = sub.load_sprint("s1"); s.status = SprintStatus.EXECUTING; sub.save_sprint(s)
+    sub.save_progress(prog)
+    w = Worker(sub, FakeAgent(collect_result=("final findings", "ok")), job_alive=lambda t: False)
+    w.run_sprint_beat(sub.load_sprint("s1"))   # job dead -> assess launch
+    w.run_sprint_beat(sub.load_sprint("s1"))   # assess agent exits ok, no job -> done
+    assert sub.load_sprint("s1").status == SprintStatus.DONE
+
+
+def test_watchdog_terminates_overrun_job(tmp_path):
+    sub = Substrate(tmp_path); _queued(sub)
+    s = sub.load_sprint("s1"); s.status = SprintStatus.EXECUTING; sub.save_sprint(s)
+    prog = sub.load_progress("s1")
+    prog.job_token, prog.job_out = "1:1", "j.out"
+    prog.job_started_at = 0.0; prog.job_max_seconds = 1.0; prog.job_next_wake = 9e18
+    sub.save_progress(prog)
+    killed = []
+    w = Worker(sub, FakeAgent(), job_alive=lambda t: True, terminate=lambda t: killed.append(t))
+    w.run_sprint_beat(sub.load_sprint("s1"))
+    assert killed == ["1:1"]
+    assert sub.load_progress("s1").assess_reason == "timed out"
