@@ -131,8 +131,12 @@ export const api = {
     }).then(j<FeedbackThreadT>),
   completeGuidanceThread: (id: string, tid: string) =>
     fetch(`/api/programs/${id}/guidance/${tid}/complete`, { method: "POST" }).then(j<FeedbackThreadT>),
+  reopenGuidanceThread: (id: string, tid: string) =>
+    fetch(`/api/programs/${id}/guidance/${tid}/reopen`, { method: "POST" }).then(j<FeedbackThreadT>),
   seenGuidanceThread: (id: string, tid: string) =>
     fetch(`/api/programs/${id}/guidance/${tid}/seen`, { method: "POST" }).then(j<FeedbackThreadT>),
+  deleteGuidance: (id: string, tid: string) =>
+    fetch(`/api/programs/${id}/guidance/${tid}`, { method: "DELETE" }).then(j<void>),
   listIdeas: (id: string) => fetch(`/api/programs/${id}/ideas`).then(j<IdeaPool>),
   addIdea: (id: string, text: string) =>
     fetch(`/api/programs/${id}/ideas`, {
@@ -160,8 +164,12 @@ export const api = {
     }).then(j<FeedbackThreadT>),
   completeIdeaThread: (id: string, ideaId: string, tid: string) =>
     fetch(`/api/programs/${id}/ideas/${ideaId}/threads/${tid}/complete`, { method: "POST" }).then(j<FeedbackThreadT>),
+  reopenIdeaThread: (id: string, ideaId: string, tid: string) =>
+    fetch(`/api/programs/${id}/ideas/${ideaId}/threads/${tid}/reopen`, { method: "POST" }).then(j<FeedbackThreadT>),
   seenIdeaThread: (id: string, ideaId: string, tid: string) =>
     fetch(`/api/programs/${id}/ideas/${ideaId}/threads/${tid}/seen`, { method: "POST" }).then(j<FeedbackThreadT>),
+  deleteIdeaThread: (id: string, ideaId: string, tid: string) =>
+    fetch(`/api/programs/${id}/ideas/${ideaId}/threads/${tid}`, { method: "DELETE" }).then(j<void>),
   listSprints: () => fetch("/api/sprints").then(j<SprintRow[]>),
   getSprint: (id: string, viewer?: string) =>
     fetch(`/api/sprints/${id}${viewer ? `?viewer=${encodeURIComponent(viewer)}` : ""}`).then(j<Sprint>),
@@ -175,8 +183,12 @@ export const api = {
     }).then(j<FeedbackThreadT>),
   completeSprintThread: (id: string, tid: string) =>
     fetch(`/api/sprints/${id}/threads/${tid}/complete`, { method: "POST" }).then(j<FeedbackThreadT>),
+  reopenSprintThread: (id: string, tid: string) =>
+    fetch(`/api/sprints/${id}/threads/${tid}/reopen`, { method: "POST" }).then(j<FeedbackThreadT>),
   seenSprintThread: (id: string, tid: string) =>
     fetch(`/api/sprints/${id}/threads/${tid}/seen`, { method: "POST" }).then(j<FeedbackThreadT>),
+  deleteSprintThread: (id: string, tid: string) =>
+    fetch(`/api/sprints/${id}/threads/${tid}`, { method: "DELETE" }).then(j<void>),
   submitSprint: (body: { id: string; goals: string; plan: string[]; program?: string;
                          priority?: number; resources_required?: Record<string, number> }) =>
     fetch("/api/sprints", {

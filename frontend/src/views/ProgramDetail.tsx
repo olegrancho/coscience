@@ -68,6 +68,14 @@ export default function ProgramDetail() {
     try { await api.completeGuidanceThread(id, tid); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't complete", message: String(e) }); }
   };
+  const reopenGuidance = async (tid: string) => {
+    try { await api.reopenGuidanceThread(id, tid); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't reopen", message: String(e) }); }
+  };
+  const deleteGuidance = async (tid: string) => {
+    try { await api.deleteGuidance(id, tid); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't delete", message: String(e) }); }
+  };
   const seenGuidance = async (tid: string) => {
     try { await api.seenGuidanceThread(id, tid); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't mark seen", message: String(e) }); }
@@ -180,6 +188,8 @@ export default function ProgramDetail() {
             <FeedbackThread key={t.id} thread={t}
               onReply={(text) => replyGuidance(t.id, text)}
               onComplete={() => completeGuidance(t.id)}
+              onReopen={() => reopenGuidance(t.id)}
+              onDelete={() => deleteGuidance(t.id)}
               onSeen={() => seenGuidance(t.id)} />
           ))}
           <Group gap={8}>

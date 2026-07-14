@@ -1,24 +1,42 @@
 import { useState } from "react";
-import { Button, Group, Stack, Text, Textarea } from "@mantine/core";
+import { ActionIcon, Button, Checkbox, Group, Stack, Text, Textarea, Tooltip } from "@mantine/core";
 import Md from "./Md";
 import { RelTime } from "./ui";
 import { UserChip, useIsMine, OTHER_SHADE } from "../auth";
 import type { FeedbackThreadT } from "../api";
 
-export function FeedbackThread({ thread, onReply, onComplete, onSeen, respondsNow = true }:
-  { thread: FeedbackThreadT; onReply: (t: string) => void; onComplete: () => void; onSeen: () => void; respondsNow?: boolean }) {
+export function FeedbackThread({ thread, onReply, onComplete, onReopen, onDelete, onSeen, respondsNow = true }:
+  { thread: FeedbackThreadT; onReply: (t: string) => void; onComplete: () => void; onReopen: () => void;
+    onDelete: () => void; onSeen: () => void; respondsNow?: boolean }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const isMine = useIsMine();
   const first = thread.messages[0];
   const toggle = () => { const n = !open; setOpen(n); if (n && thread.agent_unseen) onSeen(); };
+  const del = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (window.confirm("Permanently delete this thread?")) onDelete();
+  };
   return (
     <div style={{ border: "1px solid var(--hairline)", borderRadius: 8 }}>
       <div onClick={toggle} style={{ cursor: "pointer", padding: "8px 12px",
         opacity: thread.status === "complete" ? 0.6 : 1 }}>
         <Group justify="space-between" wrap="nowrap">
-          <Text size="sm" lineClamp={open ? undefined : 1}>{first?.text}</Text>
+          <Group gap={9} wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+            <Checkbox
+              size="sm"
+              checked={thread.status === "complete"}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => { e.stopPropagation(); e.currentTarget.checked ? onComplete() : onReopen(); }}
+              aria-label={thread.status === "complete" ? "reopen thread" : "mark complete"}
+              title={thread.status === "complete" ? "Reopen" : "Mark complete"}
+            />
+            <Text size="sm" lineClamp={open ? undefined : 1}>{first?.text}</Text>
+          </Group>
           {thread.agent_unseen && <span className="pill" style={{ "--st": "var(--signal)" } as any}><span className="dot" />reply</span>}
+          <Tooltip label="Delete thread" withArrow openDelay={300}>
+            <ActionIcon variant="subtle" color="gray" size="sm" onClick={del} aria-label="delete thread">✕</ActionIcon>
+          </Tooltip>
         </Group>
       </div>
       {open && (
@@ -41,7 +59,6 @@ export function FeedbackThread({ thread, onReply, onComplete, onSeen, respondsNo
               <Textarea style={{ flex: 1 }} autosize minRows={1} placeholder="Reply…"
                 value={draft} onChange={(e) => setDraft(e.currentTarget.value)} />
               <Button size="xs" disabled={!draft.trim()} onClick={() => { onReply(draft.trim()); setDraft(""); }}>Send</Button>
-              <Button size="xs" variant="default" onClick={onComplete}>Mark complete</Button>
             </Group>
           )}
         </div>

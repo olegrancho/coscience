@@ -255,6 +255,23 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail="not found")
 
+    @api.post("/sprints/{sprint_id}/threads/{tid}/reopen")
+    def reopen_sprint_thread(sprint_id: str, tid: str,
+                             user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.reopen_sprint_thread(sprint_id, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+
+    @api.delete("/sprints/{sprint_id}/threads/{tid}", status_code=204)
+    def delete_sprint_thread(sprint_id: str, tid: str,
+                             user: "auth.User | None" = Depends(current_user)) -> Response:
+        try:
+            service.delete_sprint_thread(sprint_id, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+        return Response(status_code=204)
+
     @api.post("/sprints/{sprint_id}/approve")
     def approve_sprint(sprint_id: str,
                        user: "auth.User | None" = Depends(current_user)) -> dict:
@@ -490,6 +507,14 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail="not found")
 
+    @api.post("/programs/{program_id}/guidance/{tid}/reopen")
+    def reopen_guidance_thread(program_id: str, tid: str,
+                               user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.reopen_guidance_thread(program_id, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+
     @api.get("/programs/{program_id}/ideas")
     def list_ideas(program_id: str) -> dict:
         try:
@@ -557,6 +582,23 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.seen_idea_thread(program_id, idea_id, tid)
         except NotFoundError:
             raise HTTPException(status_code=404, detail="not found")
+
+    @api.post("/programs/{program_id}/ideas/{idea_id}/threads/{tid}/reopen")
+    def reopen_idea_thread(program_id: str, idea_id: str, tid: str,
+                           user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.reopen_idea_thread(program_id, idea_id, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+
+    @api.delete("/programs/{program_id}/ideas/{idea_id}/threads/{tid}", status_code=204)
+    def delete_idea_thread(program_id: str, idea_id: str, tid: str,
+                           user: "auth.User | None" = Depends(current_user)) -> Response:
+        try:
+            service.delete_idea_thread(program_id, idea_id, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+        return Response(status_code=204)
 
     app.include_router(pub)
     app.include_router(api)

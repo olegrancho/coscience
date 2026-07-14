@@ -282,6 +282,9 @@ class Service:
     def complete_sprint_thread(self, sprint_id: str, thread_id: str) -> dict:
         return self._mutate_sprint_thread(sprint_id, thread_id, lambda t: t.update(status="complete"))
 
+    def reopen_sprint_thread(self, sprint_id: str, thread_id: str) -> dict:
+        return self._mutate_sprint_thread(sprint_id, thread_id, lambda t: t.update(status="open"))
+
     def seen_sprint_thread(self, sprint_id: str, thread_id: str) -> dict:
         return self._mutate_sprint_thread(sprint_id, thread_id, lambda t: t.update(agent_unseen=False))
 
@@ -294,6 +297,14 @@ class Service:
         self.substrate.save_sprint(sprint)
         self.substrate.commit(f"sprint {sprint_id}: thread {thread_id}")
         return threads.public(t)
+
+    def delete_sprint_thread(self, sprint_id: str, thread_id: str) -> None:
+        sprint = self._load_sprint(sprint_id)
+        if not any(x["id"] == thread_id for x in sprint.threads):
+            raise NotFoundError(thread_id)
+        sprint.threads = [x for x in sprint.threads if x["id"] != thread_id]
+        self.substrate.save_sprint(sprint)
+        self.substrate.commit(f"sprint {sprint_id}: thread {thread_id} deleted")
 
     # Files surfaced in the UI as the agent's "working documents", with a
     # friendly label + kind and the order they should display in.
@@ -633,6 +644,10 @@ class Service:
         return self._mutate_guidance_thread(program_id, thread_id,
                                             lambda t: t.update(status="complete"))
 
+    def reopen_guidance_thread(self, program_id: str, thread_id: str) -> dict:
+        return self._mutate_guidance_thread(program_id, thread_id,
+                                            lambda t: t.update(status="open"))
+
     def seen_guidance_thread(self, program_id: str, thread_id: str) -> dict:
         return self._mutate_guidance_thread(program_id, thread_id,
                                             lambda t: t.update(agent_unseen=False))
@@ -762,6 +777,10 @@ class Service:
         return self._mutate_idea_thread(program_id, idea_id, thread_id,
                                         lambda t: t.update(status="complete"))
 
+    def reopen_idea_thread(self, program_id: str, idea_id: str, thread_id: str) -> dict:
+        return self._mutate_idea_thread(program_id, idea_id, thread_id,
+                                        lambda t: t.update(status="open"))
+
     def seen_idea_thread(self, program_id: str, idea_id: str, thread_id: str) -> dict:
         return self._mutate_idea_thread(program_id, idea_id, thread_id,
                                         lambda t: t.update(agent_unseen=False))
@@ -778,6 +797,17 @@ class Service:
         self.substrate.save_ideas(program_id, summary, ideas)
         self.substrate.commit(f"program {program_id}: idea {idea_id} thread {thread_id}")
         return threads.public(t)
+
+    def delete_idea_thread(self, program_id: str, idea_id: str, thread_id: str) -> None:
+        summary, ideas = self.substrate.load_ideas(program_id)
+        target = next((i for i in ideas if i.id == idea_id), None)
+        if target is None:
+            raise NotFoundError(idea_id)
+        if not any(x["id"] == thread_id for x in target.threads):
+            raise NotFoundError(thread_id)
+        target.threads = [x for x in target.threads if x["id"] != thread_id]
+        self.substrate.save_ideas(program_id, summary, ideas)
+        self.substrate.commit(f"program {program_id}: idea {idea_id} thread {thread_id} deleted")
 
     # --- results ---
     def list_results(self) -> list[dict]:

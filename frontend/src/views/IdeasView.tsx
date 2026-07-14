@@ -45,6 +45,10 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
     act(() => api.addIdeaComment(programId, idea.id, text, tid), "Couldn't reply");
   const completeThread = (tid: string) =>
     act(() => api.completeIdeaThread(programId, idea.id, tid), "Couldn't complete");
+  const reopenThread = (tid: string) =>
+    act(() => api.reopenIdeaThread(programId, idea.id, tid), "Couldn't reopen");
+  const deleteThread = (tid: string) =>
+    act(() => api.deleteIdeaThread(programId, idea.id, tid), "Couldn't delete");
   const seenThread = (tid: string) =>
     act(() => api.seenIdeaThread(programId, idea.id, tid), "Couldn't mark seen");
 
@@ -95,6 +99,8 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
                 <FeedbackThread key={t.id} thread={t}
                   onReply={(text) => replyThread(t.id, text)}
                   onComplete={() => completeThread(t.id)}
+                  onReopen={() => reopenThread(t.id)}
+                  onDelete={() => deleteThread(t.id)}
                   onSeen={() => seenThread(t.id)}
                   respondsNow />
               ))}

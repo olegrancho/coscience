@@ -244,6 +244,14 @@ export default function SprintDetail() {
     try { await api.completeSprintThread(id, tid); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't complete", message: String(e) }); }
   };
+  const reopenThread = async (tid: string) => {
+    try { await api.reopenSprintThread(id, tid); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't reopen", message: String(e) }); }
+  };
+  const deleteThread = async (tid: string) => {
+    try { await api.deleteSprintThread(id, tid); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't delete", message: String(e) }); }
+  };
   const seenThread = async (tid: string) => {
     try { await api.seenSprintThread(id, tid); refresh(); }
     catch { /* best-effort — not worth surfacing */ }
@@ -361,6 +369,8 @@ export default function SprintDetail() {
                 <FeedbackThread key={t.id} thread={t}
                   onReply={(text) => replyThread("pm", t.id, text)}
                   onComplete={() => completeThread(t.id)}
+                  onReopen={() => reopenThread(t.id)}
+                  onDelete={() => deleteThread(t.id)}
                   onSeen={() => seenThread(t.id)} />
               ))}
             </Stack>
@@ -372,6 +382,8 @@ export default function SprintDetail() {
                 <FeedbackThread key={t.id} thread={t}
                   onReply={(text) => replyThread("worker", t.id, text)}
                   onComplete={() => completeThread(t.id)}
+                  onReopen={() => reopenThread(t.id)}
+                  onDelete={() => deleteThread(t.id)}
                   onSeen={() => seenThread(t.id)}
                   respondsNow={s.status === "executing"} />
               ))}
