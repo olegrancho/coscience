@@ -92,6 +92,14 @@ class ProgressState:
     started_at: float | None = None    # when the current agent run was launched
     failures: int = 0                  # consecutive agent failures (nonzero exit), for the retry cap
     last_error: str = ""               # why the most recent run failed (surfaced to the PM)
+    job_token: str = ""                # tracked detached job "<pid>:<starttime>"; "" = none
+    job_out: str = ""                  # job output path (relative to sprint dir)
+    job_note: str = ""                 # human-readable job description
+    job_started_at: float | None = None
+    job_expected_seconds: float = 0.0
+    job_next_wake: float = 0.0         # absolute ts; wake the agent when now >= this
+    job_max_seconds: float = 0.0       # clamped watchdog cap
+    assess_reason: str = ""            # "" normal; else "finished"/"timed out"/"wake" -> next launch is an assess run
 
 
 @dataclass
