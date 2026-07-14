@@ -105,7 +105,8 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
   "sprint_edits": [
     {{"sprint_id": "<an EDITABLE (still-proposed) sprint to revise per feedback>",
       "goals": "<rewritten objective, optional>", "plan": ["<revised step>", "..."],
-      "summary": "<optional>", "title": "<optional>", "priority": <int, optional>}}
+      "summary": "<optional>", "title": "<optional>", "priority": <int, optional>,
+      "resources_required": {{}} or null}}
   ],
   "reopen_ids": ["<id of an APPROVED sprint (see OPEN SPRINTS) to send back to 'proposed' for
                  reconsideration: results made it obsolete/redundant, it no longer makes sense
@@ -150,6 +151,8 @@ the work itself. So:
   `printf`, file redirects, or any executable command in `plan`.
 `resources_required` maps a resource name to a NUMBER only (e.g. {{"cpu": 1}} or {{"gpu": 2}}),
 or {{}} — never put notes or prose in it; put caveats in `rationale`.
+You may also change an editable sprint's resources_required (compute) here in response to
+feedback — e.g. drop a gpu the environment can't provide and run on cpu.
 `title` is a short headline; `summary` is the skimmable gist; `goals` is the full objective.
 """
 

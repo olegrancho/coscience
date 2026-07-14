@@ -383,6 +383,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 sp.priority = int(edit["priority"])
             except (TypeError, ValueError):
                 pass
+        if "resources_required" in edit and edit["resources_required"] is not None:
+            sp.resources_required = coerce_resources(edit["resources_required"])
         substrate.save_sprint(sp)
 
     # --- release: put an APPROVED sprint into production (-> queued). The approved
