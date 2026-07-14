@@ -32,6 +32,15 @@ def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
             notes = "\n".join(f"- {c}" for c in context.human_comments)
             comments = ("\n\n## Human feedback on this sprint (weigh this — it is direction "
                         "from your reviewers)\n" + notes)
+        if context.feedback_threads:
+            feedback_out = scratchpad.parent / "feedback.out"
+            lines = "\n".join(f'- thread `{t["thread_id"]}`: {t["text"]}'
+                              for t in context.feedback_threads)
+            comments += (
+                "\n\n## Open feedback threads (you may reply)\n" + lines +
+                "\n\nTo answer a reviewer's feedback thread, append one JSON line "
+                '{"thread_id": "<id>", "text": "<short reply>"} to '
+                f"{feedback_out} (one line per reply; do not rewrite earlier lines).")
     return f"""# Sprint: {sprint.title or sprint.id}
 
 You are an autonomous research agent. Carry out this sprint end to end, unattended.

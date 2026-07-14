@@ -13,7 +13,7 @@ import re
 import subprocess
 import time
 
-from coscience import usage_meter
+from coscience import feedback_harvest, usage_meter
 from coscience.executor import ExecutionContext
 from coscience.models import BeatOutcome, Result, Sprint, SprintStatus
 from coscience.substrate import Substrate
@@ -99,6 +99,13 @@ class Worker:
                 except OSError:
                     continue
                 prior.append(f"## {s.title or s.id}\n{summary[:1000]}")
+        feedback_threads = []
+        for t in sprint.threads:
+            if t.get("target") != "worker" or t.get("status") != "open":
+                continue
+            humans = [m["text"] for m in t.get("messages", []) if m["role"] == "human"]
+            if humans:
+                feedback_threads.append({"thread_id": t["id"], "text": humans[-1]})
         return ExecutionContext(
             program_title=program_title, program_goal=program_goal,
             sprint_title=sprint.title, sprint_summary=sprint.summary,
@@ -106,6 +113,7 @@ class Worker:
             prior_results=prior,
             human_comments=[m["text"] for t in sprint.threads if t.get("target") == "worker"
                             for m in t["messages"] if m["role"] == "human"],
+            feedback_threads=feedback_threads,
             # The agent's working directory: the program's project folder if it set
             # one (and it exists), else the control repo. Sprint metadata/scratchpad
             # still live in the control repo (absolute paths); only the cwd changes.
@@ -163,8 +171,13 @@ class Worker:
             self.substrate.commit(f"sprint {sprint.id}: agent launched")
             return BeatOutcome.PROGRESSED
 
-        # 2) agent still working -> leave it
+        # 2) agent still working -> leave it (but harvest any feedback.out replies it
+        # wrote this beat, so a human's follow-up gets answered while the agent runs)
         if self.agent.is_running(progress.agent_token):
+            try:
+                feedback_harvest.harvest_feedback(self.substrate, sprint.id)
+            except Exception:
+                pass
             return BeatOutcome.PROGRESSED
 
         # 3) agent ended -> collect. Only a clean exit (status 'ok') is a result;

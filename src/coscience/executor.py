@@ -27,6 +27,8 @@ class ExecutionContext:
     plan: list[str] = field(default_factory=list)            # suggested steps (guidance)
     prior_results: list[str] = field(default_factory=list)   # formatted "## label\n<summary>"
     human_comments: list[str] = field(default_factory=list)  # human feedback on this sprint
+    feedback_threads: list[dict] = field(default_factory=list)  # open worker threads
+                                                               # [{thread_id, text}] the agent may reply to
     repo_root: Path | None = None
 
 
