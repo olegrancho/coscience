@@ -70,3 +70,32 @@ def test_watchdog_terminates_overrun_job(tmp_path):
     w.run_sprint_beat(sub.load_sprint("s1"))
     assert killed == ["1:1"]
     assert sub.load_progress("s1").assess_reason == "timed out"
+
+
+def test_malformed_job_json_ignored_and_removed(tmp_path):
+    # Agent-authored job.json with non-numeric values must NOT crash the beat; the
+    # poison file is dropped and the sprint completes normally.
+    sub = Substrate(tmp_path); _queued(sub)
+    def write_bad(sprint_dir):
+        (sprint_dir / "job.json").write_text('{"pid": "abc", "expected_seconds": "soon"}')
+    w = Worker(sub, FakeAgent(on_start=write_bad, collect_result=("final", "ok")),
+               job_alive=lambda t: True)
+    w.run_one_beat()                       # launch (writes bad job.json)
+    w.run_one_beat()                       # exit ok, malformed job.json -> ignored -> done
+    assert sub.load_sprint("s1").status == SprintStatus.DONE
+    assert not (sub.sprint_dir("s1") / "job.json").exists()   # poison removed
+
+
+def test_stale_job_json_cleared_on_launch(tmp_path):
+    # A job.json left by a prior crashed attempt must be cleared at launch, so a
+    # fresh clean run that declares no job isn't misattributed to the stale file.
+    sub = Substrate(tmp_path); _queued(sub)
+    d = sub.sprint_dir("s1"); d.mkdir(parents=True, exist_ok=True)
+    (d / "job.json").write_text(json.dumps({"pid": 1, "out_file": "old.out", "note": "stale"}))
+    w = Worker(sub, FakeAgent(collect_result=("real result", "ok")), job_alive=lambda t: True)
+    w.run_one_beat()                       # launch -> clears the stale job.json
+    assert not (d / "job.json").exists()
+    w.run_one_beat()                       # exit ok, no job -> normal done
+    sp = sub.load_sprint("s1")
+    assert sp.status == SprintStatus.DONE
+    assert "real result" in sub.load_result(sp.results[0]).summary

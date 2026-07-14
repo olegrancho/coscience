@@ -163,16 +163,38 @@ class Worker:
         return (self._usage_gate or claude_usage_ok)()
 
     def _read_job_json(self, sprint_dir):
-        """Best-effort read of a declared detached job's job.json; None if
-        absent, unreadable, or missing the pid the rest of the lifecycle keys
-        off of."""
+        """Read + normalize a declared detached job's job.json. Returns a clean dict
+        {pid:int, out_file, note, expected_seconds, wake_after_seconds, max_seconds}
+        or None (absent / unreadable / malformed). job.json is agent-authored free-form
+        JSON, so bad values (non-int pid, "5 minutes", negatives) are expected — a
+        present-but-malformed file is DELETED so it can't crash every subsequent beat."""
         f = sprint_dir / "job.json"
         if not f.is_file():
             return None
         try:
             d = json.loads(f.read_text())
-            return d if isinstance(d, dict) and d.get("pid") else None
-        except (json.JSONDecodeError, ValueError, OSError):
+            if not isinstance(d, dict):
+                raise ValueError("job.json is not an object")
+            pid = int(d["pid"])                        # required; raises if missing/non-int
+            if pid <= 0:
+                raise ValueError("pid must be positive")
+
+            def _num(key):
+                try:
+                    return max(0.0, float(d.get(key, 0) or 0))
+                except (TypeError, ValueError):
+                    return 0.0
+
+            return {"pid": pid, "out_file": str(d.get("out_file", "")),
+                    "note": str(d.get("note", "")),
+                    "expected_seconds": _num("expected_seconds"),
+                    "wake_after_seconds": _num("wake_after_seconds"),
+                    "max_seconds": _num("max_seconds")}
+        except (json.JSONDecodeError, ValueError, TypeError, KeyError, OSError):
+            try:
+                f.unlink(missing_ok=True)              # drop the poison; treat as no job
+            except OSError:
+                pass
             return None
 
     def run_sprint_beat(self, sprint: Sprint) -> BeatOutcome:
@@ -206,6 +228,10 @@ class Worker:
                 # arrival and print a limit message. Leave the sprint claimed; a
                 # later beat retries once usage frees up.
                 return BeatOutcome.IDLE
+            # Drop any stale job.json left by a prior crashed/interrupted attempt, so
+            # only a declaration written DURING this run's clean exit is recorded
+            # (else a leftover file gets misattributed to this run's result).
+            (sprint_dir / "job.json").unlink(missing_ok=True)
             ctx = self._build_context(sprint)
             token = self.agent.start(sprint, ctx, sprint_dir, ctx.repo_root)
             progress.agent_token = token
@@ -270,14 +296,13 @@ class Worker:
         job = self._read_job_json(sprint_dir)
         if status == "ok" and job is not None:
             now = time.time()
-            progress.job_token = process_token(int(job["pid"]))
-            progress.job_out = str(job.get("out_file", ""))
-            progress.job_note = str(job.get("note", ""))
+            progress.job_token = process_token(job["pid"])
+            progress.job_out = job["out_file"]
+            progress.job_note = job["note"]
             progress.job_started_at = now
-            progress.job_expected_seconds = float(job.get("expected_seconds", 0) or 0)
-            progress.job_next_wake = now + float(job.get("wake_after_seconds", 0) or 0)
-            progress.job_max_seconds = min(float(job.get("max_seconds", 0) or 0) or JOB_MAX_SECONDS,
-                                           JOB_MAX_SECONDS)
+            progress.job_expected_seconds = job["expected_seconds"]
+            progress.job_next_wake = now + job["wake_after_seconds"]
+            progress.job_max_seconds = min(job["max_seconds"] or JOB_MAX_SECONDS, JOB_MAX_SECONDS)
             progress.assess_reason = ""
             progress.agent_token = ""
             (sprint_dir / "job.json").unlink(missing_ok=True)     # consume it
