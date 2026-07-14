@@ -42,4 +42,20 @@ sleep 3
 
 echo "==> health:  $(curl -s "$HOST:$PORT/api/health")"
 echo "==> version: $(curl -s "$HOST:$PORT/api/version")"
+
+# The HTTP server is only the coordination service; the autonomous agents are
+# separate heartbeat loops. Restart them here too so a deploy never leaves a loop
+# running stale code. Set COSCIENCE_NO_AGENTS=1 to skip (e.g. a dashboard-only box).
+# Idle beats are cheap (no Claude call until there's real work); usage-gated.
+if [ "${COSCIENCE_NO_AGENTS:-0}" != "1" ]; then
+  echo "==> restart agent loops (pm + dispatch)"
+  for loop in pm dispatch; do
+    pgrep -f "bin/coscience $loop .*--loop" | xargs -r kill || true
+  done
+  sleep 1
+  nohup "$VENV/bin/coscience" pm       --repo "$SUBSTRATE" --loop > "$HOME/coscience-pm.log"       2>&1 </dev/null & disown
+  nohup "$VENV/bin/coscience" dispatch --repo "$SUBSTRATE" --loop > "$HOME/coscience-dispatch.log" 2>&1 </dev/null & disown
+  sleep 1
+  echo "==> loops: pm=$(pgrep -f 'bin/coscience pm .*--loop' | wc -l) dispatch=$(pgrep -f 'bin/coscience dispatch .*--loop' | wc -l) (want 1 each)"
+fi
 echo "Done. Hard-reload the dashboard (Ctrl-Shift-R) to drop the cached bundle."

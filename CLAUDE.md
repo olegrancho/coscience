@@ -26,7 +26,16 @@ bash scripts/deploy.sh
 ```
 
 It: `git pull` → editable `pip install` → **`npm run build` (always)** →
-restart the backend → print health + version. Then hard-reload the dashboard.
+restart the backend → **restart the agent loops (`pm` + `dispatch`)** → print
+health + version. Then hard-reload the dashboard.
+
+**Agents are separate from the server.** `coscience-http` is only the coordination
+service/dashboard — it runs no agents. The autonomous work happens in heartbeat
+loops (`coscience pm --loop`, `coscience dispatch --loop`, which also drives
+workers). `deploy.sh` starts/restarts them so a deploy never leaves a loop on
+stale code. Set `COSCIENCE_NO_AGENTS=1` for a dashboard-only box. A `@reboot`
+crontab entry re-runs `deploy.sh` so everything comes back after a reboot. Loops
+are usage-gated and idle beats make no Claude call.
 
 ### The rules (why `deploy.sh` does what it does)
 
