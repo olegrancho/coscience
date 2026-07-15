@@ -246,19 +246,21 @@ export default function ProgramDetail() {
                 {shown.map((s) => (
                   <div key={s.id}
                     style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 6px", borderBottom: "1px solid var(--hairline)" }}>
-                    <Link to={`/sprints/${s.id}`} style={{ minWidth: 0, flex: 1, textDecoration: "none", color: "inherit" }}>
-                      <Text size="sm" truncate>{s.title || s.goals || s.id}</Text>
-                    </Link>
+                    <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
+                      <Link to={`/sprints/${s.id}`} style={{ minWidth: 0, textDecoration: "none", color: "inherit" }}>
+                        <Text size="sm" truncate>{s.title || s.goals || s.id}</Text>
+                      </Link>
+                      {s.results.length > 0 && (
+                        <Link to={`/results/${s.results[0]}`} className="view" style={{ fontSize: 12, whiteSpace: "nowrap", flexShrink: 0 }}>result ready →</Link>
+                      )}
+                    </div>
                     <Group gap={12} wrap="nowrap">
+                      {(s.votes.up > 0 || s.votes.down > 0) && <VoteControl votes={s.votes} size="xs" />}
                       {s.last_status_at ? (
                         <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
                           <AbsTime at={s.last_status_at} dateOnly />
                         </Text>
                       ) : null}
-                      {(s.votes.up > 0 || s.votes.down > 0) && <VoteControl votes={s.votes} size="xs" />}
-                      {s.results.length > 0 && (
-                        <Link to={`/results/${s.results[0]}`} className="view" style={{ fontSize: 13 }}>result →</Link>
-                      )}
                       <StatusBadge status={s.status} />
                     </Group>
                   </div>
