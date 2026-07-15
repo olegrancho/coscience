@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { api, type Idea } from "../api";
-import { BackLink, EmptyState } from "../components/ui";
+import { AbsTime, BackLink, EmptyState } from "../components/ui";
 import { FeedbackThread } from "../components/FeedbackThread";
 import { UserChip } from "../auth";
 
@@ -68,6 +68,11 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
           <Group gap={8} mt={5} wrap="nowrap">
             <SourceChip source={idea.source} />
             {idea.by && <UserChip username={idea.by} />}
+            {idea.created_at ? (
+              <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
+                <AbsTime at={idea.created_at} dateOnly />
+              </Text>
+            ) : null}
             {idea.threads.length > 0 && (
               <Text size="xs" c="dimmed">{idea.threads.length} thread{idea.threads.length === 1 ? "" : "s"}</Text>
             )}

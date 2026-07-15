@@ -432,6 +432,7 @@ class Service:
             "last_run": pm.last_run,
             "sprints": [{"id": s.id, "status": s.status.value, "goals": s.goals,
                          "title": s.title, "results": list(s.results), "model": s.model,
+                         "last_status_at": self._last_status_at(s),
                          "votes": self._vote_tally(s)}
                         for s in sprints],
         }

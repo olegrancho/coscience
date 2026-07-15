@@ -7,7 +7,7 @@ import { type Components } from "react-markdown";
 import Md from "../components/Md";
 import { FeedbackThread } from "../components/FeedbackThread";
 import { api } from "../api";
-import { BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl } from "../components/ui";
+import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -250,6 +250,11 @@ export default function ProgramDetail() {
                       <Text size="sm" truncate>{s.title || s.goals || s.id}</Text>
                     </Link>
                     <Group gap={12} wrap="nowrap">
+                      {s.last_status_at ? (
+                        <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>
+                          <AbsTime at={s.last_status_at} dateOnly />
+                        </Text>
+                      ) : null}
                       {(s.votes.up > 0 || s.votes.down > 0) && <VoteControl votes={s.votes} size="xs" />}
                       {s.results.length > 0 && (
                         <Link to={`/results/${s.results[0]}`} className="view" style={{ fontSize: 13 }}>result →</Link>

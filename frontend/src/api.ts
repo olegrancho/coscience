@@ -1,7 +1,7 @@
 export interface CurrentUser { username: string; name: string; initials: string }
 export interface MeResponse { user: CurrentUser | null; required: boolean }
 export interface ProgramRow { id: string; title: string; status: string; goals: string }
-export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string; votes: VoteTally }
+export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string; last_status_at: number | null; votes: VoteTally }
 export interface PMActivation { at: number; cycle: number; triggers: string[]; submitted: string[]; forced: boolean }
 export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
