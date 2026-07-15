@@ -52,8 +52,15 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
   const seenThread = (tid: string) =>
     act(() => api.seenIdeaThread(programId, idea.id, tid), "Couldn't mark seen");
 
-  // protected-but-not-pinned (e.g. a human comment) — show why it can't be auto-pruned
-  const autoProtected = idea.protected && !idea.pinned && !idea.demoted;
+  // One pin control doubles as the protection indicator: filled whenever the
+  // idea is protected (pinned OR inherently — human-authored, commented, or
+  // demoted). Clicking toggles the explicit pin; inherent protection can't be
+  // stripped by unpinning, so the icon stays filled in that case.
+  const pinWhy = idea.pinned
+    ? "Pinned — protected from AI pruning. Click to unpin."
+    : idea.protected
+      ? `Protected (${idea.source === "human" ? "your idea" : idea.threads.length ? "has comments" : "demoted"}) — the AI can't prune it. Click to also pin.`
+      : "Pin — protect from AI pruning.";
 
   return (
     <div style={{ border: "1px solid var(--hairline)", borderRadius: 8, overflow: "hidden" }}>
@@ -80,7 +87,6 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
               <Text size="xs" fw={600} style={{ color: "var(--signal)" }}
                 title="Demoted from a sprint — the AI can't promote it back">demoted</Text>
             )}
-            {autoProtected && <Text size="xs" c="dimmed">protected</Text>}
           </Group>
         </div>
         <Group gap={4} wrap="nowrap">
@@ -88,8 +94,8 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
             <ActionIcon variant="subtle" color="teal" onClick={liftDemote} aria-label="lift demotion"
               title="Lift demotion — let the AI promote it to a sprint again">↑</ActionIcon>
           )}
-          <ActionIcon variant={idea.pinned ? "filled" : "subtle"} color="signal" onClick={togglePin}
-            aria-label={idea.pinned ? "unpin" : "pin"} title={idea.pinned ? "Unpin (let the AI prune it)" : "Pin (protect from AI pruning)"}>
+          <ActionIcon variant={idea.protected ? "filled" : "subtle"} color="signal" onClick={togglePin}
+            aria-label={idea.pinned ? "unpin" : "pin"} title={pinWhy}>
             📌
           </ActionIcon>
           <ActionIcon variant="subtle" color="gray" onClick={del} aria-label="delete" title="Delete idea">✕</ActionIcon>
