@@ -27,11 +27,14 @@ def test_submit_then_list_and_get(tmp_path):
                             priority=3, resources_required={"gpu": 1})
     assert sid == "sp1"
     rows = svc.list_sprints()
-    assert rows == [{"id": "sp1", "status": "proposed", "title": "", "summary": "",
-                     "goals": "cure", "program": None, "priority": 3, "steps": 1,
-                     "results": [], "rationale": "", "resources_required": {"gpu": 1.0},
-                     "started_at": None, "model": "", "activity": None,
-                     "votes": {"up": 0, "down": 0, "mine": 0}}]
+    assert len(rows) == 1
+    row = rows[0]
+    assert isinstance(row.pop("last_status_at"), float)   # birth timestamp, non-deterministic
+    assert row == {"id": "sp1", "status": "proposed", "title": "", "summary": "",
+                   "goals": "cure", "program": None, "priority": 3, "steps": 1,
+                   "results": [], "rationale": "", "resources_required": {"gpu": 1.0},
+                   "started_at": None, "model": "", "activity": None,
+                   "votes": {"up": 0, "down": 0, "mine": 0}}
     detail = svc.get_sprint("sp1")
     assert detail["status"] == "proposed"
     assert detail["resources_required"] == {"gpu": 1.0}

@@ -3,7 +3,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type SprintRow } from "../api";
-import { Bars, computeCost, EmptyState, Gauge, Heartbeat, LiveActivity, RelTime, Running, StateBar, StatusBadge, UsagePanel } from "../components/ui";
+import { AbsTime, Bars, computeCost, EmptyState, Gauge, Heartbeat, LiveActivity, RelTime, Running, StateBar, StatusBadge, UsagePanel } from "../components/ui";
 
 function programOf(s: SprintRow) {
   if (s.program) return s.program;
@@ -80,6 +80,7 @@ export default function Overview() {
         {summary && <p className="exp-summary">{summary}</p>}
         <div className="exp-meta">
           <Bars filled={c.filled} /> {c.text} · {SCALE_HINT[c.scale]} · {s.steps}-step plan
+          {s.last_status_at ? <> · <AbsTime at={s.last_status_at} dateOnly /></> : null}
         </div>
         <div className="foot">
           <Link className="view" to={`/sprints/${s.id}`} onClick={(e) => e.stopPropagation()}>View plan →</Link>

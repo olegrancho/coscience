@@ -196,11 +196,20 @@ class Service:
                 "rationale": sprint.rationale,
                 "resources_required": sprint.resources_required,
                 "started_at": started,
+                "last_status_at": self._last_status_at(sprint),
                 "model": sprint.model,
                 "activity": activity,
                 "votes": self._vote_tally(sprint),
             })
         return rows
+
+    def _last_status_at(self, sprint: Sprint) -> float:
+        """Timestamp of the most recent status change. Uses the lifecycle
+        timeline; falls back to creation time for legacy sprints with no
+        recorded history."""
+        if sprint.status_history:
+            return float(sprint.status_history[-1]["at"])
+        return self._appeared_at(sprint)
 
     def _activity(self, sprint_id: str) -> dict | None:
         from coscience.claude_executor import read_activity

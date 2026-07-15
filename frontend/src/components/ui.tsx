@@ -72,12 +72,17 @@ export function RelTime({ at, prefix }: { at?: number | null; prefix?: string })
 }
 
 /** Absolute local datetime ("Jul 14, 2026, 3:20 PM"), relative time on hover.
- * The inverse of RelTime — for when the exact date matters more than recency. */
-export function AbsTime({ at, prefix }: { at?: number | null; prefix?: string }) {
+ * The inverse of RelTime — for when the exact date matters more than recency.
+ * With `dateOnly`, shows just the day ("Jul 14, 2026") and puts the full
+ * datetime + relative time on hover. */
+export function AbsTime({ at, prefix, dateOnly }: { at?: number | null; prefix?: string; dateOnly?: boolean }) {
   if (!at) return null;
-  const abs = new Date(at * 1000).toLocaleString(undefined,
+  const d = new Date(at * 1000);
+  const day = d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  const full = d.toLocaleString(undefined,
     { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  return <span title={relTime(at)}>{prefix}{abs}</span>;
+  if (dateOnly) return <span title={`${full} · ${relTime(at)}`}>{prefix}{day}</span>;
+  return <span title={relTime(at)}>{prefix}{full}</span>;
 }
 
 /** A clear way back to the parent this page belongs under. Names the parent so

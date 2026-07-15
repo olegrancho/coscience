@@ -32,7 +32,8 @@ export interface SprintRow {
   goals: string; program: string | null;
   priority: number; steps: number; results: string[];
   rationale: string; resources_required: Record<string, number>;
-  started_at: number | null; model: string; activity: SprintActivity | null;
+  started_at: number | null; last_status_at: number | null;
+  model: string; activity: SprintActivity | null;
   votes: VoteTally;
 }
 export interface UsageWindow { pct: number; resets: string }
