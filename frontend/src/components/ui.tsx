@@ -71,6 +71,15 @@ export function RelTime({ at, prefix }: { at?: number | null; prefix?: string })
   return <span title={abs}>{prefix}{relTime(at)}</span>;
 }
 
+/** Absolute local datetime ("Jul 14, 2026, 3:20 PM"), relative time on hover.
+ * The inverse of RelTime — for when the exact date matters more than recency. */
+export function AbsTime({ at, prefix }: { at?: number | null; prefix?: string }) {
+  if (!at) return null;
+  const abs = new Date(at * 1000).toLocaleString(undefined,
+    { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return <span title={relTime(at)}>{prefix}{abs}</span>;
+}
+
 /** A clear way back to the parent this page belongs under. Names the parent so
  *  it doubles as context ("‹ Demo" tells you the experiment is in the Demo program). */
 /** Whether the worker agent is engaged right now and what it's doing, vs waiting.

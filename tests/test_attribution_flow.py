@@ -19,8 +19,9 @@ def _client(tmp_path):
 def test_approve_records_actor(tmp_path):
     c, svc = _client(tmp_path)
     assert c.post("/api/sprints/s1/approve").status_code == 200
-    decisions = svc.substrate.load_sprint("s1").decisions
-    assert decisions[-1]["by"] == "stroganov" and decisions[-1]["action"] == "approve"
+    history = svc.substrate.load_sprint("s1").status_history
+    assert history[-1]["by"] == "stroganov" and history[-1]["action"] == "approve"
+    assert history[-1]["status"] == "approved"
 
 
 def test_comment_actor_is_server_derived_not_client(tmp_path):

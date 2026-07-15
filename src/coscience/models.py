@@ -1,6 +1,7 @@
 """Typed domain models for the Phase 0 substrate."""
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -56,7 +57,24 @@ class Sprint:
     threads: list[dict] = field(default_factory=list)  # feedback threads (see coscience.threads)
     model: str = ""                   # Claude model for this sprint's worker; "" = launcher default
     votes: list[dict] = field(default_factory=list)  # 👍/👎 signal [{by, value:+1|-1, at}]; one per voter
-    decisions: list[dict] = field(default_factory=list)  # governance trail [{by, action, at}]
+    decisions: list[dict] = field(default_factory=list)  # legacy governance trail [{by, action, at}]; superseded by status_history (read-only for old sprints)
+    status_history: list[dict] = field(default_factory=list)  # lifecycle timeline [{status, at, by, action}]; action="" for system transitions
+
+
+def set_status(sprint: "Sprint", new_status: "SprintStatus",
+               by: str = "", action: str = "") -> None:
+    """Set sprint.status and append a status_history entry, but only when the
+    status actually changes. Dedup matters: a dispatcher grant and the worker's
+    start both set EXECUTING within one cycle — we record it once.
+
+    `action` is the human/PM verb (approve/run/send_back/reject/reopen) for a
+    manual transition; "" marks a system transition (executing/done/failed)."""
+    last = sprint.status_history[-1]["status"] if sprint.status_history else None
+    if last != new_status.value:
+        sprint.status_history.append(
+            {"status": new_status.value, "at": time.time(),
+             "by": str(by or ""), "action": action})
+    sprint.status = new_status
 
 
 @dataclass

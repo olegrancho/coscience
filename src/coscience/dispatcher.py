@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from coscience.ledger import Ledger
-from coscience.models import BeatOutcome, SprintStatus
+from coscience.models import BeatOutcome, SprintStatus, set_status
 from coscience.resources import ResourcePool
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
@@ -74,7 +74,7 @@ class Dispatcher:
                                    priority=eff, preemptible=sprint.preemptible):
                 report.granted += 1
                 if sprint.status == SprintStatus.QUEUED:
-                    sprint.status = SprintStatus.EXECUTING
+                    set_status(sprint, SprintStatus.EXECUTING)
                     self.substrate.save_sprint(sprint)
 
         # --- one preemption round for the top starved candidate ---
@@ -94,7 +94,7 @@ class Dispatcher:
                                        priority=cand_eff, preemptible=cand.preemptible):
                     report.granted += 1
                     if cand.status == SprintStatus.QUEUED:
-                        cand.status = SprintStatus.EXECUTING
+                        set_status(cand, SprintStatus.EXECUTING)
                         self.substrate.save_sprint(cand)
 
         # --- reconcile: no lease => no running job ---

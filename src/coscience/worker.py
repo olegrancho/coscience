@@ -17,7 +17,7 @@ from coscience import feedback_harvest, usage_meter
 from coscience.executor import ExecutionContext
 from coscience.executor import is_running as _job_is_running
 from coscience.executor import process_token, terminate_detached as _terminate
-from coscience.models import BeatOutcome, Result, Sprint, SprintStatus
+from coscience.models import BeatOutcome, Result, Sprint, SprintStatus, set_status
 from coscience.substrate import Substrate
 
 _USAGE_SCRIPT = os.path.expanduser("~/.claude/skills/usage/usage.py")
@@ -151,7 +151,7 @@ class Worker:
         if not queued:
             return None
         sprint = queued[0]
-        sprint.status = SprintStatus.EXECUTING
+        set_status(sprint, SprintStatus.EXECUTING)
         self.substrate.save_sprint(sprint)
         self.substrate.commit(f"sprint {sprint.id}: start executing")
         return sprint
@@ -306,7 +306,7 @@ class Worker:
             progress.failures += 1
             progress.last_error = (text or "").strip()[-600:] or "agent exited nonzero with no output"
             if progress.failures >= MAX_AGENT_FAILURES:
-                sprint.status = SprintStatus.FAILED
+                set_status(sprint, SprintStatus.FAILED)
                 self.substrate.save_sprint(sprint)
                 self._reap_job(progress)        # terminal: don't leave a job orphaned
                 self.substrate.save_progress(progress)
@@ -345,7 +345,7 @@ class Worker:
             completed_at=time.time(),
         )
         self.substrate.save_result(result)
-        sprint.status = SprintStatus.DONE
+        set_status(sprint, SprintStatus.DONE)
         sprint.results = [result.id]
         self.substrate.save_sprint(sprint)
         progress.agent_token = ""

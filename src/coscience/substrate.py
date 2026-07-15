@@ -53,6 +53,9 @@ class Substrate:
                    for v in fm.get("votes", [])],
             decisions=[{"by": str(d.get("by", "")), "action": str(d.get("action", "")),
                         "at": float(d.get("at", 0.0))} for d in fm.get("decisions", [])],
+            status_history=[{"status": str(h.get("status", "")), "at": float(h.get("at", 0.0)),
+                             "by": str(h.get("by", "")), "action": str(h.get("action", ""))}
+                            for h in fm.get("status_history", [])],
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
@@ -82,6 +85,13 @@ class Substrate:
         # legacy sprints (saved before this field existed) stay unstamped.
         if sprint.created_at is None and not (d / "sprint.md").is_file():
             sprint.created_at = time.time()
+            # Seed the lifecycle timeline at birth (first save only). Legacy
+            # sprints (already on disk) are never re-seeded, so they keep their
+            # existing `decisions` trail with no duplicate initial entry.
+            if not sprint.status_history:
+                sprint.status_history = [{
+                    "status": str(sprint.status), "at": sprint.created_at,
+                    "by": "", "action": ""}]
         if sprint.created_at is not None:
             fm["created_at"] = sprint.created_at
         if sprint.threads:
@@ -92,6 +102,8 @@ class Substrate:
             fm["votes"] = list(sprint.votes)
         if sprint.decisions:
             fm["decisions"] = list(sprint.decisions)
+        if sprint.status_history:
+            fm["status_history"] = list(sprint.status_history)
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))
 

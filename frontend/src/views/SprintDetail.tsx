@@ -8,7 +8,7 @@ import { Transcript } from "../components/Transcript";
 import { FeedbackThread } from "../components/FeedbackThread";
 import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
-import { BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, voterId } from "../components/ui";
+import { AbsTime, BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, voterId } from "../components/ui";
 import SprintEditModal from "../components/SprintEditModal";
 import { useMe, useIsMine, UserChip, OTHER_SHADE } from "../auth";
 
@@ -315,6 +315,11 @@ export default function SprintDetail() {
         <Group gap={10} mt={9} align="center">
           <StatusBadge status={s.status} />
           <span className="mono" style={{ fontSize: 12, color: "var(--ink-faint)" }}>ref {s.id}</span>
+          {s.created_at ? (
+            <span style={{ fontSize: 12, color: "var(--ink-faint)" }}>
+              created <AbsTime at={s.created_at} />
+            </span>
+          ) : null}
           {s.status === "queued" && (
             <span style={{ fontSize: 12, color: "var(--st-queued)" }}>waiting for a compute slot…</span>
           )}
@@ -333,20 +338,35 @@ export default function SprintDetail() {
           </Card>
         )}
         {s.summary && <Text mt={12} style={{ maxWidth: 620, color: "var(--ink-muted)", lineHeight: 1.55 }}>{s.summary}</Text>}
-        {(s.decisions ?? []).length > 0 && (
-          <div style={{ marginTop: 14 }}>
-            <div className="eyebrow" style={{ marginBottom: 5 }}>decision log</div>
-            <Stack gap={4}>
-              {s.decisions!.map((d, i) => (
-                <Group key={i} gap={6} wrap="nowrap"
-                  style={{ fontSize: 12, color: "var(--ink-muted)", background: isMine(d.by) ? "transparent" : OTHER_SHADE,
-                           borderRadius: 6, padding: "3px 8px", width: "fit-content" }}>
-                  <b style={{ color: "var(--ink)" }}>{d.action}</b> by <UserChip username={d.by} /> · <RelTime at={d.at} />
-                </Group>
-              ))}
-            </Stack>
-          </div>
-        )}
+        {(() => {
+          // Merged lifecycle timeline: new status_history (all transitions) +
+          // any legacy decisions (old sprints, pre status_history). No overlap —
+          // a sprint has one or the other for a given event.
+          const events = [
+            ...(s.status_history ?? []).map((h) => ({ at: h.at, by: h.by, action: h.action, status: h.status })),
+            ...(s.decisions ?? []).map((d) => ({ at: d.at, by: d.by, action: d.action, status: "" })),
+          ].sort((a, b) => a.at - b.at);
+          if (events.length === 0) return null;
+          return (
+            <div style={{ marginTop: 14 }}>
+              <div className="eyebrow" style={{ marginBottom: 5 }}>timeline</div>
+              <Stack gap={4}>
+                {events.map((e, i) => (
+                  <Group key={i} gap={6} wrap="nowrap"
+                    style={{ fontSize: 12, color: "var(--ink-muted)", background: (e.by && !isMine(e.by)) ? OTHER_SHADE : "transparent",
+                             borderRadius: 6, padding: "3px 8px", width: "fit-content" }}>
+                    {e.action ? (
+                      <><b style={{ color: "var(--ink)" }}>{e.action}</b> by <UserChip username={e.by} /></>
+                    ) : (
+                      <><span style={{ color: "var(--ink-faint)" }}>→</span> <StatusBadge status={e.status} /></>
+                    )}
+                    <span>· <AbsTime at={e.at} /></span>
+                  </Group>
+                ))}
+              </Stack>
+            </div>
+          );
+        })()}
       </div>
 
       {s.title && s.goals && s.goals !== s.title && (

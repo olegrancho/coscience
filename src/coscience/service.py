@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from coscience import threads
 from coscience.ledger import Ledger
-from coscience.models import Sprint, SprintStatus, Program, ProgramStatus, Idea, ChatThread
+from coscience.models import Sprint, SprintStatus, Program, ProgramStatus, Idea, ChatThread, set_status
 from coscience.resources import ResourcePool, load_pool
 from coscience.substrate import Substrate
 
@@ -77,8 +77,7 @@ class Service:
         sprint = self._load_sprint(sprint_id)
         if sprint.status != SprintStatus.PROPOSED:
             raise ValueError(f"can only approve a proposed sprint; {sprint_id} is {sprint.status.value}")
-        sprint.status = SprintStatus.APPROVED
-        self._decide(sprint, by, "approve")
+        set_status(sprint, SprintStatus.APPROVED, by=by, action="approve")
         self.substrate.save_sprint(sprint)
 
     def run_sprint(self, sprint_id: str, by: str = "") -> None:
@@ -88,8 +87,7 @@ class Service:
         sprint = self._load_sprint(sprint_id)
         if sprint.status not in (SprintStatus.PROPOSED, SprintStatus.APPROVED):
             raise ValueError(f"can only run a proposed or approved sprint; {sprint_id} is {sprint.status.value}")
-        sprint.status = SprintStatus.QUEUED
-        self._decide(sprint, by, "run")
+        set_status(sprint, SprintStatus.QUEUED, by=by, action="run")
         self.substrate.save_sprint(sprint)
 
     def send_back_sprint(self, sprint_id: str, by: str = "") -> None:
@@ -97,8 +95,7 @@ class Service:
         sprint = self._load_sprint(sprint_id)
         if sprint.status != SprintStatus.APPROVED:
             raise ValueError(f"can only send back an approved sprint; {sprint_id} is {sprint.status.value}")
-        sprint.status = SprintStatus.PROPOSED
-        self._decide(sprint, by, "send_back")
+        set_status(sprint, SprintStatus.PROPOSED, by=by, action="send_back")
         self.substrate.save_sprint(sprint)
 
     _REJECTABLE = (SprintStatus.PROPOSED, SprintStatus.APPROVED, SprintStatus.QUEUED)
@@ -108,8 +105,7 @@ class Service:
         sprint = self._load_sprint(sprint_id)
         if sprint.status not in self._REJECTABLE:
             raise ValueError(f"can only cancel a pre-run sprint; {sprint_id} is {sprint.status.value}")
-        sprint.status = SprintStatus.CANCELED
-        self._decide(sprint, by, "reject")
+        set_status(sprint, SprintStatus.CANCELED, by=by, action="reject")
         self.substrate.save_sprint(sprint)
 
     def vote_sprint(self, sprint_id: str, by: str, value: int) -> dict:
@@ -130,10 +126,6 @@ class Service:
         self.substrate.save_sprint(sprint)
         self.substrate.commit(f"sprint {sprint_id}: vote")
         return self._vote_tally(sprint, by)
-
-    @staticmethod
-    def _decide(sprint, by: str, action: str) -> None:
-        sprint.decisions.append({"by": str(by or ""), "action": action, "at": time.time()})
 
     @staticmethod
     def _vote_tally(sprint, viewer: str = "") -> dict:
@@ -247,6 +239,8 @@ class Service:
             "plan": list(sprint.plan),
             "threads": [threads.public(t) for t in sprint.threads],
             "decisions": list(sprint.decisions),
+            "status_history": list(sprint.status_history),
+            "created_at": self._appeared_at(sprint),
             "votes": self._vote_tally(sprint, viewer),
             "agent_running": bool(progress.agent_token),
             "agent_state": agent_state,
@@ -714,8 +708,7 @@ class Service:
                     demoted=True, created_at=time.time())
         ideas.append(idea)
         self.substrate.save_ideas(sprint.program, summary, ideas)
-        sprint.status = SprintStatus.CANCELED
-        self._decide(sprint, by, "demote")
+        set_status(sprint, SprintStatus.CANCELED, by=by, action="demote")
         self.substrate.save_sprint(sprint)
         self.substrate.commit(f"sprint {sprint_id} demoted to idea {idea.id}")
         return {"sprint_id": sprint_id, "idea": self._idea_public(idea)}

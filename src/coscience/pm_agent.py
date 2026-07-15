@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass
 
 from coscience import threads, usage_meter
-from coscience.models import Sprint, SprintStatus, Idea
+from coscience.models import Sprint, SprintStatus, Idea, set_status
 from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
 
 # The PM may not push the program past this many sprints awaiting human review.
@@ -471,7 +471,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         sp = substrate.load_sprint(sid)
         if sp.program != program_id or sp.status != SprintStatus.APPROVED:
             continue
-        sp.status = SprintStatus.QUEUED
+        set_status(sp, SprintStatus.QUEUED, by="pm", action="run")
         substrate.save_sprint(sp)
         released.append(sid)
 
@@ -486,7 +486,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         sp = substrate.load_sprint(sid)
         if sp.program != program_id or sp.status != SprintStatus.APPROVED:
             continue
-        sp.status = SprintStatus.PROPOSED
+        set_status(sp, SprintStatus.PROPOSED, by="pm", action="reopen")
         substrate.save_sprint(sp)
         reopened.append(sid)
 
