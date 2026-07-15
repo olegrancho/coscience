@@ -75,7 +75,7 @@ def test_worker_records_executing_then_done(tmp_path):
     w.run_one_beat()                            # claim -> executing
     w.run_one_beat()                            # agent done -> done
     hist = sub.load_sprint("s1").status_history
-    assert [h["status"] for h in hist] == ["executing", "done"]
+    assert [h["status"] for h in hist] == ["queued", "executing", "done"]   # queued seeded at birth
     assert all(h["action"] == "" for h in hist)   # system transitions
 
 
