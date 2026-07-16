@@ -19,7 +19,7 @@ from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coer
 # Humans can propose beyond it; this only gates the PM's own proposing/promoting.
 MAX_PROPOSED = 4
 
-MAX_EDGE_OPS = 12   # bound the edges the PM may add per cycle (anti-spam)
+MAX_EDGE_OPS = 100   # bound the edges the PM may add per cycle (headroom for lineage back-fill)
 
 
 def _context_payload(context: PMContext) -> dict:

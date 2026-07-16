@@ -824,11 +824,18 @@ class Service:
     def get_graph(self, program_id: str) -> dict:
         self._require_program(program_id)
         ideas, sprints = self._program_nodes(program_id)
+        # Canceled sprints are off the graph (a demote already rewired their edges).
+        sprints = [s for s in sprints if s.status != SprintStatus.CANCELED]
+        live = list(ideas) + sprints
+        live_ids = {n.id for n in live}
         nodes = [{"id": i.id, "kind": graph.node_kind(i), "stage": graph.node_stage(i),
                   "label": i.text[:80]} for i in ideas]
         nodes += [{"id": s.id, "kind": graph.node_kind(s), "stage": graph.node_stage(s),
                    "label": (s.title or s.goals)[:80]} for s in sprints]
-        return {"nodes": nodes, "edges": graph.all_edges(list(ideas) + sprints)}
+        # Drop any edge that touches an excluded (canceled) node, so nothing dangles.
+        edges = [e for e in graph.all_edges(live)
+                 if e["src"] in live_ids and e["dst"] in live_ids]
+        return {"nodes": nodes, "edges": edges}
 
     def add_idea(self, program_id: str, text: str, source: str = "human", by: str = "") -> dict:
         self._require_program(program_id)

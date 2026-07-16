@@ -48,6 +48,17 @@ def test_demote_drops_kind_illegal_lineage_edge(tmp_path):
     assert svc.substrate.load_sprint("SB").edges == []   # degraded builds_on->idea dropped
 
 
+def test_get_graph_excludes_canceled(tmp_path):
+    svc = _svc(tmp_path)
+    svc.substrate.save_sprint(Sprint(id="s1", status=SprintStatus.DONE, goals="g", program="p1"))
+    svc.substrate.save_sprint(Sprint(id="sx", status=SprintStatus.CANCELED, goals="g", program="p1",
+                                     edges=[graph.new_edge("builds_on", "sx", "s1", "pm", rationale="r")]))
+    g = svc.get_graph("p1")
+    ids = {n["id"] for n in g["nodes"]}
+    assert "s1" in ids and "sx" not in ids                 # canceled off the graph
+    assert all(e["src"] != "sx" and e["dst"] != "sx" for e in g["edges"])   # no dangling edge
+
+
 def test_delete_idea_cascades_inbound_edges(tmp_path):
     svc = _svc(tmp_path)
     ideas = [Idea(id="A", text="doomed", source="pm"),
