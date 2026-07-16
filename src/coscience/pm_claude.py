@@ -185,10 +185,10 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
     {{"suffix": "<short-slug>",
       "title": "<=8 words naming the experiment, e.g. 'Cross-validate the witness pair'>",
       "summary": "one or two plain sentences a reviewer can skim to decide",
-      "goals": "<the full objective of this sprint>",
+      "goals": "<the full objective, as STRUCTURED markdown a human reads at a glance: 2-4 SHORT paragraphs separated by a BLANK LINE, and '-' bullets for any list of conditions/probes/sub-questions. Put REAL blank lines in the JSON string (escaped as \\n\\n). Do NOT write one long run-on paragraph.>",
       "plan": ["<suggested step in plain language>", "<another>", "..."],
       "priority": <int>, "resources_required": {{}} or null,
-      "rationale": "<why this experiment next>",
+      "rationale": "<why this experiment next; short — 1-3 sentences, a blank line (\\n\\n) between distinct points if more than one>",
       "from_idea": "<id of the pool idea this promotes, or omit>",
       "model": "<optional: a Claude model slug to run this sprint's worker on, e.g. 'claude-sonnet-4-6' for cheap/routine work or 'claude-opus-4-8' for hard reasoning; omit to use the default>"}}
   ]}}
@@ -225,7 +225,9 @@ the work itself. So:
 or {{}} — never put notes or prose in it; put caveats in `rationale`.
 You may also change an editable sprint's resources_required (compute) here in response to
 feedback — e.g. drop a gpu the environment can't provide and run on cpu.
-`title` is a short headline; `summary` is the skimmable gist; `goals` is the full objective.
+`title` is a short headline; `summary` is the skimmable gist; `goals` is the full objective
+— write `goals` as structured markdown (short paragraphs with blank lines, bullets for lists),
+NEVER as one long unbroken paragraph.
 """
 
 
