@@ -9,6 +9,7 @@ import { FeedbackThread } from "../components/FeedbackThread";
 import { api } from "../api";
 import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
+import LineageCard from "../components/LineageCard";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
@@ -293,6 +294,8 @@ export default function ProgramDetail() {
           )
           : <Text size="sm" c="dimmed">A pool of candidate directions the AI grows, prunes, and promotes into experiments.</Text>}
       </Card>
+
+      <LineageCard programId={id} />
 
       <ProposeSprintModal programId={id} opened={proposing} onClose={() => setProposing(false)} onDone={refresh} />
     </Stack>
