@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { ActionIcon, Card, Group, Loader, Modal, SegmentedControl, Text, Tooltip } from "@mantine/core";
 import { api } from "../api";
-import { stageColor } from "./graphFlow";
+import { stageColor, stageFill } from "./graphFlow";
 import { clearPositions } from "./graphPositions";
 import type { LayoutMode } from "./LineageGraph";
 
@@ -11,10 +11,10 @@ const LineageGraph = lazy(() => import("./LineageGraph"));
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
-function Swatch({ color, label }: { color: string; label: string }) {
+function Swatch({ color, fill, label }: { color: string; fill: string; label: string }) {
   return (
     <Group gap={4} wrap="nowrap">
-      <span style={{ width: 10, height: 10, borderRadius: 3, border: `2px solid ${color}` }} />
+      <span style={{ width: 10, height: 10, borderRadius: 3, border: `2px solid ${color}`, background: fill }} />
       <Text size="xs" c="dimmed">{label}</Text>
     </Group>
   );
@@ -32,9 +32,9 @@ function Line({ dashed, label }: { dashed: boolean; label: string }) {
 function Legend() {
   return (
     <Group gap="md" mt="xs" wrap="wrap">
-      <Swatch color={stageColor("idea")} label="idea" />
-      <Swatch color={stageColor("experiment")} label="experiment" />
-      <Swatch color={stageColor("result")} label="result" />
+      <Swatch color={stageColor("idea")} fill={stageFill("idea")} label="idea" />
+      <Swatch color={stageColor("experiment")} fill={stageFill("experiment")} label="experiment" />
+      <Swatch color={stageColor("result")} fill={stageFill("result")} label="result" />
       <Line dashed={false} label="lineage" />
       <Line dashed label="evidential" />
     </Group>

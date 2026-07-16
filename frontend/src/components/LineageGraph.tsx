@@ -6,7 +6,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { Graph, GraphEdge } from "../api";
-import { toFlow, stageColor, NODE_WIDTH } from "./graphFlow";
+import { toFlow, stageColor, stageFill, NODE_WIDTH } from "./graphFlow";
 import { layout } from "./graphLayout";
 import { loadPositions, savePosition } from "./graphPositions";
 
@@ -38,7 +38,8 @@ function BoxNode({ data }: NodeProps) {
         textAlign: "center",
         whiteSpace: "normal",
         wordBreak: "break-word",
-        background: "var(--mantine-color-body, #fff)",
+        color: "#1a1a1a",
+        background: stageFill(d.stage),
       }}
     >
       <Handle type="target" position={Position.Top} style={{ visibility: "hidden" }} />

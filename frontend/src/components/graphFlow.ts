@@ -25,6 +25,13 @@ const STAGE_COLORS: Record<string, string> = {
   result: "#16a34a",       // green — a finished experiment
 };
 
+// Light per-stage fills for box nodes (border keeps the stronger STAGE_COLORS).
+const STAGE_FILLS: Record<string, string> = {
+  idea: "#f1f3f5",         // light gray
+  experiment: "#e7f0fd",   // light blue
+  result: "#e8f6ee",       // light green
+};
+
 const SOURCE_COLORS: Record<string, string> = {
   system: "#8a8f98",
   pm: "#3b82f6",
@@ -35,6 +42,10 @@ const EVIDENTIAL = new Set(["confirms", "refutes", "contradicts"]);
 
 export function stageColor(stage: string): string {
   return STAGE_COLORS[stage] ?? "#8a8f98";
+}
+
+export function stageFill(stage: string): string {
+  return STAGE_FILLS[stage] ?? "#f1f3f5";
 }
 
 export function edgeStyle(edge: GraphEdge): { style: Record<string, unknown>; dashed: boolean } {
