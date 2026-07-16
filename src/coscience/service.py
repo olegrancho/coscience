@@ -467,6 +467,20 @@ class Service:
         return pm_beat(self.substrate, program_id, ClaudeCodeReasoner(),
                        usage_ok=claude_usage_ok, force=True)
 
+    def run_pm_directive(self, program_id: str, mode: str) -> dict:
+        """Run one directed PM cycle now: 'compress' (merge/prune/re-rank the idea
+        pool — only pinned ideas are spared) or 'brainstorm' (add fresh ideas).
+        Same lock/usage path as replan; returns the beat summary."""
+        if mode not in ("compress", "brainstorm"):
+            raise ValueError(f"unknown pm directive: {mode!r}")
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        from coscience.pm_agent import pm_beat
+        from coscience.pm_claude import ClaudeCodeReasoner
+        from coscience.worker import claude_usage_ok
+        return pm_beat(self.substrate, program_id, ClaudeCodeReasoner(),
+                       usage_ok=claude_usage_ok, force=True, directive=mode)
+
     def set_program_workdir(self, program_id: str, workdir: str) -> dict:
         """Set the project folder this program's sprint agents run in ("" = control
         repo). Returns the stored value plus whether the path currently exists, so
@@ -715,7 +729,7 @@ class Service:
         summary, ideas = self.substrate.load_ideas(sprint.program)
         text = (sprint.title or sprint.goals or sprint.id).strip()
         idea = Idea(id=uuid4().hex[:8], text=text, source="human",
-                    demoted=True, created_at=time.time())
+                    demoted=True, pinned=True, created_at=time.time())   # demote auto-pins
         ideas.append(idea)
         self.substrate.save_ideas(sprint.program, summary, ideas)
         set_status(sprint, SprintStatus.CANCELED, by=by, action="demote")
@@ -731,6 +745,8 @@ class Service:
         if target is None:
             raise NotFoundError(idea_id)
         target.demoted = demoted
+        if demoted:
+            target.pinned = True             # demote auto-pins (pinned == protected)
         self.substrate.save_ideas(program_id, summary, ideas)
         self.substrate.commit(
             f"program {program_id}: idea {idea_id} {'demoted' if demoted else 'un-demoted'}")
@@ -747,8 +763,10 @@ class Service:
         if not text:
             raise ValueError("idea text is required")
         summary, ideas = self.substrate.load_ideas(program_id)
+        # A human-authored idea is auto-pinned (pinned == protected). PM-authored
+        # ideas start unpinned and prunable.
         idea = Idea(id=uuid4().hex[:8], text=text, source=source, created_at=time.time(),
-                    by=str(by or ""))
+                    by=str(by or ""), pinned=(source == "human"))
         ideas.append(idea)
         self.substrate.save_ideas(program_id, summary, ideas)
         self.substrate.commit(f"program {program_id}: idea added ({source})")
@@ -799,6 +817,7 @@ class Service:
         else:
             t = threads.new_thread("pm", text, by, now=time.time())
             target.threads.append(t)
+        target.pinned = True                 # a human comment auto-pins (pinned == protected)
         self.substrate.save_ideas(program_id, summary, ideas)
         self.substrate.commit(f"program {program_id}: comment on idea {idea_id}")
         return threads.public(t)

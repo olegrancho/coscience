@@ -136,10 +136,11 @@ class Idea:
 
     @property
     def protected(self) -> bool:
-        """Whether the PM is forbidden from deleting this idea. Human-proposed,
-        pinned, commented-on, or demoted ideas are protected — a demoted idea is a
-        human 'do not pursue as a sprint' decision the PM must not undo by deleting."""
-        return self.source == "human" or self.pinned or bool(self.threads) or self.demoted
+        """Protected == pinned. Only pinned ideas are shielded from PM pruning.
+        Human-authored, human-commented, and demoted ideas are auto-pinned at the
+        action that creates them (see the service), so they start protected — but a
+        human can unpin any of them to let the PM prune it again."""
+        return self.pinned
 
 
 @dataclass

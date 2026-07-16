@@ -420,6 +420,15 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
 
+    @api.post("/programs/{program_id}/ideas/{mode}")
+    def pm_directive(program_id: str, mode: str) -> dict:
+        if mode not in ("compress", "brainstorm"):
+            raise HTTPException(status_code=404, detail=f"unknown action: {mode}")
+        try:
+            return service.run_pm_directive(program_id, mode)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
     @api.get("/programs/{program_id}/chats")
     def list_chats(program_id: str) -> list[dict]:
         try:

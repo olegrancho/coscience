@@ -125,7 +125,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
                          for th in guidance_threads if threads.needs_reply(th)]
     _summary, ideas = substrate.load_ideas(program_id)
     idea_dicts = [{"id": i.id, "text": i.text, "source": i.source,
-                   "protected": i.protected, "demoted": i.demoted} for i in ideas]
+                   "protected": i.protected, "demoted": i.demoted, "pinned": i.pinned} for i in ideas]
     idea_feedback: list[dict] = []
     for i in ideas:
         # Idea threads are always target "pm" — no worker runs against a pool idea.
@@ -166,6 +166,7 @@ class StagedCycle:
     cycle: int
     output: PMCycleOutput
     fingerprint: str = ""
+    directive: str = ""       # "compress"/"brainstorm"/"" — carried so a resumed cycle applies the same rules
 
 
 def proposal_id(program_id: str, cycle: int, suffix: str) -> str:
@@ -186,16 +187,18 @@ def _staging_path(substrate, program_id: str):
 
 
 def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
-                  fingerprint: str = "") -> None:
+                  fingerprint: str = "", directive: str = "") -> None:
     path = _staging_path(substrate, program_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "cycle": cycle,
         "fingerprint": fingerprint,
+        "directive": directive,
         "report": output.report,
         "ideas_summary": output.ideas_summary,
         "new_ideas": list(output.new_ideas),
         "delete_idea_ids": list(output.delete_idea_ids),
+        "idea_order": list(output.idea_order),
         "sprint_edits": list(output.sprint_edits),
         "reopen_ids": list(output.reopen_ids),
         "release_ids": list(output.release_ids),
@@ -223,6 +226,7 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         ideas_summary=data.get("ideas_summary", ""),
         new_ideas=list(data.get("new_ideas", [])),
         delete_idea_ids=list(data.get("delete_idea_ids", [])),
+        idea_order=list(data.get("idea_order", [])),
         sprint_edits=list(data.get("sprint_edits", [])),
         reopen_ids=list(data.get("reopen_ids", [])),
         release_ids=list(data.get("release_ids", [])),
@@ -230,7 +234,8 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         proposals=[ProposedSprint(**p) for p in data.get("proposals", [])],
     )
     return StagedCycle(cycle=int(data["cycle"]), output=output,
-                       fingerprint=data.get("fingerprint", ""))
+                       fingerprint=data.get("fingerprint", ""),
+                       directive=data.get("directive", ""))
 
 
 def clear_staging(substrate, program_id: str) -> None:
@@ -240,7 +245,7 @@ def clear_staging(substrate, program_id: str) -> None:
 
 
 def pm_beat(substrate, program_id: str, reasoner, now: float | None = None,
-            usage_ok=None, force: bool = False) -> dict:
+            usage_ok=None, force: bool = False, directive: str = "") -> dict:
     """Run one bounded, kill-safe PM cycle for a program under a per-program lock.
 
     The lock serialises the background loop against on-demand "replan now" calls so
@@ -253,7 +258,7 @@ def pm_beat(substrate, program_id: str, reasoner, now: float | None = None,
         return {"program": program_id, "cycle": pm.cycle,
                 "submitted": [], "proposed": [], "skipped": True, "busy": True}
     try:
-        return _run_pm_cycle(substrate, program_id, reasoner, now, usage_ok, force)
+        return _run_pm_cycle(substrate, program_id, reasoner, now, usage_ok, force, directive)
     finally:
         _release_program_lock(lock)
 
@@ -281,7 +286,7 @@ def _release_program_lock(f) -> None:
 
 
 def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None,
-                  usage_ok=None, force: bool = False) -> dict:
+                  usage_ok=None, force: bool = False, directive: str = "") -> dict:
     """One PM cycle body (already holding the program lock): gather context, reason
     once behind the staging commit, then idempotently apply proposals/ideas/edits.
 
@@ -296,6 +301,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     if staged is None:
         cycle = pm.cycle
         context = gather_context(substrate, program_id)
+        context.directive = directive        # directed cycle (compress/brainstorm); "" = normal
         fingerprint = context_fingerprint(context)
         if not force and fingerprint == pm.last_fingerprint:
             # Event-driven: nothing the PM acts on has changed since the last cycle
@@ -320,8 +326,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         usage_meter.record_run(substrate.repo_root, "pm", program_id,
                                cost=lc.get("cost"), tokens=lc.get("tokens"),
                                model=context.model)
-        write_staging(substrate, program_id, cycle, output, fingerprint)  # COMMIT POINT
-        staged = StagedCycle(cycle=cycle, output=output, fingerprint=fingerprint)
+        write_staging(substrate, program_id, cycle, output, fingerprint, directive)  # COMMIT POINT
+        staged = StagedCycle(cycle=cycle, output=output, fingerprint=fingerprint, directive=directive)
 
     cycle = staged.cycle
     now_ts = time.time() if now is None else now
@@ -367,12 +373,19 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         if prop.from_idea:
             ideas_by_id.pop(prop.from_idea, None)
 
-    # --- idea pool: prune, add, and re-summarise (protection enforced here) ---
+    # --- idea pool: prune, add, re-rank, and re-summarise (protection enforced here) ---
+    # Protection is pinned-only: the PM may prune ANY idea that is not pinned. Human,
+    # commented, and demoted ideas are auto-pinned when created, so they're protected
+    # until a human unpins them.
+    ideas_removed = 0
     for iid in staged.output.delete_idea_ids:
         target = ideas_by_id.get(iid)
-        if target is not None and target.source == "pm" and not target.protected:
-            del ideas_by_id[iid]
+        if target is None or target.pinned:
+            continue
+        del ideas_by_id[iid]
+        ideas_removed += 1
     existing_texts = {i.text for i in ideas_by_id.values()}
+    ideas_added = 0
     for text in staged.output.new_ideas:
         text = str(text).strip()
         if not text or text in existing_texts:
@@ -383,6 +396,14 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             continue
         ideas_by_id[iid] = Idea(id=iid, text=text, source="pm", created_at=now_ts)
         existing_texts.add(text)
+        ideas_added += 1
+    # Re-rank the pool if the reasoner returned an ordering (compress): ids it lists
+    # first (in that order), then any it omitted, in their existing order.
+    if staged.output.idea_order:
+        ordered = {iid: ideas_by_id[iid] for iid in staged.output.idea_order if iid in ideas_by_id}
+        for iid, idea in ideas_by_id.items():
+            ordered.setdefault(iid, idea)
+        ideas_by_id = ordered
     new_summary = staged.output.ideas_summary or summary_text
     substrate.save_ideas(program_id, new_summary, list(ideas_by_id.values()))
 
@@ -511,4 +532,6 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
 
     clear_staging(substrate, program_id)
     return {"program": program_id, "cycle": cycle, "submitted": submitted,
-            "proposed": proposed, "dropped": dropped, "skipped": False}
+            "proposed": proposed, "dropped": dropped, "skipped": False,
+            "ideas_added": ideas_added, "ideas_removed": ideas_removed,
+            "pool_size": len(ideas_by_id)}

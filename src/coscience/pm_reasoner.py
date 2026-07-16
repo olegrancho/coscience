@@ -42,6 +42,7 @@ class PMContext:
     max_proposed: int = 4                              # cap the PM may not exceed
     model: str = ""                                    # Claude model for this PM cycle; "" = default
     workdir: str = ""                                  # resolved cwd for the reasoner's claude session ("" = inherit)
+    directive: str = ""                                # "compress" | "brainstorm" | "" — a human-triggered directed cycle
 
     @property
     def free_slots(self) -> int:
@@ -69,6 +70,7 @@ class PMCycleOutput:
     ideas_summary: str = ""                          # PM's narrative over the whole idea pool
     new_ideas: list[str] = field(default_factory=list)      # vague directions to record (PM-sourced)
     delete_idea_ids: list[str] = field(default_factory=list)  # PM ideas to prune (protected ones ignored)
+    idea_order: list[str] = field(default_factory=list)      # desired pool order, most-promising first (compress re-rank)
     sprint_edits: list[dict] = field(default_factory=list)   # revisions to still-proposed sprints (from PM feedback)
     reopen_ids: list[str] = field(default_factory=list)      # approved sprints to send back to proposed (now obsolete)
     release_ids: list[str] = field(default_factory=list)     # approved sprints to release into production (-> queued)

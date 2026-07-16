@@ -59,30 +59,34 @@ def test_new_ideas_not_duplicated_by_text(substrate):
     assert [i.text for i in ideas] == ["dup"]          # no duplicate added
 
 
-def test_pm_deletes_only_unprotected_own_ideas(substrate):
+def test_pm_deletes_any_unpinned_idea(substrate):
+    # Protection is pinned-only: the PM may prune any non-pinned idea (its own OR a
+    # human one the human left unpinned); only pinned ideas survive.
     _prog(substrate)
     substrate.save_ideas("p1", "", [
-        Idea(id="a", text="prunable", source="pm"),
+        Idea(id="a", text="prunable pm", source="pm"),
         Idea(id="b", text="pinned", source="pm", pinned=True),
-        Idea(id="c", text="human", source="human"),
+        Idea(id="c", text="unpinned human", source="human"),
     ])
     out = PMCycleOutput(delete_idea_ids=["a", "b", "c"])
     pm_beat(substrate, "p1", FakeReasoner([out]))
     _summary, ideas = substrate.load_ideas("p1")
-    assert sorted(i.id for i in ideas) == ["b", "c"]   # only 'a' pruned
+    assert sorted(i.id for i in ideas) == ["b"]   # only the pinned one survived
 
 
 def test_demoted_idea_is_not_promotable(substrate):
     # A demoted idea must not be promoted into a sprint, even if the reasoner tries.
     _prog(substrate)
-    substrate.save_ideas("p1", "", [Idea(id="seed", text="dead end", source="human", demoted=True)])
+    # Demoted ideas are auto-pinned (protected); seed that real state.
+    substrate.save_ideas("p1", "", [Idea(id="seed", text="dead end", source="human",
+                                         demoted=True, pinned=True)])
     out = PMCycleOutput(proposals=[_prop("from-seed", from_idea="seed")])
     summary = pm_beat(substrate, "p1", FakeReasoner([out]))
     assert summary["submitted"] == []                           # promotion blocked
     assert not (substrate.sprint_dir("p1-c0-from-seed") / "sprint.md").is_file()
     _s, ideas = substrate.load_ideas("p1")
     assert [i.id for i in ideas] == ["seed"]                    # idea stays in the pool
-    assert ideas[0].protected is True                           # and PM can't delete it
+    assert ideas[0].protected is True                           # and PM can't delete it (pinned)
 
 
 def test_promotion_creates_sprint_and_removes_idea(substrate):
@@ -224,9 +228,9 @@ def test_context_surfaces_pm_feedback_only(substrate):
 def test_context_exposes_pool_and_slots(substrate):
     _prog(substrate)
     _proposed(substrate, 1)
-    substrate.save_ideas("p1", "", [Idea(id="a", text="lead", source="human")])
+    substrate.save_ideas("p1", "", [Idea(id="a", text="lead", source="human", pinned=True)])
     ctx = gather_context(substrate, "p1")
     assert ctx.proposed_count == 1
     assert ctx.max_proposed == MAX_PROPOSED
     assert ctx.free_slots == MAX_PROPOSED - 1
-    assert ctx.ideas[0]["protected"] is True
+    assert ctx.ideas[0]["protected"] is True   # pinned == protected
