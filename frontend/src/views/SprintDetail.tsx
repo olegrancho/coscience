@@ -397,14 +397,14 @@ export default function SprintDetail() {
       {s.title && s.goals && s.goals !== s.title && (
         <Card padding="lg" radius="md" style={cardStyle}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>what this experiment does</div>
-          <Text>{s.goals}</Text>
+          <div className="report-leaf"><Md>{s.goals}</Md></div>
         </Card>
       )}
 
       {s.rationale && (
         <Card padding="lg" radius="md" style={cardStyle}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>why the AI proposed this</div>
-          <Text>{s.rationale}</Text>
+          <div className="report-leaf"><Md>{s.rationale}</Md></div>
         </Card>
       )}
 
