@@ -124,6 +124,9 @@ export const api = {
   replan: (id: string) =>
     fetch(`/api/programs/${id}/replan`, { method: "POST" }).then(
       j<{ program: string; cycle: number; submitted: string[]; skipped?: boolean; busy?: boolean; throttled?: boolean }>),
+  pmDirective: (id: string, mode: "compress" | "brainstorm") =>
+    fetch(`/api/programs/${id}/ideas/${mode}`, { method: "POST" }).then(
+      j<{ program: string; cycle: number; submitted: string[]; skipped?: boolean; busy?: boolean; throttled?: boolean; ideas_added?: number; ideas_removed?: number; pool_size?: number }>),
   setProgramWorkdir: (id: string, workdir: string) =>
     fetch(`/api/programs/${id}/workdir`, {
       method: "POST", headers: { "Content-Type": "application/json" },

@@ -55,18 +55,40 @@ def render_prompt(context: PMContext) -> str:
         flags = []
         if i.get("source") == "human":
             flags.append("human")
+        if i.get("pinned"):
+            flags.append("PINNED — protected, do NOT delete")
         if i.get("demoted"):
             flags.append("DEMOTED — do NOT promote to a sprint")
-        if i.get("protected"):
-            flags.append("PROTECTED")
         tag = f" ({'; '.join(flags)})" if flags else ""
         return f"- [{i['id']}] {i['text']}{tag}"
     ideas_block = _lines(context.ideas, _idea_line)
 
+    directive_block = ""
+    if context.directive == "compress":
+        directive_block = (
+            "\n\n*** DIRECTIVE THIS CYCLE: COMPRESS THE IDEA POOL ***\n"
+            "The human asked you to CONTRACT and tidy the pool now. Aggressively consolidate:\n"
+            "- You MAY merge and delete ANY idea that is NOT marked PINNED. PINNED ideas stay intact "
+            "(never delete or reword them) — everything else is fair game.\n"
+            "- MERGE overlapping ideas: write ONE combined idea in new_ideas and list the originals' ids "
+            "in delete_idea_ids. Prune settled, disproven, duplicate, or low-value ideas.\n"
+            "- RE-RANK the survivors: set idea_order to ALL surviving idea ids, most-promising first "
+            "(include pinned ids and the ids of any merged ideas you add).\n"
+            "- Do NOT propose sprints this cycle; focus on the pool. Refresh ideas_summary.\n"
+        )
+    elif context.directive == "brainstorm":
+        directive_block = (
+            "\n\n*** DIRECTIVE THIS CYCLE: BRAINSTORM — EXPAND THE IDEA POOL ***\n"
+            "The human asked you to GROW the pool now. Generate roughly 4-8 GENUINELY NEW, diverse "
+            "candidate directions (new_ideas, ~1 paragraph each) — not already in the pool and not "
+            "rewordings of existing ideas. Do NOT prune existing ideas and do NOT propose sprints this "
+            "cycle; just add fresh ideas and refresh ideas_summary.\n"
+        )
+
     return f"""You are the PM agent for a research program. You maintain two things:
 a small set of PROPOSED SPRINTS (concrete next experiments, which humans approve), and
 an IDEA POOL (short, vague candidate directions you grow and prune over time). You only
-PROPOSE and curate; humans approve sprints.
+PROPOSE and curate; humans approve sprints.{directive_block}
 
 Your session runs in this program's working directory. If the goals refer to "this
 folder", "the data here", or "existing work", they mean your current working
@@ -116,7 +138,7 @@ GUIDANCE FEEDBACK:
 
 PRIOR PROPOSALS you already made (do NOT repeat their intent): {prior_block}
 
-IDEA POOL (id in brackets; you may delete only your own non-PROTECTED ideas):
+IDEA POOL (id in brackets; you may delete ANY idea that is not PINNED — pinned == protected):
 {ideas_block}
 
 SPRINT CAP: at most {context.max_proposed} sprints may await review. {context.proposed_count} are
@@ -127,7 +149,8 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
 {{"report": "<program-status report as STRUCTURED markdown a reader understands at a glance, WITHOUT needing prior context. Always cover, in THIS order, each under a bold heading: **Findings** — the most important and most recent results so far and what they mean (if none yet, say so plainly); **Rationale** — why the currently proposed experiments are the right next moves; **Status & next steps** — where the program stands and what happens next. Do NOT reduce the report to just next steps (e.g. 'waiting for results') — the findings and rationale must always be there. NOT one run-on paragraph: a bold one-line headline, a blank line, then the headed sections with short paragraphs and/or '-' bullets, a blank line between blocks. Put real newlines in the JSON string (escaped as \\n).>",
   "ideas_summary": "<short markdown summary of the whole idea pool: themes, what's promising, what you pruned and why>",
   "new_ideas": ["<a one-paragraph candidate direction>", "..."],
-  "delete_idea_ids": ["<id of one of YOUR non-protected ideas to prune>", "..."],
+  "delete_idea_ids": ["<id of any NON-PINNED idea to prune>", "..."],
+  "idea_order": ["<idea id — used when COMPRESSing: ALL surviving ids, most-promising first; omit/empty otherwise>", "..."],
   "sprint_edits": [
     {{"sprint_id": "<an EDITABLE (still-proposed) sprint to revise per feedback>",
       "goals": "<rewritten objective, optional>", "plan": ["<revised step>", "..."],
@@ -159,12 +182,13 @@ Propose 0 proposals if nothing new is warranted, or you are at the cap.
 
 Run the program by curating ideas, not by piling on sprints:
 - Keep the idea pool small and alive. As results arrive, PRUNE ideas that are settled,
-  disproven, or obsolete (delete_idea_ids — only your own, non-protected). ADD new ideas
+  disproven, or obsolete (delete_idea_ids — any NON-PINNED idea). ADD new ideas
   (new_ideas, ~1 paragraph each) when results suggest fresh directions.
 - PROMOTE an idea to a sprint only when it is genuinely promising AND you have a free
   slot: emit a proposal with `from_idea` set to that idea's id (it leaves the pool).
-- Ideas marked PROTECTED (human-proposed, pinned, or commented-on) are off-limits to
-  deletion — treat human comments on them as direction.
+- Ideas marked PINNED are protected — never delete them. (Human-made, commented-on, and
+  demoted ideas are auto-pinned, so they start protected; treat human comments as
+  direction.) Everything not pinned is fair game to prune.
 - MANAGE THE APPROVED QUEUE: these are authorized and waiting on you. Each cycle, release
   (release_ids) the approved sprint(s) that should run next and hold the rest until their
   prerequisites/prior results are in; use priority to order what's pending. Don't leave
@@ -228,6 +252,7 @@ def parse_response(text: str) -> PMCycleOutput:
         ideas_summary=str(data.get("ideas_summary", "")),
         new_ideas=[str(s) for s in data.get("new_ideas", [])],
         delete_idea_ids=[str(s) for s in data.get("delete_idea_ids", [])],
+        idea_order=[str(s) for s in data.get("idea_order", [])],
         sprint_edits=edits,
         reopen_ids=[str(s) for s in data.get("reopen_ids", [])],
         release_ids=[str(s) for s in data.get("release_ids", [])],
