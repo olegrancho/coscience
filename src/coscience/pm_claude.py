@@ -85,6 +85,8 @@ def render_prompt(context: PMContext) -> str:
             "cycle; just add fresh ideas and refresh ideas_summary.\n"
         )
 
+    graph_block = _lines(context.graph_lines, lambda ln: f"- {ln}") if context.graph_lines else "(none yet)"
+
     return f"""You are the PM agent for a research program. You maintain two things:
 a small set of PROPOSED SPRINTS (concrete next experiments, which humans approve), and
 an IDEA POOL (short, vague candidate directions you grow and prune over time). You only
@@ -141,6 +143,9 @@ PRIOR PROPOSALS you already made (do NOT repeat their intent): {prior_block}
 IDEA POOL (id in brackets; you may delete ANY idea that is not PINNED — pinned == protected):
 {ideas_block}
 
+LINEAGE GRAPH (existing typed edges among the ideas/experiments above, "<node>: <type> <target>"; each edge points from a node to its antecedent). Use it to avoid re-running refuted or superseded directions and to spot dead-end chains:
+{graph_block}
+
 SPRINT CAP: at most {context.max_proposed} sprints may await review. {context.proposed_count} are
 pending now, so you have {context.free_slots} free slot(s). Propose/promote AT MOST {context.free_slots};
 if that is 0, propose nothing and instead curate the idea pool.
@@ -167,6 +172,15 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
   "thread_replies": [{{"thread_id": "<id of an open feedback thread shown above,
                        whether on a sprint, a pool idea, or standing guidance>",
                        "text": "<short reply: what you did in response, or why you can't>"}}],
+  "edge_ops": [
+    {{"op": "add",
+      "type": "<one of: inspired_by | builds_on | supersedes | confirms | refutes>",
+      "src": "<node id the edge points FROM>", "dst": "<antecedent node id it points TO>",
+      "rationale": "<REQUIRED one line: why this relationship holds>",
+      "confidence": "<low|med|high — REQUIRED for confirms/refutes>",
+      "evidence": "<optional: the result/finding that decides it>"}},
+    {{"op": "delete", "type": "<type>", "src": "<id>", "dst": "<id>"}}
+  ],
   "proposals": [
     {{"suffix": "<short-slug>",
       "title": "<=8 words naming the experiment, e.g. 'Cross-validate the witness pair'>",
@@ -189,6 +203,11 @@ Run the program by curating ideas, not by piling on sprints:
 - Ideas marked PINNED are protected — never delete them. (Human-made, commented-on, and
   demoted ideas are auto-pinned, so they start protected; treat human comments as
   direction.) Everything not pinned is fair game to prune.
+- RECORD LINEAGE with edge_ops: link an experiment that extends another (builds_on),
+  obsoletes it (supersedes), or — once BOTH are done — confirms/refutes its result.
+  inspired_by links a direction to what provoked it. Every add needs a one-line rationale;
+  confirms/refutes need confidence. You may only delete edges YOU created; endpoints must
+  exist. Don't over-link: add an edge only when it changes how the program should be read.
 - MANAGE THE APPROVED QUEUE: these are authorized and waiting on you. Each cycle, release
   (release_ids) the approved sprint(s) that should run next and hold the rest until their
   prerequisites/prior results are in; use priority to order what's pending. Don't leave
@@ -258,6 +277,8 @@ def parse_response(text: str) -> PMCycleOutput:
         release_ids=[str(s) for s in data.get("release_ids", [])],
         thread_replies=[dict(r) for r in data.get("thread_replies", [])
                         if isinstance(r, dict) and r.get("thread_id")],
+        edge_ops=[dict(o) for o in data.get("edge_ops", [])
+                  if isinstance(o, dict) and o.get("op") and o.get("type")],
     )
 
 

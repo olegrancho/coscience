@@ -68,6 +68,14 @@ export interface Ledger {
   capacity: Record<string, number>; used: Record<string, number>;
   available: Record<string, number>; leases: unknown[];
 }
+export interface GraphNode {
+  id: string; kind: "idea" | "experiment"; stage: "idea" | "experiment" | "result"; label: string;
+}
+export interface GraphEdge {
+  id: string; type: string; src: string; dst: string; source: string;
+  by: string; at: number; rationale: string; confidence: string; evidence: string;
+}
+export interface Graph { nodes: GraphNode[]; edges: GraphEdge[] }
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
@@ -91,6 +99,7 @@ export const api = {
   getVersion: () => fetch("/api/version").then(j<{ sha: string }>),
   listPrograms: () => fetch("/api/programs").then(j<ProgramRow[]>),
   getProgram: (id: string) => fetch(`/api/programs/${id}`).then(j<Program>),
+  getGraph: (id: string) => fetch(`/api/programs/${id}/graph`).then(j<Graph>),
   setProgramStatus: (id: string, status: string) =>
     fetch(`/api/programs/${id}/status`, {
       method: "POST", headers: { "Content-Type": "application/json" },

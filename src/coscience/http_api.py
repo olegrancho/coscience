@@ -120,6 +120,15 @@ class SprintCommentIn(BaseModel):
     thread_id: str = ""            # append to an existing thread instead of starting one
 
 
+class EdgeCreate(BaseModel):
+    type: str
+    src: str
+    dst: str
+    rationale: str = ""
+    confidence: str = ""
+    evidence: str = ""
+
+
 class LoginIn(BaseModel):
     username: str
 
@@ -344,6 +353,34 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.post("/programs/{program_id}/edges")
+    def add_edge(program_id: str, body: EdgeCreate,
+                 user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.add_edge(program_id, body.type, body.src, body.dst,
+                                    by=(user.username if user else ""),
+                                    rationale=body.rationale, confidence=body.confidence,
+                                    evidence=body.evidence)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.delete("/programs/{program_id}/edges/{edge_id}")
+    def delete_edge(program_id: str, edge_id: str,
+                    user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.delete_edge(program_id, edge_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"edge not found: {edge_id}")
+
+    @api.get("/programs/{program_id}/graph")
+    def get_graph(program_id: str) -> dict:
+        try:
+            return service.get_graph(program_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
 
     @api.patch("/sprints/{sprint_id}")
     def patch_sprint(sprint_id: str, body: SprintPatch) -> dict:

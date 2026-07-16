@@ -11,13 +11,15 @@ import re
 import time
 from dataclasses import dataclass
 
-from coscience import threads, usage_meter
+from coscience import graph, threads, usage_meter
 from coscience.models import Sprint, SprintStatus, Idea, set_status
 from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
 
 # The PM may not push the program past this many sprints awaiting human review.
 # Humans can propose beyond it; this only gates the PM's own proposing/promoting.
 MAX_PROPOSED = 4
+
+MAX_EDGE_OPS = 12   # bound the edges the PM may add per cycle (anti-spam)
 
 
 def _context_payload(context: PMContext) -> dict:
@@ -136,6 +138,21 @@ def gather_context(substrate, program_id: str) -> PMContext:
                     "messages": [{"role": m["role"], "text": m["text"]} for m in th["messages"]],
                 })
     proposed_count = sum(1 for s in open_sprints if s["status"] == SprintStatus.PROPOSED.value)
+    # Windowed lineage graph: adjacency for edges whose SOURCE is a node already
+    # shown in this prompt (ideas + open/completed/failed sprints). Keeps the
+    # block proportional to the rendered window, not the whole program.
+    shown_ids = ({i.id for i in ideas}
+                 | {s["id"] for s in open_sprints}
+                 | {s["id"] for s in completed} | {s["id"] for s in failed})
+    graph_lines: list[str] = []
+    for s in substrate.iter_sprints():
+        if s.program == program_id and s.id in shown_ids and s.edges:
+            rel = "; ".join(f"{e['type']} {e['dst']}" for e in s.edges)
+            graph_lines.append(f"{s.id}: {rel}")
+    for i in ideas:
+        if i.id in shown_ids and i.edges:
+            rel = "; ".join(f"{e['type']} {e['dst']}" for e in i.edges)
+            graph_lines.append(f"{i.id}: {rel}")
     return PMContext(
         program_id=program_id, goals=program.goals, cycle=pm.cycle,
         open_sprints=open_sprints, completed=completed, failed=failed,
@@ -146,6 +163,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
         proposed_count=proposed_count, max_proposed=MAX_PROPOSED,
         model=program.pm_model,
         workdir=_resolve_workdir(substrate, program.workdir),
+        graph_lines=graph_lines,
     )
 
 
@@ -203,6 +221,7 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
         "reopen_ids": list(output.reopen_ids),
         "release_ids": list(output.release_ids),
         "thread_replies": list(output.thread_replies),
+        "edge_ops": list(output.edge_ops),
         "proposals": [
             {"suffix": p.suffix, "goals": p.goals, "plan": p.plan,
              "priority": p.priority, "resources_required": p.resources_required,
@@ -231,6 +250,7 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         reopen_ids=list(data.get("reopen_ids", [])),
         release_ids=list(data.get("release_ids", [])),
         thread_replies=list(data.get("thread_replies", [])),
+        edge_ops=list(data.get("edge_ops", [])),
         proposals=[ProposedSprint(**p) for p in data.get("proposals", [])],
     )
     return StagedCycle(cycle=int(data["cycle"]), output=output,
@@ -283,6 +303,82 @@ def _release_program_lock(f) -> None:
         fcntl.flock(f, fcntl.LOCK_UN)
     finally:
         f.close()
+
+
+def _rewire_on_promote(substrate, program_id: str, old_idea_id: str,
+                       new_sid: str, ideas_by_id: dict) -> None:
+    """Move the promoted idea's edges (both directions) onto the new sprint.
+    Inbound edges may live on other ideas or other sprints, so scan the whole
+    program node set. The new sprint is saved on disk already; save every node
+    the rewire touched. Pool ideas are saved by the caller."""
+    program_sprints = [s for s in substrate.iter_sprints() if s.program == program_id]
+    nodes = list(ideas_by_id.values()) + program_sprints
+    changed = graph.repoint_edges(old_idea_id, new_sid, nodes)
+    sprint_by_id = {s.id: s for s in program_sprints}
+    for nid in changed:
+        if nid in sprint_by_id:
+            substrate.save_sprint(sprint_by_id[nid])
+
+
+def _apply_edge_ops(substrate, program_id: str, ops: list[dict],
+                    ideas_by_id: dict, now_ts: float) -> tuple[int, int]:
+    """Apply the PM's edge diffs deterministically: validate each, silently drop
+    invalid ones, dedup, cap adds, and forbid deleting non-PM edges. Returns
+    (added, removed). Ideas are mutated in place (saved by the caller); changed
+    sprints are saved here."""
+    program_sprints = [s for s in substrate.iter_sprints() if s.program == program_id]
+    nodes = list(ideas_by_id.values()) + program_sprints
+    node_by_id = {n.id: n for n in nodes}
+    sprint_ids = {s.id for s in program_sprints}
+    existing = graph.all_edges(nodes)
+    existing_ids = {e["id"] for e in existing}
+    changed_sprint_ids: set[str] = set()
+    added = removed = 0
+    for op in ops:
+        if not isinstance(op, dict):
+            continue                                       # tolerate corrupted staging/LLM output
+        kind = str(op.get("op", ""))
+        # `or ""` (not a get-default) so an explicit JSON null normalizes to empty.
+        etype = str(op.get("type") or "")
+        src, dst = str(op.get("src") or ""), str(op.get("dst") or "")
+        if kind == "add":
+            if added >= MAX_EDGE_OPS:
+                continue
+            if not str(op.get("rationale") or "").strip():
+                continue                                   # asserted adds must justify
+            edge = graph.new_edge(
+                etype, src, dst, "pm", by="pm", at=now_ts,
+                rationale=str(op.get("rationale") or ""),
+                confidence=str(op.get("confidence") or ""),
+                evidence=str(op.get("evidence") or ""))
+            if edge["id"] in existing_ids:
+                continue                                   # dedup
+            if graph.validate_edge(edge, nodes, existing) is not None:
+                continue                                   # invalid -> drop
+            node_by_id[src].edges.append(edge)
+            existing.append(edge)
+            existing_ids.add(edge["id"])
+            if src in sprint_ids:
+                changed_sprint_ids.add(src)
+            added += 1
+        elif kind == "delete":
+            eid = graph.edge_id(etype, src, dst)
+            holder = node_by_id.get(src)
+            if holder is None:
+                continue
+            kept = [e for e in holder.edges
+                    if not (e["id"] == eid and e.get("source") == "pm")]  # PM deletes only its own
+            if len(kept) != len(holder.edges):
+                holder.edges = kept
+                existing_ids.discard(eid)
+                existing[:] = [e for e in existing if e["id"] != eid]  # keep cycle-check view in sync
+                if src in sprint_ids:
+                    changed_sprint_ids.add(src)
+                removed += 1
+    sprint_by_id = {s.id: s for s in program_sprints}
+    for sid in changed_sprint_ids:
+        substrate.save_sprint(sprint_by_id[sid])
+    return added, removed
 
 
 def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None,
@@ -369,8 +465,11 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         proposed.append(sid)
         if sid not in pm.proposed_ids:
             submitted.append(sid)                      # new this run
-        # A promotion: the originating idea has become a sprint -> drop it from the pool.
+        # A promotion: the originating idea has become a sprint. Move its edges
+        # onto the sprint (both directions), then drop it from the pool.
         if prop.from_idea:
+            if prop.from_idea in ideas_by_id:
+                _rewire_on_promote(substrate, program_id, prop.from_idea, sid, ideas_by_id)
             ideas_by_id.pop(prop.from_idea, None)
 
     # --- idea pool: prune, add, re-rank, and re-summarise (protection enforced here) ---
@@ -378,12 +477,26 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     # commented, and demoted ideas are auto-pinned when created, so they're protected
     # until a human unpins them.
     ideas_removed = 0
+    pruned_ids: list[str] = []
     for iid in staged.output.delete_idea_ids:
         target = ideas_by_id.get(iid)
         if target is None or target.pinned:
             continue
         del ideas_by_id[iid]
+        pruned_ids.append(iid)
         ideas_removed += 1
+    # Cascade: a pruned idea is deleted outright (not transitioned), so drop every
+    # edge that pointed AT it, or a surviving node keeps a dangling reference.
+    if pruned_ids:
+        prog_sprints = [s for s in substrate.iter_sprints() if s.program == program_id]
+        cascade_nodes = list(ideas_by_id.values()) + prog_sprints
+        cascade_changed: set[str] = set()
+        for did in pruned_ids:
+            cascade_changed |= graph.drop_edges_to(did, cascade_nodes)
+        sp_by_id = {s.id: s for s in prog_sprints}
+        for nid in cascade_changed:
+            if nid in sp_by_id:
+                substrate.save_sprint(sp_by_id[nid])   # idea-side saved by save_ideas below
     existing_texts = {i.text for i in ideas_by_id.values()}
     ideas_added = 0
     for text in staged.output.new_ideas:
@@ -404,6 +517,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         for iid, idea in ideas_by_id.items():
             ordered.setdefault(iid, idea)
         ideas_by_id = ordered
+    edges_added, edges_removed = _apply_edge_ops(
+        substrate, program_id, staged.output.edge_ops, ideas_by_id, now_ts)
     new_summary = staged.output.ideas_summary or summary_text
     substrate.save_ideas(program_id, new_summary, list(ideas_by_id.values()))
 
@@ -534,4 +649,5 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     return {"program": program_id, "cycle": cycle, "submitted": submitted,
             "proposed": proposed, "dropped": dropped, "skipped": False,
             "ideas_added": ideas_added, "ideas_removed": ideas_removed,
-            "pool_size": len(ideas_by_id)}
+            "pool_size": len(ideas_by_id),
+            "edges_added": edges_added, "edges_removed": edges_removed}

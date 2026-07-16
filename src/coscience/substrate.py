@@ -56,6 +56,7 @@ class Substrate:
             status_history=[{"status": str(h.get("status", "")), "at": float(h.get("at", 0.0)),
                              "by": str(h.get("by", "")), "action": str(h.get("action", ""))}
                             for h in fm.get("status_history", [])],
+            edges=list(fm.get("edges", [])),
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
@@ -104,6 +105,8 @@ class Substrate:
             fm["decisions"] = list(sprint.decisions)
         if sprint.status_history:
             fm["status_history"] = list(sprint.status_history)
+        if sprint.edges:
+            fm["edges"] = list(sprint.edges)
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))
 
@@ -387,6 +390,7 @@ class Substrate:
                 threads=idea_threads,
                 created_at=float(n.get("created_at", 0.0)),
                 demoted=bool(n.get("demoted", False)),
+                edges=list(n.get("edges", [])),
             ))
         return str(fm.get("summary", "")), ideas
 
@@ -400,7 +404,8 @@ class Substrate:
                 {"id": i.id, "text": i.text, "source": i.source, "pinned": i.pinned,
                  "by": i.by,
                  "threads": list(i.threads), "created_at": i.created_at,
-                 **({"demoted": True} if i.demoted else {})}
+                 **({"demoted": True} if i.demoted else {}),
+                 **({"edges": list(i.edges)} if i.edges else {})}
                 for i in ideas
             ],
         }
