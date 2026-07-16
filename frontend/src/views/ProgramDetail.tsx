@@ -22,6 +22,7 @@ export default function ProgramDetail() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [showAll, setShowAll] = useState(false);
   const [ideasExpanded, setIdeasExpanded] = useState(false);
+  const [pmExpanded, setPmExpanded] = useState(false);
 
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
   const guidance = useQuery({ queryKey: ["guidance", id], queryFn: () => api.listGuidance(id) });
@@ -165,7 +166,7 @@ export default function ProgramDetail() {
         <Card padding="lg" radius="md" style={cardStyle}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>PM activity — when it planned and why</div>
           <Stack gap={7}>
-            {p.activations.slice(0, 12).map((a, i) => (
+            {(pmExpanded ? p.activations.slice(0, 12) : p.activations.slice(0, 3)).map((a, i) => (
               <Group key={i} justify="space-between" wrap="nowrap" align="baseline"
                 style={{ borderBottom: "1px solid var(--hairline)", paddingBottom: 6 }}>
                 <Text size="sm" style={{ minWidth: 0 }}>
@@ -178,6 +179,12 @@ export default function ProgramDetail() {
               </Group>
             ))}
           </Stack>
+          {p.activations.length > 3 && (
+            <button type="button" className="linklike" style={{ alignSelf: "flex-start", marginTop: 8 }}
+              onClick={() => setPmExpanded((v) => !v)}>
+              {pmExpanded ? "Show fewer" : `Show all (${Math.min(12, p.activations.length) - 3} more)`}
+            </button>
+          )}
         </Card>
       )}
 
