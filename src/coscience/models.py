@@ -59,6 +59,7 @@ class Sprint:
     votes: list[dict] = field(default_factory=list)  # 👍/👎 signal [{by, value:+1|-1, at}]; one per voter
     decisions: list[dict] = field(default_factory=list)  # legacy governance trail [{by, action, at}]; superseded by status_history (read-only for old sprints)
     status_history: list[dict] = field(default_factory=list)  # lifecycle timeline [{status, at, by, action}]; action="" for system transitions
+    edges: list[dict] = field(default_factory=list)  # outbound lineage/evidential edges (see coscience.graph)
 
 
 def set_status(sprint: "Sprint", new_status: "SprintStatus",
@@ -133,6 +134,7 @@ class Idea:
     threads: list[dict] = field(default_factory=list)  # feedback threads (see coscience.threads); always target "pm"
     created_at: float = 0.0
     demoted: bool = False               # demoted from a sprint; PM may not re-promote it
+    edges: list[dict] = field(default_factory=list)  # outbound lineage edges (see coscience.graph)
 
     @property
     def protected(self) -> bool:

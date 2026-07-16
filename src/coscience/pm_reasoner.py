@@ -43,6 +43,7 @@ class PMContext:
     model: str = ""                                    # Claude model for this PM cycle; "" = default
     workdir: str = ""                                  # resolved cwd for the reasoner's claude session ("" = inherit)
     directive: str = ""                                # "compress" | "brainstorm" | "" — a human-triggered directed cycle
+    graph_lines: list[str] = field(default_factory=list)  # windowed lineage-graph adjacency, one line per node with edges
 
     @property
     def free_slots(self) -> int:
@@ -75,6 +76,7 @@ class PMCycleOutput:
     reopen_ids: list[str] = field(default_factory=list)      # approved sprints to send back to proposed (now obsolete)
     release_ids: list[str] = field(default_factory=list)     # approved sprints to release into production (-> queued)
     thread_replies: list[dict] = field(default_factory=list)  # [{thread_id, text}] PM answers to open feedback threads
+    edge_ops: list[dict] = field(default_factory=list)  # [{op:"add"|"delete", type, src, dst, rationale, confidence?, evidence?}]
 
 
 class Reasoner(Protocol):

@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
-from coscience import threads
+from coscience import graph, threads
 from coscience.ledger import Ledger
 from coscience.models import Sprint, SprintStatus, Program, ProgramStatus, Idea, ChatThread, set_status
 from coscience.resources import ResourcePool, load_pool
@@ -731,6 +731,24 @@ class Service:
         idea = Idea(id=uuid4().hex[:8], text=text, source="human",
                     demoted=True, pinned=True, created_at=time.time())   # demote auto-pins
         ideas.append(idea)
+        # Rewire the sprint's graph edges onto the new idea. Drop evidential edges
+        # incident on the sprint first (an idea has no result to confirm/refute),
+        # then repoint the rest across every program idea + sprint. Use the live
+        # `sprint` object in the node set (NOT an iter_sprints copy) so its own
+        # edges are drained on the object we save last.
+        program_sprints = [s for s in self.substrate.iter_sprints()
+                           if s.program == sprint.program and s.id != sprint.id]
+        nodes = list(ideas) + program_sprints + [sprint]
+        changed = graph.drop_evidential_incident(sprint.id, nodes)
+        changed |= graph.repoint_edges(sprint.id, idea.id, nodes)
+        # Repoint preserves edge type, so an experiment->experiment lineage edge can
+        # degrade to an illegal kind pair once it lands on the new idea; drop those
+        # ("repoint … where still valid", spec §4.2).
+        changed |= graph.drop_kind_illegal_incident(idea.id, nodes)
+        sprint_by_id = {s.id: s for s in program_sprints}
+        for nid in changed:
+            if nid in sprint_by_id:
+                self.substrate.save_sprint(sprint_by_id[nid])
         self.substrate.save_ideas(sprint.program, summary, ideas)
         set_status(sprint, SprintStatus.CANCELED, by=by, action="demote")
         self.substrate.save_sprint(sprint)
@@ -757,6 +775,61 @@ class Service:
         summary, ideas = self.substrate.load_ideas(program_id)
         return {"summary": summary, "ideas": [self._idea_public(i) for i in ideas]}
 
+    # --- lineage graph ---
+    def _program_nodes(self, program_id: str):
+        """(ideas, sprints) for a program — the live node set the graph spans."""
+        _summary, ideas = self.substrate.load_ideas(program_id)
+        sprints = [s for s in self.substrate.iter_sprints() if s.program == program_id]
+        return ideas, sprints
+
+    def _save_node(self, program_id: str, node, ideas) -> None:
+        """Persist one node after an edge change: a sprint saves directly; an idea
+        requires re-saving the whole pool (single ideas.md)."""
+        if isinstance(node, Sprint):
+            self.substrate.save_sprint(node)
+        else:
+            summary, _ = self.substrate.load_ideas(program_id)
+            self.substrate.save_ideas(program_id, summary, ideas)
+
+    def add_edge(self, program_id: str, etype: str, src: str, dst: str, by: str = "",
+                 rationale: str = "", confidence: str = "", evidence: str = "") -> dict:
+        self._require_program(program_id)
+        ideas, sprints = self._program_nodes(program_id)
+        nodes = list(ideas) + sprints
+        node_by_id = {n.id: n for n in nodes}
+        edge = graph.new_edge(etype, src, dst, "human", by=by, at=time.time(),
+                              rationale=rationale, confidence=confidence, evidence=evidence)
+        reason = graph.validate_edge(edge, nodes, graph.all_edges(nodes))
+        if reason is not None:
+            raise ValueError(reason)
+        if any(e["id"] == edge["id"] for e in node_by_id[src].edges):
+            raise ValueError("edge already exists")
+        node_by_id[src].edges.append(edge)
+        self._save_node(program_id, node_by_id[src], ideas)
+        self.substrate.commit(f"program {program_id}: add edge {edge['id']} ({etype})")
+        return edge
+
+    def delete_edge(self, program_id: str, edge_id: str) -> dict:
+        self._require_program(program_id)
+        ideas, sprints = self._program_nodes(program_id)
+        for n in list(ideas) + sprints:
+            kept = [e for e in n.edges if e["id"] != edge_id]
+            if len(kept) != len(n.edges):
+                n.edges = kept
+                self._save_node(program_id, n, ideas)
+                self.substrate.commit(f"program {program_id}: delete edge {edge_id}")
+                return {"deleted": edge_id}
+        raise NotFoundError(edge_id)
+
+    def get_graph(self, program_id: str) -> dict:
+        self._require_program(program_id)
+        ideas, sprints = self._program_nodes(program_id)
+        nodes = [{"id": i.id, "kind": graph.node_kind(i), "stage": graph.node_stage(i),
+                  "label": i.text[:80]} for i in ideas]
+        nodes += [{"id": s.id, "kind": graph.node_kind(s), "stage": graph.node_stage(s),
+                   "label": (s.title or s.goals)[:80]} for s in sprints]
+        return {"nodes": nodes, "edges": graph.all_edges(list(ideas) + sprints)}
+
     def add_idea(self, program_id: str, text: str, source: str = "human", by: str = "") -> dict:
         self._require_program(program_id)
         text = text.strip()
@@ -781,6 +854,14 @@ class Service:
         if by == "pm" and target.protected:
             raise ValueError("idea is protected; the PM may not delete it")
         ideas = [i for i in ideas if i.id != idea_id]
+        # Cascade: drop every edge pointing AT the deleted idea so no surviving node
+        # is left with a dangling reference (mirrors the PM prune path).
+        sprints = [s for s in self.substrate.iter_sprints() if s.program == program_id]
+        changed = graph.drop_edges_to(idea_id, list(ideas) + sprints)
+        sprint_by_id = {s.id: s for s in sprints}
+        for nid in changed:
+            if nid in sprint_by_id:
+                self.substrate.save_sprint(sprint_by_id[nid])
         self.substrate.save_ideas(program_id, summary, ideas)
         self.substrate.commit(f"program {program_id}: idea {idea_id} deleted ({by})")
 
