@@ -25,8 +25,8 @@ describe("toFlow", () => {
   it("maps nodes and edges with correct direction", () => {
     const g = {
       nodes: [
-        { id: "s1", kind: "experiment" as const, stage: "result" as const, label: "base" },
-        { id: "s2", kind: "experiment" as const, stage: "experiment" as const, label: "next" },
+        { id: "s1", kind: "experiment" as const, stage: "result" as const, label: "base", status: "done" },
+        { id: "s2", kind: "experiment" as const, stage: "experiment" as const, label: "next", status: "proposed" },
       ],
       edges: [edge({})],
     };

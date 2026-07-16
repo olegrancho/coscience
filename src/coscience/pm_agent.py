@@ -91,7 +91,8 @@ def gather_context(substrate, program_id: str) -> PMContext:
         if s.program != program_id:
             continue
         for th in s.threads:
-            if th.get("target") == "pm" and threads.needs_reply(th) and s.status != SprintStatus.CANCELED:
+            if (th.get("target") == "pm" and threads.needs_reply(th)
+                    and s.status not in (SprintStatus.CANCELED, SprintStatus.PARKED)):
                 sprint_feedback.append({
                     "sprint_id": s.id, "goals": s.goals, "status": s.status.value,
                     # PM may revise a sprint while it is still proposed/approved/queued;

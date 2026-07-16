@@ -12,7 +12,7 @@ import { loadPositions, savePosition } from "./graphPositions";
 
 export type LayoutMode = "box" | "dot";
 
-type NodeData = { label: string; stage: string; kind: string };
+type NodeData = { label: string; stage: string; kind: string; status: string };
 
 function edgeTitle(ge: GraphEdge): string {
   return [
@@ -26,10 +26,12 @@ function edgeTitle(ge: GraphEdge): string {
 // --- custom nodes ---
 function BoxNode({ data }: NodeProps) {
   const d = data as NodeData;
+  const parked = d.status === "parked";
   return (
     <div
+      title={parked ? "parked" : undefined}
       style={{
-        border: `2px solid ${stageColor(d.stage)}`,
+        border: `2px ${parked ? "dashed" : "solid"} ${stageColor(d.stage)}`,
         borderRadius: 8,
         padding: "5px 8px",
         width: NODE_WIDTH,
@@ -40,6 +42,7 @@ function BoxNode({ data }: NodeProps) {
         wordBreak: "break-word",
         color: "#1a1a1a",
         background: stageFill(d.stage),
+        opacity: parked ? 0.45 : 1,
       }}
     >
       <Handle type="target" position={Position.Top} style={{ visibility: "hidden" }} />
@@ -53,8 +56,9 @@ function DotNode({ data }: NodeProps) {
   const zoom = useStore((s) => s.transform[2]);
   const d = data as NodeData;
   const showLabel = zoom >= 0.6;   // hide side labels when zoomed out
+  const parked = d.status === "parked";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 6, opacity: parked ? 0.45 : 1 }}>
       <Handle type="target" position={Position.Top} style={{ visibility: "hidden" }} />
       <span
         title={d.label}

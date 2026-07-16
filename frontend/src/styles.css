@@ -25,6 +25,7 @@
   --st-executing: #1f8fb0;
   --st-done: #4f9d5d;
   --st-paused: #7a8a85;
+  --st-parked: #b0895e;
   --st-canceled: #97a39e;
 
   /* the PM report reads on a faintly warm notebook leaf */

@@ -2,7 +2,7 @@ import type { GraphNode, GraphEdge } from "../api";
 
 export interface FlowNode {
   id: string;
-  data: { label: string; stage: string; kind: string };
+  data: { label: string; stage: string; kind: string; status: string };
   position: { x: number; y: number };
   style: Record<string, unknown>;
   width?: number;    // size hints for the dagre layout (nodes render their own DOM)
@@ -74,7 +74,7 @@ export function toFlow(graph: { nodes: GraphNode[]; edges: GraphEdge[] }): {
     const label = n.label || n.id;
     return {
       id: n.id,
-      data: { label, stage: n.stage, kind: n.kind },
+      data: { label, stage: n.stage, kind: n.kind, status: n.status },
       position: { x: 0, y: 0 },
       style: {},                              // styling lives in the custom node components
       width: NODE_WIDTH,

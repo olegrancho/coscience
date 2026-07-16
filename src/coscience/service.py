@@ -108,6 +108,32 @@ class Service:
         set_status(sprint, SprintStatus.CANCELED, by=by, action="reject")
         self.substrate.save_sprint(sprint)
 
+    def park_sprint(self, sprint_id: str, by: str = "") -> None:
+        """Human shelf: proposed -> parked. Frees a proposed-cap slot for the PM
+        without deleting or demoting the sprint. Inert until unparked."""
+        sprint = self._load_sprint(sprint_id)
+        if sprint.status != SprintStatus.PROPOSED:
+            raise ValueError(f"can only park a proposed sprint; {sprint_id} is {sprint.status.value}")
+        set_status(sprint, SprintStatus.PARKED, by=by, action="park")
+        self.substrate.save_sprint(sprint)
+
+    def unpark_sprint(self, sprint_id: str, by: str = "") -> None:
+        """Un-shelf: parked -> proposed (back into the review pool / PM cap)."""
+        sprint = self._load_sprint(sprint_id)
+        if sprint.status != SprintStatus.PARKED:
+            raise ValueError(f"can only unpark a parked sprint; {sprint_id} is {sprint.status.value}")
+        set_status(sprint, SprintStatus.PROPOSED, by=by, action="unpark")
+        self.substrate.save_sprint(sprint)
+
+    def cancel_parked_sprint(self, sprint_id: str, by: str = "") -> None:
+        """Cancel a parked sprint: parked -> canceled (record + git history stay;
+        it just leaves the board)."""
+        sprint = self._load_sprint(sprint_id)
+        if sprint.status != SprintStatus.PARKED:
+            raise ValueError(f"can only cancel a parked sprint; {sprint_id} is {sprint.status.value}")
+        set_status(sprint, SprintStatus.CANCELED, by=by, action="cancel")
+        self.substrate.save_sprint(sprint)
+
     def vote_sprint(self, sprint_id: str, by: str, value: int) -> dict:
         """Record a 👍/👎 on a sprint. `value` is +1, -1, or 0 (clear). One vote
         per `by` (a browser id) — re-voting the same way clears it (toggle),
@@ -721,9 +747,9 @@ class Service:
         is flagged 'demoted' (the PM may not promote it back); a human can lift that.
         The sprint is canceled so it leaves the board."""
         sprint = self._load_sprint(sprint_id)
-        if sprint.status not in (SprintStatus.PROPOSED, SprintStatus.APPROVED):
+        if sprint.status not in (SprintStatus.PROPOSED, SprintStatus.APPROVED, SprintStatus.PARKED):
             raise ValueError(
-                f"only a proposed or approved sprint can be demoted (is {sprint.status.value})")
+                f"only a proposed, approved, or parked sprint can be demoted (is {sprint.status.value})")
         if not sprint.program:
             raise ValueError("sprint has no program to hold the idea")
         summary, ideas = self.substrate.load_ideas(sprint.program)
@@ -829,9 +855,9 @@ class Service:
         live = list(ideas) + sprints
         live_ids = {n.id for n in live}
         nodes = [{"id": i.id, "kind": graph.node_kind(i), "stage": graph.node_stage(i),
-                  "label": i.text[:80]} for i in ideas]
+                  "label": i.text[:80], "status": ""} for i in ideas]
         nodes += [{"id": s.id, "kind": graph.node_kind(s), "stage": graph.node_stage(s),
-                   "label": (s.title or s.goals)[:80]} for s in sprints]
+                   "label": (s.title or s.goals)[:80], "status": s.status.value} for s in sprints]
         # Drop any edge that touches an excluded (canceled) node, so nothing dangles.
         edges = [e for e in graph.all_edges(live)
                  if e["src"] in live_ids and e["dst"] in live_ids]

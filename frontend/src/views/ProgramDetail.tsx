@@ -223,7 +223,7 @@ export default function ProgramDetail() {
         const counts = p.sprints.reduce<Record<string, number>>((a, s) => {
           a[s.status] = (a[s.status] ?? 0) + 1; return a;
         }, {});
-        const order = ["proposed", "approved", "queued", "executing", "failed", "done", "canceled"];
+        const order = ["proposed", "approved", "queued", "executing", "parked", "failed", "done", "canceled"];
         return (
           <Card padding="lg" radius="md" style={cardStyle}>
             <Group justify="space-between" align="center" mb={12} wrap="nowrap">

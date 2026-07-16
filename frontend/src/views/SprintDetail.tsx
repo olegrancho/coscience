@@ -218,6 +218,22 @@ export default function SprintDetail() {
       nav(`/programs/${prog}`);
     } catch (e) { notifications.show({ color: "red", title: "Couldn't demote", message: String(e) }); }
   };
+  const park = async () => {
+    try { await api.parkSprint(id); notifications.show({ color: "gray", title: "Parked", message: "Shelved — off the AI's queue, freeing a slot. Unpark it any time." }); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't park", message: String(e) }); }
+  };
+  const unpark = async () => {
+    try { await api.unparkSprint(id); notifications.show({ color: "teal", title: "Unparked", message: "Back in the proposed pool for review." }); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't unpark", message: String(e) }); }
+  };
+  const cancelParked = async () => {
+    if (!window.confirm("Cancel this parked experiment? It leaves the board (kept in history).")) return;
+    try {
+      await api.cancelParkedSprint(id);
+      notifications.show({ color: "gray", title: "Canceled", message: "Removed from the board." });
+      nav(`/programs/${prog}`);
+    } catch (e) { notifications.show({ color: "red", title: "Couldn't cancel", message: String(e) }); }
+  };
   const setModel = async (model: string) => {
     const live = s.status === "executing" && s.agent_running;
     try {
@@ -292,8 +308,13 @@ export default function SprintDetail() {
                 <Button variant="default" color="red" onClick={reject}>{s.status === "queued" ? "Cancel" : "Reject"}</Button>
               </Tooltip>
             )}
-            {(actions.includes("edit") || actions.includes("demote")
-              || (actions.includes("run") && s.status === "proposed")) && (
+            {actions.includes("unpark") && (
+              <Tooltip label="Return this parked sprint to the proposed pool." withArrow openDelay={300}>
+                <Button color="signal" onClick={unpark}>Unpark</Button>
+              </Tooltip>
+            )}
+            {(actions.includes("edit") || actions.includes("demote") || actions.includes("park")
+              || actions.includes("cancel") || (actions.includes("run") && s.status === "proposed")) && (
               <Menu position="bottom-end" withArrow>
                 <Menu.Target>
                   <Tooltip label="More actions" withArrow openDelay={300}>
@@ -305,8 +326,12 @@ export default function SprintDetail() {
                     <Menu.Item onClick={run}>Run now (approve &amp; release)</Menu.Item>}
                   {actions.includes("edit") &&
                     <Menu.Item onClick={() => setEditing(true)}>Edit goals / plan / resources…</Menu.Item>}
+                  {actions.includes("park") &&
+                    <Menu.Item onClick={park}>Park (shelve, free a slot)…</Menu.Item>}
                   {actions.includes("demote") &&
                     <Menu.Item onClick={demote}>Demote to idea…</Menu.Item>}
+                  {actions.includes("cancel") &&
+                    <Menu.Item color="red" onClick={cancelParked}>Cancel…</Menu.Item>}
                 </Menu.Dropdown>
               </Menu>
             )}

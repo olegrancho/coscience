@@ -70,6 +70,7 @@ export interface Ledger {
 }
 export interface GraphNode {
   id: string; kind: "idea" | "experiment"; stage: "idea" | "experiment" | "result"; label: string;
+  status: string;   // sprint status ("" for ideas); used to dim parked nodes
 }
 export interface GraphEdge {
   id: string; type: string; src: string; dst: string; source: string;
@@ -221,6 +222,12 @@ export const api = {
     fetch(`/api/sprints/${id}/send_back`, { method: "POST" }).then(j<Sprint>),
   rejectSprint: (id: string) =>
     fetch(`/api/sprints/${id}/reject`, { method: "POST" }).then(j<Sprint>),
+  parkSprint: (id: string) =>
+    fetch(`/api/sprints/${id}/park`, { method: "POST" }).then(j<Sprint>),
+  unparkSprint: (id: string) =>
+    fetch(`/api/sprints/${id}/unpark`, { method: "POST" }).then(j<Sprint>),
+  cancelParkedSprint: (id: string) =>
+    fetch(`/api/sprints/${id}/cancel`, { method: "POST" }).then(j<Sprint>),
   voteSprint: (id: string, by: string, value: number) =>
     fetch(`/api/sprints/${id}/vote`, {
       method: "POST", headers: { "Content-Type": "application/json" },

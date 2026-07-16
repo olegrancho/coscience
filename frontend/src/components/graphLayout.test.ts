@@ -3,7 +3,7 @@ import { layout } from "./graphLayout";
 import type { FlowNode, FlowEdge } from "./graphFlow";
 
 const node = (id: string): FlowNode => ({
-  id, data: { label: id, stage: "experiment", kind: "experiment" },
+  id, data: { label: id, stage: "experiment", kind: "experiment", status: "proposed" },
   position: { x: 0, y: 0 }, style: {},
 });
 const edge = (s: string, t: string): FlowEdge => ({
