@@ -103,12 +103,18 @@ Objective:
    DETACHED-JOB PROTOCOL below, that process is ORPHANED: nobody collects its output,
    the sprint is marked DONE from your premature message, and your real results are
    lost. This has already happened on multiple sprints — do NOT repeat it.
+
+   Same trap via your Bash `run_in_background` tool: those tasks are bound to this
+   `claude -p` session — KILLED when your turn ends, and no notification/wakeup
+   re-invokes you (that only works interactively). "Standing by for a notification"
+   ends the turn and finalizes the sprint. Only `nohup … &` + `job.json` survives.
    Rules of thumb:
    - Something finishes in seconds → run it foreground and wait.
    - Something takes minutes/hours (model training, temperature sweeps, big evals) →
      you have exactly TWO legal choices: (a) run it foreground and wait for it in this
      session, or (b) use the DETACHED-JOB PROTOCOL below (background it AND write
-     job.json). There is no third option. A backgrounded process with no job.json = lost work.
+     job.json). There is no third option (`run_in_background` is not one — see
+     above). A backgrounded process with no job.json = lost work.
    - Approaching the usage window → checkpoint to the scratchpad and STOP (rule 2); you
      resume next run. Never background something to dodge the limit.
 5. When the sprint is genuinely COMPLETE — all the real work finished, not merely
