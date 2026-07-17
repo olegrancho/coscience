@@ -32,7 +32,14 @@ class SchedulerPolicy:
                 granted.append(sprint)
         return granted
 
-    def select_preemptions(self, candidate, candidate_priority, ledger: Ledger):
+    def select_yield_victims(self, candidate, candidate_priority, ledger: Ledger,
+                             yieldable_ids):
+        """Leases to hibernate so `candidate` can be granted. Only leases in
+        `yieldable_ids` (at a safe yield point — no running agent, no live job)
+        are considered; the caller (dispatcher) computes that set. Picks the
+        lowest-priority preemptible holders below the candidate's priority, just
+        enough to cover the deficit; returns [] if the safe-point set can't cover
+        it (nothing is killed — the candidate waits for a job/turn to finish)."""
         need = candidate.resources_required
         avail = dict(ledger.available())
         deficit = {k: v - avail.get(k, 0.0) for k, v in need.items()
@@ -41,7 +48,8 @@ class SchedulerPolicy:
             return []
 
         eligible = [l for l in ledger.all_leases()
-                    if l.preemptible and l.priority < candidate_priority]
+                    if l.preemptible and l.priority < candidate_priority
+                    and l.sprint_id in yieldable_ids]
         # lowest priority first; tie -> most-recently granted first
         eligible.sort(key=lambda l: (l.priority, -l.granted_at))
 

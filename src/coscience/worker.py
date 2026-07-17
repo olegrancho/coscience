@@ -496,3 +496,46 @@ class Worker:
         self.substrate.save_progress(progress)
         self.substrate.commit(f"sprint {sprint.id}: agent stopped")
         return [sprint.id]
+
+    def is_yieldable(self, sprint_id: str) -> bool:
+        """True if the sprint can safely yield its lease RIGHT NOW: nothing in
+        flight and nothing uncollected. A non-empty `agent_token` means an agent
+        run was launched and NOT yet collected — it may still be running, or it may
+        have just exited leaving output (a fresh finished.json / job.json) that the
+        next beat must collect. Hibernating in that window would discard a completed
+        result or orphan a just-declared detached job, so it is NOT yieldable. Only
+        a fully-idle sprint (token cleared) with no live job may yield."""
+        progress = self.substrate.load_progress(sprint_id)
+        if progress.agent_token:
+            return False
+        if progress.job_token and self._job_alive(progress.job_token):
+            return False
+        return True
+
+    def hibernate_sprint(self, sprint: Sprint) -> None:
+        """Yield at a safe point: park the sprint as HIBERNATED with its scratchpad
+        intact, waiting for the dispatcher to wake it from free capacity. Any
+        lingering job process group is killed; if a finished job was awaiting
+        assessment, the assess pointer (assess_reason/job_out/job_note) is kept so
+        the resumed run reads that output instead of starting blind."""
+        progress = self.substrate.load_progress(sprint.id)
+        if progress.agent_token:
+            self.agent.stop(progress.agent_token)
+            progress.agent_token = ""
+        if progress.job_token:
+            # is_yieldable guaranteed the job is not alive; kill any straggler in
+            # its group, but preserve the assess context for the resumed run.
+            try:
+                self._terminate(progress.job_token)
+            except Exception:
+                pass
+            progress.assess_reason = progress.assess_reason or "finished"
+            progress.job_token = ""
+            progress.job_started_at = None
+            progress.job_next_wake = 0.0
+            progress.job_max_seconds = 0.0
+            progress.job_expected_seconds = 0.0
+        set_status(sprint, SprintStatus.HIBERNATED, by="dispatcher", action="hibernate")
+        self.substrate.save_sprint(sprint)
+        self.substrate.save_progress(progress)
+        self.substrate.commit(f"sprint {sprint.id}: hibernated (yield for higher-priority work)")

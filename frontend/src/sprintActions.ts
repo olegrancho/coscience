@@ -1,5 +1,6 @@
 export type SprintStatus =
-  | "proposed" | "approved" | "queued" | "executing" | "parked" | "done" | "canceled" | "failed";
+  | "proposed" | "approved" | "queued" | "executing" | "parked" | "hibernated"
+  | "done" | "canceled" | "failed";
 
 // Human lifecycle actions. `approve`/`run` are the primary (state-advancing) ones;
 // the rest are secondary and live in the ⋯ overflow menu. `reject` reads as

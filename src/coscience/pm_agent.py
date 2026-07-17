@@ -115,7 +115,8 @@ def gather_context(substrate, program_id: str) -> PMContext:
             err = substrate.load_progress(s.id).last_error
             failed.append({"id": s.id, "goals": s.goals, "error": err})
         elif s.status in (SprintStatus.PROPOSED, SprintStatus.APPROVED,
-                          SprintStatus.QUEUED, SprintStatus.EXECUTING):
+                          SprintStatus.QUEUED, SprintStatus.EXECUTING,
+                          SprintStatus.HIBERNATED):
             open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals,
                                  "priority": s.priority})
     guidance_threads = substrate.load_guidance(program_id)

@@ -18,6 +18,7 @@ class SprintStatus(StrEnum):
     QUEUED = "queued"          # released to the scheduler; runs when a resource slot frees
     EXECUTING = "executing"    # lease granted; the worker agent is running
     PARKED = "parked"          # human shelved a proposed sprint; inert, off the PM's cap
+    HIBERNATED = "hibernated"  # dispatcher yielded it at a safe point; parked mid-work, waiting for capacity
     DONE = "done"
     CANCELED = "canceled"
     FAILED = "failed"          # agent failed repeatedly; terminal until a human acts

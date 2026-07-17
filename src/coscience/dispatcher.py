@@ -13,13 +13,13 @@ from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
 from coscience.worker import Worker
 
-_ELIGIBLE = (SprintStatus.QUEUED, SprintStatus.EXECUTING)
+_ELIGIBLE = (SprintStatus.QUEUED, SprintStatus.EXECUTING, SprintStatus.HIBERNATED)
 
 
 @dataclass
 class CycleReport:
     granted: int = 0
-    preempted: int = 0
+    hibernated: int = 0
     beaten: int = 0
     completed: int = 0
     waiting: int = 0
@@ -73,29 +73,30 @@ class Dispatcher:
             if self.ledger.acquire(sprint.id, sprint.resources_required, now, ttl,
                                    priority=eff, preemptible=sprint.preemptible):
                 report.granted += 1
-                if sprint.status == SprintStatus.QUEUED:
+                if sprint.status in (SprintStatus.QUEUED, SprintStatus.HIBERNATED):
                     set_status(sprint, SprintStatus.EXECUTING)
                     self.substrate.save_sprint(sprint)
 
-        # --- one preemption round for the top starved candidate ---
-        starved = [s for s in eligible if self.ledger.lease_for(s.id) is None]
+        # --- yield: hibernate a safe-point sprint to free a starved QUEUED candidate ---
+        # Cooperative preemption: never hard-kill. Only a QUEUED candidate can
+        # trigger a yield (hibernated sprints re-enter from free capacity only, so
+        # there is no hibernate ping-pong). Victims are chosen only among leases at
+        # a safe yield point (no running agent, no live job); the freed capacity is
+        # granted on the NEXT cycle's grant step.
+        starved = [s for s in eligible
+                   if s.status == SprintStatus.QUEUED and self.ledger.lease_for(s.id) is None]
         if starved:
             starved.sort(
                 key=lambda s: -self.policy.effective_priority(s, queue.get(s.id, now), now))
             cand = starved[0]
             cand_eff = self.policy.effective_priority(cand, queue.get(cand.id, now), now)
-            victims = self.policy.select_preemptions(cand, cand_eff, self.ledger)
-            if victims:
-                for v in victims:
-                    self.ledger.release(v.sprint_id)
-                    self.worker.stop_sprint(self.substrate.load_sprint(v.sprint_id))
-                    report.preempted += 1
-                if self.ledger.acquire(cand.id, cand.resources_required, now, ttl,
-                                       priority=cand_eff, preemptible=cand.preemptible):
-                    report.granted += 1
-                    if cand.status == SprintStatus.QUEUED:
-                        set_status(cand, SprintStatus.EXECUTING)
-                        self.substrate.save_sprint(cand)
+            yieldable = {l.sprint_id for l in self.ledger.all_leases()
+                         if self.worker.is_yieldable(l.sprint_id)}
+            victims = self.policy.select_yield_victims(cand, cand_eff, self.ledger, yieldable)
+            for v in victims:
+                self.ledger.release(v.sprint_id)
+                self.worker.hibernate_sprint(self.substrate.load_sprint(v.sprint_id))
+                report.hibernated += 1
 
         # --- reconcile: no lease => no running job ---
         # Grants/preemption above re-adopted any leaseless running sprint that
@@ -103,6 +104,8 @@ class Dispatcher:
         # (e.g. expired across a dispatcher outage) so physical use matches the
         # ledger.
         for sprint in eligible:
+            if sprint.status != SprintStatus.EXECUTING:
+                continue                          # hibernated: intentionally leaseless, no agent/job
             if self.ledger.lease_for(sprint.id) is None:
                 # A sleeping sprint (no live agent, but a tracked detached job) must
                 # also be reaped when leaseless — else its job runs with no lease.
@@ -127,6 +130,6 @@ class Dispatcher:
         report.waiting = sum(
             1 for s in eligible if self.ledger.lease_for(s.id) is None)
         self._save_queue(queue)
-        if report.granted or report.completed or report.preempted or report.reconciled:
+        if report.granted or report.completed or report.hibernated or report.reconciled:
             self.substrate.commit("dispatch cycle")
         return report
