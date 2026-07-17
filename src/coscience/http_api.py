@@ -387,6 +387,17 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc))
         return service.get_sprint(sprint_id)
 
+    @api.post("/sprints/{sprint_id}/resume")
+    def resume_sprint(sprint_id: str,
+                      user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            service.resume_sprint(sprint_id, by=(user.username if user else ""))
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        return service.get_sprint(sprint_id)
+
     @api.post("/programs/{program_id}/edges")
     def add_edge(program_id: str, body: EdgeCreate,
                  user: "auth.User | None" = Depends(current_user)) -> dict:

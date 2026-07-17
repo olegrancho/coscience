@@ -134,6 +134,32 @@ class Service:
         set_status(sprint, SprintStatus.CANCELED, by=by, action="cancel")
         self.substrate.save_sprint(sprint)
 
+    def resume_sprint(self, sprint_id: str, by: str = "") -> None:
+        """Manually re-open a finished/failed sprint for more work: drop its
+        result(s), reset the retry/ambiguity counters, and re-queue it. The worker
+        relaunches and the agent resumes from its scratchpad. For sprints wrongly
+        marked done (e.g. the agent stopped without actually finishing)."""
+        sprint = self._load_sprint(sprint_id)
+        if sprint.status not in (SprintStatus.DONE, SprintStatus.FAILED):
+            raise ValueError(
+                f"can only resume a done or failed sprint; {sprint_id} is {sprint.status.value}")
+        for rid in list(sprint.results):
+            self.substrate.delete_result(rid)
+        sprint.results = []
+        # Clear the completion sentinel so the fresh run must signal done anew.
+        (self.substrate.sprint_dir(sprint_id) / "finished.json").unlink(missing_ok=True)
+        progress = self.substrate.load_progress(sprint_id)
+        progress.agent_token = ""
+        progress.agent_session_id = ""      # don't --resume the prior finished session
+        progress.failures = 0
+        progress.ambiguous_exits = 0
+        progress.scratch_size = 0
+        progress.last_error = ""
+        self.substrate.save_progress(progress)
+        set_status(sprint, SprintStatus.QUEUED, by=by, action="resume")
+        self.substrate.save_sprint(sprint)
+        self.substrate.commit(f"sprint {sprint_id}: resumed by {by or 'human'} (re-queued)")
+
     def vote_sprint(self, sprint_id: str, by: str, value: int) -> dict:
         """Record a 👍/👎 on a sprint. `value` is +1, -1, or 0 (clear). One vote
         per `by` (a browser id) — re-voting the same way clears it (toggle),

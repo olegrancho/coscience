@@ -170,7 +170,13 @@ export default function SprintDetail() {
   const voter = me.data?.user?.username ?? voterId();
   const sprint = useQuery({
     queryKey: ["sprint", id], queryFn: () => api.getSprint(id, voter),
-    refetchInterval: (q) => (q.state.data?.status === "executing" ? 5000 : false),
+    // Poll through the whole active lifecycle (not just executing) so the page
+    // live-updates as a sprint moves queued -> executing -> done without a reload.
+    refetchInterval: (q) => {
+      const st = q.state.data?.status;
+      const active = st === "proposed" || st === "approved" || st === "queued" || st === "executing";
+      return active ? 5000 : false;
+    },
   });
   // Use the sprint's real program; the id-prefix guess is only a pre-load fallback
   // (sprint ids aren't always "<program>-..."), which made the breadcrumb link dead.
@@ -233,6 +239,14 @@ export default function SprintDetail() {
       notifications.show({ color: "gray", title: "Canceled", message: "Removed from the board." });
       nav(`/programs/${prog}`);
     } catch (e) { notifications.show({ color: "red", title: "Couldn't cancel", message: String(e) }); }
+  };
+  const resume = async () => {
+    if (!window.confirm("Resume this sprint? Its current result is cleared and it re-queues to run again; the agent continues from its scratchpad.")) return;
+    try {
+      await api.resumeSprint(id);
+      notifications.show({ color: "teal", title: "Resumed", message: "Re-queued — the worker will pick it up and continue." });
+      refresh();
+    } catch (e) { notifications.show({ color: "red", title: "Couldn't resume", message: String(e) }); }
   };
   const setModel = async (model: string) => {
     const live = s.status === "executing" && s.agent_running;
@@ -311,6 +325,11 @@ export default function SprintDetail() {
             {actions.includes("unpark") && (
               <Tooltip label="Return this parked sprint to the proposed pool." withArrow openDelay={300}>
                 <Button color="signal" onClick={unpark}>Unpark</Button>
+              </Tooltip>
+            )}
+            {actions.includes("resume") && (
+              <Tooltip label="Re-open this sprint for more work — clears its result and re-queues it; the agent picks up from its scratchpad. Use it if the sprint was marked done before the work actually finished." withArrow openDelay={300}>
+                <Button color="signal" onClick={resume}>Resume</Button>
               </Tooltip>
             )}
             {(actions.includes("edit") || actions.includes("demote") || actions.includes("park")

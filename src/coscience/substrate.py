@@ -146,6 +146,9 @@ class Substrate:
             job_next_wake=float(fm.get("job_next_wake", 0.0)),
             job_max_seconds=float(fm.get("job_max_seconds", 0.0)),
             assess_reason=str(fm.get("assess_reason", "")),
+            agent_session_id=str(fm.get("agent_session_id", "")),
+            ambiguous_exits=int(fm.get("ambiguous_exits", 0)),
+            scratch_size=int(fm.get("scratch_size", 0)),
         )
 
     def save_progress(self, progress: ProgressState) -> None:
@@ -162,6 +165,9 @@ class Substrate:
             "job_next_wake": progress.job_next_wake,
             "job_max_seconds": progress.job_max_seconds,
             "assess_reason": progress.assess_reason,
+            "agent_session_id": progress.agent_session_id,
+            "ambiguous_exits": progress.ambiguous_exits,
+            "scratch_size": progress.scratch_size,
         }
         d = self.sprint_dir(progress.sprint_id)
         d.mkdir(parents=True, exist_ok=True)
@@ -190,6 +196,11 @@ class Substrate:
                 completed_at = None
         return Result(id=result_id, sprint=str(fm.get("sprint", "")), summary=body.strip(),
                       completed_at=None if completed_at is None else float(completed_at))
+
+    def delete_result(self, result_id: str) -> None:
+        """Remove a result file (no-op if absent). Used when a sprint is re-opened
+        and its prior result must be dropped before it re-runs."""
+        (self.repo_root / "results" / f"{result_id}.md").unlink(missing_ok=True)
 
     def iter_results(self) -> list[Result]:
         results_dir = self.repo_root / "results"

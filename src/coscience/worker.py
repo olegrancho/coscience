@@ -24,6 +24,10 @@ _USAGE_SCRIPT = os.path.expanduser("~/.claude/skills/usage/usage.py")
 # After this many real (non-usage) failures, a sprint is marked FAILED rather than
 # relaunched forever — so a deterministically-broken sprint can't burn usage.
 MAX_AGENT_FAILURES = 3
+# After this many consecutive clean exits with NO completion signal (neither
+# finished.json nor a job.json), a sprint is marked FAILED instead of resumed
+# forever — the guard against an agent that keeps ending without ever finishing.
+MAX_AMBIGUOUS_EXITS = 3
 # Hard cap on how long a declared detached job may run before the watchdog kills
 # it, regardless of what the job itself claimed. Overridable for tests/ops.
 JOB_MAX_SECONDS = float(os.environ.get("COSCIENCE_JOB_MAX_SECONDS", 7 * 24 * 3600))
@@ -203,6 +207,46 @@ class Worker:
                 pass
             return None
 
+    def _read_finished_json(self, sprint_dir):
+        """The agent's completion sentinel. Returns {"summary": str} if finished.json
+        exists (the ONLY accepted done signal), else None. Presence IS the signal — a
+        malformed/empty file still counts as done, with an empty summary (the result
+        then falls back to the agent's final message)."""
+        f = sprint_dir / "finished.json"
+        if not f.is_file():
+            return None
+        summary = ""
+        try:
+            d = json.loads(f.read_text())
+            if isinstance(d, dict):
+                summary = str(d.get("summary", "")).strip()
+        except (json.JSONDecodeError, ValueError, OSError):
+            pass
+        return {"summary": summary}
+
+    def _sprint_cwd(self, sprint: Sprint):
+        """The agent's working directory for a resume: the program's project folder if
+        set (and present), else the control repo — same rule as a normal launch."""
+        workdir = ""
+        if sprint.program:
+            try:
+                workdir = self.substrate.load_program(sprint.program).workdir
+            except OSError:
+                pass
+        return self._agent_cwd(workdir)
+
+    def _nudge(self, sprint_dir) -> str:
+        fj = sprint_dir / "finished.json"
+        return (
+            "You ended your turn without signaling completion. The platform treats "
+            f"this sprint as DONE only when {fj} exists. Do exactly ONE thing now:\n"
+            f'1. If the real work is genuinely FINISHED: write {fj} as '
+            '{"summary": "<one-paragraph result: answer, evidence, caveats>"} and end.\n'
+            "2. If a long job is still running: use the DETACHED-JOB PROTOCOL (nohup + "
+            "write job.json) as your instructions describe, then end.\n"
+            "3. Otherwise the work is NOT finished — continue it now and complete it.\n"
+            "Do NOT merely restate that you are done without writing finished.json.")
+
     def _reap_job(self, progress) -> None:
         """Kill any still-tracked detached job and clear all job fields. Backstop for
         the done/failed paths so a job left tracked (e.g. an assess run that finished
@@ -256,10 +300,11 @@ class Worker:
                 # arrival and print a limit message. Leave the sprint claimed; a
                 # later beat retries once usage frees up.
                 return BeatOutcome.IDLE
-            # Drop any stale job.json left by a prior crashed/interrupted attempt, so
-            # only a declaration written DURING this run's clean exit is recorded
-            # (else a leftover file gets misattributed to this run's result).
+            # Drop any stale job.json / finished.json left by a prior crashed or
+            # interrupted attempt, so only a signal written DURING this run's clean
+            # exit is honored (else a leftover file gets misattributed to this run).
             (sprint_dir / "job.json").unlink(missing_ok=True)
+            (sprint_dir / "finished.json").unlink(missing_ok=True)
             ctx = self._build_context(sprint)
             token = self.agent.start(sprint, ctx, sprint_dir, ctx.repo_root)
             progress.agent_token = token
@@ -318,12 +363,17 @@ class Worker:
                 f"sprint {sprint.id}: attempt {progress.failures} failed, will retry")
             return BeatOutcome.PROGRESSED
 
-        # A clean exit that declared a detached job takes precedence over the
-        # normal done path: the agent's final message is premature (the real
-        # work is still running detached), so ignore it and start sleeping on
-        # the job instead.
+        # Reaching here: a clean exit (status 'ok'). Capture the claude session id so
+        # we can --resume this exact session if the agent stopped without signaling
+        # completion (preserves its full context).
+        sid = self.agent.read_session_id(sprint_dir)
+        if sid:
+            progress.agent_session_id = sid
+
+        # 3a) declared a detached job -> the final message is premature (real work
+        # still running detached): ignore it and sleep on the job instead.
         job = self._read_job_json(sprint_dir)
-        if status == "ok" and job is not None:
+        if job is not None:
             now = time.time()
             progress.job_token = process_token(job["pid"])
             progress.job_out = job["out_file"]
@@ -334,25 +384,95 @@ class Worker:
             progress.job_max_seconds = min(job["max_seconds"] or JOB_MAX_SECONDS, JOB_MAX_SECONDS)
             progress.assess_reason = ""
             progress.agent_token = ""
+            progress.ambiguous_exits = 0
             (sprint_dir / "job.json").unlink(missing_ok=True)     # consume it
             self.substrate.save_progress(progress)
             self.substrate.commit(f"sprint {sprint.id}: detached job declared ({progress.job_note})")
             return BeatOutcome.PROGRESSED                          # stay executing, sleep on the job
 
-        result = Result(
-            id=f"{sprint.id}-result", sprint=sprint.id,
-            summary=text or "(agent produced no output)",
-            completed_at=time.time(),
-        )
-        self.substrate.save_result(result)
-        set_status(sprint, SprintStatus.DONE)
-        sprint.results = [result.id]
-        self.substrate.save_sprint(sprint)
+        # 3b) signaled completion via finished.json -> the ONLY accepted "done".
+        finished = self._read_finished_json(sprint_dir)
+        if finished is not None:
+            progress.ambiguous_exits = 0
+            result = Result(
+                id=f"{sprint.id}-result", sprint=sprint.id,
+                summary=finished["summary"] or text or "(agent produced no output)",
+                completed_at=time.time(),
+            )
+            self.substrate.save_result(result)
+            set_status(sprint, SprintStatus.DONE)
+            sprint.results = [result.id]
+            self.substrate.save_sprint(sprint)
+            progress.agent_token = ""
+            self._reap_job(progress)          # kill + clear any still-tracked detached job
+            self.substrate.save_progress(progress)
+            self.substrate.commit(f"sprint {sprint.id}: done, result {result.id}")
+            return BeatOutcome.COMPLETED
+
+        # 3c) clean exit with NO done signal. Do NOT finalize from the (premature)
+        # final message. Bring the agent back in the SAME session to ask whether it
+        # finished; after a few no-progress exits, give up so a stuck agent can't loop.
         progress.agent_token = ""
-        self._reap_job(progress)            # kill + clear any still-tracked detached job
+
+        # If a detached job is still tracked (only reachable via a wake-assess run that
+        # ended without finishing or re-declaring), this isn't a premature completion:
+        # go back to sleeping on the job so step A re-arms its watchdog next beat.
+        if progress.job_token:
+            self.substrate.save_progress(progress)
+            self.substrate.commit(
+                f"sprint {sprint.id}: assess ended without signal; back to sleeping on job")
+            return BeatOutcome.PROGRESSED
+
+        progress.assess_reason = ""    # avoid a stale assess section on a later fresh launch
+        if not self._usage_ok():
+            # Don't relaunch into an exhausted budget; hold WITHOUT counting and retry
+            # when usage frees (also covers a deliberate near-limit wind-down that
+            # ended the turn cleanly).
+            self.substrate.save_progress(progress)
+            self.substrate.commit(f"sprint {sprint.id}: no done-signal; waiting on usage")
+            return BeatOutcome.IDLE
+
+        # Count only exits that made NO progress: a run that advanced the scratchpad
+        # resets the streak, so a legitimately long multi-turn sprint is never failed —
+        # only an agent that resumes and does nothing accumulates toward the cap.
+        try:
+            size = (sprint_dir / "scratchpad.md").stat().st_size
+        except OSError:
+            size = 0
+        if size > progress.scratch_size:
+            progress.ambiguous_exits = 1
+        else:
+            progress.ambiguous_exits += 1
+        progress.scratch_size = size
+
+        if progress.ambiguous_exits >= MAX_AMBIGUOUS_EXITS:
+            set_status(sprint, SprintStatus.FAILED)
+            progress.last_error = (
+                f"worker ended {progress.ambiguous_exits} times with no progress and no "
+                "completion signal (no finished.json and no job.json)")
+            self.substrate.save_sprint(sprint)
+            self._reap_job(progress)
+            self.substrate.save_progress(progress)
+            self.substrate.commit(
+                f"sprint {sprint.id}: FAILED — no completion signal after "
+                f"{progress.ambiguous_exits} no-progress exits")
+            return BeatOutcome.COMPLETED
+        if not progress.agent_session_id:
+            # No session id to resume -> relaunch fresh next beat (agent resumes from
+            # its scratchpad).
+            self.substrate.save_progress(progress)
+            self.substrate.commit(f"sprint {sprint.id}: no done-signal, no session — will relaunch")
+            return BeatOutcome.PROGRESSED
+        token = self.agent.resume(progress.agent_session_id, sprint_dir,
+                                  self._nudge(sprint_dir), sprint.model,
+                                  self._sprint_cwd(sprint))
+        progress.agent_token = token
+        progress.started_at = time.time()
         self.substrate.save_progress(progress)
-        self.substrate.commit(f"sprint {sprint.id}: done, result {result.id}")
-        return BeatOutcome.COMPLETED
+        self.substrate.commit(
+            f"sprint {sprint.id}: no done-signal — resuming to ask "
+            f"(attempt {progress.ambiguous_exits})")
+        return BeatOutcome.PROGRESSED
 
     def stop_sprint(self, sprint: Sprint) -> list[str]:
         """Stop the sprint's running agent and/or its tracked detached job, and

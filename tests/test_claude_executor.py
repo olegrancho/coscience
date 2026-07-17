@@ -125,3 +125,60 @@ def test_read_activity_none_without_feed(tmp_path):
     sprint_dir = tmp_path / "sprints" / "sp1"
     sprint_dir.mkdir(parents=True)
     assert read_activity(sprint_dir) is None
+
+
+def test_start_disables_background_tasks_and_monitor(tmp_path, monkeypatch):
+    # Option-2 hardening: the launch must strip the session-bound background paths so
+    # the ONLY way to outlive a turn is the OS-level detached-job protocol.
+    captured = {}
+    monkeypatch.setattr("coscience.claude_executor.launch_detached",
+                        lambda cmd, cwd=None: captured.update(cmd=cmd, cwd=cwd) or "tok")
+    agent = ClaudeAgent(claude_bin="claude")
+    token = agent.start(_sprint(), None, tmp_path / "sp1", repo_root=tmp_path)
+    assert token == "tok"
+    assert "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 claude -p" in captured["cmd"]
+    assert "--disallowedTools Monitor" in captured["cmd"]
+
+
+def test_resume_builds_resume_command_and_clears_prior_capture(tmp_path, monkeypatch):
+    sprint_dir = tmp_path / "sp1"
+    sprint_dir.mkdir()
+    (sprint_dir / "agent.out").write_text("old feed")
+    (sprint_dir / "agent.exit").write_text("0")
+    captured = {}
+    monkeypatch.setattr("coscience.claude_executor.launch_detached",
+                        lambda cmd, cwd=None: captured.update(cmd=cmd) or "tok2")
+    agent = ClaudeAgent(claude_bin="claude")
+    tok = agent.resume("sess-123", sprint_dir, "did you finish?",
+                       model_slug="claude-x", repo_root=tmp_path)
+    assert tok == "tok2"
+    c = captured["cmd"]
+    assert "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1" in c
+    assert "--resume sess-123" in c and "--disallowedTools Monitor" in c
+    assert "--model claude-x" in c and "did you finish?" in c
+    assert not (sprint_dir / "agent.out").exists()      # prior capture cleared
+    assert not (sprint_dir / "agent.exit").exists()
+
+
+def test_read_session_id_from_stream(tmp_path):
+    sprint_dir = tmp_path / "sp1"
+    sprint_dir.mkdir()
+    (sprint_dir / "agent.out").write_text(_stream(
+        {"type": "system", "subtype": "init", "session_id": "abc-123"},
+        {"type": "assistant", "session_id": "abc-123", "message": {"content": []}},
+    ))
+    assert ClaudeAgent.read_session_id(sprint_dir) == "abc-123"
+
+
+def test_read_session_id_absent(tmp_path):
+    sprint_dir = tmp_path / "sp1"
+    sprint_dir.mkdir()
+    (sprint_dir / "agent.out").write_text("no json here")
+    assert ClaudeAgent.read_session_id(sprint_dir) == ""
+
+
+def test_instructions_require_finished_json_signal(tmp_path):
+    text = build_instructions(_sprint(), None, tmp_path / "scratchpad.md")
+    assert "finished.json" in text
+    assert "DETACHED-JOB PROTOCOL" in text
+    assert "not available to you" in text           # background tooling declared disabled

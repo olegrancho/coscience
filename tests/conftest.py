@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 import coscience.worker as worker_mod
@@ -16,14 +18,23 @@ class FakeAgent:
     """Deterministic stand-in for ClaudeAgent in tests — no real claude, no real
     processes. By default an agent 'finishes' immediately: beat 1 launches it,
     beat 2 sees it done and collects. Set linger>0 to keep it 'running' for that
-    many is_running polls (for preemption/reconcile tests); stop() ends it."""
+    many is_running polls (for preemption/reconcile tests); stop() ends it.
 
-    def __init__(self, result="agent findings", status="ok", linger=0):
+    A well-behaved worker signals completion by writing finished.json; this stand-in
+    writes it on a clean ('ok') launch by default. Pass finished=False to model the
+    premature-completion trap (clean exit with no done signal), which drives the
+    worker's resume-to-ask path."""
+
+    def __init__(self, result="agent findings", status="ok", linger=0,
+                 finished=True, session_id="fake-sess"):
         self.result = result
         self.status = status
         self.linger = linger
+        self.finished = finished          # write finished.json on a clean launch
+        self.session_id = session_id
         self.started: list[str] = []     # sprint ids launched
         self.stopped: list[str] = []     # tokens stopped
+        self.resumed: list[str] = []     # session ids resumed
         self._left: dict[str, int] = {}
         self._n = 0
 
@@ -32,7 +43,21 @@ class FakeAgent:
         token = f"fake:{self._n}"
         self.started.append(sprint.id)
         self._left[token] = self.linger
+        sprint_dir = Path(sprint_dir)
+        sprint_dir.mkdir(parents=True, exist_ok=True)
+        if self.finished and self.status == "ok":
+            (sprint_dir / "finished.json").write_text("{}")
         return token
+
+    def resume(self, session_id, sprint_dir, nudge, model_slug="", repo_root=None):
+        self._n += 1
+        token = f"fake:{self._n}"
+        self.resumed.append(session_id)
+        self._left[token] = self.linger
+        return token
+
+    def read_session_id(self, sprint_dir):
+        return self.session_id
 
     def is_running(self, token):
         if not token or token in self.stopped:

@@ -15,8 +15,9 @@ describe("availableActions", () => {
     expect(availableActions("queued").sort()).toEqual(["edit", "reject"]);
     expect(availableActions("executing")).toEqual(["edit"]);
   });
-  it("offers nothing for done/canceled", () => {
-    expect(availableActions("done")).toEqual([]);
+  it("offers resume for done/failed, nothing for canceled", () => {
+    expect(availableActions("done")).toEqual(["resume"]);
+    expect(availableActions("failed")).toEqual(["resume"]);
     expect(availableActions("canceled")).toEqual([]);
   });
 });

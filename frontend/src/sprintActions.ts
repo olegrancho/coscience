@@ -4,9 +4,10 @@ export type SprintStatus =
 // Human lifecycle actions. `approve`/`run` are the primary (state-advancing) ones;
 // the rest are secondary and live in the ⋯ overflow menu. `reject` reads as
 // "Cancel" once a sprint is queued. `park`/`unpark`/`delete` are the human shelf.
+// `resume` re-opens a done/failed sprint for more work (clears its result, re-queues).
 export type Action =
   | "approve" | "run" | "sendBack" | "reject" | "edit" | "demote"
-  | "park" | "unpark" | "cancel";
+  | "park" | "unpark" | "cancel" | "resume";
 
 export function availableActions(status: SprintStatus): Action[] {
   if (status === "proposed") return ["approve", "run", "edit", "reject", "demote", "park"];
@@ -14,6 +15,7 @@ export function availableActions(status: SprintStatus): Action[] {
   if (status === "queued") return ["reject", "edit"];
   if (status === "executing") return ["edit"];
   if (status === "parked") return ["unpark", "demote", "cancel"];
+  if (status === "done" || status === "failed") return ["resume"];
   return [];
 }
 

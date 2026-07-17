@@ -228,6 +228,8 @@ export const api = {
     fetch(`/api/sprints/${id}/unpark`, { method: "POST" }).then(j<Sprint>),
   cancelParkedSprint: (id: string) =>
     fetch(`/api/sprints/${id}/cancel`, { method: "POST" }).then(j<Sprint>),
+  resumeSprint: (id: string) =>
+    fetch(`/api/sprints/${id}/resume`, { method: "POST" }).then(j<Sprint>),
   voteSprint: (id: string, by: string, value: number) =>
     fetch(`/api/sprints/${id}/vote`, {
       method: "POST", headers: { "Content-Type": "application/json" },

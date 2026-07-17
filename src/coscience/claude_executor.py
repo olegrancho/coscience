@@ -104,23 +104,27 @@ Objective:
    the sprint is marked DONE from your premature message, and your real results are
    lost. This has already happened on multiple sprints — do NOT repeat it.
 
-   Same trap via your Bash `run_in_background` tool: those tasks are bound to this
-   `claude -p` session — KILLED when your turn ends, and no notification/wakeup
-   re-invokes you (that only works interactively). "Standing by for a notification"
-   ends the turn and finalizes the sprint. Only `nohup … &` + `job.json` survives.
+   Your session's own background tooling is DISABLED for this reason: the Bash
+   `run_in_background` parameter and the Monitor tool are not available to you, so a
+   session-bound background task is not even possible. The ONLY way to outlive your
+   turn is the OS-level DETACHED-JOB PROTOCOL below (`nohup … &` + `job.json`).
    Rules of thumb:
    - Something finishes in seconds → run it foreground and wait.
    - Something takes minutes/hours (model training, temperature sweeps, big evals) →
      you have exactly TWO legal choices: (a) run it foreground and wait for it in this
-     session, or (b) use the DETACHED-JOB PROTOCOL below (background it AND write
-     job.json). There is no third option (`run_in_background` is not one — see
-     above). A backgrounded process with no job.json = lost work.
+     session, or (b) use the DETACHED-JOB PROTOCOL below (`nohup` it AND write
+     job.json). A backgrounded process with no job.json = lost work.
    - Approaching the usage window → checkpoint to the scratchpad and STOP (rule 2); you
      resume next run. Never background something to dodge the limit.
 5. When the sprint is genuinely COMPLETE — all the real work finished, not merely
-   started — print your findings as your final message: the answer, how you reached
-   it, the key evidence/witnesses, and any caveats. That final message is recorded as
-   the sprint result, so it must describe finished work, never "I kicked off X".
+   started — you MUST signal it by writing {scratchpad.parent}/finished.json:
+     {{"summary": "<one paragraph: the answer, how you reached it, key evidence/
+       witnesses, caveats>"}}
+   This file is the ONLY thing the platform accepts as "done"; also print the same
+   findings as your final message. If you end your turn WITHOUT finished.json (and
+   without a job.json declaring a still-running detached job), the platform assumes
+   you are NOT done: it brings you back to ask whether you finished. So write
+   finished.json only when the work is truly complete — never for "I kicked off X".
 
 ## Long jobs: the DETACHED-JOB PROTOCOL (the ONLY correct way to background anything)
 If a job outlives this turn, you MUST do ALL THREE steps — background it, declare it,
@@ -172,10 +176,59 @@ class ClaudeAgent:
         # assistant turn / tool use flushed as it happens, so the dashboard can show
         # what the agent is doing right now) and ends with a `result` event carrying
         # the final message + cost/token usage, which collect() parses.
-        cmd = (f"{self.claude_bin} -p {shlex.quote(prompt)} {model}"
-               f"--dangerously-skip-permissions --output-format stream-json --verbose "
-               f"> {shlex.quote(str(out))} 2>&1; echo $? > {shlex.quote(str(exitf))}")
+        cmd = self._invocation(prompt, model, out, exitf)
         return launch_detached(cmd, cwd=str(repo_root) if repo_root else None)
+
+    def resume(self, session_id: str, sprint_dir: Path, nudge: str,
+               model_slug: str = "", repo_root: "Path | None" = None) -> str:
+        """Resume the SAME claude session (`--resume`) with a short nudge prompt, so
+        the agent keeps its full prior context (files it wrote, what it was doing).
+        Used when a worker exited cleanly without signaling completion — we bring it
+        back to ask whether it finished. Clears the prior run's capture first."""
+        _instr, _scratch, out, exitf = self._paths(sprint_dir)
+        for f in (out, exitf):
+            if f.exists():
+                f.unlink()
+        model = f"--model {shlex.quote(model_slug)} " if model_slug else ""
+        cmd = self._invocation(nudge, model, out, exitf,
+                               extra=f"--resume {shlex.quote(session_id)} ")
+        return launch_detached(cmd, cwd=str(repo_root) if repo_root else None)
+
+    def _invocation(self, prompt: str, model: str, out: Path, exitf: Path,
+                    extra: str = "") -> str:
+        """The `claude -p` command line shared by start() and resume().
+
+        `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` removes the Bash `run_in_background`
+        parameter from the tool schema, and `--disallowedTools Monitor` drops the
+        Monitor tool — so the ONLY way the worker can outlive its turn is the OS-level
+        DETACHED-JOB PROTOCOL (nohup + job.json). This structurally prevents the
+        session-bound-background trap that silently finalized sprints as done."""
+        return (f"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 {self.claude_bin} -p "
+                f"{shlex.quote(prompt)} {extra}{model}"
+                f"--disallowedTools Monitor "
+                f"--dangerously-skip-permissions --output-format stream-json --verbose "
+                f"> {shlex.quote(str(out))} 2>&1; echo $? > {shlex.quote(str(exitf))}")
+
+    @staticmethod
+    def read_session_id(sprint_dir: Path) -> str:
+        """The claude session id from the run's JSONL feed (every event carries it),
+        so a later beat can `--resume` this exact session. "" if not yet present."""
+        out = sprint_dir / "agent.out"
+        try:
+            raw = out.read_text()
+        except OSError:
+            return ""
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                ev = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if isinstance(ev, dict) and ev.get("session_id"):
+                return str(ev["session_id"])
+        return ""
 
     def is_running(self, token: str) -> bool:
         return bool(token) and is_running(token)

@@ -120,6 +120,9 @@ class ProgressState:
     job_next_wake: float = 0.0         # absolute ts; wake the agent when now >= this
     job_max_seconds: float = 0.0       # clamped watchdog cap
     assess_reason: str = ""            # "" normal; else "finished"/"timed out"/"wake" -> next launch is an assess run
+    agent_session_id: str = ""         # claude session id of the current/last run, for --resume
+    ambiguous_exits: int = 0           # consecutive no-progress clean exits with no completion signal
+    scratch_size: int = 0              # scratchpad bytes at the last ambiguous exit (progress marker)
 
 
 @dataclass
