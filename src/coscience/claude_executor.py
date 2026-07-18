@@ -118,8 +118,11 @@ Objective:
      resume next run. Never background something to dodge the limit.
 5. When the sprint is genuinely COMPLETE — all the real work finished, not merely
    started — you MUST signal it by writing {scratchpad.parent}/finished.json:
-     {{"summary": "<one paragraph: the answer, how you reached it, key evidence/
-       witnesses, caveats>"}}
+     {{"summary": "<the result as STRUCTURED markdown a human reads at a glance:
+       2-4 SHORT paragraphs separated by a BLANK LINE, and '-' bullets for any list
+       of findings / numbers / caveats. Put REAL blank lines in the JSON string
+       (escaped as \\n\\n). Do NOT write one long run-on paragraph. Cover the
+       answer, how you reached it, the key evidence/numbers, and caveats.>"}}
    This file is the ONLY thing the platform accepts as "done"; also print the same
    findings as your final message. If you end your turn WITHOUT finished.json (and
    without a job.json declaring a still-running detached job), the platform assumes
