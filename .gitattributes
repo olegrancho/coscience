@@ -1,0 +1,3 @@
+# Normalize line endings: store LF in the repo, check out LF everywhere.
+# Prevents CRLF churn when the tree is edited/synced across machines.
+* text=auto eol=lf
