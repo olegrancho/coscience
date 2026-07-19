@@ -1,10 +1,13 @@
-import { ActionIcon, Badge, Button, Card, Group, Loader, Stack, Text } from "@mantine/core";
+import { ActionIcon, Badge, Button, Card, Group, Loader, Stack, Text, Textarea } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import Md from "../components/Md";
+import { FeedbackThread } from "../components/FeedbackThread";
 import { api } from "../api";
 import { buildArtifactTree, type TreeRow } from "../components/artifactTree";
-import { BackLink, EmptyState, RelTime } from "../components/ui";
+import { BackLink, EmptyState, RelTime, StatusBadge } from "../components/ui";
 import { UserChip } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -114,12 +117,38 @@ function VersionRow(
 export default function ArtifactDetail() {
   const { id = "", aid = "" } = useParams();
   const qc = useQueryClient();
+  const [comment, setComment] = useState("");
   const artifact = useQuery({ queryKey: ["artifact", id, aid], queryFn: () => api.getArtifact(id, aid) });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["artifact", id, aid] });
   const archiveArtifact = useMutation({
     mutationFn: (archived: boolean) => api.archiveArtifact(id, aid, archived),
     onSuccess: invalidate,
   });
+  const addComment = async () => {
+    if (!comment.trim()) return;
+    try { await api.addArtifactComment(id, aid, comment.trim()); setComment(""); invalidate(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't comment", message: String(e) }); }
+  };
+  const replyThread = async (tid: string, text: string) => {
+    try { await api.addArtifactComment(id, aid, text, tid); invalidate(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't reply", message: String(e) }); }
+  };
+  const completeThread = async (tid: string) => {
+    try { await api.completeArtifactThread(id, aid, tid); invalidate(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't complete", message: String(e) }); }
+  };
+  const reopenThread = async (tid: string) => {
+    try { await api.reopenArtifactThread(id, aid, tid); invalidate(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't reopen", message: String(e) }); }
+  };
+  const deleteThread = async (tid: string) => {
+    try { await api.deleteArtifactThread(id, aid, tid); invalidate(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't delete", message: String(e) }); }
+  };
+  const seenThread = async (tid: string) => {
+    try { await api.seenArtifactThread(id, aid, tid); invalidate(); }
+    catch { /* best-effort — not worth surfacing */ }
+  };
 
   if (artifact.isLoading) return <Loader color="machine" />;
   if (artifact.error || !artifact.data) {
@@ -178,6 +207,46 @@ export default function ArtifactDetail() {
           ) : <Text size="sm" c="dimmed">No versions yet.</Text>}
         </Card>
       </div>
+
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>linked sprints · {art.linked_sprints.length}</div>
+        {art.linked_sprints.length ? (
+          <Stack gap={6}>
+            {art.linked_sprints.map((s) => (
+              <Group key={s.id} justify="space-between" wrap="nowrap">
+                <Link to={`/sprints/${s.id}`} className="view">
+                  {s.title ? `${s.title} · ` : ""}<span className="mono">{s.id}</span>
+                </Link>
+                <StatusBadge status={s.status} />
+              </Group>
+            ))}
+          </Stack>
+        ) : <Text size="sm" c="dimmed">No sprints linked.</Text>}
+      </Card>
+
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>comments{art.threads.length ? ` · ${art.threads.length}` : ""}</div>
+        <Stack gap={16}>
+          {art.threads.length > 0 && (
+            <Stack gap={8}>
+              {art.threads.map((t) => (
+                <FeedbackThread key={t.id} thread={t}
+                  onReply={(text) => replyThread(t.id, text)}
+                  onComplete={() => completeThread(t.id)}
+                  onReopen={() => reopenThread(t.id)}
+                  onDelete={() => deleteThread(t.id)}
+                  onSeen={() => seenThread(t.id)}
+                  respondsNow={false} />
+              ))}
+            </Stack>
+          )}
+          <Group gap={8} align="flex-start">
+            <Textarea style={{ flex: 1 }} placeholder="Add a comment…"
+              autosize minRows={1} value={comment} onChange={(e) => setComment(e.currentTarget.value)} />
+            <Button variant="light" color="machine" onClick={addComment}>Send</Button>
+          </Group>
+        </Stack>
+      </Card>
     </Stack>
   );
 }

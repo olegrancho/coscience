@@ -52,4 +52,17 @@ describe("ArtifactDetail", () => {
     renderAt();
     await waitFor(() => expect(screen.getByText(/s1/)).toBeTruthy());
   });
+
+  it("renders an existing comment thread and the linked sprint", async () => {
+    vi.spyOn(api, "getArtifact").mockResolvedValue({
+      id: "doc", program: "p", title: "Doc", kind: "md", current: "", archived: false,
+      lock: {}, current_files: [], versions: [],
+      linked_sprints: [{ id: "p-c1-x", status: "queued", title: "Draft" }],
+      threads: [{ id: "t1", target: "pm", status: "open", agent_unseen: false, created_at: 1,
+                  messages: [{ role: "human", text: "tighten intro", by: "oleg", at: 1 }] }],
+    } as any);
+    renderAt();
+    await waitFor(() => expect(screen.getByText("tighten intro")).toBeTruthy());
+    expect(screen.getByText(/p-c1-x/)).toBeTruthy();
+  });
 });
