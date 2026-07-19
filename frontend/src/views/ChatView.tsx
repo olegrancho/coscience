@@ -2,7 +2,7 @@ import { ActionIcon, Badge, Button, Card, Group, Loader, Menu, SegmentedControl,
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
 import { api, type ChatScope } from "../api";
@@ -37,6 +37,36 @@ export default function ChatView() {
     refetchInterval: (q) => (q.state.data?.busy ? 1500 : false),
   });
   const refreshChats = () => qc.invalidateQueries({ queryKey: ["chats", id] });
+
+  // Bound-chat right panel: the thread is "bound" when it carries at least one
+  // artifact id. These hooks stay unconditional (top level) per Rules of Hooks —
+  // `enabled` gates the actual fetching so unbound chats just skip the network call.
+  const aid = thread.data?.artifacts?.[0] ?? "";
+  const bound = !!(thread.data?.artifacts && thread.data.artifacts.length);
+  const work = useQuery({
+    queryKey: ["work", id, aid],
+    queryFn: () => api.listArtifactWorkFiles(id, aid),
+    enabled: !!aid,
+    refetchInterval: 3000,
+  });
+  const files = work.data ?? [];
+  const workName = files[0];
+  const workfile = useQuery({
+    queryKey: ["workfile", id, aid, workName],
+    queryFn: () => api.readArtifactWorkFile(id, aid, workName!),
+    enabled: !!workName,
+    refetchInterval: 3000,
+  });
+  const saveVersion = useMutation({
+    mutationFn: () => api.saveChatVersion(id, active),
+    onSuccess: (result) => {
+      const saved = aid ? result[aid] : undefined;
+      notifications.show({ color: "green", title: "Saved", message: saved ? `Version ${saved}` : "New version saved." });
+      qc.invalidateQueries({ queryKey: ["work", id, aid] });
+      qc.invalidateQueries({ queryKey: ["workfile", id, aid, workName] });
+    },
+    onError: (e) => notifications.show({ color: "red", title: "Couldn't save version", message: String(e) }),
+  });
 
   const create = useMutation({
     mutationFn: () => api.createChat(id),
@@ -127,14 +157,18 @@ export default function ChatView() {
         </Group>
       </Card>
 
-      {/* active conversation — the standard body column, same edges as every page */}
-      <Stack gap="md" style={{ minWidth: 0 }}>
-          {!active ? (
-            <Card padding="lg" radius="md" style={cardStyle}>
-              <Text size="sm" c="dimmed">Start a new chat on the left to talk to the planner.</Text>
-            </Card>
-          ) : (
-            <>
+      {/* active conversation — the standard body column, same edges as every page.
+          Bound chats (t.artifacts.length) split into this column + a live artifact
+          panel on the right; unbound chats keep the single-column layout untouched. */}
+      {!active ? (
+        <Stack gap="md" style={{ minWidth: 0 }}>
+          <Card padding="lg" radius="md" style={cardStyle}>
+            <Text size="sm" c="dimmed">Start a new chat on the left to talk to the planner.</Text>
+          </Card>
+        </Stack>
+      ) : (
+        <div style={bound ? { display: "grid", gridTemplateColumns: "1fr 380px", gap: 20, alignItems: "start" } : undefined}>
+          <Stack gap="md" style={{ minWidth: 0 }}>
               <Card padding="sm" radius="md" style={cardStyle}>
                 <Group justify="space-between" wrap="nowrap">
                   <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
@@ -211,9 +245,44 @@ export default function ChatView() {
                   </Button>
                 </Stack>
               </Card>
-            </>
+          </Stack>
+
+          {bound && (
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Stack gap={10}>
+                <Group justify="space-between" wrap="nowrap">
+                  <Text fw={600} size="sm" className="mono" truncate>{aid}</Text>
+                  <Tooltip label="This chat can read and write this artifact's working files while it's active." withArrow>
+                    <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>🔒 bound artifact</Text>
+                  </Tooltip>
+                </Group>
+
+                {work.isLoading ? (
+                  <Loader size="sm" color="machine" />
+                ) : !workName || workfile.data?.binary ? (
+                  <Stack gap={6}>
+                    <Text size="sm" c="dimmed">Save a version to preview.</Text>
+                    <Link to={`/programs/${id}/artifacts/${aid}`} className="view">open artifact</Link>
+                  </Stack>
+                ) : workfile.isLoading ? (
+                  <Loader size="sm" color="machine" />
+                ) : (
+                  <div className="report-leaf" style={{ maxHeight: 480, overflow: "auto" }}>
+                    <Md>{workfile.data?.content ?? ""}</Md>
+                  </div>
+                )}
+
+                <Button
+                  size="xs" color="green" variant="light" loading={saveVersion.isPending}
+                  onClick={() => saveVersion.mutate()} style={{ alignSelf: "flex-start" }}
+                >
+                  Save as version
+                </Button>
+              </Stack>
+            </Card>
           )}
-      </Stack>
+        </div>
+      )}
     </Stack>
   );
 }
