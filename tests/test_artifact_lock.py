@@ -106,3 +106,17 @@ def test_reacquire_same_holder_preserves_work(substrate):
     # the newly added artifact is locked + seeded
     assert (substrate.artifact_dir("p", "doc2") / "work").is_dir()
     assert substrate.load_artifact("p", "doc2").lock["holder_id"] == "chat:x"
+
+
+def test_release_only_by_holder(substrate):
+    _mk(substrate, "doc")
+    artifacts.acquire_lock(substrate, "p", ["doc"], "chat", "chat:x", now=1.0)
+    (substrate.artifact_dir("p", "doc") / "work" / "c.md").write_text("edit")
+    # a DIFFERENT holder must not release it
+    out = artifacts.release_lock(substrate, "p", ["doc"], now=2.0, created_by="s1")
+    assert out == [None]
+    assert substrate.load_artifact("p", "doc").lock["holder_id"] == "chat:x"   # still held
+    # the true holder can
+    out = artifacts.release_lock(substrate, "p", ["doc"], now=3.0, created_by="chat:x")
+    assert out == ["v1"]
+    assert substrate.load_artifact("p", "doc").lock == {}

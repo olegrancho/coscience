@@ -178,8 +178,8 @@ def release_lock(substrate, program_id: str, aids: list[str], now: float,
                 out.append(None)
                 continue
             art = substrate.load_artifact(program_id, aid)
-            if not art.lock:
-                out.append(None)
+            if not art.lock or art.lock.get("holder_id") != created_by:
+                out.append(None)          # only the true holder may release
                 continue
             vid = cut_version(substrate, program_id, aid, created_by, now)
             work = substrate.artifact_dir(program_id, aid) / "work"
