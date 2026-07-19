@@ -561,7 +561,8 @@ class Service:
     def _chat_public(thread: ChatThread, live: str = "") -> dict:
         return {"id": thread.id, "title": thread.title, "scope": thread.scope,
                 "created_at": thread.created_at, "turns_done": thread.turns_done,
-                "busy": thread.pending, "messages": list(thread.messages), "live": live}
+                "busy": thread.pending, "messages": list(thread.messages), "live": live,
+                "artifacts": list(thread.artifacts)}
 
     def _migrate_legacy_chat(self, program_id: str) -> None:
         """One-time: fold a pre-threads chat.md into a single imported thread."""
@@ -1132,6 +1133,23 @@ class Service:
 
     def read_artifact_file(self, program_id: str, aid: str, vid: str, name: str) -> dict:
         path = self._guarded_file(program_id, aid, vid, name)
+        raw = path.read_bytes()
+        binary = b"\x00" in raw[:8192]
+        return {"name": name, "size": len(raw),
+                "content": "" if binary else raw.decode("utf-8", errors="replace"),
+                "binary": binary}
+
+    def read_artifact_work_file(self, program_id: str, aid: str, name: str) -> dict:
+        work = (self.substrate.artifact_dir(program_id, aid) / "work").resolve()
+        root = (self.substrate.repo_root / "programs").resolve()
+        if not work.is_relative_to(root) or not work.is_dir():
+            raise NotFoundError(name)
+        try:
+            path = (work / name).resolve()
+        except (ValueError, OSError):
+            raise NotFoundError(name)
+        if not path.is_file() or not path.is_relative_to(work):
+            raise NotFoundError(name)
         raw = path.read_bytes()
         binary = b"\x00" in raw[:8192]
         return {"name": name, "size": len(raw),

@@ -141,6 +141,13 @@ class Dispatcher:
 
         report.waiting = sum(
             1 for s in eligible if self.ledger.lease_for(s.id) is None)
+
+        # Release chat locks left idle past the inactivity window (cuts a final
+        # version), so a walked-away editing session frees the artifact.
+        from coscience import artifacts as _artifacts
+        for program in self.substrate.iter_programs():
+            _artifacts.reap_stale_chat_locks(self.substrate, program.id, now)
+
         self._save_queue(queue)
         if report.granted or report.completed or report.hibernated or report.reconciled:
             self.substrate.commit("dispatch cycle")

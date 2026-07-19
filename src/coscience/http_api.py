@@ -107,6 +107,7 @@ class ChatIn(BaseModel):
 
 class ChatCreateIn(BaseModel):
     title: str = ""
+    artifacts: list[str] | None = None
 
 
 class ChatPatchIn(BaseModel):
@@ -662,9 +663,11 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     @api.post("/programs/{program_id}/chats", status_code=201)
     def create_chat(program_id: str, body: ChatCreateIn) -> dict:
         try:
-            return service.create_chat(program_id, body.title)
+            return service.create_chat(program_id, body.title, artifacts=body.artifacts)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     @api.get("/programs/{program_id}/chats/{thread_id}")
     def get_chat_thread(program_id: str, thread_id: str) -> dict:
@@ -703,6 +706,23 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             service.delete_chat(program_id, thread_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail="chat not found")
+
+    @api.post("/programs/{program_id}/chats/{tid}/save")
+    def save_chat_version(program_id: str, tid: str,
+                          user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.save_chat_version(program_id, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.get("/programs/{program_id}/artifacts/{aid}/work/{name}")
+    def read_artifact_work(program_id: str, aid: str, name: str) -> dict:
+        try:
+            return service.read_artifact_work_file(program_id, aid, name)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="work file not found")
 
     @api.get("/programs/{program_id}/guidance")
     def list_guidance(program_id: str) -> list[dict]:
