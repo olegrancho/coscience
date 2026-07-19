@@ -146,9 +146,20 @@ class Dispatcher:
         # version), so a walked-away editing session frees the artifact.
         reaped = 0
         for program in self.substrate.iter_programs():
-            reaped += len(artifacts.reap_stale_chat_locks(self.substrate, program.id, now))
+            reaped += len(artifacts.reap_stale_chat_locks(
+                self.substrate, program.id, now, holder_busy=self._chat_busy(program.id)))
 
         self._save_queue(queue)
         if report.granted or report.completed or report.hibernated or report.reconciled or reaped:
             self.substrate.commit("dispatch cycle")
         return report
+
+    def _chat_busy(self, program_id: str):
+        """Predicate for the reaper: a lock holder id 'chat:<tid>' is 'busy' (protect
+        it) if that chat currently has a turn in flight (pending)."""
+        def busy(holder_id: str) -> bool:
+            if not holder_id.startswith("chat:"):
+                return False
+            t = self.substrate.load_chat_thread(program_id, holder_id[len("chat:"):])
+            return bool(t and t.pending)
+        return busy

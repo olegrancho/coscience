@@ -39,3 +39,14 @@ def test_bound_chat_rejected_when_busy(substrate):
         pass
     # no orphan chat thread created
     assert svc.list_chats("p") == []
+
+
+def test_bound_chat_unknown_artifact_rejected(substrate):
+    _program(substrate)
+    svc = Service(substrate.repo_root)
+    try:
+        svc.create_chat("p", artifacts=["ghost"])
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+    assert svc.list_chats("p") == []

@@ -82,6 +82,20 @@ def cut_version(substrate, program_id: str, aid: str, created_by: str,
     return vid
 
 
+def cut_version_for(substrate, program_id: str, aid: str, holder_id: str,
+                    now: float, note: str = "") -> str | None:
+    """Cut a version from work/ ONLY if `holder_id` currently holds the lock
+    (checked under the guard). Returns the new vid, or None if this holder does
+    not hold the lock / the artifact is missing / dedup. Prevents a stale editor
+    from snapshotting an artifact another holder has since taken."""
+    with _lock_guard(substrate):
+        if not (substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            return None
+        if substrate.load_artifact(program_id, aid).lock.get("holder_id") != holder_id:
+            return None
+        return cut_version(substrate, program_id, aid, holder_id, now, note)
+
+
 def revert(substrate, program_id: str, aid: str, vid: str) -> None:
     """Set `current` to an existing version. Pointer move only — no version is
     cut and nothing is deleted; a later edit branches from `vid`."""
@@ -201,17 +215,35 @@ def bump_activity(substrate, program_id: str, aid: str, now: float) -> None:
 
 
 def reap_stale_chat_locks(substrate, program_id: str, now: float,
-                          timeout: float = 1800.0, holder_alive=None) -> list[str]:
+                          timeout: float = 1800.0, holder_alive=None,
+                          holder_busy=None) -> list[str]:
+    """Release chat locks left idle past `timeout` (or whose holder is dead via
+    holder_alive), cutting a final version. Skips a holder that `holder_busy(hid)`
+    reports as actively working (an in-flight turn), so a live edit is never reaped
+    mid-work. The whole scan+release runs under ONE lock guard so a concurrent
+    re-acquire cannot interleave (no torn 'looked idle, then someone re-acquired'
+    release). Does NOT call release_lock (which would nest the guard); inlines the
+    release."""
     released: list[str] = []
-    for art in substrate.iter_artifacts(program_id, include_archived=True):
-        lock = art.lock
-        if not lock or lock.get("holder_kind") != "chat":
-            continue
-        idle = now - float(lock.get("last_activity", lock.get("acquired_at", now)))
-        dead = holder_alive is not None and not holder_alive(lock.get("holder_id", ""))
-        if idle >= timeout or dead:
-            release_lock(substrate, program_id, [art.id], now,
-                         created_by=lock.get("holder_id", ""))
+    with _lock_guard(substrate):
+        for art in substrate.iter_artifacts(program_id, include_archived=True):
+            lock = art.lock
+            if not lock or lock.get("holder_kind") != "chat":
+                continue
+            hid = lock.get("holder_id", "")
+            if holder_busy is not None and holder_busy(hid):
+                continue                                   # in-flight turn -> protect
+            idle = now - float(lock.get("last_activity", lock.get("acquired_at", now)))
+            dead = holder_alive is not None and not holder_alive(hid)
+            if not (idle >= timeout or dead):
+                continue
+            cut_version(substrate, program_id, art.id, hid, now)   # final snapshot (dedup ok)
+            work = substrate.artifact_dir(program_id, art.id) / "work"
+            if work.is_dir():
+                shutil.rmtree(work)
+            fresh = substrate.load_artifact(program_id, art.id)
+            fresh.lock = {}
+            substrate.save_artifact(fresh)
             released.append(art.id)
     return released
 

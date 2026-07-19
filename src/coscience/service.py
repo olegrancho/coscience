@@ -630,6 +630,9 @@ class Service:
                        session_id=str(uuid4()), created_at=time.time(),
                        artifacts=aids)
         if aids:
+            for aid in aids:
+                if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+                    raise ValueError(f"artifact not found: {aid}")
             ok = _art.acquire_lock(self.substrate, program_id, aids, "chat",
                                    f"chat:{tid}", time.time())
             if not ok:
@@ -680,8 +683,8 @@ class Service:
             raise ValueError("this chat is not bound to an artifact")
         out: dict = {}
         for aid in thread.artifacts:
-            vid = _art.cut_version(self.substrate, program_id, aid,
-                                   f"chat:{thread_id}", time.time())
+            vid = _art.cut_version_for(self.substrate, program_id, aid,
+                                       f"chat:{thread_id}", time.time())
             out[aid] = vid
         self.substrate.commit(f"program {program_id}: chat {thread_id} saved versions {out}")
         return out
