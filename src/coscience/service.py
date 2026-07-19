@@ -701,6 +701,12 @@ class Service:
             return self._chat_public(thread)
         program = self.substrate.load_program(program_id)
         workdir = chat_agent.resolve_workdir(self.substrate, program.workdir)
+        if thread.artifacts:
+            from coscience import artifacts as _art
+            aid0 = thread.artifacts[0]
+            workdir = str(self.substrate.artifact_dir(program_id, aid0) / "work")
+            for aid in thread.artifacts:
+                _art.bump_activity(self.substrate, program_id, aid, time.time())
         resume = thread.turns_done > 0
         if resume:
             # The preamble (with the TOOLS/scope line) went out only on turn 1. If the
@@ -714,6 +720,10 @@ class Service:
             from coscience.pm_agent import gather_context
             ctx = gather_context(self.substrate, program_id)
             prompt = chat_agent.render_preamble(ctx, thread.scope) + "\n\nHuman: " + message
+        if thread.artifacts:
+            prompt = (f"[ARTIFACT] You are editing artifact(s) {thread.artifacts} — your working "
+                      f"directory IS the artifact's working copy. Create and edit files here; "
+                      f"the human snapshots them as versions.\n\n") + prompt
         thread.announced_scope = thread.scope
         launch = launch or chat_agent.launch_turn
         token = launch(thread_dir=self.substrate.chat_thread_dir(program_id, thread_id),
