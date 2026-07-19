@@ -1120,6 +1120,59 @@ class Service:
         self.substrate.commit(f"artifact {program_id}/{aid}: version {vid} archived={archived}")
         return self.get_artifact(program_id, aid)
 
+    def _load_artifact(self, program_id: str, aid: str):
+        if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            raise NotFoundError(aid)
+        return self.substrate.load_artifact(program_id, aid)
+
+    def add_artifact_comment(self, program_id: str, aid: str, text: str,
+                             by: str = "", thread_id: str = "") -> dict:
+        text = text.strip()
+        if not text:
+            raise ValueError("comment text is required")
+        a = self._load_artifact(program_id, aid)
+        if thread_id:
+            t = next((x for x in a.threads if x["id"] == thread_id), None)
+            if t is None:
+                raise NotFoundError(thread_id)
+            threads.append(t, "human", text, by, now=time.time())
+        else:
+            t = threads.new_thread("pm", text, by, now=time.time())   # artifact threads -> PM
+            a.threads.append(t)
+        self.substrate.save_artifact(a)
+        self.substrate.commit(f"artifact {program_id}/{aid}: comment")
+        return threads.public(t)
+
+    def _mutate_artifact_thread(self, program_id: str, aid: str, thread_id: str, fn) -> dict:
+        a = self._load_artifact(program_id, aid)
+        t = next((x for x in a.threads if x["id"] == thread_id), None)
+        if t is None:
+            raise NotFoundError(thread_id)
+        fn(t)
+        self.substrate.save_artifact(a)
+        self.substrate.commit(f"artifact {program_id}/{aid}: thread {thread_id}")
+        return threads.public(t)
+
+    def complete_artifact_thread(self, program_id: str, aid: str, thread_id: str) -> dict:
+        return self._mutate_artifact_thread(program_id, aid, thread_id,
+                                            lambda t: t.update(status="complete"))
+
+    def reopen_artifact_thread(self, program_id: str, aid: str, thread_id: str) -> dict:
+        return self._mutate_artifact_thread(program_id, aid, thread_id,
+                                            lambda t: t.update(status="open"))
+
+    def seen_artifact_thread(self, program_id: str, aid: str, thread_id: str) -> dict:
+        return self._mutate_artifact_thread(program_id, aid, thread_id,
+                                            lambda t: t.update(agent_unseen=False))
+
+    def delete_artifact_thread(self, program_id: str, aid: str, thread_id: str) -> None:
+        a = self._load_artifact(program_id, aid)
+        if not any(x["id"] == thread_id for x in a.threads):
+            raise NotFoundError(thread_id)
+        a.threads = [x for x in a.threads if x["id"] != thread_id]
+        self.substrate.save_artifact(a)
+        self.substrate.commit(f"artifact {program_id}/{aid}: thread {thread_id} deleted")
+
     # --- ledger ---
     def ledger_status(self) -> dict:
         ledger = self._ledger()
