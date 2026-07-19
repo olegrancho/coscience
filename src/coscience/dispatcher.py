@@ -13,6 +13,8 @@ from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
 from coscience.worker import Worker
 
+from coscience import artifacts
+
 _ELIGIBLE = (SprintStatus.QUEUED, SprintStatus.EXECUTING, SprintStatus.HIBERNATED)
 
 
@@ -67,11 +69,21 @@ class Dispatcher:
         queue = {k: v for k, v in queue.items() if k in eligible_ids}
 
         # --- grants ---
-        needs = [s for s in eligible if self.ledger.lease_for(s.id) is None]
+        # A sprint bound to artifacts is grantable only when none of its bound
+        # artifacts is locked by another holder (the artifact is a capacity-1
+        # resource). Filter those out before the pool scheduler runs.
+        needs = [s for s in eligible if self.ledger.lease_for(s.id) is None
+                 and not artifacts.sprint_blocked(self.substrate, s)]
         for sprint in self.policy.select_grants(needs, queue, self.ledger, now):
             eff = self.policy.effective_priority(sprint, queue.get(sprint.id, now), now)
             if self.ledger.acquire(sprint.id, sprint.resources_required, now, ttl,
                                    priority=eff, preemptible=sprint.preemptible):
+                # Acquire the sprint's artifact locks (instantiating create-targets).
+                # If a same-cycle race lost the atomic acquire, give the lease back
+                # and leave the sprint queued for a later cycle.
+                if not artifacts.acquire_for_sprint(self.substrate, sprint, now):
+                    self.ledger.release(sprint.id)
+                    continue
                 report.granted += 1
                 if sprint.status in (SprintStatus.QUEUED, SprintStatus.HIBERNATED):
                     set_status(sprint, SprintStatus.EXECUTING)
