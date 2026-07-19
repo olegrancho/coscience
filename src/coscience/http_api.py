@@ -717,6 +717,10 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
+    @api.get("/programs/{program_id}/artifacts/{aid}/work")
+    def list_artifact_work(program_id: str, aid: str) -> list[str]:
+        return service.list_artifact_work_files(program_id, aid)
+
     @api.get("/programs/{program_id}/artifacts/{aid}/work/{name:path}")
     def read_artifact_work(program_id: str, aid: str, name: str) -> dict:
         try:

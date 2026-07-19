@@ -1240,6 +1240,12 @@ class Service:
         self.substrate.save_artifact(a)
         self.substrate.commit(f"artifact {program_id}/{aid}: thread {thread_id} deleted")
 
+    def list_artifact_work_files(self, program_id: str, aid: str) -> list[str]:
+        work = self.substrate.artifact_dir(program_id, aid) / "work"
+        if not work.is_dir():
+            return []
+        return sorted(str(p.relative_to(work)) for p in work.rglob("*") if p.is_file())
+
     # --- ledger ---
     def ledger_status(self) -> dict:
         ledger = self._ledger()
