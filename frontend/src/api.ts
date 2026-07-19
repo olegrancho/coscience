@@ -58,6 +58,8 @@ export interface Sprint {
   agent_state?: "running" | "sleeping" | "idle";
   job?: { note: string; out_file: string; started_at: number | null;
           expected_seconds: number; next_wake: number; max_seconds: number } | null;
+  artifacts_bound: string[];
+  artifacts_create: { aid: string; title: string; kind: string }[];
 }
 export interface SprintFile {
   name: string; label: string; kind: string; size: number;
@@ -219,7 +221,9 @@ export const api = {
   deleteSprintThread: (id: string, tid: string) =>
     fetch(`/api/sprints/${id}/threads/${tid}`, { method: "DELETE" }).then(j<void>),
   submitSprint: (body: { id: string; goals: string; plan: string[]; program?: string;
-                         priority?: number; resources_required?: Record<string, number> }) =>
+                         priority?: number; resources_required?: Record<string, number>;
+                         artifacts_bound?: string[];
+                         artifacts_create?: { aid: string; title: string; kind: string }[] }) =>
     fetch("/api/sprints", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

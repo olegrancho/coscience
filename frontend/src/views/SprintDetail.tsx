@@ -494,6 +494,25 @@ export default function SprintDetail() {
         </Card>
       )}
 
+      {(s.artifacts_bound?.length > 0 || s.artifacts_create?.length > 0) && (
+        <Card padding="lg" radius="md" style={cardStyle}>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>artifacts</div>
+          <Stack gap={6}>
+            {s.artifacts_bound?.map((aid) => (
+              <Group key={aid} gap={6}>
+                <Text size="sm" c="dimmed">bound —</Text>
+                <Link to={`/programs/${prog}/artifacts/${aid}`} className="view">{aid}</Link>
+              </Group>
+            ))}
+            {s.artifacts_create?.map((a, i) => (
+              <Text key={i} size="sm" c="dimmed">
+                {a.title} ({a.kind}) — will be created
+              </Text>
+            ))}
+          </Stack>
+        </Card>
+      )}
+
       <WorkingDocs sprintId={s.id} live={s.agent_running} />
 
       <SimpleGrid cols={{ base: 1, sm: 2 }}>

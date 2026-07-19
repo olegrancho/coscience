@@ -62,4 +62,13 @@ describe("api client", () => {
     expect(api.artifactDownloadUrl("p", "doc", "v2")).toBe("/api/programs/p/artifacts/doc/versions/v2/download");
     expect(api.artifactPageUrl("p", "site", "v1", "index.html")).toBe("/api/programs/p/artifacts/site/versions/v1/page/index.html");
   });
+
+  it("submitSprint forwards artifacts_bound/create", async () => {
+    const f = mockFetch(201, { id: "s1" });
+    await api.submitSprint({ id: "s1", goals: "g", plan: ["x"], program: "p",
+      artifacts_bound: ["doc"], artifacts_create: [{ aid: "fig", title: "Fig", kind: "figure" }] });
+    const body = JSON.parse((f.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.artifacts_bound).toEqual(["doc"]);
+    expect(body.artifacts_create).toEqual([{ aid: "fig", title: "Fig", kind: "figure" }]);
+  });
 });
