@@ -618,12 +618,24 @@ class Service:
                         "last_at": t.messages[-1]["at"] if t.messages else t.created_at})
         return out
 
-    def create_chat(self, program_id: str, title: str = "") -> dict:
+    def create_chat(self, program_id: str, title: str = "",
+                    artifacts: list | None = None) -> dict:
+        from coscience import artifacts as _art
         self._require_program(program_id)
-        t = ChatThread(id=uuid4().hex[:8], title=(str(title).strip() or "New chat"),
-                       scope="read", session_id=str(uuid4()), created_at=time.time())
+        aids = [str(a) for a in (artifacts or [])]
+        tid = uuid4().hex[:8]
+        t = ChatThread(id=tid, title=(str(title).strip() or "New chat"),
+                       scope="full" if aids else "read",
+                       session_id=str(uuid4()), created_at=time.time(),
+                       artifacts=aids)
+        if aids:
+            ok = _art.acquire_lock(self.substrate, program_id, aids, "chat",
+                                   f"chat:{tid}", time.time())
+            if not ok:
+                raise ValueError("artifact busy — held by another editor")
         self.substrate.save_chat_thread(program_id, t)
-        self.substrate.commit(f"program {program_id}: new chat {t.id}")
+        self.substrate.commit(f"program {program_id}: new chat {t.id}"
+                              + (f" bound to {aids}" if aids else ""))
         return self._chat_public(t)
 
     def _thread_or_404(self, program_id: str, thread_id: str) -> ChatThread:
