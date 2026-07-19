@@ -138,8 +138,8 @@ def archive_artifact(substrate, program_id: str, aid: str,
 
 @contextmanager
 def _lock_guard(substrate):
-    """Repo-level flock so multi-artifact acquire/release is atomic across the
-    dispatcher and HTTP processes (mirrors pm_agent's per-program lock)."""
+    """Repo-level exclusive flock so multi-artifact acquire/release is atomic across the
+    dispatcher and HTTP processes. Like pm_agent's per-program lock but blocking (LOCK_EX) rather than non-blocking — callers here wait for the guard rather than reporting 'busy'."""
     lockdir = substrate.repo_root / ".coscience"
     lockdir.mkdir(parents=True, exist_ok=True)
     f = open(lockdir / "artifacts.lock", "w")
@@ -187,10 +187,11 @@ def release_lock(substrate, program_id: str, aids: list[str], now: float,
 
 
 def bump_activity(substrate, program_id: str, aid: str, now: float) -> None:
-    art = substrate.load_artifact(program_id, aid)
-    if art.lock:
-        art.lock["last_activity"] = now
-        substrate.save_artifact(art)
+    with _lock_guard(substrate):
+        art = substrate.load_artifact(program_id, aid)
+        if art.lock:
+            art.lock["last_activity"] = now
+            substrate.save_artifact(art)
 
 
 def reap_stale_chat_locks(substrate, program_id: str, now: float,
