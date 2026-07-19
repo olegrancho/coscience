@@ -62,6 +62,8 @@ class Sprint:
     decisions: list[dict] = field(default_factory=list)  # legacy governance trail [{by, action, at}]; superseded by status_history (read-only for old sprints)
     status_history: list[dict] = field(default_factory=list)  # lifecycle timeline [{status, at, by, action}]; action="" for system transitions
     edges: list[dict] = field(default_factory=list)  # outbound lineage/evidential edges (see coscience.graph)
+    artifacts_bound: list[str] = field(default_factory=list)   # existing artifact ids this sprint edits (locked as a resource)
+    artifacts_create: list[dict] = field(default_factory=list)  # new artifacts to produce: [{aid, title, kind}]
 
 
 def set_status(sprint: "Sprint", new_status: "SprintStatus",
