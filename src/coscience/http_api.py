@@ -7,8 +7,10 @@ siblings over Service.
 """
 from __future__ import annotations
 
+import io
 import os
 import subprocess
+import zipfile
 from functools import lru_cache
 from pathlib import Path
 
@@ -451,6 +453,56 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.get_result(result_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"result not found: {result_id}")
+
+    @api.get("/programs/{program_id}/artifacts")
+    def list_artifacts(program_id: str) -> list[dict]:
+        return service.list_artifacts(program_id)
+
+    @api.get("/programs/{program_id}/artifacts/{aid}")
+    def get_artifact(program_id: str, aid: str) -> dict:
+        try:
+            return service.get_artifact(program_id, aid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
+
+    @api.get("/programs/{program_id}/artifacts/{aid}/versions/{vid}/files/{name}")
+    def read_artifact_file(program_id: str, aid: str, vid: str, name: str) -> dict:
+        try:
+            return service.read_artifact_file(program_id, aid, vid, name)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"file not found: {name}")
+
+    @api.get("/programs/{program_id}/artifacts/{aid}/versions/{vid}/download")
+    def download_artifact_version(program_id: str, aid: str, vid: str):
+        try:
+            vdir = service.artifact_version_dir(program_id, aid, vid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="version not found")
+        files = sorted(p for p in vdir.rglob("*") if p.is_file())
+        if not files:
+            raise HTTPException(status_code=404, detail="version is empty")
+        if len(files) == 1:
+            return FileResponse(files[0], filename=files[0].name)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for p in files:
+                z.write(p, p.relative_to(vdir))
+        return Response(
+            content=buf.getvalue(), media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{aid}-{vid}.zip"'})
+
+    @api.get("/programs/{program_id}/artifacts/{aid}/versions/{vid}/page/{path:path}")
+    def artifact_page(program_id: str, aid: str, vid: str, path: str):
+        try:
+            fp = service.artifact_page_file(program_id, aid, vid, path)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="page asset not found")
+        resp = FileResponse(fp)
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; "
+            "script-src 'unsafe-inline'; font-src data:")
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
 
     @api.get("/ledger")
     def ledger_status() -> dict:
