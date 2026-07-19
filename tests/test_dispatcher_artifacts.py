@@ -70,3 +70,13 @@ def test_nonartifact_sprint_unaffected(substrate):
     disp.run_one_cycle(now=1.0)
     disp.ledger.load()
     assert disp.ledger.lease_for("s1") is not None
+
+
+def test_bound_missing_artifact_does_not_crash_cycle(substrate):
+    # A sprint bound to an artifact id that does not exist must NOT crash the
+    # dispatch cycle; the missing aid is simply not locked.
+    _queued(substrate, "s1", "p", bound=["ghost"])
+    disp = _disp(substrate, {"cpu": 4.0})
+    disp.run_one_cycle(now=1.0)                       # must not raise
+    disp.ledger.load()
+    assert disp.ledger.lease_for("s1") is not None    # granted; missing aid ignored

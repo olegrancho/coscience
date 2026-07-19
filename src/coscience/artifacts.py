@@ -154,7 +154,8 @@ def _lock_guard(substrate):
 def acquire_lock(substrate, program_id: str, aids: list[str], holder_kind: str,
                  holder_id: str, now: float) -> bool:
     with _lock_guard(substrate):
-        arts = [substrate.load_artifact(program_id, aid) for aid in aids]
+        arts = [substrate.load_artifact(program_id, aid) for aid in aids
+                if (substrate.artifact_dir(program_id, aid) / "meta.md").is_file()]
         for art in arts:
             if art.lock and art.lock.get("holder_id") != holder_id:
                 return False                       # any busy -> acquire none
@@ -173,6 +174,9 @@ def release_lock(substrate, program_id: str, aids: list[str], now: float,
     out: list[str | None] = []
     with _lock_guard(substrate):
         for aid in aids:
+            if not (substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+                out.append(None)
+                continue
             art = substrate.load_artifact(program_id, aid)
             if not art.lock:
                 out.append(None)
