@@ -34,6 +34,7 @@ class ExecutionContext:
                               # detached job ("finished"/"timed out"/"wake")
     job_out: str = ""        # path to the detached job's captured output (set when assessing)
     job_note: str = ""       # the job's own short description (set when assessing)
+    artifacts: list[dict] = field(default_factory=list)  # [{aid, kind, work_path}] deliverables to write into work/
 
 
 def launch_detached(command: str, cwd: "str | Path | None" = None) -> str:

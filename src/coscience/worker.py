@@ -121,6 +121,17 @@ class Worker:
             if humans:
                 feedback_threads.append({"thread_id": t["id"], "text": humans[-1]})
         progress = self.substrate.load_progress(sprint.id)
+        artifact_specs: list[dict] = []
+        if sprint.program:
+            for aid in artifacts.sprint_aids(sprint):
+                work_path = self.substrate.artifact_dir(sprint.program, aid) / "work"
+                try:
+                    kind = self.substrate.load_artifact(sprint.program, aid).kind
+                except OSError:
+                    kind = next((str(c.get("kind") or "md")
+                                 for c in sprint.artifacts_create
+                                 if str(c.get("aid") or "") == aid), "md")
+                artifact_specs.append({"aid": aid, "kind": kind, "work_path": str(work_path)})
         return ExecutionContext(
             program_title=program_title, program_goal=program_goal,
             sprint_title=sprint.title, sprint_summary=sprint.summary,
@@ -138,6 +149,7 @@ class Worker:
             assess_reason=progress.assess_reason,
             job_out=progress.job_out,
             job_note=progress.job_note,
+            artifacts=artifact_specs,
         )
 
     def _agent_cwd(self, workdir: str):
