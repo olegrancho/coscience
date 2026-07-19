@@ -98,6 +98,7 @@ class ChatThread:
     pending: bool = False              # a turn is in flight (streaming into turn.out)
     agent_token: str = ""              # detached turn's process token
     messages: list[dict] = field(default_factory=list)  # [{role, text, at}]
+    artifacts: list[str] = field(default_factory=list)  # bound artifact ids (chat edits their work/); sized 1 for now
 
 
 @dataclass

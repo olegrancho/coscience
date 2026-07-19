@@ -423,6 +423,7 @@ class Substrate:
             messages=[{"role": str(m.get("role", "user")), "text": str(m.get("text", "")),
                        "at": float(m.get("at", 0.0)), "by": str(m.get("by", ""))}
                       for m in fm.get("messages", [])],
+            artifacts=[str(a) for a in fm.get("artifacts", [])],
         )
 
     def save_chat_thread(self, program_id: str, thread: ChatThread) -> None:
@@ -432,7 +433,8 @@ class Substrate:
               "announced_scope": thread.announced_scope,
               "session_id": thread.session_id, "created_at": thread.created_at,
               "turns_done": thread.turns_done, "pending": thread.pending,
-              "agent_token": thread.agent_token, "messages": thread.messages}
+              "agent_token": thread.agent_token, "artifacts": list(thread.artifacts),
+              "messages": thread.messages}
         (d / "thread.md").write_text(serialize(fm, f"# Chat {thread.id}\n"))
 
     def delete_chat_thread(self, program_id: str, thread_id: str) -> None:
