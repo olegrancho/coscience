@@ -238,6 +238,7 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
         "release_ids": list(output.release_ids),
         "thread_replies": list(output.thread_replies),
         "edge_ops": list(output.edge_ops),
+        "artifact_tasks": list(output.artifact_tasks),
         "proposals": [
             {"suffix": p.suffix, "goals": p.goals, "plan": p.plan,
              "priority": p.priority, "resources_required": p.resources_required,
@@ -267,6 +268,7 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         release_ids=list(data.get("release_ids", [])),
         thread_replies=list(data.get("thread_replies", [])),
         edge_ops=list(data.get("edge_ops", [])),
+        artifact_tasks=list(data.get("artifact_tasks", [])),
         proposals=[ProposedSprint(**p) for p in data.get("proposals", [])],
     )
     return StagedCycle(cycle=int(data["cycle"]), output=output,
