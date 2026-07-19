@@ -216,6 +216,11 @@ def proposal_id(program_id: str, cycle: int, suffix: str) -> str:
     return f"{program_id}-c{cycle}-{s}"
 
 
+def _artifact_slug(title: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", str(title).lower()).strip("-")
+    return s or "artifact"
+
+
 def _staging_path(substrate, program_id: str):
     return substrate.program_dir(program_id) / ".pm" / "cycle-staging.json"
 
@@ -490,6 +495,37 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 _rewire_on_promote(substrate, program_id, prop.from_idea, sid, ideas_by_id)
             ideas_by_id.pop(prop.from_idea, None)
 
+    for task in staged.output.artifact_tasks:
+        if not isinstance(task, dict):
+            continue
+        suffix = str(task.get("suffix") or "artifact-update")
+        sid = proposal_id(program_id, cycle, suffix)
+        if (substrate.sprint_dir(sid) / "sprint.md").is_file():
+            if sid not in proposed:
+                proposed.append(sid)
+            continue
+        if slots <= 0:
+            dropped.append(sid)
+            continue
+        bound = [str(a) for a in task.get("artifact_ids", []) if str(a).strip()]
+        create = []
+        for c in task.get("create", []):
+            if isinstance(c, dict) and str(c.get("title") or "").strip():
+                title = str(c["title"])
+                create.append({"aid": _artifact_slug(title), "title": title,
+                               "kind": str(c.get("kind") or "md")})
+        if not bound and not create:
+            continue                                   # nothing to act on
+        substrate.save_sprint(Sprint(
+            id=sid, status=SprintStatus.PROPOSED,
+            goals=str(task.get("instructions") or "Update the artifact."),
+            plan=[], program=program_id,
+            artifacts_bound=bound, artifacts_create=create))
+        slots -= 1
+        proposed.append(sid)
+        if sid not in pm.proposed_ids:
+            submitted.append(sid)
+
     # --- idea pool: prune, add, re-rank, and re-summarise (protection enforced here) ---
     # Protection is pinned-only: the PM may prune ANY idea that is not pinned. Human,
     # commented, and demoted ideas are auto-pinned when created, so they're protected
@@ -612,6 +648,18 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 touched_guidance = True
         if touched_guidance:
             substrate.save_guidance(program_id, guidance_threads)
+
+        touched_art = False
+        for art in substrate.iter_artifacts(program_id):
+            hit = False
+            for th in art.threads:
+                if th["id"] in replies and threads.needs_reply(th):
+                    threads.append(th, "pm", replies[th["id"]], "", now=now_ts)
+                    hit = True
+            if hit:
+                substrate.save_artifact(art)
+                touched_art = True
+        _ = touched_art
 
     # --- release: put an APPROVED sprint into production (-> queued). The approved
     # pool is the PM's managed queue; it releases items here as it sees need, and the
