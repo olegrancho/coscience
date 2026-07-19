@@ -98,3 +98,39 @@ def children(art: Artifact, vid: str) -> list[str]:
 
 def is_leaf(art: Artifact, vid: str) -> bool:
     return not children(art, vid)
+
+
+def archive_version(substrate, program_id: str, aid: str, vid: str,
+                    archived: bool = True) -> None:
+    art = substrate.load_artifact(program_id, aid)
+    for v in art.versions:
+        if v.id == vid:
+            v.archived = archived
+    substrate.save_artifact(art)
+
+
+def archive_subtree(substrate, program_id: str, aid: str, vid: str,
+                    archived: bool = True) -> None:
+    art = substrate.load_artifact(program_id, aid)
+    kids: dict[str, list[str]] = {}
+    for v in art.versions:
+        kids.setdefault(v.parent, []).append(v.id)
+    seen: set[str] = set()
+    stack = [vid]
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        stack.extend(kids.get(cur, []))
+    for v in art.versions:
+        if v.id in seen:
+            v.archived = archived
+    substrate.save_artifact(art)
+
+
+def archive_artifact(substrate, program_id: str, aid: str,
+                     archived: bool = True) -> None:
+    art = substrate.load_artifact(program_id, aid)
+    art.archived = archived
+    substrate.save_artifact(art)
