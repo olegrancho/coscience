@@ -132,7 +132,7 @@ export default function ArtifactDetail() {
   });
   const openChat = useMutation({
     mutationFn: () => api.createChat(id, `Edit ${artifact.data?.title || aid}`, [aid]),
-    onSuccess: () => navigate(`/programs/${id}/chat`),
+    onSuccess: (t) => navigate(`/programs/${id}/chat?c=${t.id}`),
     onError: (e) => notifications.show({ color: "red", title: "Couldn't open chat", message: String(e) }),
   });
   const addComment = async () => {

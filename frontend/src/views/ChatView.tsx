@@ -1,8 +1,8 @@
 import { ActionIcon, Badge, Button, Card, Group, Loader, Menu, SegmentedControl, Stack, Text, Textarea, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
 import { api, type ChatScope } from "../api";
@@ -13,6 +13,8 @@ const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shado
 
 export default function ChatView() {
   const { id = "" } = useParams();
+  const [sp] = useSearchParams();
+  const wantChat = sp.get("c") || "";
   const qc = useQueryClient();
   const isMine = useIsMine();
   const [active, setActive] = useState<string>("");
@@ -24,12 +26,16 @@ export default function ChatView() {
     queryKey: ["chats", id], queryFn: () => api.listChats(id), refetchInterval: 5000,
   });
 
-  // Default to the most recently active thread once the list loads.
+  // Default to the most recently active thread once the list loads. A `?c=` param
+  // (e.g. from "Open chat" on an artifact) takes priority over the list heuristic,
+  // since the list can be a stale cache that doesn't yet include a brand-new thread.
   useEffect(() => {
+    if (active) return;
+    if (wantChat) { setActive(wantChat); return; }
     const list = chats.data;
-    if (!list || active) return;
+    if (!list) return;
     if (list.length) setActive([...list].sort((a, b) => b.last_at - a.last_at)[0].id);
-  }, [chats.data, active]);
+  }, [chats.data, active, wantChat]);
 
   const thread = useQuery({
     queryKey: ["chat", id, active], queryFn: () => api.getChatThread(id, active),
@@ -43,25 +49,43 @@ export default function ChatView() {
   // `enabled` gates the actual fetching so unbound chats just skip the network call.
   const aid = thread.data?.artifacts?.[0] ?? "";
   const bound = !!(thread.data?.artifacts && thread.data.artifacts.length);
+  const busy = !!thread.data?.busy;
   const work = useQuery({
     queryKey: ["work", id, aid],
     queryFn: () => api.listArtifactWorkFiles(id, aid),
     enabled: !!aid,
-    refetchInterval: 3000,
+    refetchInterval: busy ? 2000 : false,
   });
   const files = work.data ?? [];
-  const workName = files[0];
+  const isBinaryName = (n: string) => /\.(png|jpe?g|gif|svg|webp|pdf|zip|npy|npz|h5|hdf5|pkl|parquet|bin|ico|mp4|mov)$/i.test(n);
+  const workName = files.find((n) => !isBinaryName(n)) ?? files[0] ?? "";
   const workfile = useQuery({
     queryKey: ["workfile", id, aid, workName],
     queryFn: () => api.readArtifactWorkFile(id, aid, workName!),
     enabled: !!workName,
-    refetchInterval: 3000,
+    refetchInterval: busy ? 2000 : false,
   });
+
+  // One-shot refresh when a turn stops running, so the final edits show up even
+  // though polling itself has just switched off.
+  const wasBusy = useRef(busy);
+  useEffect(() => {
+    if (wasBusy.current && !busy) {
+      qc.invalidateQueries({ queryKey: ["work", id, aid] });
+      qc.invalidateQueries({ queryKey: ["workfile", id, aid, workName] });
+    }
+    wasBusy.current = busy;
+  }, [busy, qc, id, aid, workName]);
+
   const saveVersion = useMutation({
     mutationFn: () => api.saveChatVersion(id, active),
     onSuccess: (result) => {
       const saved = aid ? result[aid] : undefined;
-      notifications.show({ color: "green", title: "Saved", message: saved ? `Version ${saved}` : "New version saved." });
+      if (saved) {
+        notifications.show({ color: "green", title: "Saved", message: `Version ${saved}` });
+      } else {
+        notifications.show({ color: "yellow", title: "Nothing to save", message: "No changes since the last version, or the editing session ended." });
+      }
       qc.invalidateQueries({ queryKey: ["work", id, aid] });
       qc.invalidateQueries({ queryKey: ["workfile", id, aid, workName] });
     },
@@ -93,7 +117,6 @@ export default function ChatView() {
   });
 
   const t = thread.data;
-  const busy = !!t?.busy;
   const submit = () => { const m = draft.trim(); if (m && !busy) send.mutate(m); };
   const doRename = () => {
     const name = window.prompt("Rename chat", t?.title ?? "");
