@@ -71,4 +71,25 @@ describe("api client", () => {
     expect(body.artifacts_bound).toEqual(["doc"]);
     expect(body.artifacts_create).toEqual([{ aid: "fig", title: "Fig", kind: "figure" }]);
   });
+
+  it("createChat sends artifacts when bound", async () => {
+    const f = mockFetch(201, { id: "c1", artifacts: ["doc"] });
+    await api.createChat("p", "edit", ["doc"]);
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("/api/programs/p/chats");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ title: "edit", artifacts: ["doc"] });
+  });
+
+  it("saveChatVersion POSTs to the save route", async () => {
+    const f = mockFetch(200, { doc: "v1" });
+    const r = await api.saveChatVersion("p", "c1");
+    expect(f).toHaveBeenCalledWith("/api/programs/p/chats/c1/save", expect.objectContaining({ method: "POST" }));
+    expect(r).toEqual({ doc: "v1" });
+  });
+
+  it("work list + read hit the right paths", async () => {
+    const f = mockFetch(200, ["content.md"]);
+    await api.listArtifactWorkFiles("p", "doc");
+    expect(f).toHaveBeenCalledWith("/api/programs/p/artifacts/doc/work");
+  });
 });

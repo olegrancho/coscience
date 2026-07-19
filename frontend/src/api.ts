@@ -17,11 +17,11 @@ export interface ChatMessage { role: "user" | "pm"; text: string; at: number; by
 export type ChatScope = "read" | "full";
 export interface ChatThreadSummary {
   id: string; title: string; scope: ChatScope; created_at: number;
-  busy: boolean; messages: number; last_at: number;
+  busy: boolean; messages: number; last_at: number; artifacts: string[];
 }
 export interface ChatThread {
   id: string; title: string; scope: ChatScope; created_at: number;
-  turns_done: number; busy: boolean; messages: ChatMessage[]; live: string;
+  turns_done: number; busy: boolean; messages: ChatMessage[]; live: string; artifacts: string[];
 }
 export interface FeedbackMessage { role: "human" | "pm" | "worker"; text: string; by?: string; at: number }
 export interface FeedbackThreadT { id: string; target: "pm" | "worker"; status: "open" | "complete"; agent_unseen: boolean; created_at: number; messages: FeedbackMessage[] }
@@ -124,10 +124,10 @@ export const api = {
       body: JSON.stringify({ model }),
     }).then(j<{ id: string; pm_model: string }>),
   listChats: (id: string) => fetch(`/api/programs/${id}/chats`).then(j<ChatThreadSummary[]>),
-  createChat: (id: string, title = "") =>
+  createChat: (id: string, title = "", artifacts?: string[]) =>
     fetch(`/api/programs/${id}/chats`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, ...(artifacts && artifacts.length ? { artifacts } : {}) }),
     }).then(j<ChatThread>),
   getChatThread: (id: string, tid: string) =>
     fetch(`/api/programs/${id}/chats/${tid}`).then(j<ChatThread>),
@@ -143,6 +143,12 @@ export const api = {
     }).then(j<ChatThread>),
   deleteChat: (id: string, tid: string) =>
     fetch(`/api/programs/${id}/chats/${tid}`, { method: "DELETE" }).then(j<void>),
+  saveChatVersion: (id: string, tid: string) =>
+    fetch(`/api/programs/${id}/chats/${tid}/save`, { method: "POST" }).then(j<Record<string, string | null>>),
+  listArtifactWorkFiles: (id: string, aid: string) =>
+    fetch(`/api/programs/${id}/artifacts/${aid}/work`).then(j<string[]>),
+  readArtifactWorkFile: (id: string, aid: string, name: string) =>
+    fetch(`/api/programs/${id}/artifacts/${aid}/work/${name}`).then(j<ArtifactFileT>),
   replan: (id: string) =>
     fetch(`/api/programs/${id}/replan`, { method: "POST" }).then(
       j<{ program: string; cycle: number; submitted: string[]; skipped?: boolean; busy?: boolean; throttled?: boolean }>),
