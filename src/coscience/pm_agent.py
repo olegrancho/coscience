@@ -44,6 +44,8 @@ def _context_payload(context: PMContext) -> dict:
         # sprint_feedback above (idea_id instead of sprint_id).
         "idea_comments": sorted((f["idea_id"], f["thread_id"], f["messages"][-1]["text"])
                                 for f in context.idea_feedback),
+        "artifact_feedback": sorted((f["artifact_id"], f["thread_id"], f["messages"][-1]["text"])
+                                    for f in context.artifact_feedback),
     }
 
 
@@ -63,6 +65,7 @@ _TRIGGER_LABELS = {
     "sprint_feedback": "feedback to the planner",
     "human_ideas": "a human idea",
     "idea_comments": "comment on an idea",
+    "artifact_feedback": "comment on an artifact",
 }
 
 
@@ -139,6 +142,16 @@ def gather_context(substrate, program_id: str) -> PMContext:
                     "idea_id": i.id, "thread_id": th["id"],
                     "messages": [{"role": m["role"], "text": m["text"]} for m in th["messages"]],
                 })
+    artifact_dicts: list[dict] = []
+    artifact_feedback: list[dict] = []
+    for art in substrate.iter_artifacts(program_id):
+        artifact_dicts.append({"id": art.id, "title": art.title, "kind": art.kind})
+        for th in art.threads:
+            if threads.needs_reply(th):
+                artifact_feedback.append({
+                    "artifact_id": art.id, "thread_id": th["id"],
+                    "messages": [{"role": m["role"], "text": m["text"]} for m in th["messages"]],
+                })
     proposed_count = sum(1 for s in open_sprints if s["status"] == SprintStatus.PROPOSED.value)
     # Windowed lineage graph: adjacency for edges whose SOURCE is a node already
     # shown in this prompt (ideas + open/completed/failed sprints). Keeps the
@@ -166,6 +179,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
         model=program.pm_model,
         workdir=_resolve_workdir(substrate, program.workdir),
         graph_lines=graph_lines,
+        artifacts=artifact_dicts, artifact_feedback=artifact_feedback,
     )
 
 
