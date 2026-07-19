@@ -1,8 +1,8 @@
-import { ActionIcon, Badge, Button, Card, Group, Loader, Stack, Text, Textarea } from "@mantine/core";
+import { ActionIcon, Badge, Button, Card, Group, Loader, Stack, Text, Textarea, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { FeedbackThread } from "../components/FeedbackThread";
 import { api } from "../api";
@@ -122,12 +122,18 @@ function VersionRow(
 export default function ArtifactDetail() {
   const { id = "", aid = "" } = useParams();
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [comment, setComment] = useState("");
   const artifact = useQuery({ queryKey: ["artifact", id, aid], queryFn: () => api.getArtifact(id, aid) });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["artifact", id, aid] });
   const archiveArtifact = useMutation({
     mutationFn: (archived: boolean) => api.archiveArtifact(id, aid, archived),
     onSuccess: invalidate,
+  });
+  const openChat = useMutation({
+    mutationFn: () => api.createChat(id, `Edit ${artifact.data?.title || aid}`, [aid]),
+    onSuccess: () => navigate(`/programs/${id}/chat`),
+    onError: (e) => notifications.show({ color: "red", title: "Couldn't open chat", message: String(e) }),
   });
   const addComment = async () => {
     if (!comment.trim()) return;
@@ -186,6 +192,15 @@ export default function ArtifactDetail() {
                 Download
               </Button>
             )}
+            <Tooltip label={art.lock.holder_id ? `busy — ${art.lock.holder_id}` : ""} disabled={!art.lock.holder_id} withArrow>
+              <Button
+                variant="default" loading={openChat.isPending}
+                disabled={!!art.lock.holder_id}
+                onClick={() => openChat.mutate()}
+              >
+                Open chat
+              </Button>
+            </Tooltip>
             {art.archived ? (
               <Button variant="default" onClick={undiscard} loading={archiveArtifact.isPending}>Un-discard</Button>
             ) : (

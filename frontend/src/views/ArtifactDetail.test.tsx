@@ -65,4 +65,13 @@ describe("ArtifactDetail", () => {
     await waitFor(() => expect(screen.getByText("tighten intro")).toBeTruthy());
     expect(screen.getByText(/p-c1-x/)).toBeTruthy();
   });
+
+  it("shows an Open chat action", async () => {
+    vi.spyOn(api, "getArtifact").mockResolvedValue({
+      id: "doc", program: "p", title: "Doc", kind: "md", current: "", archived: false,
+      lock: {}, current_files: [], linked_sprints: [], threads: [], versions: [],
+    } as any);
+    renderAt();
+    await waitFor(() => expect(screen.getByText(/open chat/i)).toBeTruthy());
+  });
 });
