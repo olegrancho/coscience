@@ -98,8 +98,13 @@ function VersionRow(
       </Stack>
       <Group gap={4} wrap="nowrap">
         {!isCurrent && (
-          <Button size="xs" variant="subtle" onClick={() => revert.mutate()} loading={revert.isPending}>
-            View/Revert
+          <Button
+            size="xs" variant="subtle" loading={revert.isPending}
+            onClick={() => {
+              if (window.confirm(`Revert to ${row.v.id}? It becomes the current version.`)) revert.mutate();
+            }}
+          >
+            Revert
           </Button>
         )}
         <ActionIcon
@@ -176,9 +181,11 @@ export default function ArtifactDetail() {
             {art.archived && <Badge color="gray" variant="light">discarded</Badge>}
           </Group>
           <Group gap={8} wrap="nowrap">
-            <Button component="a" href={api.artifactDownloadUrl(id, aid, art.current)} variant="default">
-              Download
-            </Button>
+            {art.current && (
+              <Button component="a" href={api.artifactDownloadUrl(id, aid, art.current)} variant="default">
+                Download
+              </Button>
+            )}
             {art.archived ? (
               <Button variant="default" onClick={undiscard} loading={archiveArtifact.isPending}>Un-discard</Button>
             ) : (
