@@ -159,6 +159,8 @@ def acquire_lock(substrate, program_id: str, aids: list[str], holder_kind: str,
             if art.lock and art.lock.get("holder_id") != holder_id:
                 return False                       # any busy -> acquire none
         for art in arts:
+            if art.lock.get("holder_id") == holder_id:
+                continue                           # already held -> no-op (keep work/ + age)
             art.lock = {"holder_kind": holder_kind, "holder_id": holder_id,
                         "acquired_at": now, "last_activity": now}
             substrate.save_artifact(art)

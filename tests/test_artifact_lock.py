@@ -91,3 +91,18 @@ def test_reap_releases_dead_holder(substrate):
     released = artifacts.reap_stale_chat_locks(
         substrate, "p", now=1001.0, timeout=1800.0, holder_alive=lambda h: False)
     assert released == ["doc"]
+
+
+def test_reacquire_same_holder_preserves_work(substrate):
+    _mk(substrate, "doc")
+    artifacts.acquire_lock(substrate, "p", ["doc"], "chat", "chat:x", now=1.0)
+    (substrate.artifact_dir("p", "doc") / "work" / "c.md").write_text("draft")
+    _mk(substrate, "doc2")
+    ok = artifacts.acquire_lock(substrate, "p", ["doc", "doc2"], "chat", "chat:x", now=2.0)
+    assert ok is True
+    # the already-held artifact's in-progress work/ is untouched, its age not reset
+    assert (substrate.artifact_dir("p", "doc") / "work" / "c.md").read_text() == "draft"
+    assert substrate.load_artifact("p", "doc").lock["acquired_at"] == 1.0
+    # the newly added artifact is locked + seeded
+    assert (substrate.artifact_dir("p", "doc2") / "work").is_dir()
+    assert substrate.load_artifact("p", "doc2").lock["holder_id"] == "chat:x"
