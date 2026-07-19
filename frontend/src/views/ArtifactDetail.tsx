@@ -193,13 +193,15 @@ export default function ArtifactDetail() {
               </Button>
             )}
             <Tooltip label={art.lock.holder_id ? `busy — ${art.lock.holder_id}` : ""} disabled={!art.lock.holder_id} withArrow>
-              <Button
-                variant="default" loading={openChat.isPending}
-                disabled={!!art.lock.holder_id}
-                onClick={() => openChat.mutate()}
-              >
-                Open chat
-              </Button>
+              <span style={{ display: "inline-block" }}>
+                <Button
+                  variant="default" loading={openChat.isPending}
+                  disabled={!!art.lock.holder_id}
+                  onClick={() => openChat.mutate()}
+                >
+                  Open chat
+                </Button>
+              </span>
             </Tooltip>
             {art.archived ? (
               <Button variant="default" onClick={undiscard} loading={archiveArtifact.isPending}>Un-discard</Button>
