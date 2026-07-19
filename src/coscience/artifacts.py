@@ -60,7 +60,8 @@ def cut_version(substrate, program_id: str, aid: str, created_by: str,
                 now: float, note: str = "") -> str | None:
     """Snapshot `work/` into a new immutable version whose parent is `current`,
     then move `current` to it. Returns the new version id, or None when there is
-    no `work/` or it is byte-identical to `current` (the dedup rule)."""
+    no `work/`, when it is byte-identical to `current` (the dedup rule), or when
+    it is the first version but `work/` holds no files."""
     d = substrate.artifact_dir(program_id, aid)
     work = d / "work"
     if not work.is_dir():

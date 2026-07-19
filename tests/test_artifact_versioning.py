@@ -66,3 +66,11 @@ def test_dedup_identical_work_cuts_nothing(substrate):
 def test_cut_without_work_returns_none(substrate):
     artifacts.create_artifact(substrate, "p", "doc", "Doc", "md")
     assert artifacts.cut_version(substrate, "p", "doc", "human", now=1.0) is None
+
+
+def test_first_version_empty_work_cuts_nothing(substrate):
+    artifacts.create_artifact(substrate, "p", "doc", "Doc", "md")
+    artifacts.seed_work(substrate, "p", "doc")          # empty work/, no current yet
+    vid = artifacts.cut_version(substrate, "p", "doc", "human", now=1.0)
+    assert vid is None
+    assert substrate.load_artifact("p", "doc").versions == []
