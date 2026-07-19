@@ -1061,6 +1061,31 @@ class Service:
             "linked_sprints": self._artifact_sprints(program_id, aid),
         }
 
+    def artifact_version_dir(self, program_id: str, aid: str, vid: str) -> Path:
+        d = (self.substrate.artifact_dir(program_id, aid) / vid).resolve()
+        base = self.substrate.artifact_dir(program_id, aid).resolve()
+        if d.parent != base or not d.is_dir():
+            raise NotFoundError(vid)
+        return d
+
+    def _guarded_file(self, program_id: str, aid: str, vid: str, relpath: str) -> Path:
+        vdir = self.artifact_version_dir(program_id, aid, vid)
+        path = (vdir / relpath).resolve()
+        if not path.is_file() or not path.is_relative_to(vdir):
+            raise NotFoundError(relpath)
+        return path
+
+    def read_artifact_file(self, program_id: str, aid: str, vid: str, name: str) -> dict:
+        path = self._guarded_file(program_id, aid, vid, name)
+        raw = path.read_bytes()
+        binary = b"\x00" in raw[:8192]
+        return {"name": name, "size": len(raw),
+                "content": "" if binary else raw.decode("utf-8", errors="replace"),
+                "binary": binary}
+
+    def artifact_page_file(self, program_id: str, aid: str, vid: str, relpath: str) -> Path:
+        return self._guarded_file(program_id, aid, vid, relpath)
+
     # --- ledger ---
     def ledger_status(self) -> dict:
         ledger = self._ledger()
