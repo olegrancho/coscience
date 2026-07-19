@@ -53,6 +53,8 @@ class Service:
     def submit_sprint(self, *, id: str, goals: str, plan: list[str],
                       program: str | None = None, priority: int = 0,
                       preemptible: bool = True, resources_required: dict | None = None,
+                      artifacts_bound: list | None = None,
+                      artifacts_create: list | None = None,
                       status: str = "proposed") -> str:
         if not plan:
             raise ValueError("plan must have at least one suggested step")
@@ -67,6 +69,8 @@ class Service:
             resources_required={k: float(v) for k, v in (resources_required or {}).items()},
             priority=priority,
             preemptible=preemptible,
+            artifacts_bound=[str(a) for a in (artifacts_bound or [])],
+            artifacts_create=[dict(c) for c in (artifacts_create or [])],
         )
         self.substrate.save_sprint(sprint)
         return id

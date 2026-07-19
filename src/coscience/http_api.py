@@ -51,6 +51,8 @@ class SprintSubmit(BaseModel):
     priority: int = 0
     preemptible: bool = True
     resources_required: dict[str, float] | None = None
+    artifacts_bound: list[str] | None = None
+    artifacts_create: list[dict] | None = None
 
 
 class SprintPatch(BaseModel):
@@ -209,6 +211,8 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
                 program=body.program, priority=body.priority,
                 preemptible=body.preemptible,
                 resources_required=body.resources_required,
+                artifacts_bound=body.artifacts_bound,
+                artifacts_create=body.artifacts_create,
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
