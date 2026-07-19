@@ -1042,7 +1042,6 @@ class Service:
                 "id": a.id, "title": a.title, "kind": a.kind, "current": a.current,
                 "archived": a.archived, "lock": a.lock,
                 "version_count": sum(1 for v in a.versions if not v.archived),
-                "linked_sprints": self._artifact_sprints(program_id, a.id),
             })
         return out
 

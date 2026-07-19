@@ -59,6 +59,7 @@ def test_page_serve_has_csp(substrate):
     r = c.get("/api/programs/p/artifacts/site/versions/v1/page/index.html")
     assert r.status_code == 200
     assert "default-src 'none'" in r.headers["content-security-policy"]
+    assert "sandbox allow-scripts" in r.headers["content-security-policy"]
 
 
 def test_get_missing_404(substrate):

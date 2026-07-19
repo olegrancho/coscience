@@ -512,8 +512,8 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=404, detail="page asset not found")
         resp = FileResponse(fp)
         resp.headers["Content-Security-Policy"] = (
-            "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; "
-            "script-src 'unsafe-inline'; font-src data:")
+            "sandbox allow-scripts; default-src 'none'; img-src 'self' data:; "
+            "style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:")
         resp.headers["X-Content-Type-Options"] = "nosniff"
         return resp
 
