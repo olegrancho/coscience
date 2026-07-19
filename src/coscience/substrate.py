@@ -7,7 +7,8 @@ from pathlib import Path
 
 from coscience.frontmatter_io import parse, serialize
 from coscience.models import (Sprint, SprintStatus, ProgressState, Result, Program,
-                              ProgramStatus, PMState, Idea, ChatThread)
+                              ProgramStatus, PMState, Idea, ChatThread, Artifact,
+                              ArtifactVersion)
 
 
 class Substrate:
@@ -209,6 +210,61 @@ class Substrate:
         out = []
         for path in sorted(results_dir.glob("*.md")):
             out.append(self.load_result(path.stem))
+        return out
+
+    # --- artifacts (versioned program deliverables) ---
+    def artifact_dir(self, program_id: str, aid: str) -> Path:
+        return self.program_dir(program_id) / "artifacts" / aid
+
+    def load_artifact(self, program_id: str, aid: str) -> Artifact:
+        text = (self.artifact_dir(program_id, aid) / "meta.md").read_text()
+        fm, _body = parse(text)
+        return Artifact(
+            id=aid, program=program_id,
+            title=str(fm.get("title", "")),
+            kind=str(fm.get("kind", "md")),
+            current=str(fm.get("current", "")),
+            lock=dict(fm.get("lock") or {}),
+            versions=[ArtifactVersion(
+                id=str(v["id"]), parent=str(v.get("parent", "")),
+                created_at=float(v.get("created_at", 0.0)),
+                created_by=str(v.get("created_by", "")),
+                archived=bool(v.get("archived", False)),
+                note=str(v.get("note", "")))
+                for v in fm.get("versions", [])],
+            threads=list(fm.get("threads", [])),
+            archived=bool(fm.get("archived", False)),
+        )
+
+    def save_artifact(self, artifact: Artifact) -> None:
+        fm = {
+            "type": "artifact",
+            "title": artifact.title,
+            "kind": artifact.kind,
+            "current": artifact.current,
+            "lock": artifact.lock,
+            "versions": [
+                {"id": v.id, "parent": v.parent, "created_at": v.created_at,
+                 "created_by": v.created_by, "archived": v.archived, "note": v.note}
+                for v in artifact.versions],
+        }
+        if artifact.threads:
+            fm["threads"] = list(artifact.threads)
+        if artifact.archived:
+            fm["archived"] = True
+        d = self.artifact_dir(artifact.program, artifact.id)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "meta.md").write_text(serialize(fm, f"# {artifact.title or artifact.id}\n"))
+
+    def iter_artifacts(self, program_id: str,
+                       include_archived: bool = False) -> list[Artifact]:
+        d = self.program_dir(program_id) / "artifacts"
+        out: list[Artifact] = []
+        for sub in (sorted(d.iterdir()) if d.is_dir() else []):
+            if (sub / "meta.md").is_file():
+                a = self.load_artifact(program_id, sub.name)
+                if include_archived or not a.archived:
+                    out.append(a)
         return out
 
     # --- programs ---
