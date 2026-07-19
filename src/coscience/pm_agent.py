@@ -504,9 +504,6 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             if sid not in proposed:
                 proposed.append(sid)
             continue
-        if slots <= 0:
-            dropped.append(sid)
-            continue
         bound = [str(a) for a in task.get("artifact_ids", []) if str(a).strip()]
         create = []
         for c in task.get("create", []):
@@ -516,6 +513,9 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                                "kind": str(c.get("kind") or "md")})
         if not bound and not create:
             continue                                   # nothing to act on
+        if slots <= 0:
+            dropped.append(sid)
+            continue
         substrate.save_sprint(Sprint(
             id=sid, status=SprintStatus.PROPOSED,
             goals=str(task.get("instructions") or "Update the artifact."),
@@ -649,7 +649,6 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         if touched_guidance:
             substrate.save_guidance(program_id, guidance_threads)
 
-        touched_art = False
         for art in substrate.iter_artifacts(program_id):
             hit = False
             for th in art.threads:
@@ -658,8 +657,6 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                     hit = True
             if hit:
                 substrate.save_artifact(art)
-                touched_art = True
-        _ = touched_art
 
     # --- release: put an APPROVED sprint into production (-> queued). The approved
     # pool is the PM's managed queue; it releases items here as it sees need, and the
