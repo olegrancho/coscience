@@ -1018,6 +1018,49 @@ class Service:
         return {"id": r.id, "sprint": r.sprint, "summary": r.summary, "program": program,
                 "completed_at": r.completed_at}
 
+    # --- artifacts ---
+    def _artifact_sprints(self, program_id: str, aid: str) -> list[dict]:
+        from coscience import artifacts
+        out = []
+        for s in self.substrate.iter_sprints():
+            if s.program == program_id and aid in artifacts.sprint_aids(s):
+                out.append({"id": s.id, "status": s.status.value, "title": s.title})
+        return out
+
+    def _artifact_version_files(self, program_id: str, aid: str, vid: str) -> list[str]:
+        vdir = self.substrate.artifact_dir(program_id, aid) / vid
+        if not vdir.is_dir():
+            return []
+        return sorted(str(p.relative_to(vdir)) for p in vdir.rglob("*") if p.is_file())
+
+    def list_artifacts(self, program_id: str) -> list[dict]:
+        out = []
+        for a in self.substrate.iter_artifacts(program_id):
+            out.append({
+                "id": a.id, "title": a.title, "kind": a.kind, "current": a.current,
+                "archived": a.archived, "lock": a.lock,
+                "version_count": sum(1 for v in a.versions if not v.archived),
+                "linked_sprints": self._artifact_sprints(program_id, a.id),
+            })
+        return out
+
+    def get_artifact(self, program_id: str, aid: str) -> dict:
+        from coscience import threads as _th
+        if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            raise NotFoundError(aid)
+        a = self.substrate.load_artifact(program_id, aid)
+        return {
+            "id": a.id, "program": program_id, "title": a.title, "kind": a.kind,
+            "current": a.current, "archived": a.archived, "lock": a.lock,
+            "versions": [
+                {"id": v.id, "parent": v.parent, "created_at": v.created_at,
+                 "created_by": v.created_by, "archived": v.archived, "note": v.note}
+                for v in a.versions],
+            "threads": [_th.public(t) for t in a.threads],
+            "current_files": self._artifact_version_files(program_id, aid, a.current) if a.current else [],
+            "linked_sprints": self._artifact_sprints(program_id, aid),
+        }
+
     # --- ledger ---
     def ledger_status(self) -> dict:
         ledger = self._ledger()
