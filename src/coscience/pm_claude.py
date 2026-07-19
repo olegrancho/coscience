@@ -43,6 +43,15 @@ def render_prompt(context: PMContext) -> str:
         history = " | ".join(f"{m['role']}: {m['text']}" for m in f["messages"])
         return f"- thread {f['thread_id']}: {history}"
     guidance_feedback_block = _lines(context.guidance_feedback, _guidance_feedback_line)
+
+    artifacts_block = _lines(context.artifacts,
+                             lambda a: f"- [{a['id']}] {a.get('title', a['id'])} ({a.get('kind', 'md')})")
+
+    def _artifact_feedback_line(f):
+        history = " | ".join(f"{m['role']}: {m['text']}" for m in f["messages"])
+        return f"- artifact [{f['artifact_id']}], thread {f['thread_id']}: {history}"
+    artifact_feedback_block = _lines(context.artifact_feedback, _artifact_feedback_line)
+
     prior_block = ", ".join(context.prior_proposals) or "(none)"
     guidance_block = ""
     if context.human_guidance:
@@ -131,6 +140,16 @@ saying what you did, or why not.
 IDEA FEEDBACK:
 {idea_feedback_block}
 
+ARTIFACTS (the program's deliverables — reports, data, figures, pages — that agents produce and evolve):
+{artifacts_block}
+
+HUMAN FEEDBACK ADDRESSED TO YOU about specific artifacts — same thread_replies mechanism.
+For each open thread: decide the right action and, when it needs work on the artifact,
+emit an artifact_task (below) that proposes a sprint to do it; then add a thread_replies
+entry with that artifact thread's id saying what you proposed (or why not).
+ARTIFACT FEEDBACK:
+{artifact_feedback_block}
+
 GUIDANCE FEEDBACK ADDRESSED TO YOU — new standing-guidance messages open below need your
 action: same thread_replies mechanism as sprint/idea feedback — weigh each into your
 proposals/idea curation (adjust plans, curate ideas, whatever it calls for) AND add a
@@ -181,6 +200,12 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
       "evidence": "<optional: the result/finding that decides it>"}},
     {{"op": "delete", "type": "<type>", "src": "<id>", "dst": "<id>"}}
   ],
+  "artifact_tasks": [
+    {{"suffix": "<short-slug naming the update>",
+      "artifact_ids": ["<existing artifact id(s) this sprint will edit>", "..."],
+      "create": [{{"title": "<new artifact to create>", "kind": "md|data|figure|page"}}],
+      "instructions": "<what the sprint should do to the artifact(s) — becomes the sprint's goals>"}}
+  ],
   "proposals": [
     {{"suffix": "<short-slug>",
       "title": "<=8 words naming the experiment, e.g. 'Cross-validate the witness pair'>",
@@ -212,6 +237,11 @@ Run the program by curating ideas, not by piling on sprints:
   (release_ids) the approved sprint(s) that should run next and hold the rest until their
   prerequisites/prior results are in; use priority to order what's pending. Don't leave
   authorized work sitting idle with no reason — if it's ready and useful, release it.
+- ARTIFACTS: when a human comment asks for work on an artifact, or asks for a new
+  artifact, propose it as an artifact_task (it becomes a PROPOSED sprint bound to
+  that artifact — humans approve it like any sprint; it counts against the cap). Bind
+  existing artifacts with artifact_ids; declare new ones in create. Do NOT try to edit
+  artifacts yourself — you only propose.
 
 Each sprint is carried out by a capable autonomous research agent that plans and does
 the work itself. So:
@@ -281,6 +311,7 @@ def parse_response(text: str) -> PMCycleOutput:
                         if isinstance(r, dict) and r.get("thread_id")],
         edge_ops=[dict(o) for o in data.get("edge_ops", [])
                   if isinstance(o, dict) and o.get("op") and o.get("type")],
+        artifact_tasks=[dict(t) for t in data.get("artifact_tasks", []) if isinstance(t, dict)],
     )
 
 
