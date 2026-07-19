@@ -134,3 +134,76 @@ def archive_artifact(substrate, program_id: str, aid: str,
     art = substrate.load_artifact(program_id, aid)
     art.archived = archived
     substrate.save_artifact(art)
+
+
+@contextmanager
+def _lock_guard(substrate):
+    """Repo-level flock so multi-artifact acquire/release is atomic across the
+    dispatcher and HTTP processes (mirrors pm_agent's per-program lock)."""
+    lockdir = substrate.repo_root / ".coscience"
+    lockdir.mkdir(parents=True, exist_ok=True)
+    f = open(lockdir / "artifacts.lock", "w")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(f, fcntl.LOCK_UN)
+        f.close()
+
+
+def acquire_lock(substrate, program_id: str, aids: list[str], holder_kind: str,
+                 holder_id: str, now: float) -> bool:
+    with _lock_guard(substrate):
+        arts = [substrate.load_artifact(program_id, aid) for aid in aids]
+        for art in arts:
+            if art.lock and art.lock.get("holder_id") != holder_id:
+                return False                       # any busy -> acquire none
+        for art in arts:
+            art.lock = {"holder_kind": holder_kind, "holder_id": holder_id,
+                        "acquired_at": now, "last_activity": now}
+            substrate.save_artifact(art)
+            seed_work(substrate, program_id, art.id)
+        return True
+
+
+def release_lock(substrate, program_id: str, aids: list[str], now: float,
+                 created_by: str) -> list[str | None]:
+    out: list[str | None] = []
+    with _lock_guard(substrate):
+        for aid in aids:
+            art = substrate.load_artifact(program_id, aid)
+            if not art.lock:
+                out.append(None)
+                continue
+            vid = cut_version(substrate, program_id, aid, created_by, now)
+            work = substrate.artifact_dir(program_id, aid) / "work"
+            if work.is_dir():
+                shutil.rmtree(work)
+            art = substrate.load_artifact(program_id, aid)   # reload (cut_version saved)
+            art.lock = {}
+            substrate.save_artifact(art)
+            out.append(vid)
+    return out
+
+
+def bump_activity(substrate, program_id: str, aid: str, now: float) -> None:
+    art = substrate.load_artifact(program_id, aid)
+    if art.lock:
+        art.lock["last_activity"] = now
+        substrate.save_artifact(art)
+
+
+def reap_stale_chat_locks(substrate, program_id: str, now: float,
+                          timeout: float = 1800.0, holder_alive=None) -> list[str]:
+    released: list[str] = []
+    for art in substrate.iter_artifacts(program_id, include_archived=True):
+        lock = art.lock
+        if not lock or lock.get("holder_kind") != "chat":
+            continue
+        idle = now - float(lock.get("last_activity", lock.get("acquired_at", now)))
+        dead = holder_alive is not None and not holder_alive(lock.get("holder_id", ""))
+        if idle >= timeout or dead:
+            release_lock(substrate, program_id, [art.id], now,
+                         created_by=lock.get("holder_id", ""))
+            released.append(art.id)
+    return released
