@@ -680,7 +680,7 @@ class Service:
     def post_chat_message(self, program_id: str, thread_id: str, message: str,
                           by: str = "", launch=None) -> dict:
         """Append the human message and launch a detached, resumable chat turn in the
-        program workdir. Returns immediately with busy=True; the reply is collected
+        program workdir (or the bound artifact's work/ dir). Returns immediately with busy=True; the reply is collected
         on a later poll. `launch(**kwargs)->token` is injectable for tests."""
         from coscience import chat_agent
         thread = self._thread_or_404(program_id, thread_id)
@@ -703,6 +703,12 @@ class Service:
         workdir = chat_agent.resolve_workdir(self.substrate, program.workdir)
         if thread.artifacts:
             from coscience import artifacts as _art
+            # Re-acquire in case a prior idle session's lock was reaped (which rmtree'd
+            # work/). Same-holder acquire is a no-op keeping work/; a reaped lock re-locks
+            # and re-seeds work/ from current; a lock now held by someone else is rejected.
+            if not _art.acquire_lock(self.substrate, program_id, list(thread.artifacts),
+                                     "chat", f"chat:{thread_id}", time.time()):
+                raise ValueError("artifact busy — held by another editor")
             aid0 = thread.artifacts[0]
             workdir = str(self.substrate.artifact_dir(program_id, aid0) / "work")
             for aid in thread.artifacts:

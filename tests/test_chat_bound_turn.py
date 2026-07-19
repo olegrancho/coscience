@@ -30,3 +30,15 @@ def test_bound_message_bumps_activity(substrate):
     svc.post_chat_message("p", cid, "hi", launch=lambda **k: "tok")
     after = substrate.load_artifact("p", "doc").lock["last_activity"]
     assert after >= before
+
+
+def test_bound_turn_reacquires_after_reap(substrate):
+    svc, cid = _bound_chat(substrate)
+    # simulate the reaper releasing the idle lock (clears lock + removes work/)
+    artifacts.release_lock(substrate, "p", ["doc"], now=9999.0, created_by=f"chat:{cid}")
+    assert substrate.load_artifact("p", "doc").lock == {}
+    # next message must re-acquire (not crash): lock restored, work/ recreated
+    svc.post_chat_message("p", cid, "keep going", launch=lambda **k: "tok")
+    a = substrate.load_artifact("p", "doc")
+    assert a.lock["holder_id"] == f"chat:{cid}"
+    assert (substrate.artifact_dir("p", "doc") / "work").is_dir()
