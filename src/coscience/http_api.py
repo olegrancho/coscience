@@ -57,6 +57,19 @@ class SprintSubmit(BaseModel):
     artifacts_create: list[dict] | None = None
 
 
+class ArtifactRevertIn(BaseModel):
+    vid: str
+
+
+class ArtifactArchiveIn(BaseModel):
+    archived: bool = True
+
+
+class ArtifactCommentIn(BaseModel):
+    text: str
+    thread_id: str = ""
+
+
 class SprintPatch(BaseModel):
     goals: str | None = None
     plan: list[str] | None = None
@@ -503,6 +516,79 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             "script-src 'unsafe-inline'; font-src data:")
         resp.headers["X-Content-Type-Options"] = "nosniff"
         return resp
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/revert")
+    def revert_artifact(program_id: str, aid: str, body: ArtifactRevertIn,
+                        user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.revert_artifact(program_id, aid, body.vid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/archive")
+    def archive_artifact(program_id: str, aid: str, body: ArtifactArchiveIn,
+                         user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.set_artifact_archived(program_id, aid, body.archived)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/versions/{vid}/archive")
+    def archive_artifact_version(program_id: str, aid: str, vid: str,
+                                 body: ArtifactArchiveIn,
+                                 user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.set_artifact_version_archived(program_id, aid, vid, body.archived)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/comments", status_code=201)
+    def comment_artifact(program_id: str, aid: str, body: ArtifactCommentIn,
+                         user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.add_artifact_comment(
+                program_id, aid, body.text,
+                by=(user.username if user else ""), thread_id=body.thread_id)
+        except NotFoundError as exc:
+            missing = exc.args[0] if exc.args else aid
+            raise HTTPException(status_code=404, detail=f"not found: {missing}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/threads/{tid}/complete")
+    def complete_artifact_thread(program_id: str, aid: str, tid: str,
+                                 user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.complete_artifact_thread(program_id, aid, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/threads/{tid}/reopen")
+    def reopen_artifact_thread(program_id: str, aid: str, tid: str,
+                               user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.reopen_artifact_thread(program_id, aid, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/threads/{tid}/seen")
+    def seen_artifact_thread(program_id: str, aid: str, tid: str,
+                             user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.seen_artifact_thread(program_id, aid, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+
+    @api.delete("/programs/{program_id}/artifacts/{aid}/threads/{tid}", status_code=204)
+    def delete_artifact_thread(program_id: str, aid: str, tid: str,
+                               user: "auth.User | None" = Depends(current_user)) -> Response:
+        try:
+            service.delete_artifact_thread(program_id, aid, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+        return Response(status_code=204)
 
     @api.get("/ledger")
     def ledger_status() -> dict:
