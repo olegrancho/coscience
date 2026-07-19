@@ -302,6 +302,8 @@ class Service:
             "model": sprint.model,
             "results": list(sprint.results),
             "plan": list(sprint.plan),
+            "artifacts_bound": list(sprint.artifacts_bound),
+            "artifacts_create": [dict(c) for c in sprint.artifacts_create],
             "threads": [threads.public(t) for t in sprint.threads],
             "decisions": list(sprint.decisions),
             "status_history": list(sprint.status_history),
