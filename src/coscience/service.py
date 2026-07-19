@@ -672,8 +672,25 @@ class Service:
         self.substrate.commit(f"program {program_id}: chat {thread_id} scope -> {scope}")
         return self._chat_public(thread)
 
+    def save_chat_version(self, program_id: str, thread_id: str) -> dict:
+        from coscience import artifacts as _art
+        thread = self._thread_or_404(program_id, thread_id)
+        if not thread.artifacts:
+            raise ValueError("this chat is not bound to an artifact")
+        out: dict = {}
+        for aid in thread.artifacts:
+            vid = _art.cut_version(self.substrate, program_id, aid,
+                                   f"chat:{thread_id}", time.time())
+            out[aid] = vid
+        self.substrate.commit(f"program {program_id}: chat {thread_id} saved versions {out}")
+        return out
+
     def delete_chat(self, program_id: str, thread_id: str) -> None:
-        self._thread_or_404(program_id, thread_id)
+        from coscience import artifacts as _art
+        thread = self._thread_or_404(program_id, thread_id)
+        if thread.artifacts:
+            _art.release_lock(self.substrate, program_id, list(thread.artifacts),
+                              time.time(), created_by=f"chat:{thread_id}")
         self.substrate.delete_chat_thread(program_id, thread_id)
         self.substrate.commit(f"program {program_id}: delete chat {thread_id}")
 
