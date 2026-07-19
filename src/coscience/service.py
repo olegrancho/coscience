@@ -1062,15 +1062,24 @@ class Service:
         }
 
     def artifact_version_dir(self, program_id: str, aid: str, vid: str) -> Path:
-        d = (self.substrate.artifact_dir(program_id, aid) / vid).resolve()
-        base = self.substrate.artifact_dir(program_id, aid).resolve()
+        try:
+            base = self.substrate.artifact_dir(program_id, aid).resolve()
+            root = (self.substrate.repo_root / "programs").resolve()
+            if not base.is_relative_to(root):
+                raise NotFoundError(vid)          # program_id/aid escaped the substrate
+            d = (base / vid).resolve()
+        except (ValueError, OSError):
+            raise NotFoundError(vid)
         if d.parent != base or not d.is_dir():
             raise NotFoundError(vid)
         return d
 
     def _guarded_file(self, program_id: str, aid: str, vid: str, relpath: str) -> Path:
         vdir = self.artifact_version_dir(program_id, aid, vid)
-        path = (vdir / relpath).resolve()
+        try:
+            path = (vdir / relpath).resolve()
+        except (ValueError, OSError):
+            raise NotFoundError(relpath)
         if not path.is_file() or not path.is_relative_to(vdir):
             raise NotFoundError(relpath)
         return path

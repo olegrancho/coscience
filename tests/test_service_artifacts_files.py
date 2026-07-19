@@ -50,3 +50,14 @@ def test_version_dir_missing_raises(substrate):
         assert False
     except NotFoundError:
         pass
+
+
+def test_program_or_aid_escape_blocked(substrate):
+    _seed(substrate, "doc", {"content.md": "x"})
+    svc = Service(substrate.repo_root)
+    for bad_program, bad_aid in (("..", "doc"), ("p", ".."), ("../..", "doc")):
+        try:
+            svc.artifact_version_dir(bad_program, bad_aid, "v1")
+            assert False, f"escape not blocked: {bad_program}/{bad_aid}"
+        except NotFoundError:
+            pass
