@@ -210,3 +210,58 @@ def reap_stale_chat_locks(substrate, program_id: str, now: float,
                          created_by=lock.get("holder_id", ""))
             released.append(art.id)
     return released
+
+
+# --- sprint binding: a sprint's artifacts are a capacity-1 resource it locks ---
+def sprint_aids(sprint) -> list[str]:
+    """The artifact ids a sprint touches: existing bound ids + each create-spec's aid."""
+    aids = list(sprint.artifacts_bound)
+    for spec in sprint.artifacts_create:
+        aid = str(spec.get("aid") or "").strip()
+        if aid:
+            aids.append(aid)
+    return aids
+
+
+def acquire_for_sprint(substrate, sprint, now: float) -> bool:
+    """Instantiate any not-yet-existing create-targets, then atomically lock every
+    artifact the sprint touches under holder ("sprint", sprint.id). Returns False
+    (locking none) if a bound artifact is held by someone else; True (no-op) when
+    the sprint has no program or no artifacts."""
+    if not sprint.program:
+        return True
+    for spec in sprint.artifacts_create:
+        aid = str(spec.get("aid") or "").strip()
+        if aid and not (substrate.artifact_dir(sprint.program, aid) / "meta.md").is_file():
+            create_artifact(substrate, sprint.program, aid,
+                            str(spec.get("title") or aid), str(spec.get("kind") or "md"))
+    aids = sprint_aids(sprint)
+    if not aids:
+        return True
+    return acquire_lock(substrate, sprint.program, aids, "sprint", sprint.id, now)
+
+
+def release_for_sprint(substrate, sprint, now: float) -> list:
+    """Release every artifact the sprint holds, cutting a version from each work/
+    (dedup applies). No-op when the sprint has no program or no artifacts."""
+    if not sprint.program:
+        return []
+    aids = sprint_aids(sprint)
+    if not aids:
+        return []
+    return release_lock(substrate, sprint.program, aids, now, created_by=sprint.id)
+
+
+def sprint_blocked(substrate, sprint) -> bool:
+    """True if any EXISTING bound artifact is locked by a different holder, so the
+    sprint must not be granted yet. Create-targets don't exist, so they never block."""
+    if not sprint.program:
+        return False
+    for aid in sprint.artifacts_bound:
+        p = substrate.artifact_dir(sprint.program, aid) / "meta.md"
+        if not p.is_file():
+            continue
+        lock = substrate.load_artifact(sprint.program, aid).lock
+        if lock and lock.get("holder_id") != sprint.id:
+            return True
+    return False
