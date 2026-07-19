@@ -1095,6 +1095,31 @@ class Service:
     def artifact_page_file(self, program_id: str, aid: str, vid: str, relpath: str) -> Path:
         return self._guarded_file(program_id, aid, vid, relpath)
 
+    def revert_artifact(self, program_id: str, aid: str, vid: str) -> dict:
+        from coscience import artifacts
+        if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            raise NotFoundError(aid)
+        artifacts.revert(self.substrate, program_id, aid, vid)   # ValueError on unknown vid
+        self.substrate.commit(f"artifact {program_id}/{aid}: revert to {vid}")
+        return self.get_artifact(program_id, aid)
+
+    def set_artifact_archived(self, program_id: str, aid: str, archived: bool) -> dict:
+        from coscience import artifacts
+        if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            raise NotFoundError(aid)
+        artifacts.archive_artifact(self.substrate, program_id, aid, archived)
+        self.substrate.commit(f"artifact {program_id}/{aid}: archived={archived}")
+        return self.get_artifact(program_id, aid)
+
+    def set_artifact_version_archived(self, program_id: str, aid: str, vid: str,
+                                      archived: bool) -> dict:
+        from coscience import artifacts
+        if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            raise NotFoundError(aid)
+        artifacts.archive_version(self.substrate, program_id, aid, vid, archived)
+        self.substrate.commit(f"artifact {program_id}/{aid}: version {vid} archived={archived}")
+        return self.get_artifact(program_id, aid)
+
     # --- ledger ---
     def ledger_status(self) -> dict:
         ledger = self._ledger()
