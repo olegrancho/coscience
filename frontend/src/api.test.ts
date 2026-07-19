@@ -31,4 +31,35 @@ describe("api client", () => {
     mockFetch(404, { detail: "nope" });
     await expect(api.getSprint("x")).rejects.toThrow("404");
   });
+
+  it("getArtifact hits the prefixed path", async () => {
+    const f = mockFetch(200, { id: "doc", program: "p", title: "Doc", kind: "md",
+      current: "v1", archived: false, lock: {}, versions: [], threads: [],
+      current_files: ["content.md"], linked_sprints: [] });
+    const d = await api.getArtifact("p", "doc");
+    expect(f).toHaveBeenCalledWith("/api/programs/p/artifacts/doc");
+    expect(d.current).toBe("v1");
+  });
+
+  it("revertArtifact POSTs the vid", async () => {
+    const f = mockFetch(200, { id: "doc", current: "v1" });
+    await api.revertArtifact("p", "doc", "v1");
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("/api/programs/p/artifacts/doc/revert");
+    expect((init as RequestInit).method).toBe("POST");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ vid: "v1" });
+  });
+
+  it("addArtifactComment POSTs text + thread_id", async () => {
+    const f = mockFetch(201, { id: "t1" });
+    await api.addArtifactComment("p", "doc", "tighten intro");
+    const [url, init] = f.mock.calls[0];
+    expect(url).toBe("/api/programs/p/artifacts/doc/comments");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ text: "tighten intro", thread_id: "" });
+  });
+
+  it("download/page url helpers build the right paths", () => {
+    expect(api.artifactDownloadUrl("p", "doc", "v2")).toBe("/api/programs/p/artifacts/doc/versions/v2/download");
+    expect(api.artifactPageUrl("p", "site", "v1", "index.html")).toBe("/api/programs/p/artifacts/site/versions/v1/page/index.html");
+  });
 });

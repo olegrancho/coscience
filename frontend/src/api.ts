@@ -77,6 +77,16 @@ export interface GraphEdge {
   by: string; at: number; rationale: string; confidence: string; evidence: string;
 }
 export interface Graph { nodes: GraphNode[]; edges: GraphEdge[] }
+export interface ArtifactVersionT { id: string; parent: string; created_at: number; created_by: string; archived: boolean; note: string }
+export interface ArtifactLock { holder_kind?: string; holder_id?: string; acquired_at?: number; last_activity?: number }
+export interface ArtifactRow { id: string; title: string; kind: string; current: string; archived: boolean; lock: ArtifactLock; version_count: number }
+export interface LinkedSprint { id: string; status: string; title: string }
+export interface ArtifactDetailT {
+  id: string; program: string; title: string; kind: string; current: string;
+  archived: boolean; lock: ArtifactLock; versions: ArtifactVersionT[];
+  threads: FeedbackThreadT[]; current_files: string[]; linked_sprints: LinkedSprint[];
+}
+export interface ArtifactFileT { name: string; size: number; content: string; binary: boolean }
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
@@ -246,4 +256,41 @@ export const api = {
   getResult: (id: string) => fetch(`/api/results/${id}`).then(j<ResultRow>),
   getLedger: () => fetch("/api/ledger").then(j<Ledger>),
   getUsage: () => fetch("/api/usage").then(j<Usage>),
+  listArtifacts: (pid: string) => fetch(`/api/programs/${pid}/artifacts`).then(j<ArtifactRow[]>),
+  getArtifact: (pid: string, aid: string) =>
+    fetch(`/api/programs/${pid}/artifacts/${aid}`).then(j<ArtifactDetailT>),
+  readArtifactFile: (pid: string, aid: string, vid: string, name: string) =>
+    fetch(`/api/programs/${pid}/artifacts/${aid}/versions/${vid}/files/${encodeURIComponent(name)}`).then(j<ArtifactFileT>),
+  revertArtifact: (pid: string, aid: string, vid: string) =>
+    fetch(`/api/programs/${pid}/artifacts/${aid}/revert`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vid }),
+    }).then(j<ArtifactDetailT>),
+  archiveArtifact: (pid: string, aid: string, archived: boolean) =>
+    fetch(`/api/programs/${pid}/artifacts/${aid}/archive`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived }),
+    }).then(j<ArtifactDetailT>),
+  archiveArtifactVersion: (pid: string, aid: string, vid: string, archived: boolean) =>
+    fetch(`/api/programs/${pid}/artifacts/${aid}/versions/${vid}/archive`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived }),
+    }).then(j<ArtifactDetailT>),
+  addArtifactComment: (pid: string, aid: string, text: string, threadId?: string) =>
+    fetch(`/api/programs/${pid}/artifacts/${aid}/comments`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, thread_id: threadId ?? "" }),
+    }).then(j<FeedbackThreadT>),
+  completeArtifactThread: (pid: string, aid: string, tid: string) =>
+    fetch(`/api/programs/${pid}/artifacts/${aid}/threads/${tid}/complete`, { method: "POST" }).then(j<FeedbackThreadT>),
+  reopenArtifactThread: (pid: string, aid: string, tid: string) =>
+    fetch(`/api/programs/${pid}/artifacts/${aid}/threads/${tid}/reopen`, { method: "POST" }).then(j<FeedbackThreadT>),
+  seenArtifactThread: (pid: string, aid: string, tid: string) =>
+    fetch(`/api/programs/${pid}/artifacts/${aid}/threads/${tid}/seen`, { method: "POST" }).then(j<FeedbackThreadT>),
+  deleteArtifactThread: (pid: string, aid: string, tid: string) =>
+    fetch(`/api/programs/${pid}/artifacts/${aid}/threads/${tid}`, { method: "DELETE" }).then(j<void>),
+  artifactDownloadUrl: (pid: string, aid: string, vid: string) =>
+    `/api/programs/${pid}/artifacts/${aid}/versions/${vid}/download`,
+  artifactPageUrl: (pid: string, aid: string, vid: string, path: string) =>
+    `/api/programs/${pid}/artifacts/${aid}/versions/${vid}/page/${path}`,
 };
