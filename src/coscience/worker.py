@@ -13,7 +13,7 @@ import re
 import subprocess
 import time
 
-from coscience import feedback_harvest, usage_meter
+from coscience import artifacts, feedback_harvest, usage_meter
 from coscience.executor import ExecutionContext
 from coscience.executor import is_running as _job_is_running
 from coscience.executor import process_token, terminate_detached as _terminate
@@ -352,6 +352,7 @@ class Worker:
             progress.last_error = (text or "").strip()[-600:] or "agent exited nonzero with no output"
             if progress.failures >= MAX_AGENT_FAILURES:
                 set_status(sprint, SprintStatus.FAILED)
+                artifacts.release_for_sprint(self.substrate, sprint, time.time())
                 self.substrate.save_sprint(sprint)
                 self._reap_job(progress)        # terminal: don't leave a job orphaned
                 self.substrate.save_progress(progress)
@@ -394,6 +395,7 @@ class Worker:
         finished = self._read_finished_json(sprint_dir)
         if finished is not None:
             progress.ambiguous_exits = 0
+            artifacts.release_for_sprint(self.substrate, sprint, time.time())  # snapshot deliverables
             result = Result(
                 id=f"{sprint.id}-result", sprint=sprint.id,
                 summary=finished["summary"] or text or "(agent produced no output)",
@@ -447,6 +449,7 @@ class Worker:
 
         if progress.ambiguous_exits >= MAX_AMBIGUOUS_EXITS:
             set_status(sprint, SprintStatus.FAILED)
+            artifacts.release_for_sprint(self.substrate, sprint, time.time())
             progress.last_error = (
                 f"worker ended {progress.ambiguous_exits} times with no progress and no "
                 "completion signal (no finished.json and no job.json)")
