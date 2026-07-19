@@ -107,6 +107,34 @@ class Result:
 
 
 @dataclass
+class ArtifactVersion:
+    """One node in an artifact's version tree. `parent` is the version this one
+    was derived from ("" = root). Append-only; never deleted, only `archived`."""
+    id: str                              # "v1", "v2", ...
+    parent: str = ""                     # "" = root
+    created_at: float = 0.0
+    created_by: str = ""                 # sprint id | "chat:<id>" | "human"
+    archived: bool = False
+    note: str = ""
+
+
+@dataclass
+class Artifact:
+    """A program-level deliverable (report/data/figure/page) with a versioned,
+    tree-structured store. `current` names the active leaf version; `lock` is the
+    exclusive editing hold ({} = unlocked); `archived` is a whole-artifact discard."""
+    id: str
+    program: str
+    title: str = ""
+    kind: str = "md"                     # md | data | figure | page
+    current: str = ""                    # active leaf version id; "" = no versions yet
+    lock: dict = field(default_factory=dict)          # {} = unlocked
+    versions: list[ArtifactVersion] = field(default_factory=list)
+    threads: list[dict] = field(default_factory=list)  # feedback threads (target "pm")
+    archived: bool = False               # whole-artifact discard (reversible)
+
+
+@dataclass
 class ProgressState:
     sprint_id: str
     agent_token: str = ""              # detached agent process token; "" when not running
