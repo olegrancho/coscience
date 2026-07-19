@@ -80,3 +80,21 @@ def cut_version(substrate, program_id: str, aid: str, created_by: str,
     art.current = vid
     substrate.save_artifact(art)
     return vid
+
+
+def revert(substrate, program_id: str, aid: str, vid: str) -> None:
+    """Set `current` to an existing version. Pointer move only — no version is
+    cut and nothing is deleted; a later edit branches from `vid`."""
+    art = substrate.load_artifact(program_id, aid)
+    if vid not in {v.id for v in art.versions}:
+        raise ValueError(f"no version {vid!r} in artifact {aid!r}")
+    art.current = vid
+    substrate.save_artifact(art)
+
+
+def children(art: Artifact, vid: str) -> list[str]:
+    return [v.id for v in art.versions if v.parent == vid]
+
+
+def is_leaf(art: Artifact, vid: str) -> bool:
+    return not children(art, vid)
