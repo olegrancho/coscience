@@ -44,6 +44,8 @@ class PMContext:
     workdir: str = ""                                  # resolved cwd for the reasoner's claude session ("" = inherit)
     directive: str = ""                                # "compress" | "brainstorm" | "" — a human-triggered directed cycle
     graph_lines: list[str] = field(default_factory=list)  # windowed lineage-graph adjacency, one line per node with edges
+    artifacts: list[dict] = field(default_factory=list)          # program artifacts: [{id, title, kind}]
+    artifact_feedback: list[dict] = field(default_factory=list)  # open human-last threads on artifacts (target "pm")
 
     @property
     def free_slots(self) -> int:
@@ -77,6 +79,7 @@ class PMCycleOutput:
     release_ids: list[str] = field(default_factory=list)     # approved sprints to release into production (-> queued)
     thread_replies: list[dict] = field(default_factory=list)  # [{thread_id, text}] PM answers to open feedback threads
     edge_ops: list[dict] = field(default_factory=list)  # [{op:"add"|"delete", type, src, dst, rationale, confidence?, evidence?}]
+    artifact_tasks: list[dict] = field(default_factory=list)  # [{suffix, artifact_ids, create:[{title,kind}], instructions}]
 
 
 class Reasoner(Protocol):

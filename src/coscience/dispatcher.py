@@ -13,6 +13,8 @@ from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
 from coscience.worker import Worker
 
+from coscience import artifacts
+
 _ELIGIBLE = (SprintStatus.QUEUED, SprintStatus.EXECUTING, SprintStatus.HIBERNATED)
 
 
@@ -67,11 +69,21 @@ class Dispatcher:
         queue = {k: v for k, v in queue.items() if k in eligible_ids}
 
         # --- grants ---
-        needs = [s for s in eligible if self.ledger.lease_for(s.id) is None]
+        # A sprint bound to artifacts is grantable only when none of its bound
+        # artifacts is locked by another holder (the artifact is a capacity-1
+        # resource). Filter those out before the pool scheduler runs.
+        needs = [s for s in eligible if self.ledger.lease_for(s.id) is None
+                 and not artifacts.sprint_blocked(self.substrate, s)]
         for sprint in self.policy.select_grants(needs, queue, self.ledger, now):
             eff = self.policy.effective_priority(sprint, queue.get(sprint.id, now), now)
             if self.ledger.acquire(sprint.id, sprint.resources_required, now, ttl,
                                    priority=eff, preemptible=sprint.preemptible):
+                # Acquire the sprint's artifact locks (instantiating create-targets).
+                # If a same-cycle race lost the atomic acquire, give the lease back
+                # and leave the sprint queued for a later cycle.
+                if not artifacts.acquire_for_sprint(self.substrate, sprint, now):
+                    self.ledger.release(sprint.id)
+                    continue
                 report.granted += 1
                 if sprint.status in (SprintStatus.QUEUED, SprintStatus.HIBERNATED):
                     set_status(sprint, SprintStatus.EXECUTING)
@@ -129,7 +141,25 @@ class Dispatcher:
 
         report.waiting = sum(
             1 for s in eligible if self.ledger.lease_for(s.id) is None)
+
+        # Release chat locks left idle past the inactivity window (cuts a final
+        # version), so a walked-away editing session frees the artifact.
+        reaped = 0
+        for program in self.substrate.iter_programs():
+            reaped += len(artifacts.reap_stale_chat_locks(
+                self.substrate, program.id, now, holder_busy=self._chat_busy(program.id)))
+
         self._save_queue(queue)
-        if report.granted or report.completed or report.hibernated or report.reconciled:
+        if report.granted or report.completed or report.hibernated or report.reconciled or reaped:
             self.substrate.commit("dispatch cycle")
         return report
+
+    def _chat_busy(self, program_id: str):
+        """Predicate for the reaper: a lock holder id 'chat:<tid>' is 'busy' (protect
+        it) if that chat currently has a turn in flight (pending)."""
+        def busy(holder_id: str) -> bool:
+            if not holder_id.startswith("chat:"):
+                return False
+            t = self.substrate.load_chat_thread(program_id, holder_id[len("chat:"):])
+            return bool(t and t.pending)
+        return busy

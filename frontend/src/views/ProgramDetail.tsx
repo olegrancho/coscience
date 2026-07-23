@@ -1,4 +1,4 @@
-import { ActionIcon, Button, Card, Group, Loader, Stack, Text, TextInput, Tooltip } from "@mantine/core";
+import { ActionIcon, Badge, Button, Card, Group, Loader, Stack, Text, TextInput, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -27,6 +27,7 @@ export default function ProgramDetail() {
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
   const guidance = useQuery({ queryKey: ["guidance", id], queryFn: () => api.listGuidance(id) });
   const ideas = useQuery({ queryKey: ["ideas", id], queryFn: () => api.listIdeas(id) });
+  const artifacts = useQuery({ queryKey: ["artifacts", id], queryFn: () => api.listArtifacts(id) });
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["program", id] });
     qc.invalidateQueries({ queryKey: ["guidance", id] });
@@ -300,6 +301,37 @@ export default function ProgramDetail() {
             </div>
           )
           : <Text size="sm" c="dimmed">A pool of candidate directions the AI grows, prunes, and promotes into experiments.</Text>}
+      </Card>
+
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <div className="eyebrow" style={{ marginBottom: 12 }}>artifacts · {artifacts.data?.length ?? 0}</div>
+        {!artifacts.data || artifacts.data.length === 0 ? (
+          <Text size="sm" c="dimmed">No artifacts yet.</Text>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
+            {artifacts.data.map((a) => (
+              <Link key={a.id} to={`/programs/${id}/artifacts/${a.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+                <Card withBorder padding="sm" radius="md" style={{ height: "100%" }}>
+                  <Group justify="space-between" align="flex-start" wrap="nowrap" gap={6}>
+                    <Text size="sm" fw={600} truncate style={{ minWidth: 0 }}>{a.title || a.id}</Text>
+                    {a.lock.holder_id && (
+                      <Badge size="xs" color="signal" variant="light" title={`locked by ${a.lock.holder_kind ?? "agent"} ${a.lock.holder_id}`}>
+                        🔒 locked
+                      </Badge>
+                    )}
+                  </Group>
+                  <Group gap={6} mt={6} wrap="wrap">
+                    <Badge size="xs" color="machine" variant="light">{a.kind}</Badge>
+                    {a.archived && <Badge size="xs" color="gray" variant="light">archived</Badge>}
+                  </Group>
+                  <Text size="xs" c="dimmed" mt={8} className="mono">
+                    {a.current || "—"} · {a.version_count} version{a.version_count === 1 ? "" : "s"}
+                  </Text>
+                </Card>
+              </Link>
+            ))}
+          </div>
+        )}
       </Card>
 
       <LineageCard programId={id} />

@@ -12,6 +12,7 @@ import IdeasView from "./views/IdeasView";
 import ChatView from "./views/ChatView";
 import SprintDetail from "./views/SprintDetail";
 import ResultDetail from "./views/ResultDetail";
+import ArtifactDetail from "./views/ArtifactDetail";
 import Ledger from "./views/Ledger";
 
 const NAV = [
@@ -211,6 +212,7 @@ export default function App() {
               <Route path="/programs/:id/chat" element={<ChatView />} />
               <Route path="/sprints/:id" element={<SprintDetail />} />
               <Route path="/results/:id" element={<ResultDetail />} />
+              <Route path="/programs/:id/artifacts/:aid" element={<ArtifactDetail />} />
               <Route path="/ledger" element={<Ledger />} />
             </Routes>
           </div>

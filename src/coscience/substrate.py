@@ -7,7 +7,8 @@ from pathlib import Path
 
 from coscience.frontmatter_io import parse, serialize
 from coscience.models import (Sprint, SprintStatus, ProgressState, Result, Program,
-                              ProgramStatus, PMState, Idea, ChatThread)
+                              ProgramStatus, PMState, Idea, ChatThread, Artifact,
+                              ArtifactVersion)
 
 
 class Substrate:
@@ -57,9 +58,18 @@ class Substrate:
                              "by": str(h.get("by", "")), "action": str(h.get("action", ""))}
                             for h in fm.get("status_history", [])],
             edges=list(fm.get("edges", [])),
+            artifacts_bound=[str(a) for a in fm.get("artifacts_bound", [])],
+            artifacts_create=[dict(c) for c in fm.get("artifacts_create", [])],
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
+        # Invariant: a sprint always has a non-empty title. Some producers (e.g.
+        # PM artifact-update sprints) may hand us none; backfill a readable one
+        # so the UI never falls back to rendering the whole goals blob — or the
+        # bare id — as the heading.
+        if not sprint.title:
+            first = next((ln.strip() for ln in (sprint.goals or "").splitlines() if ln.strip()), "")
+            sprint.title = (first[:80].rstrip() + "…") if len(first) > 80 else (first or sprint.id)
         fm = {
             "status": str(sprint.status),
             "goals": sprint.goals,
@@ -107,6 +117,10 @@ class Substrate:
             fm["status_history"] = list(sprint.status_history)
         if sprint.edges:
             fm["edges"] = list(sprint.edges)
+        if sprint.artifacts_bound:
+            fm["artifacts_bound"] = list(sprint.artifacts_bound)
+        if sprint.artifacts_create:
+            fm["artifacts_create"] = [dict(c) for c in sprint.artifacts_create]
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))
 
@@ -209,6 +223,61 @@ class Substrate:
         out = []
         for path in sorted(results_dir.glob("*.md")):
             out.append(self.load_result(path.stem))
+        return out
+
+    # --- artifacts (versioned program deliverables) ---
+    def artifact_dir(self, program_id: str, aid: str) -> Path:
+        return self.program_dir(program_id) / "artifacts" / aid
+
+    def load_artifact(self, program_id: str, aid: str) -> Artifact:
+        text = (self.artifact_dir(program_id, aid) / "meta.md").read_text()
+        fm, _body = parse(text)
+        return Artifact(
+            id=aid, program=program_id,
+            title=str(fm.get("title", "")),
+            kind=str(fm.get("kind", "md")),
+            current=str(fm.get("current", "")),
+            lock=dict(fm.get("lock") or {}),
+            versions=[ArtifactVersion(
+                id=str(v["id"]), parent=str(v.get("parent", "")),
+                created_at=float(v.get("created_at", 0.0)),
+                created_by=str(v.get("created_by", "")),
+                archived=bool(v.get("archived", False)),
+                note=str(v.get("note", "")))
+                for v in fm.get("versions", [])],
+            threads=list(fm.get("threads", [])),
+            archived=bool(fm.get("archived", False)),
+        )
+
+    def save_artifact(self, artifact: Artifact) -> None:
+        fm = {
+            "type": "artifact",
+            "title": artifact.title,
+            "kind": artifact.kind,
+            "current": artifact.current,
+            "lock": artifact.lock,
+            "versions": [
+                {"id": v.id, "parent": v.parent, "created_at": v.created_at,
+                 "created_by": v.created_by, "archived": v.archived, "note": v.note}
+                for v in artifact.versions],
+        }
+        if artifact.threads:
+            fm["threads"] = list(artifact.threads)
+        if artifact.archived:
+            fm["archived"] = True
+        d = self.artifact_dir(artifact.program, artifact.id)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "meta.md").write_text(serialize(fm, f"# {artifact.title or artifact.id}\n"))
+
+    def iter_artifacts(self, program_id: str,
+                       include_archived: bool = False) -> list[Artifact]:
+        d = self.program_dir(program_id) / "artifacts"
+        out: list[Artifact] = []
+        for sub in (sorted(d.iterdir()) if d.is_dir() else []):
+            if (sub / "meta.md").is_file():
+                a = self.load_artifact(program_id, sub.name)
+                if include_archived or not a.archived:
+                    out.append(a)
         return out
 
     # --- programs ---
@@ -361,6 +430,7 @@ class Substrate:
             messages=[{"role": str(m.get("role", "user")), "text": str(m.get("text", "")),
                        "at": float(m.get("at", 0.0)), "by": str(m.get("by", ""))}
                       for m in fm.get("messages", [])],
+            artifacts=[str(a) for a in fm.get("artifacts", [])],
         )
 
     def save_chat_thread(self, program_id: str, thread: ChatThread) -> None:
@@ -370,7 +440,8 @@ class Substrate:
               "announced_scope": thread.announced_scope,
               "session_id": thread.session_id, "created_at": thread.created_at,
               "turns_done": thread.turns_done, "pending": thread.pending,
-              "agent_token": thread.agent_token, "messages": thread.messages}
+              "agent_token": thread.agent_token, "artifacts": list(thread.artifacts),
+              "messages": thread.messages}
         (d / "thread.md").write_text(serialize(fm, f"# Chat {thread.id}\n"))
 
     def delete_chat_thread(self, program_id: str, thread_id: str) -> None:

@@ -30,7 +30,7 @@ def test_submit_then_list_and_get(tmp_path):
     assert len(rows) == 1
     row = rows[0]
     assert isinstance(row.pop("last_status_at"), float)   # birth timestamp, non-deterministic
-    assert row == {"id": "sp1", "status": "proposed", "title": "", "summary": "",
+    assert row == {"id": "sp1", "status": "proposed", "title": "cure", "summary": "",
                    "goals": "cure", "program": None, "priority": 3, "steps": 1,
                    "results": [], "rationale": "", "resources_required": {"gpu": 1.0},
                    "started_at": None, "model": "", "activity": None,

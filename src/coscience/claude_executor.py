@@ -25,6 +25,7 @@ def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
     prior = "None yet."
     comments = ""
     assess_section = ""
+    artifacts_section = ""
     if context is not None:
         program = f"{context.program_title}: {context.program_goal}".strip(": ").strip()
         if context.prior_results:
@@ -42,6 +43,16 @@ def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
                 "\n\nTo answer a reviewer's feedback thread, append one JSON line "
                 '{"thread_id": "<id>", "text": "<short reply>"} to '
                 f"{feedback_out} (one line per reply; do not rewrite earlier lines).")
+        if context.artifacts:
+            alines = "\n".join(
+                f'- `{a["aid"]}` ({a["kind"]}): write this artifact\'s files into {a["work_path"]}'
+                for a in context.artifacts)
+            artifacts_section = (
+                "\n\n## Artifacts to produce (deliverables)\n"
+                "Write each artifact's files into its working directory below. The platform "
+                "snapshots each working copy as a new immutable version when this sprint "
+                "completes — you do not manage version numbers yourself; just create and edit "
+                "the current files in place.\n" + alines)
         if context.assess_reason:
             assess_section = f"""
 ## Resuming to check a detached job ({context.assess_reason})
@@ -74,7 +85,7 @@ sprint. Just do the work.
 
 Objective:
 {sprint.goals}
-{comments}
+{comments}{artifacts_section}
 
 ## Suggested steps (guidance only — you decide the actual work)
 {steps}

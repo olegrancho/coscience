@@ -62,6 +62,8 @@ class Sprint:
     decisions: list[dict] = field(default_factory=list)  # legacy governance trail [{by, action, at}]; superseded by status_history (read-only for old sprints)
     status_history: list[dict] = field(default_factory=list)  # lifecycle timeline [{status, at, by, action}]; action="" for system transitions
     edges: list[dict] = field(default_factory=list)  # outbound lineage/evidential edges (see coscience.graph)
+    artifacts_bound: list[str] = field(default_factory=list)   # existing artifact ids this sprint edits (locked as a resource)
+    artifacts_create: list[dict] = field(default_factory=list)  # new artifacts to produce: [{aid, title, kind}]
 
 
 def set_status(sprint: "Sprint", new_status: "SprintStatus",
@@ -96,6 +98,7 @@ class ChatThread:
     pending: bool = False              # a turn is in flight (streaming into turn.out)
     agent_token: str = ""              # detached turn's process token
     messages: list[dict] = field(default_factory=list)  # [{role, text, at}]
+    artifacts: list[str] = field(default_factory=list)  # bound artifact ids (chat edits their work/); sized 1 for now
 
 
 @dataclass
@@ -104,6 +107,34 @@ class Result:
     sprint: str
     summary: str
     completed_at: float | None = None
+
+
+@dataclass
+class ArtifactVersion:
+    """One node in an artifact's version tree. `parent` is the version this one
+    was derived from ("" = root). Append-only; never deleted, only `archived`."""
+    id: str                              # "v1", "v2", ...
+    parent: str = ""                     # "" = root
+    created_at: float = 0.0
+    created_by: str = ""                 # sprint id | "chat:<id>" | "human"
+    archived: bool = False
+    note: str = ""
+
+
+@dataclass
+class Artifact:
+    """A program-level deliverable (report/data/figure/page) with a versioned,
+    tree-structured store. `current` names the active leaf version; `lock` is the
+    exclusive editing hold ({} = unlocked); `archived` is a whole-artifact discard."""
+    id: str
+    program: str
+    title: str = ""
+    kind: str = "md"                     # md | data | figure | page
+    current: str = ""                    # active leaf version id; "" = no versions yet
+    lock: dict = field(default_factory=dict)          # {} = unlocked
+    versions: list[ArtifactVersion] = field(default_factory=list)
+    threads: list[dict] = field(default_factory=list)  # feedback threads (target "pm")
+    archived: bool = False               # whole-artifact discard (reversible)
 
 
 @dataclass

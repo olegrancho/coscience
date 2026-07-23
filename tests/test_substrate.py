@@ -17,6 +17,37 @@ def test_load_sprint_parses_plan(substrate):
     assert sprint.plan == ["scan the primes", "tabulate the gaps"]
 
 
+def test_save_sprint_backfills_empty_title_from_goals(substrate):
+    substrate.save_sprint(Sprint(
+        id="sp-notitle", status=SprintStatus.PROPOSED,
+        goals="Draft the manuscript introduction.", program="p"))
+    s = substrate.load_sprint("sp-notitle")
+    assert s.title == "Draft the manuscript introduction."
+
+
+def test_save_sprint_truncates_long_goals_title(substrate):
+    goals = "x" * 200
+    substrate.save_sprint(Sprint(
+        id="sp-long", status=SprintStatus.PROPOSED, goals=goals, program="p"))
+    s = substrate.load_sprint("sp-long")
+    assert len(s.title) == 81 and s.title.endswith("…")
+
+
+def test_save_sprint_title_falls_back_to_id_when_no_goals(substrate):
+    substrate.save_sprint(Sprint(
+        id="sp-bare", status=SprintStatus.PROPOSED, goals="", program="p"))
+    s = substrate.load_sprint("sp-bare")
+    assert s.title == "sp-bare"
+
+
+def test_save_sprint_keeps_explicit_title(substrate):
+    substrate.save_sprint(Sprint(
+        id="sp-titled", status=SprintStatus.PROPOSED, title="My title",
+        goals="whatever", program="p"))
+    s = substrate.load_sprint("sp-titled")
+    assert s.title == "My title"
+
+
 def test_legacy_dict_plan_entries_coerce_to_strings(substrate):
     # tolerate old sprint files whose plan was [{id, run}]
     write_raw_sprint(substrate.repo_root, "old", "approved", "g",

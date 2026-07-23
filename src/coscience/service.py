@@ -53,6 +53,8 @@ class Service:
     def submit_sprint(self, *, id: str, goals: str, plan: list[str],
                       program: str | None = None, priority: int = 0,
                       preemptible: bool = True, resources_required: dict | None = None,
+                      artifacts_bound: list | None = None,
+                      artifacts_create: list | None = None,
                       status: str = "proposed") -> str:
         if not plan:
             raise ValueError("plan must have at least one suggested step")
@@ -67,6 +69,8 @@ class Service:
             resources_required={k: float(v) for k, v in (resources_required or {}).items()},
             priority=priority,
             preemptible=preemptible,
+            artifacts_bound=[str(a) for a in (artifacts_bound or [])],
+            artifacts_create=[dict(c) for c in (artifacts_create or [])],
         )
         self.substrate.save_sprint(sprint)
         return id
@@ -298,6 +302,8 @@ class Service:
             "model": sprint.model,
             "results": list(sprint.results),
             "plan": list(sprint.plan),
+            "artifacts_bound": list(sprint.artifacts_bound),
+            "artifacts_create": [dict(c) for c in sprint.artifacts_create],
             "threads": [threads.public(t) for t in sprint.threads],
             "decisions": list(sprint.decisions),
             "status_history": list(sprint.status_history),
@@ -555,7 +561,8 @@ class Service:
     def _chat_public(thread: ChatThread, live: str = "") -> dict:
         return {"id": thread.id, "title": thread.title, "scope": thread.scope,
                 "created_at": thread.created_at, "turns_done": thread.turns_done,
-                "busy": thread.pending, "messages": list(thread.messages), "live": live}
+                "busy": thread.pending, "messages": list(thread.messages), "live": live,
+                "artifacts": list(thread.artifacts)}
 
     def _migrate_legacy_chat(self, program_id: str) -> None:
         """One-time: fold a pre-threads chat.md into a single imported thread."""
@@ -612,12 +619,27 @@ class Service:
                         "last_at": t.messages[-1]["at"] if t.messages else t.created_at})
         return out
 
-    def create_chat(self, program_id: str, title: str = "") -> dict:
+    def create_chat(self, program_id: str, title: str = "",
+                    artifacts: list | None = None) -> dict:
+        from coscience import artifacts as _art
         self._require_program(program_id)
-        t = ChatThread(id=uuid4().hex[:8], title=(str(title).strip() or "New chat"),
-                       scope="read", session_id=str(uuid4()), created_at=time.time())
+        aids = [str(a) for a in (artifacts or [])]
+        tid = uuid4().hex[:8]
+        t = ChatThread(id=tid, title=(str(title).strip() or "New chat"),
+                       scope="full" if aids else "read",
+                       session_id=str(uuid4()), created_at=time.time(),
+                       artifacts=aids)
+        if aids:
+            for aid in aids:
+                if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+                    raise ValueError(f"artifact not found: {aid}")
+            ok = _art.acquire_lock(self.substrate, program_id, aids, "chat",
+                                   f"chat:{tid}", time.time())
+            if not ok:
+                raise ValueError("artifact busy — held by another editor")
         self.substrate.save_chat_thread(program_id, t)
-        self.substrate.commit(f"program {program_id}: new chat {t.id}")
+        self.substrate.commit(f"program {program_id}: new chat {t.id}"
+                              + (f" bound to {aids}" if aids else ""))
         return self._chat_public(t)
 
     def _thread_or_404(self, program_id: str, thread_id: str) -> ChatThread:
@@ -654,15 +676,54 @@ class Service:
         self.substrate.commit(f"program {program_id}: chat {thread_id} scope -> {scope}")
         return self._chat_public(thread)
 
+    def save_chat_version(self, program_id: str, thread_id: str) -> dict:
+        from coscience import artifacts as _art
+        thread = self._thread_or_404(program_id, thread_id)
+        if not thread.artifacts:
+            raise ValueError("this chat is not bound to an artifact")
+        out: dict = {}
+        for aid in thread.artifacts:
+            vid = _art.cut_version_for(self.substrate, program_id, aid,
+                                       f"chat:{thread_id}", time.time())
+            out[aid] = vid
+        self.substrate.commit(f"program {program_id}: chat {thread_id} saved versions {out}")
+        return out
+
     def delete_chat(self, program_id: str, thread_id: str) -> None:
-        self._thread_or_404(program_id, thread_id)
+        from coscience import artifacts as _art
+        thread = self._thread_or_404(program_id, thread_id)
+        if thread.artifacts:
+            _art.release_lock(self.substrate, program_id, list(thread.artifacts),
+                              time.time(), created_by=f"chat:{thread_id}")
         self.substrate.delete_chat_thread(program_id, thread_id)
         self.substrate.commit(f"program {program_id}: delete chat {thread_id}")
+
+    def release_chat(self, program_id: str, thread_id: str) -> dict:
+        """Finish an artifact-editing session: cut a final version of anything
+        changed since the last save, release the lock, and unbind the artifact(s)
+        so the chat won't silently re-lock on its next message. The chat thread and
+        its history stay; the artifact becomes free and re-bindable. Returns the
+        updated (now-unbound) thread plus {aid: version_id | None} for what was cut."""
+        from coscience import artifacts as _art
+        thread = self._thread_or_404(program_id, thread_id)
+        if not thread.artifacts:
+            raise ValueError("this chat is not bound to an artifact")
+        if thread.pending:
+            raise ValueError("this chat is still working — wait for the turn to finish, then release")
+        aids = list(thread.artifacts)
+        # release_lock cuts a final version (dedup-aware) and clears work/ + the lock.
+        vids = _art.release_lock(self.substrate, program_id, aids,
+                                 time.time(), created_by=f"chat:{thread_id}")
+        saved = dict(zip(aids, vids))
+        thread.artifacts = []
+        self.substrate.save_chat_thread(program_id, thread)
+        self.substrate.commit(f"program {program_id}: chat {thread_id} released {aids}")
+        return {"thread": self._chat_public(thread), "saved": saved}
 
     def post_chat_message(self, program_id: str, thread_id: str, message: str,
                           by: str = "", launch=None) -> dict:
         """Append the human message and launch a detached, resumable chat turn in the
-        program workdir. Returns immediately with busy=True; the reply is collected
+        program workdir (or the bound artifact's work/ dir). Returns immediately with busy=True; the reply is collected
         on a later poll. `launch(**kwargs)->token` is injectable for tests."""
         from coscience import chat_agent
         thread = self._thread_or_404(program_id, thread_id)
@@ -683,6 +744,18 @@ class Service:
             return self._chat_public(thread)
         program = self.substrate.load_program(program_id)
         workdir = chat_agent.resolve_workdir(self.substrate, program.workdir)
+        if thread.artifacts:
+            from coscience import artifacts as _art
+            # Re-acquire in case a prior idle session's lock was reaped (which rmtree'd
+            # work/). Same-holder acquire is a no-op keeping work/; a reaped lock re-locks
+            # and re-seeds work/ from current; a lock now held by someone else is rejected.
+            if not _art.acquire_lock(self.substrate, program_id, list(thread.artifacts),
+                                     "chat", f"chat:{thread_id}", time.time()):
+                raise ValueError("artifact busy — held by another editor")
+            aid0 = thread.artifacts[0]
+            workdir = str(self.substrate.artifact_dir(program_id, aid0) / "work")
+            for aid in thread.artifacts:
+                _art.bump_activity(self.substrate, program_id, aid, time.time())
         resume = thread.turns_done > 0
         if resume:
             # The preamble (with the TOOLS/scope line) went out only on turn 1. If the
@@ -696,6 +769,10 @@ class Service:
             from coscience.pm_agent import gather_context
             ctx = gather_context(self.substrate, program_id)
             prompt = chat_agent.render_preamble(ctx, thread.scope) + "\n\nHuman: " + message
+        if thread.artifacts:
+            prompt = (f"[ARTIFACT] You are editing artifact(s) {thread.artifacts} — your working "
+                      f"directory IS the artifact's working copy. Create and edit files here; "
+                      f"the human snapshots them as versions.\n\n") + prompt
         thread.announced_scope = thread.scope
         launch = launch or chat_agent.launch_turn
         token = launch(thread_dir=self.substrate.chat_thread_dir(program_id, thread_id),
@@ -1013,6 +1090,190 @@ class Service:
             program = self.substrate.load_sprint(r.sprint).program
         return {"id": r.id, "sprint": r.sprint, "summary": r.summary, "program": program,
                 "completed_at": r.completed_at}
+
+    # --- artifacts ---
+    def _artifact_sprints(self, program_id: str, aid: str) -> list[dict]:
+        from coscience import artifacts
+        out = []
+        for s in self.substrate.iter_sprints():
+            if s.program == program_id and aid in artifacts.sprint_aids(s):
+                out.append({"id": s.id, "status": s.status.value, "title": s.title})
+        return out
+
+    def _artifact_version_files(self, program_id: str, aid: str, vid: str) -> list[str]:
+        vdir = self.substrate.artifact_dir(program_id, aid) / vid
+        if not vdir.is_dir():
+            return []
+        return sorted(str(p.relative_to(vdir)) for p in vdir.rglob("*") if p.is_file())
+
+    def list_artifacts(self, program_id: str) -> list[dict]:
+        out = []
+        for a in self.substrate.iter_artifacts(program_id):
+            out.append({
+                "id": a.id, "title": a.title, "kind": a.kind, "current": a.current,
+                "archived": a.archived, "lock": a.lock,
+                "version_count": sum(1 for v in a.versions if not v.archived),
+            })
+        return out
+
+    def get_artifact(self, program_id: str, aid: str) -> dict:
+        from coscience import threads as _th
+        if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            raise NotFoundError(aid)
+        a = self.substrate.load_artifact(program_id, aid)
+        return {
+            "id": a.id, "program": program_id, "title": a.title, "kind": a.kind,
+            "current": a.current, "archived": a.archived, "lock": a.lock,
+            "versions": [
+                {"id": v.id, "parent": v.parent, "created_at": v.created_at,
+                 "created_by": v.created_by, "archived": v.archived, "note": v.note}
+                for v in a.versions],
+            "threads": [_th.public(t) for t in a.threads],
+            "current_files": self._artifact_version_files(program_id, aid, a.current) if a.current else [],
+            "linked_sprints": self._artifact_sprints(program_id, aid),
+        }
+
+    def artifact_version_dir(self, program_id: str, aid: str, vid: str) -> Path:
+        try:
+            base = self.substrate.artifact_dir(program_id, aid).resolve()
+            root = (self.substrate.repo_root / "programs").resolve()
+            if not base.is_relative_to(root):
+                raise NotFoundError(vid)          # program_id/aid escaped the substrate
+            d = (base / vid).resolve()
+        except (ValueError, OSError):
+            raise NotFoundError(vid)
+        if d.parent != base or not d.is_dir():
+            raise NotFoundError(vid)
+        return d
+
+    def _guarded_file(self, program_id: str, aid: str, vid: str, relpath: str) -> Path:
+        vdir = self.artifact_version_dir(program_id, aid, vid)
+        try:
+            path = (vdir / relpath).resolve()
+        except (ValueError, OSError):
+            raise NotFoundError(relpath)
+        if not path.is_file() or not path.is_relative_to(vdir):
+            raise NotFoundError(relpath)
+        return path
+
+    def read_artifact_file(self, program_id: str, aid: str, vid: str, name: str) -> dict:
+        path = self._guarded_file(program_id, aid, vid, name)
+        raw = path.read_bytes()
+        binary = b"\x00" in raw[:8192]
+        return {"name": name, "size": len(raw),
+                "content": "" if binary else raw.decode("utf-8", errors="replace"),
+                "binary": binary}
+
+    def artifact_work_file_path(self, program_id: str, aid: str, name: str) -> Path:
+        """Guarded resolution of a file inside an artifact's live work/ dir. Confined
+        to work/ (no traversal, must stay inside the substrate). Used by both the
+        JSON reader and the raw-bytes route (so images can be shown live)."""
+        work = (self.substrate.artifact_dir(program_id, aid) / "work").resolve()
+        root = (self.substrate.repo_root / "programs").resolve()
+        if not work.is_relative_to(root) or not work.is_dir():
+            raise NotFoundError(name)
+        try:
+            path = (work / name).resolve()
+        except (ValueError, OSError):
+            raise NotFoundError(name)
+        if not path.is_file() or not path.is_relative_to(work):
+            raise NotFoundError(name)
+        return path
+
+    def read_artifact_work_file(self, program_id: str, aid: str, name: str) -> dict:
+        path = self.artifact_work_file_path(program_id, aid, name)
+        raw = path.read_bytes()
+        binary = b"\x00" in raw[:8192]
+        return {"name": name, "size": len(raw),
+                "content": "" if binary else raw.decode("utf-8", errors="replace"),
+                "binary": binary}
+
+    def artifact_page_file(self, program_id: str, aid: str, vid: str, relpath: str) -> Path:
+        return self._guarded_file(program_id, aid, vid, relpath)
+
+    def revert_artifact(self, program_id: str, aid: str, vid: str) -> dict:
+        from coscience import artifacts
+        if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            raise NotFoundError(aid)
+        artifacts.revert(self.substrate, program_id, aid, vid)   # ValueError on unknown vid
+        self.substrate.commit(f"artifact {program_id}/{aid}: revert to {vid}")
+        return self.get_artifact(program_id, aid)
+
+    def set_artifact_archived(self, program_id: str, aid: str, archived: bool) -> dict:
+        from coscience import artifacts
+        if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            raise NotFoundError(aid)
+        artifacts.archive_artifact(self.substrate, program_id, aid, archived)
+        self.substrate.commit(f"artifact {program_id}/{aid}: archived={archived}")
+        return self.get_artifact(program_id, aid)
+
+    def set_artifact_version_archived(self, program_id: str, aid: str, vid: str,
+                                      archived: bool) -> dict:
+        from coscience import artifacts
+        if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            raise NotFoundError(aid)
+        artifacts.archive_version(self.substrate, program_id, aid, vid, archived)
+        self.substrate.commit(f"artifact {program_id}/{aid}: version {vid} archived={archived}")
+        return self.get_artifact(program_id, aid)
+
+    def _load_artifact(self, program_id: str, aid: str):
+        if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            raise NotFoundError(aid)
+        return self.substrate.load_artifact(program_id, aid)
+
+    def add_artifact_comment(self, program_id: str, aid: str, text: str,
+                             by: str = "", thread_id: str = "") -> dict:
+        text = text.strip()
+        if not text:
+            raise ValueError("comment text is required")
+        a = self._load_artifact(program_id, aid)
+        if thread_id:
+            t = next((x for x in a.threads if x["id"] == thread_id), None)
+            if t is None:
+                raise NotFoundError(thread_id)
+            threads.append(t, "human", text, by, now=time.time())
+        else:
+            t = threads.new_thread("pm", text, by, now=time.time())   # artifact threads -> PM
+            a.threads.append(t)
+        self.substrate.save_artifact(a)
+        self.substrate.commit(f"artifact {program_id}/{aid}: comment")
+        return threads.public(t)
+
+    def _mutate_artifact_thread(self, program_id: str, aid: str, thread_id: str, fn) -> dict:
+        a = self._load_artifact(program_id, aid)
+        t = next((x for x in a.threads if x["id"] == thread_id), None)
+        if t is None:
+            raise NotFoundError(thread_id)
+        fn(t)
+        self.substrate.save_artifact(a)
+        self.substrate.commit(f"artifact {program_id}/{aid}: thread {thread_id}")
+        return threads.public(t)
+
+    def complete_artifact_thread(self, program_id: str, aid: str, thread_id: str) -> dict:
+        return self._mutate_artifact_thread(program_id, aid, thread_id,
+                                            lambda t: t.update(status="complete"))
+
+    def reopen_artifact_thread(self, program_id: str, aid: str, thread_id: str) -> dict:
+        return self._mutate_artifact_thread(program_id, aid, thread_id,
+                                            lambda t: t.update(status="open"))
+
+    def seen_artifact_thread(self, program_id: str, aid: str, thread_id: str) -> dict:
+        return self._mutate_artifact_thread(program_id, aid, thread_id,
+                                            lambda t: t.update(agent_unseen=False))
+
+    def delete_artifact_thread(self, program_id: str, aid: str, thread_id: str) -> None:
+        a = self._load_artifact(program_id, aid)
+        if not any(x["id"] == thread_id for x in a.threads):
+            raise NotFoundError(thread_id)
+        a.threads = [x for x in a.threads if x["id"] != thread_id]
+        self.substrate.save_artifact(a)
+        self.substrate.commit(f"artifact {program_id}/{aid}: thread {thread_id} deleted")
+
+    def list_artifact_work_files(self, program_id: str, aid: str) -> list[str]:
+        work = self.substrate.artifact_dir(program_id, aid) / "work"
+        if not work.is_dir():
+            return []
+        return sorted(str(p.relative_to(work)) for p in work.rglob("*") if p.is_file())
 
     # --- ledger ---
     def ledger_status(self) -> dict:

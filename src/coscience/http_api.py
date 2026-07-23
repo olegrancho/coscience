@@ -7,8 +7,10 @@ siblings over Service.
 """
 from __future__ import annotations
 
+import io
 import os
 import subprocess
+import zipfile
 from functools import lru_cache
 from pathlib import Path
 
@@ -51,6 +53,21 @@ class SprintSubmit(BaseModel):
     priority: int = 0
     preemptible: bool = True
     resources_required: dict[str, float] | None = None
+    artifacts_bound: list[str] | None = None
+    artifacts_create: list[dict] | None = None
+
+
+class ArtifactRevertIn(BaseModel):
+    vid: str
+
+
+class ArtifactArchiveIn(BaseModel):
+    archived: bool = True
+
+
+class ArtifactCommentIn(BaseModel):
+    text: str
+    thread_id: str = ""
 
 
 class SprintPatch(BaseModel):
@@ -90,6 +107,7 @@ class ChatIn(BaseModel):
 
 class ChatCreateIn(BaseModel):
     title: str = ""
+    artifacts: list[str] | None = None
 
 
 class ChatPatchIn(BaseModel):
@@ -209,6 +227,8 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
                 program=body.program, priority=body.priority,
                 preemptible=body.preemptible,
                 resources_required=body.resources_required,
+                artifacts_bound=body.artifacts_bound,
+                artifacts_create=body.artifacts_create,
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
@@ -448,6 +468,129 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"result not found: {result_id}")
 
+    @api.get("/programs/{program_id}/artifacts")
+    def list_artifacts(program_id: str) -> list[dict]:
+        return service.list_artifacts(program_id)
+
+    @api.get("/programs/{program_id}/artifacts/{aid}")
+    def get_artifact(program_id: str, aid: str) -> dict:
+        try:
+            return service.get_artifact(program_id, aid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
+
+    @api.get("/programs/{program_id}/artifacts/{aid}/versions/{vid}/files/{name}")
+    def read_artifact_file(program_id: str, aid: str, vid: str, name: str) -> dict:
+        try:
+            return service.read_artifact_file(program_id, aid, vid, name)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"file not found: {name}")
+
+    @api.get("/programs/{program_id}/artifacts/{aid}/versions/{vid}/download")
+    def download_artifact_version(program_id: str, aid: str, vid: str):
+        try:
+            vdir = service.artifact_version_dir(program_id, aid, vid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="version not found")
+        files = sorted(p for p in vdir.rglob("*") if p.is_file())
+        if not files:
+            raise HTTPException(status_code=404, detail="version is empty")
+        if len(files) == 1:
+            return FileResponse(files[0], filename=files[0].name)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for p in files:
+                z.write(p, p.relative_to(vdir))
+        return Response(
+            content=buf.getvalue(), media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{aid}-{vid}.zip"'})
+
+    @api.get("/programs/{program_id}/artifacts/{aid}/versions/{vid}/page/{path:path}")
+    def artifact_page(program_id: str, aid: str, vid: str, path: str):
+        try:
+            fp = service.artifact_page_file(program_id, aid, vid, path)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="page asset not found")
+        resp = FileResponse(fp)
+        resp.headers["Content-Security-Policy"] = (
+            "sandbox allow-scripts; default-src 'none'; img-src 'self' data:; "
+            "style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:")
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/revert")
+    def revert_artifact(program_id: str, aid: str, body: ArtifactRevertIn,
+                        user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.revert_artifact(program_id, aid, body.vid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/archive")
+    def archive_artifact(program_id: str, aid: str, body: ArtifactArchiveIn,
+                         user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.set_artifact_archived(program_id, aid, body.archived)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/versions/{vid}/archive")
+    def archive_artifact_version(program_id: str, aid: str, vid: str,
+                                 body: ArtifactArchiveIn,
+                                 user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.set_artifact_version_archived(program_id, aid, vid, body.archived)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/comments", status_code=201)
+    def comment_artifact(program_id: str, aid: str, body: ArtifactCommentIn,
+                         user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.add_artifact_comment(
+                program_id, aid, body.text,
+                by=(user.username if user else ""), thread_id=body.thread_id)
+        except NotFoundError as exc:
+            missing = exc.args[0] if exc.args else aid
+            raise HTTPException(status_code=404, detail=f"not found: {missing}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/threads/{tid}/complete")
+    def complete_artifact_thread(program_id: str, aid: str, tid: str,
+                                 user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.complete_artifact_thread(program_id, aid, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/threads/{tid}/reopen")
+    def reopen_artifact_thread(program_id: str, aid: str, tid: str,
+                               user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.reopen_artifact_thread(program_id, aid, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/threads/{tid}/seen")
+    def seen_artifact_thread(program_id: str, aid: str, tid: str,
+                             user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.seen_artifact_thread(program_id, aid, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+
+    @api.delete("/programs/{program_id}/artifacts/{aid}/threads/{tid}", status_code=204)
+    def delete_artifact_thread(program_id: str, aid: str, tid: str,
+                               user: "auth.User | None" = Depends(current_user)) -> Response:
+        try:
+            service.delete_artifact_thread(program_id, aid, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+        return Response(status_code=204)
+
     @api.get("/ledger")
     def ledger_status() -> dict:
         return service.ledger_status()
@@ -520,9 +663,11 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     @api.post("/programs/{program_id}/chats", status_code=201)
     def create_chat(program_id: str, body: ChatCreateIn) -> dict:
         try:
-            return service.create_chat(program_id, body.title)
+            return service.create_chat(program_id, body.title, artifacts=body.artifacts)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     @api.get("/programs/{program_id}/chats/{thread_id}")
     def get_chat_thread(program_id: str, thread_id: str) -> dict:
@@ -561,6 +706,46 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             service.delete_chat(program_id, thread_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail="chat not found")
+
+    @api.post("/programs/{program_id}/chats/{tid}/save")
+    def save_chat_version(program_id: str, tid: str,
+                          user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.save_chat_version(program_id, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.post("/programs/{program_id}/chats/{tid}/release")
+    def release_chat(program_id: str, tid: str,
+                     user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.release_chat(program_id, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.get("/programs/{program_id}/artifacts/{aid}/work")
+    def list_artifact_work(program_id: str, aid: str) -> list[str]:
+        return service.list_artifact_work_files(program_id, aid)
+
+    # Serves a live work/ file as raw bytes (distinct 'work-raw' segment) so
+    # figures/images render in the chat instead of the JSON text reader below.
+    @api.get("/programs/{program_id}/artifacts/{aid}/work-raw/{name:path}")
+    def read_artifact_work_raw(program_id: str, aid: str, name: str):
+        try:
+            return FileResponse(service.artifact_work_file_path(program_id, aid, name))
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="work file not found")
+
+    @api.get("/programs/{program_id}/artifacts/{aid}/work/{name:path}")
+    def read_artifact_work(program_id: str, aid: str, name: str) -> dict:
+        try:
+            return service.read_artifact_work_file(program_id, aid, name)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="work file not found")
 
     @api.get("/programs/{program_id}/guidance")
     def list_guidance(program_id: str) -> list[dict]:

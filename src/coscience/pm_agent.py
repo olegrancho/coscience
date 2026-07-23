@@ -44,6 +44,8 @@ def _context_payload(context: PMContext) -> dict:
         # sprint_feedback above (idea_id instead of sprint_id).
         "idea_comments": sorted((f["idea_id"], f["thread_id"], f["messages"][-1]["text"])
                                 for f in context.idea_feedback),
+        "artifact_feedback": sorted((f["artifact_id"], f["thread_id"], f["messages"][-1]["text"])
+                                    for f in context.artifact_feedback),
     }
 
 
@@ -63,6 +65,7 @@ _TRIGGER_LABELS = {
     "sprint_feedback": "feedback to the planner",
     "human_ideas": "a human idea",
     "idea_comments": "comment on an idea",
+    "artifact_feedback": "comment on an artifact",
 }
 
 
@@ -139,6 +142,16 @@ def gather_context(substrate, program_id: str) -> PMContext:
                     "idea_id": i.id, "thread_id": th["id"],
                     "messages": [{"role": m["role"], "text": m["text"]} for m in th["messages"]],
                 })
+    artifact_dicts: list[dict] = []
+    artifact_feedback: list[dict] = []
+    for art in substrate.iter_artifacts(program_id):
+        artifact_dicts.append({"id": art.id, "title": art.title, "kind": art.kind})
+        for th in art.threads:
+            if threads.needs_reply(th):
+                artifact_feedback.append({
+                    "artifact_id": art.id, "thread_id": th["id"],
+                    "messages": [{"role": m["role"], "text": m["text"]} for m in th["messages"]],
+                })
     proposed_count = sum(1 for s in open_sprints if s["status"] == SprintStatus.PROPOSED.value)
     # Windowed lineage graph: adjacency for edges whose SOURCE is a node already
     # shown in this prompt (ideas + open/completed/failed sprints). Keeps the
@@ -166,6 +179,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
         model=program.pm_model,
         workdir=_resolve_workdir(substrate, program.workdir),
         graph_lines=graph_lines,
+        artifacts=artifact_dicts, artifact_feedback=artifact_feedback,
     )
 
 
@@ -202,6 +216,11 @@ def proposal_id(program_id: str, cycle: int, suffix: str) -> str:
     return f"{program_id}-c{cycle}-{s}"
 
 
+def _artifact_slug(title: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", str(title).lower()).strip("-")
+    return s or "artifact"
+
+
 def _staging_path(substrate, program_id: str):
     return substrate.program_dir(program_id) / ".pm" / "cycle-staging.json"
 
@@ -224,6 +243,7 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
         "release_ids": list(output.release_ids),
         "thread_replies": list(output.thread_replies),
         "edge_ops": list(output.edge_ops),
+        "artifact_tasks": list(output.artifact_tasks),
         "proposals": [
             {"suffix": p.suffix, "goals": p.goals, "plan": p.plan,
              "priority": p.priority, "resources_required": p.resources_required,
@@ -253,6 +273,7 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         release_ids=list(data.get("release_ids", [])),
         thread_replies=list(data.get("thread_replies", [])),
         edge_ops=list(data.get("edge_ops", [])),
+        artifact_tasks=list(data.get("artifact_tasks", [])),
         proposals=[ProposedSprint(**p) for p in data.get("proposals", [])],
     )
     return StagedCycle(cycle=int(data["cycle"]), output=output,
@@ -474,6 +495,44 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 _rewire_on_promote(substrate, program_id, prop.from_idea, sid, ideas_by_id)
             ideas_by_id.pop(prop.from_idea, None)
 
+    for task in staged.output.artifact_tasks:
+        if not isinstance(task, dict):
+            continue
+        suffix = str(task.get("suffix") or "artifact-update")
+        sid = proposal_id(program_id, cycle, suffix)
+        if (substrate.sprint_dir(sid) / "sprint.md").is_file():
+            if sid not in proposed:
+                proposed.append(sid)
+            continue
+        bound = [str(a) for a in task.get("artifact_ids", []) if str(a).strip()]
+        create = []
+        for c in task.get("create", []):
+            if isinstance(c, dict) and str(c.get("title") or "").strip():
+                title = str(c["title"])
+                create.append({"aid": _artifact_slug(title), "title": title,
+                               "kind": str(c.get("kind") or "md")})
+        if not bound and not create:
+            continue                                   # nothing to act on
+        if slots <= 0:
+            dropped.append(sid)
+            continue
+        title = str(task.get("title") or "").strip()
+        if not title:                                  # PM omitted one — derive
+            if create:
+                title = "Create: " + ", ".join(c["title"] for c in create)
+            elif bound:
+                title = "Update " + ", ".join(bound)
+            title = title[:80]
+        substrate.save_sprint(Sprint(
+            id=sid, status=SprintStatus.PROPOSED, title=title,
+            goals=str(task.get("instructions") or "Update the artifact."),
+            plan=[], program=program_id,
+            artifacts_bound=bound, artifacts_create=create))
+        slots -= 1
+        proposed.append(sid)
+        if sid not in pm.proposed_ids:
+            submitted.append(sid)
+
     # --- idea pool: prune, add, re-rank, and re-summarise (protection enforced here) ---
     # Protection is pinned-only: the PM may prune ANY idea that is not pinned. Human,
     # commented, and demoted ideas are auto-pinned when created, so they're protected
@@ -596,6 +655,15 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 touched_guidance = True
         if touched_guidance:
             substrate.save_guidance(program_id, guidance_threads)
+
+        for art in substrate.iter_artifacts(program_id):
+            hit = False
+            for th in art.threads:
+                if th["id"] in replies and threads.needs_reply(th):
+                    threads.append(th, "pm", replies[th["id"]], "", now=now_ts)
+                    hit = True
+            if hit:
+                substrate.save_artifact(art)
 
     # --- release: put an APPROVED sprint into production (-> queued). The approved
     # pool is the PM's managed queue; it releases items here as it sees need, and the
