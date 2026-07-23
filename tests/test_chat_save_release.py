@@ -46,3 +46,33 @@ def test_save_unbound_raises(substrate):
         assert False
     except ValueError:
         pass
+
+
+def test_release_cuts_final_unlocks_and_unbinds(substrate):
+    svc, cid = _bound_chat(substrate)
+    out = svc.release_chat("p", cid)
+    assert out["saved"] == {"doc": "v1"}          # final snapshot
+    assert out["thread"]["artifacts"] == []        # chat unbound
+    a = substrate.load_artifact("p", "doc")
+    assert a.current == "v1"
+    assert a.lock == {}                            # artifact freed
+    assert [c["id"] for c in svc.list_chats("p")] == [cid]   # chat survives as history
+
+
+def test_release_frees_artifact_for_a_new_binder(substrate):
+    svc, cid = _bound_chat(substrate)
+    svc.release_chat("p", cid)
+    c2 = svc.create_chat("p", artifacts=["doc"])   # would raise if still locked
+    a = substrate.load_artifact("p", "doc")
+    assert a.lock["holder_id"] == f"chat:{c2['id']}"
+
+
+def test_release_unbound_raises(substrate):
+    substrate.save_program(Program(id="p", title="P", goals="g"))
+    svc = Service(substrate.repo_root)
+    c = svc.create_chat("p")
+    try:
+        svc.release_chat("p", c["id"])
+        assert False
+    except ValueError:
+        pass

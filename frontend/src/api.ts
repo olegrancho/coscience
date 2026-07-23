@@ -145,10 +145,15 @@ export const api = {
     fetch(`/api/programs/${id}/chats/${tid}`, { method: "DELETE" }).then(j<void>),
   saveChatVersion: (id: string, tid: string) =>
     fetch(`/api/programs/${id}/chats/${tid}/save`, { method: "POST" }).then(j<Record<string, string | null>>),
+  releaseChat: (id: string, tid: string) =>
+    fetch(`/api/programs/${id}/chats/${tid}/release`, { method: "POST" })
+      .then(j<{ thread: ChatThread; saved: Record<string, string | null> }>),
   listArtifactWorkFiles: (id: string, aid: string) =>
     fetch(`/api/programs/${id}/artifacts/${aid}/work`).then(j<string[]>),
   readArtifactWorkFile: (id: string, aid: string, name: string) =>
     fetch(`/api/programs/${id}/artifacts/${aid}/work/${name}`).then(j<ArtifactFileT>),
+  artifactWorkRawUrl: (id: string, aid: string, name: string) =>
+    `/api/programs/${id}/artifacts/${aid}/work-raw/${name}`,
   replan: (id: string) =>
     fetch(`/api/programs/${id}/replan`, { method: "POST" }).then(
       j<{ program: string; cycle: number; submitted: string[]; skipped?: boolean; busy?: boolean; throttled?: boolean }>),

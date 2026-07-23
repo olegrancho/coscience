@@ -57,12 +57,17 @@ export default function ChatView() {
     refetchInterval: busy ? 2000 : false,
   });
   const files = work.data ?? [];
+  const isImageName = (n: string) => /\.(png|jpe?g|gif|svg|webp)$/i.test(n);
   const isBinaryName = (n: string) => /\.(png|jpe?g|gif|svg|webp|pdf|zip|npy|npz|h5|hdf5|pkl|parquet|bin|ico|mp4|mov)$/i.test(n);
-  const workName = files.find((n) => !isBinaryName(n)) ?? files[0] ?? "";
+  // A figure's deliverable IS the image — prefer it over any build script so the
+  // panel shows the picture, not the .py source. Otherwise render the first text file.
+  const imgName = files.find(isImageName) ?? "";
+  const textName = files.find((n) => !isBinaryName(n)) ?? "";
+  const workName = imgName || textName || files[0] || "";
   const workfile = useQuery({
     queryKey: ["workfile", id, aid, workName],
     queryFn: () => api.readArtifactWorkFile(id, aid, workName!),
-    enabled: !!workName,
+    enabled: !!workName && !imgName,       // images render via <img>, not the JSON reader
     refetchInterval: busy ? 2000 : false,
   });
 
@@ -90,6 +95,20 @@ export default function ChatView() {
       qc.invalidateQueries({ queryKey: ["workfile", id, aid, workName] });
     },
     onError: (e) => notifications.show({ color: "red", title: "Couldn't save version", message: String(e) }),
+  });
+
+  const release = useMutation({
+    mutationFn: () => api.releaseChat(id, active),
+    onSuccess: ({ thread: t2, saved }) => {
+      qc.setQueryData(["chat", id, active], t2);
+      const vid = aid ? saved[aid] : undefined;
+      notifications.show({ color: "green", title: "Released",
+        message: vid ? `Saved version ${vid} — artifact freed.`
+                     : "Artifact freed (no new changes to save)." });
+      qc.invalidateQueries({ queryKey: ["work", id, aid] });
+      refreshChats();
+    },
+    onError: (e) => notifications.show({ color: "red", title: "Couldn't release", message: String(e) }),
   });
 
   const create = useMutation({
@@ -125,6 +144,9 @@ export default function ChatView() {
   const doDelete = (tid: string, title: string) => {
     if (window.confirm(`Delete chat “${title}”? This can't be undone.`)) del.mutate(tid);
   };
+  const doRelease = () => {
+    if (window.confirm("Done editing? This saves a final version of any changes and releases the artifact. The chat stays as history; the artifact becomes free to edit again.")) release.mutate();
+  };
 
   // Show the 3 most-recent chats by default; unfold for the rest. Always keep the
   // active one visible even if it's older, so its highlight doesn't vanish.
@@ -138,8 +160,17 @@ export default function ChatView() {
   }
   const hiddenCount = sorted.length - visible.length;
 
+  // Bound chats break out of the app's centered 980px column to fill the canvas
+  // (navbar 232 + canvas padding 60 = 292px reserved), capped so lines don't get
+  // absurdly wide. The artifact is the point here, so it gets the room; the chat
+  // shrinks to a secondary side column. Unbound chats keep the tight column.
+  const breakout = bound
+    ? { width: "min(calc(100vw - 292px), 1500px)",
+        marginLeft: "calc((980px - min(100vw - 292px, 1500px)) / 2)" }
+    : undefined;
+
   return (
-    <Stack gap="lg">
+    <Stack gap="lg" style={breakout}>
       <div>
         <BackLink to={`/programs/${id}`}>{program.data?.title || id}</BackLink>
         <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: 0 }}>
@@ -190,7 +221,7 @@ export default function ChatView() {
           </Card>
         </Stack>
       ) : (
-        <div style={bound ? { display: "grid", gridTemplateColumns: "1fr 380px", gap: 20, alignItems: "start" } : undefined}>
+        <div style={bound ? { display: "grid", gridTemplateColumns: "minmax(340px, 400px) minmax(0, 1fr)", gap: 20, alignItems: "start" } : undefined}>
           <Stack gap="md" style={{ minWidth: 0 }}>
               <Card padding="sm" radius="md" style={cardStyle}>
                 <Group justify="space-between" wrap="nowrap">
@@ -221,7 +252,7 @@ export default function ChatView() {
                 </Group>
               </Card>
 
-              <Card padding="lg" radius="md" style={cardStyle}>
+              <Card padding="lg" radius="md" style={bound ? { ...cardStyle, maxHeight: "calc(100vh - 340px)", overflow: "auto" } : cardStyle}>
                 {thread.isLoading ? <Loader color="machine" /> : (t?.messages.length ?? 0) === 0 && !busy ? (
                   <Text size="sm" c="dimmed">No messages yet — ask the planner something below.</Text>
                 ) : (
@@ -271,36 +302,51 @@ export default function ChatView() {
           </Stack>
 
           {bound && (
-            <Card padding="lg" radius="md" style={cardStyle}>
-              <Stack gap={10}>
+            <Card padding="lg" radius="md" style={{ ...cardStyle, position: "sticky", top: 16 }}>
+              <Stack gap={12}>
                 <Group justify="space-between" wrap="nowrap">
-                  <Text fw={600} size="sm" className="mono" truncate>{aid}</Text>
-                  <Tooltip label="This chat can read and write this artifact's working files while it's active." withArrow>
-                    <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>🔒 bound artifact</Text>
-                  </Tooltip>
+                  <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+                    <Text fw={600} size="md" className="mono" truncate>{aid}</Text>
+                    <Tooltip label="This chat can read and write this artifact's working files while it's active." withArrow>
+                      <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>🔒 bound</Text>
+                    </Tooltip>
+                  </Group>
+                  <Group gap={10} wrap="nowrap">
+                    <Link to={`/programs/${id}/artifacts/${aid}`} className="view" style={{ whiteSpace: "nowrap" }}>full view →</Link>
+                    <Button
+                      size="xs" color="green" variant="light" loading={saveVersion.isPending} disabled={busy}
+                      onClick={() => saveVersion.mutate()}
+                    >
+                      Save as version
+                    </Button>
+                    <Tooltip label="Save a final version and release the lock — frees the artifact; the chat stays as history." withArrow>
+                      <Button size="xs" variant="default" loading={release.isPending} disabled={busy}
+                              onClick={doRelease}>
+                        Release
+                      </Button>
+                    </Tooltip>
+                  </Group>
                 </Group>
 
                 {work.isLoading ? (
                   <Loader size="sm" color="machine" />
+                ) : imgName ? (
+                  <div style={{ maxHeight: "calc(100vh - 190px)", overflow: "auto", textAlign: "center" }}>
+                    <img src={`${api.artifactWorkRawUrl(id, aid, imgName)}?t=${work.dataUpdatedAt}`}
+                         alt={imgName} style={{ maxWidth: "100%" }} />
+                  </div>
                 ) : !workName || workfile.data?.binary ? (
                   <Stack gap={6}>
-                    <Text size="sm" c="dimmed">Save a version to preview.</Text>
+                    <Text size="sm" c="dimmed">Nothing to preview yet — ask the planner to create the file, or save a version.</Text>
                     <Link to={`/programs/${id}/artifacts/${aid}`} className="view">open artifact</Link>
                   </Stack>
                 ) : workfile.isLoading ? (
                   <Loader size="sm" color="machine" />
                 ) : (
-                  <div className="report-leaf" style={{ maxHeight: 480, overflow: "auto" }}>
+                  <div className="report-leaf" style={{ maxHeight: "calc(100vh - 190px)", overflow: "auto" }}>
                     <Md>{workfile.data?.content ?? ""}</Md>
                   </div>
                 )}
-
-                <Button
-                  size="xs" color="green" variant="light" loading={saveVersion.isPending}
-                  onClick={() => saveVersion.mutate()} style={{ alignSelf: "flex-start" }}
-                >
-                  Save as version
-                </Button>
               </Stack>
             </Card>
           )}

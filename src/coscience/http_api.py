@@ -717,9 +717,28 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
+    @api.post("/programs/{program_id}/chats/{tid}/release")
+    def release_chat(program_id: str, tid: str,
+                     user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.release_chat(program_id, tid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="chat not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
     @api.get("/programs/{program_id}/artifacts/{aid}/work")
     def list_artifact_work(program_id: str, aid: str) -> list[str]:
         return service.list_artifact_work_files(program_id, aid)
+
+    # Serves a live work/ file as raw bytes (distinct 'work-raw' segment) so
+    # figures/images render in the chat instead of the JSON text reader below.
+    @api.get("/programs/{program_id}/artifacts/{aid}/work-raw/{name:path}")
+    def read_artifact_work_raw(program_id: str, aid: str, name: str):
+        try:
+            return FileResponse(service.artifact_work_file_path(program_id, aid, name))
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="work file not found")
 
     @api.get("/programs/{program_id}/artifacts/{aid}/work/{name:path}")
     def read_artifact_work(program_id: str, aid: str, name: str) -> dict:

@@ -698,6 +698,28 @@ class Service:
         self.substrate.delete_chat_thread(program_id, thread_id)
         self.substrate.commit(f"program {program_id}: delete chat {thread_id}")
 
+    def release_chat(self, program_id: str, thread_id: str) -> dict:
+        """Finish an artifact-editing session: cut a final version of anything
+        changed since the last save, release the lock, and unbind the artifact(s)
+        so the chat won't silently re-lock on its next message. The chat thread and
+        its history stay; the artifact becomes free and re-bindable. Returns the
+        updated (now-unbound) thread plus {aid: version_id | None} for what was cut."""
+        from coscience import artifacts as _art
+        thread = self._thread_or_404(program_id, thread_id)
+        if not thread.artifacts:
+            raise ValueError("this chat is not bound to an artifact")
+        if thread.pending:
+            raise ValueError("this chat is still working — wait for the turn to finish, then release")
+        aids = list(thread.artifacts)
+        # release_lock cuts a final version (dedup-aware) and clears work/ + the lock.
+        vids = _art.release_lock(self.substrate, program_id, aids,
+                                 time.time(), created_by=f"chat:{thread_id}")
+        saved = dict(zip(aids, vids))
+        thread.artifacts = []
+        self.substrate.save_chat_thread(program_id, thread)
+        self.substrate.commit(f"program {program_id}: chat {thread_id} released {aids}")
+        return {"thread": self._chat_public(thread), "saved": saved}
+
     def post_chat_message(self, program_id: str, thread_id: str, message: str,
                           by: str = "", launch=None) -> dict:
         """Append the human message and launch a detached, resumable chat turn in the
@@ -1142,7 +1164,10 @@ class Service:
                 "content": "" if binary else raw.decode("utf-8", errors="replace"),
                 "binary": binary}
 
-    def read_artifact_work_file(self, program_id: str, aid: str, name: str) -> dict:
+    def artifact_work_file_path(self, program_id: str, aid: str, name: str) -> Path:
+        """Guarded resolution of a file inside an artifact's live work/ dir. Confined
+        to work/ (no traversal, must stay inside the substrate). Used by both the
+        JSON reader and the raw-bytes route (so images can be shown live)."""
         work = (self.substrate.artifact_dir(program_id, aid) / "work").resolve()
         root = (self.substrate.repo_root / "programs").resolve()
         if not work.is_relative_to(root) or not work.is_dir():
@@ -1153,6 +1178,10 @@ class Service:
             raise NotFoundError(name)
         if not path.is_file() or not path.is_relative_to(work):
             raise NotFoundError(name)
+        return path
+
+    def read_artifact_work_file(self, program_id: str, aid: str, name: str) -> dict:
+        path = self.artifact_work_file_path(program_id, aid, name)
         raw = path.read_bytes()
         binary = b"\x00" in raw[:8192]
         return {"name": name, "size": len(raw),
