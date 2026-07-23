@@ -516,8 +516,15 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         if slots <= 0:
             dropped.append(sid)
             continue
+        title = str(task.get("title") or "").strip()
+        if not title:                                  # PM omitted one — derive
+            if create:
+                title = "Create: " + ", ".join(c["title"] for c in create)
+            elif bound:
+                title = "Update " + ", ".join(bound)
+            title = title[:80]
         substrate.save_sprint(Sprint(
-            id=sid, status=SprintStatus.PROPOSED,
+            id=sid, status=SprintStatus.PROPOSED, title=title,
             goals=str(task.get("instructions") or "Update the artifact."),
             plan=[], program=program_id,
             artifacts_bound=bound, artifacts_create=create))

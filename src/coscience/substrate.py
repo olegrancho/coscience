@@ -63,6 +63,13 @@ class Substrate:
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
+        # Invariant: a sprint always has a non-empty title. Some producers (e.g.
+        # PM artifact-update sprints) may hand us none; backfill a readable one
+        # so the UI never falls back to rendering the whole goals blob — or the
+        # bare id — as the heading.
+        if not sprint.title:
+            first = next((ln.strip() for ln in (sprint.goals or "").splitlines() if ln.strip()), "")
+            sprint.title = (first[:80].rstrip() + "…") if len(first) > 80 else (first or sprint.id)
         fm = {
             "status": str(sprint.status),
             "goals": sprint.goals,

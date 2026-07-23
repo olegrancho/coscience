@@ -20,6 +20,19 @@ def test_artifact_task_becomes_proposed_bound_sprint(substrate):
     assert s.status == SprintStatus.PROPOSED
     assert s.artifacts_bound == ["doc"]
     assert "Tighten" in s.goals
+    assert s.title == "Update doc"          # derived when the PM omits a title
+
+
+def test_artifact_task_honors_pm_title(substrate):
+    _program(substrate)
+    artifacts.create_artifact(substrate, "p", "doc", "Doc", "md")
+    out = PMCycleOutput(report="r", artifact_tasks=[
+        {"suffix": "tighten-intro", "title": "Tighten the intro",
+         "artifact_ids": ["doc"], "create": [],
+         "instructions": "Tighten the introduction."}])
+    pm_beat(substrate, "p", FakeReasoner([out]), now=1.0)
+    s = substrate.load_sprint("p-c0-tighten-intro")
+    assert s.title == "Tighten the intro"
 
 
 def test_artifact_task_create_new_artifact_sprint(substrate):
@@ -33,6 +46,7 @@ def test_artifact_task_create_new_artifact_sprint(substrate):
     assert s.artifacts_create and s.artifacts_create[0]["title"] == "Manuscript"
     assert s.artifacts_create[0]["kind"] == "md"
     assert s.artifacts_create[0]["aid"]      # a slug was assigned
+    assert s.title == "Create: Manuscript"   # derived from what it creates
 
 
 def test_pm_reply_lands_on_artifact_thread(substrate):

@@ -202,6 +202,7 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
   ],
   "artifact_tasks": [
     {{"suffix": "<short-slug naming the update>",
+      "title": "<=8 words naming the update, e.g. 'Draft the manuscript intro'>",
       "artifact_ids": ["<existing artifact id(s) this sprint will edit>", "..."],
       "create": [{{"title": "<new artifact to create>", "kind": "md|data|figure|page"}}],
       "instructions": "<what the sprint should do to the artifact(s) — becomes the sprint's goals>"}}
