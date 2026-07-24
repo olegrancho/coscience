@@ -179,7 +179,9 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
     {{"sprint_id": "<an EDITABLE (still-proposed) sprint to revise per feedback>",
       "goals": "<rewritten objective, optional>", "plan": ["<revised step>", "..."],
       "summary": "<optional>", "title": "<optional>", "priority": <int, optional>,
-      "resources_required": {{}} or null}}
+      "resources_required": {{}} or null,
+      "artifacts_bound": ["<existing artifact id(s) this sprint should now edit — optional>"],
+      "artifacts_create": [{{"title": "<new artifact this sprint should produce>", "kind": "md|data|figure|page"}}]}}
   ],
   "reopen_ids": ["<id of an APPROVED sprint (see OPEN SPRINTS) to send back to 'proposed' for
                  reconsideration: results made it obsolete/redundant, it no longer makes sense
@@ -243,6 +245,11 @@ Run the program by curating ideas, not by piling on sprints:
   that artifact — humans approve it like any sprint; it counts against the cap). Bind
   existing artifacts with artifact_ids; declare new ones in create. Do NOT try to edit
   artifacts yourself — you only propose.
+  If the request is to make an ALREADY-PROPOSED sprint deliver its output as an artifact
+  (e.g. "have this sprint produce a program-report artifact"), do NOT emit a duplicate
+  artifact_task — instead add artifacts_bound/artifacts_create to that sprint via
+  sprint_edits. Editing the goals text alone does NOT create an artifact: the worker only
+  produces one when the sprint is bound to it.
 
 Each sprint is carried out by a capable autonomous research agent that plans and does
 the work itself. So:
