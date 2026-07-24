@@ -1,7 +1,9 @@
-import { Card, Group, Loader, SimpleGrid, Text } from "@mantine/core";
+import { Button, Card, Group, Loader, SimpleGrid, Stack, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type SprintRow } from "../api";
+import NewProgramModal from "../components/NewProgramModal";
 import { EmptyState, Heartbeat, StateBar, StatusBadge } from "../components/ui";
 
 function progOf(s: SprintRow) {
@@ -11,6 +13,7 @@ function progOf(s: SprintRow) {
 }
 
 export default function ProgramsOverview() {
+  const [newOpen, setNewOpen] = useState(false);
   const programs = useQuery({ queryKey: ["programs"], queryFn: api.listPrograms });
   const sprints = useQuery({ queryKey: ["sprints"], queryFn: api.listSprints });
   if (programs.isLoading || sprints.isLoading) return <Loader color="machine" />;
@@ -28,11 +31,18 @@ export default function ProgramsOverview() {
 
   return (
     <>
-      <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: "0 0 20px" }}>Programs</h1>
+      <Group justify="space-between" align="center" mb={20}>
+        <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: 0 }}>Programs</h1>
+        <Button onClick={() => setNewOpen(true)}>New Program</Button>
+      </Group>
+      <NewProgramModal opened={newOpen} onClose={() => setNewOpen(false)} />
       {progs.length === 0 ? (
-        <EmptyState title="No programs yet" command="coscience program create --id … --title … --goals …">
-          A program is a research direction you hand to the AI. Create one and it'll start proposing experiments.
-        </EmptyState>
+        <Stack gap={14} align="center">
+          <EmptyState title="No programs yet">
+            A program is a research direction you hand to the AI. Create one and it'll start proposing experiments.
+          </EmptyState>
+          <Button onClick={() => setNewOpen(true)}>New Program</Button>
+        </Stack>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2 }}>
           {progs.map((p) => {

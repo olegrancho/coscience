@@ -93,6 +93,43 @@ def test_pm_chat_rejects_empty(tmp_path):
         svc.post_chat_message("p1", tid, "   ", launch=_fake_launch())
 
 
+def test_create_program_persists_and_returns_detail(tmp_path):
+    svc = Service(tmp_path)
+    detail = svc.create_program("Cancer", "cure it", workdir="~/proj")
+    assert detail["id"] == "p1"
+    assert detail["title"] == "Cancer"
+    assert detail["goals"] == "cure it"
+    assert detail["workdir"] == "~/proj"
+    assert detail["status"] == "active"
+    assert detail == svc.get_program("p1")          # same shape as get_program
+    loaded = svc.substrate.load_program("p1")       # actually persisted
+    assert loaded.title == "Cancer" and loaded.goals == "cure it"
+
+
+def test_create_program_assigns_next_id(tmp_path):
+    svc = Service(tmp_path)
+    assert svc.create_program("A", "goal a")["id"] == "p1"
+    assert svc.create_program("B", "goal b")["id"] == "p2"
+
+
+def test_create_program_strips_fields(tmp_path):
+    svc = Service(tmp_path)
+    detail = svc.create_program("  Title  ", "  goals  ", workdir="  /wd  ")
+    assert detail["title"] == "Title"
+    assert detail["goals"] == "goals"
+    assert detail["workdir"] == "/wd"
+
+
+def test_create_program_blank_title_raises(tmp_path):
+    with pytest.raises(ValueError):
+        Service(tmp_path).create_program("   ", "goals")
+
+
+def test_create_program_blank_goals_raises(tmp_path):
+    with pytest.raises(ValueError):
+        Service(tmp_path).create_program("title", "   ")
+
+
 def test_list_and_get_program(tmp_path):
     svc = Service(tmp_path)
     svc.substrate.save_program(Program(id="p1", title="Cancer", goals="cure"))

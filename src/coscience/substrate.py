@@ -1,6 +1,7 @@
 """Read/write the OKF substrate (a directory of markdown files)."""
 from __future__ import annotations
 
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -317,6 +318,18 @@ class Substrate:
                 if status is None or p.status == status:
                     out.append(p)
         return out
+
+    def next_program_id(self) -> str:
+        """Assign the next `pN` program id: max numeric suffix over existing
+        `p\\d+` dirs (0 if none), plus one. Non-conforming dir names are ignored —
+        they can't collide with a `pN` id."""
+        programs_dir = self.repo_root / "programs"
+        max_n = 0
+        for d in (programs_dir.iterdir() if programs_dir.is_dir() else []):
+            m = re.fullmatch(r"p(\d+)", d.name)
+            if d.is_dir() and m:
+                max_n = max(max_n, int(m.group(1)))
+        return f"p{max_n + 1}"
 
     def save_report(self, program_id: str, report: str) -> None:
         d = self.program_dir(program_id)
