@@ -84,6 +84,12 @@ class VoteIn(BaseModel):
     value: int                    # +1 👍, -1 👎, 0 clear (toggling handled server-side)
 
 
+class ProgramCreateIn(BaseModel):
+    title: str
+    goals: str
+    workdir: str = ""
+
+
 class ProgramStatusIn(BaseModel):
     status: str
 
@@ -605,6 +611,13 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.list_programs(status)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.post("/programs", status_code=201)
+    def create_program(body: ProgramCreateIn) -> dict:
+        try:
+            return service.create_program(body.title, body.goals, body.workdir)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     @api.get("/programs/{program_id}")
     def get_program(program_id: str) -> dict:

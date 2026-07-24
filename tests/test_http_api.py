@@ -27,6 +27,27 @@ def test_version_returns_sha(client):
     assert isinstance(sha, str) and sha
 
 
+def test_create_program_returns_201_and_detail(client):
+    r = client.post("/api/programs", json={"title": "Cancer", "goals": "cure it"})
+    assert r.status_code == 201
+    body = r.json()
+    assert body["id"] == "p1"
+    assert body["title"] == "Cancer"
+    assert body["goals"] == "cure it"
+    assert body["status"] == "active"
+    assert client.get("/api/programs/p1").status_code == 200
+
+
+def test_create_program_blank_title_is_400(client):
+    r = client.post("/api/programs", json={"title": "  ", "goals": "cure it"})
+    assert r.status_code == 400
+
+
+def test_create_program_blank_goals_is_400(client):
+    r = client.post("/api/programs", json={"title": "Cancer", "goals": ""})
+    assert r.status_code == 400
+
+
 def test_sprint_files_endpoint(client):
     client.post("/api/sprints", json={"id": "sp1", "goals": "g", "plan": ["a"]})
     (client.svc.substrate.sprint_dir("sp1") / "scratchpad.md").write_text("# notes")

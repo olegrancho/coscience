@@ -111,6 +111,11 @@ export const api = {
   logout: () => fetch("/api/logout", { method: "POST" }).then(j<{ ok: boolean }>),
   getVersion: () => fetch("/api/version").then(j<{ sha: string }>),
   listPrograms: () => fetch("/api/programs").then(j<ProgramRow[]>),
+  createProgram: (body: { title: string; goals: string; workdir?: string }) =>
+    fetch("/api/programs", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(j<Program>),
   getProgram: (id: string) => fetch(`/api/programs/${id}`).then(j<Program>),
   getGraph: (id: string) => fetch(`/api/programs/${id}/graph`).then(j<Graph>),
   setProgramStatus: (id: string, status: string) =>

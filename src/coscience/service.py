@@ -474,6 +474,21 @@ class Service:
         spec = self.substrate.sprint_dir(sprint.id) / "sprint.md"
         return spec.stat().st_mtime if spec.is_file() else 0.0
 
+    def create_program(self, title: str, goals: str, workdir: str = "") -> dict:
+        """Create a program from the dashboard. Title and goals are required
+        (blank after strip -> ValueError); the id is assigned server-side via
+        next_program_id(). Returns the same dict shape as get_program."""
+        title = str(title or "").strip()
+        goals = str(goals or "").strip()
+        if not title:
+            raise ValueError("title is required")
+        if not goals:
+            raise ValueError("goals is required")
+        program = Program(id=self.substrate.next_program_id(), title=title,
+                          goals=goals, workdir=str(workdir or "").strip())
+        self.substrate.save_program(program)
+        return self.get_program(program.id)
+
     def get_program(self, program_id: str) -> dict:
         if not (self.substrate.program_dir(program_id) / "program.md").is_file():
             raise NotFoundError(program_id)
