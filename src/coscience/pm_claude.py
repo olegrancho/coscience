@@ -218,7 +218,7 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
       "priority": <int>, "resources_required": {{}} or null,
       "rationale": "<why this experiment next; short — 1-3 sentences, a blank line (\\n\\n) between distinct points if more than one>",
       "from_idea": "<id of the pool idea this promotes, or omit>",
-      "model": "<optional: a Claude model slug to run this sprint's worker on, e.g. 'claude-sonnet-4-6' for cheap/routine work or 'claude-opus-4-8' for hard reasoning; omit to use the default>"}}
+      "model": "<optional: a Claude model slug to run this sprint's worker on, e.g. 'claude-sonnet-4-6' for cheap/routine work or 'claude-opus-5' for hard reasoning; omit to use the default>"}}
   ]}}
 Propose 0 proposals if nothing new is warranted, or you are at the cap.
 
