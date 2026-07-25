@@ -62,9 +62,15 @@ def _checked(path: str) -> Path:
     """Resolve `path` and confine it to the configured roots.
 
     `resolve()` follows symlinks BEFORE the check, so a link pointing outside
-    the roots is rejected rather than followed.
+    the roots is rejected rather than followed. A pathological input (e.g. a
+    null byte) makes `resolve()` raise a raw ValueError/OSError; that's not a
+    BrowseError, so it's converted to NotFound here rather than left to
+    escape past the module's exception contract.
     """
-    p = Path(os.path.expanduser(str(path))).resolve()
+    try:
+        p = Path(os.path.expanduser(str(path))).resolve()
+    except (OSError, ValueError):
+        raise NotFound(str(path))
     if not _inside(p, roots()):
         raise OutsideRoots(str(p))
     return p

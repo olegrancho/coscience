@@ -62,6 +62,13 @@ def test_symlink_pointing_outside_a_root_is_not_listed(root, tmp_path):
     assert [e["name"] for e in out["entries"]] == ["ok"]
 
 
+def test_null_byte_in_path_raises_not_found(root):
+    """Path.resolve() raises a raw ValueError on a null byte; _checked() must
+    convert that into a BrowseError so it doesn't escape as a 500 over HTTP."""
+    with pytest.raises(fs_browse.NotFound):
+        fs_browse.list_dirs(str(root) + "\0bad")
+
+
 def test_missing_path_raises_not_found(root):
     with pytest.raises(fs_browse.NotFound):
         fs_browse.list_dirs(str(root / "nope"))
