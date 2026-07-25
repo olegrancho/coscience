@@ -1,4 +1,6 @@
 """Creating a folder from the picker: one segment, inside the roots, no clobber."""
+from pathlib import Path
+
 import pytest
 
 from coscience import fs_browse
@@ -45,17 +47,12 @@ def test_missing_parent_raises_not_found(root):
         fs_browse.make_dir(str(root / "nope"), "child")
 
 
-def test_dangling_symlink_conflicts(root):
-    """A symlink pointing to an existing target should raise AlreadyExists
-    when trying to create a directory with that name. Regression test: the old
-    exists() check would return False for a dangling symlink, but mkdir() would
-    still fail with FileExistsError when the symlink itself exists."""
-    # Create a symlink pointing to an existing directory in the root
-    (root / "target-dir").mkdir()
-    symlink = root / "link-to-target"
-    symlink.symlink_to(root / "target-dir")
-    # When we try to create a directory with the symlink's name,
-    # _checked() resolves it to the target, mkdir() tries to create the target,
-    # and fails because the target exists. This should be caught as AlreadyExists.
+def test_concurrent_create_race(root, monkeypatch):
+    """A FileExistsError from mkdir must surface as AlreadyExists because the HTTP layer maps that to 409 and has no mapping for a bare OSError."""
+    def mock_mkdir(self, *args, **kwargs):
+        raise FileExistsError("File exists")
+
+    monkeypatch.setattr(Path, "mkdir", mock_mkdir)
+
     with pytest.raises(fs_browse.AlreadyExists):
-        fs_browse.make_dir(str(root), "link-to-target")
+        fs_browse.make_dir(str(root), "concurrent-create")
