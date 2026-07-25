@@ -100,3 +100,24 @@ def list_dirs(path: str | None = None) -> dict:
 
     parent = None if any(p == r for r in rs) else str(p.parent)
     return {"path": str(p), "parent": parent, "roots": root_rows, "entries": entries}
+
+
+def make_dir(parent: str, name: str) -> dict:
+    """Create one directory under `parent`.
+
+    `name` must be a single path segment, and the result must still fall inside
+    the configured roots.
+    """
+    clean = str(name or "").strip()
+    if clean in ("", ".", "..") or "/" in clean or "\0" in clean:
+        raise InvalidName(str(name))
+
+    base = _checked(parent)
+    if not base.is_dir():
+        raise NotFound(str(base))
+
+    target = _checked(str(base / clean))
+    if target.exists():
+        raise AlreadyExists(str(target))
+    target.mkdir()
+    return {"path": str(target)}
