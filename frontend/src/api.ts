@@ -89,6 +89,11 @@ export interface ArtifactDetailT {
   threads: FeedbackThreadT[]; current_files: string[]; linked_sprints: LinkedSprint[];
 }
 export interface ArtifactFileT { name: string; size: number; content: string; binary: boolean }
+export interface DirEntry { name: string; path: string }
+export interface DirRoot { label: string; path: string }
+export interface DirListing {
+  path: string | null; parent: string | null; roots: DirRoot[]; entries: DirEntry[];
+}
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
@@ -170,6 +175,13 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workdir }),
     }).then(j<{ id: string; workdir: string; exists: boolean }>),
+  listDirs: (path?: string | null) =>
+    fetch(`/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ""}`).then(j<DirListing>),
+  createDir: (parent: string, name: string) =>
+    fetch("/api/fs/dirs", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parent, name }),
+    }).then(j<{ path: string }>),
   listGuidance: (id: string) => fetch(`/api/programs/${id}/guidance`).then(j<FeedbackThreadT[]>),
   addGuidance: (id: string, text: string, threadId?: string) =>
     fetch(`/api/programs/${id}/guidance`, {
