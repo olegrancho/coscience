@@ -179,7 +179,9 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
     {{"sprint_id": "<an EDITABLE (still-proposed) sprint to revise per feedback>",
       "goals": "<rewritten objective, optional>", "plan": ["<revised step>", "..."],
       "summary": "<optional>", "title": "<optional>", "priority": <int, optional>,
-      "resources_required": {{}} or null}}
+      "resources_required": {{}} or null,
+      "artifacts_bound": ["<existing artifact id(s) this sprint should now edit — optional>"],
+      "artifacts_create": [{{"title": "<new artifact this sprint should produce>", "kind": "md|data|figure|page"}}]}}
   ],
   "reopen_ids": ["<id of an APPROVED sprint (see OPEN SPRINTS) to send back to 'proposed' for
                  reconsideration: results made it obsolete/redundant, it no longer makes sense
@@ -216,7 +218,7 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
       "priority": <int>, "resources_required": {{}} or null,
       "rationale": "<why this experiment next; short — 1-3 sentences, a blank line (\\n\\n) between distinct points if more than one>",
       "from_idea": "<id of the pool idea this promotes, or omit>",
-      "model": "<optional: a Claude model slug to run this sprint's worker on, e.g. 'claude-sonnet-4-6' for cheap/routine work or 'claude-opus-4-8' for hard reasoning; omit to use the default>"}}
+      "model": "<optional: a Claude model slug to run this sprint's worker on, e.g. 'claude-sonnet-4-6' for cheap/routine work or 'claude-opus-5' for hard reasoning; omit to use the default>"}}
   ]}}
 Propose 0 proposals if nothing new is warranted, or you are at the cap.
 
@@ -243,6 +245,11 @@ Run the program by curating ideas, not by piling on sprints:
   that artifact — humans approve it like any sprint; it counts against the cap). Bind
   existing artifacts with artifact_ids; declare new ones in create. Do NOT try to edit
   artifacts yourself — you only propose.
+  If the request is to make an ALREADY-PROPOSED sprint deliver its output as an artifact
+  (e.g. "have this sprint produce a program-report artifact"), do NOT emit a duplicate
+  artifact_task — instead add artifacts_bound/artifacts_create to that sprint via
+  sprint_edits. Editing the goals text alone does NOT create an artifact: the worker only
+  produces one when the sprint is bound to it.
 
 Each sprint is carried out by a capable autonomous research agent that plans and does
 the work itself. So:

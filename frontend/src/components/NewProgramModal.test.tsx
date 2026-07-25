@@ -11,7 +11,11 @@ vi.mock("react-router-dom", async (orig) => ({
 }));
 
 vi.mock("../api", () => ({
-  api: { createProgram: vi.fn().mockResolvedValue({ id: "p7" }) },
+  api: {
+    createProgram: vi.fn().mockResolvedValue({ id: "p7" }),
+    listDirs: vi.fn().mockResolvedValue({ path: null, parent: null, roots: [], entries: [] }),
+    createDir: vi.fn(),
+  },
 }));
 
 import { api } from "../api";
@@ -55,5 +59,11 @@ describe("NewProgramModal", () => {
     await waitFor(() =>
       expect(api.createProgram).toHaveBeenCalledWith({ title: "Aging", goals: "Reverse it", workdir: "" }));
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/programs/p7"));
+  });
+
+  it("offers an in-field browse control under advanced", async () => {
+    renderModal();
+    fireEvent.click(screen.getByRole("button", { name: /\+ advanced/i }));
+    await waitFor(() => expect(screen.getByLabelText("browse folders")).toBeTruthy());
   });
 });

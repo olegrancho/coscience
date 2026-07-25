@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from coscience import auth
+from coscience import auth, fs_browse
 from coscience.service import NotFoundError, Service, service_from_env
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -100,6 +100,11 @@ class ProgramModelIn(BaseModel):
 
 class ProgramWorkdirIn(BaseModel):
     workdir: str = ""
+
+
+class DirCreateIn(BaseModel):
+    parent: str
+    name: str
 
 
 class GuidanceIn(BaseModel):
@@ -604,6 +609,37 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     @api.get("/usage")
     def usage_stats() -> dict:
         return service.usage_stats()
+
+    @api.get("/fs/dirs")
+    def browse_dirs(path: str | None = Query(default=None)) -> dict:
+        try:
+            return fs_browse.list_dirs(path)
+        except fs_browse.OutsideRoots:
+            # Constant detail: the exception carries the requested path, and
+            # echoing it (or a resolved path) back to an unauthenticated LAN
+            # caller is an enumeration/leak primitive, not useful detail.
+            raise HTTPException(status_code=403, detail="outside the allowed roots")
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="permission denied")
+        except fs_browse.NotFound:
+            raise HTTPException(status_code=404, detail="not a directory")
+
+    @api.post("/fs/dirs", status_code=201)
+    def create_dir(body: DirCreateIn) -> dict:
+        try:
+            return fs_browse.make_dir(body.parent, body.name)
+        except fs_browse.InvalidName as exc:
+            raise HTTPException(status_code=400, detail=f"invalid folder name: {exc}")
+        except fs_browse.AlreadyExists as exc:
+            raise HTTPException(status_code=409, detail=f"already exists: {exc}")
+        except fs_browse.OutsideRoots:
+            raise HTTPException(status_code=403, detail="outside the allowed roots")
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="permission denied")
+        except fs_browse.NotFound:
+            raise HTTPException(status_code=404, detail="not a directory")
+        except fs_browse.CreateFailed as exc:
+            raise HTTPException(status_code=400, detail=f"could not create the folder: {exc}")
 
     @api.get("/programs")
     def list_programs(status: str | None = Query(default=None)) -> list[dict]:

@@ -6,6 +6,7 @@ import { Link, useParams } from "react-router-dom";
 import { type Components } from "react-markdown";
 import Md from "../components/Md";
 import { FeedbackThread } from "../components/FeedbackThread";
+import DirectoryPickerModal from "../components/DirectoryPickerModal";
 import { api } from "../api";
 import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
@@ -23,6 +24,7 @@ export default function ProgramDetail() {
   const [showAll, setShowAll] = useState(false);
   const [ideasExpanded, setIdeasExpanded] = useState(false);
   const [pmExpanded, setPmExpanded] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
 
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
   const guidance = useQuery({ queryKey: ["guidance", id], queryFn: () => api.listGuidance(id) });
@@ -149,8 +151,21 @@ export default function ProgramDetail() {
             defaultValue={p.workdir}
             placeholder="control repo — set a path to run this program's agents there"
             style={{ minWidth: 380, flex: 1, maxWidth: 560 }}
+            rightSectionPointerEvents="all"
+            rightSection={
+              <Tooltip label="Browse folders on the server" withArrow>
+                <ActionIcon variant="subtle" size="sm" aria-label="browse folders"
+                            onClick={() => setBrowsing(true)}>📁</ActionIcon>
+              </Tooltip>
+            }
             onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
             onBlur={(e) => { if (e.currentTarget.value.trim() !== p.workdir) saveWorkdir(e.currentTarget.value); }}
+          />
+          <DirectoryPickerModal
+            opened={browsing}
+            initialPath={p.workdir}
+            onClose={() => setBrowsing(false)}
+            onPick={(picked) => saveWorkdir(picked)}
           />
         </Group>
       </div>

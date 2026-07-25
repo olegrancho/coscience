@@ -221,6 +221,20 @@ def _artifact_slug(title: str) -> str:
     return s or "artifact"
 
 
+def _artifact_specs(bound_ids, create_list) -> tuple[list[str], list[dict]]:
+    """Normalise a proposal's/edit's artifact fields into (bound, create):
+    `bound` = existing artifact ids to edit; `create` = new-artifact dicts with a
+    slugged aid. Shared by artifact_tasks and sprint_edits so both bind the same way."""
+    bound = [str(a) for a in (bound_ids or []) if str(a).strip()]
+    create = []
+    for c in (create_list or []):
+        if isinstance(c, dict) and str(c.get("title") or "").strip():
+            title = str(c["title"])
+            create.append({"aid": _artifact_slug(title), "title": title,
+                           "kind": str(c.get("kind") or "md")})
+    return bound, create
+
+
 def _staging_path(substrate, program_id: str):
     return substrate.program_dir(program_id) / ".pm" / "cycle-staging.json"
 
@@ -504,13 +518,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             if sid not in proposed:
                 proposed.append(sid)
             continue
-        bound = [str(a) for a in task.get("artifact_ids", []) if str(a).strip()]
-        create = []
-        for c in task.get("create", []):
-            if isinstance(c, dict) and str(c.get("title") or "").strip():
-                title = str(c["title"])
-                create.append({"aid": _artifact_slug(title), "title": title,
-                               "kind": str(c.get("kind") or "md")})
+        bound, create = _artifact_specs(task.get("artifact_ids"), task.get("create"))
         if not bound and not create:
             continue                                   # nothing to act on
         if slots <= 0:
@@ -604,6 +612,16 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 sp.summary = str(edit["summary"])
             if edit.get("title") is not None:
                 sp.title = str(edit["title"])
+            # Attach artifacts to a still-proposed sprint (e.g. a human asked it to
+            # deliver its output as an artifact). Deliverables must be fixed before
+            # the sprint runs, so this is PROPOSED-only like goals/plan above.
+            if edit.get("artifacts_bound") is not None or edit.get("artifacts_create") is not None:
+                bound, create = _artifact_specs(edit.get("artifacts_bound"),
+                                                edit.get("artifacts_create"))
+                if bound:
+                    sp.artifacts_bound = bound
+                if create:
+                    sp.artifacts_create = create
         if edit.get("priority") is not None:
             try:
                 sp.priority = int(edit["priority"])

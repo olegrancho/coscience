@@ -1,0 +1,165 @@
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MantineProvider } from "@mantine/core";
+
+vi.mock("../api", () => ({
+  api: { listDirs: vi.fn(), createDir: vi.fn() },
+}));
+
+import { api } from "../api";
+import DirectoryPickerModal from "./DirectoryPickerModal";
+
+// jsdom has no matchMedia; MantineProvider's color-scheme effect needs it.
+beforeAll(() => {
+  window.matchMedia = window.matchMedia || (((query: string) => ({
+    matches: false, media: query, onchange: null,
+    addListener() {}, removeListener() {},
+    addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
+  })) as unknown as typeof window.matchMedia);
+  // Mantine's ScrollArea.Autosize uses ResizeObserver, absent in jsdom (see ChatView.test.tsx).
+  window.ResizeObserver = window.ResizeObserver || (class {
+    observe() {} unobserve() {} disconnect() {}
+  } as unknown as typeof ResizeObserver);
+});
+
+const listing = (path: string, entries: string[], parent: string | null = null) => ({
+  path,
+  parent,
+  roots: [{ label: "~", path: "/home/oleg" }],
+  entries: entries.map((name) => ({ name, path: `${path}/${name}` })),
+});
+
+beforeEach(() => {
+  vi.mocked(api.listDirs).mockReset();
+  vi.mocked(api.createDir).mockReset();
+  vi.mocked(api.listDirs).mockImplementation(async (p?: string | null) =>
+    p === "/home/oleg/sync"
+      ? listing("/home/oleg/sync", ["bmt-share"], "/home/oleg")
+      : listing("/home/oleg", ["sync"]));
+});
+
+function renderPicker(onPick = vi.fn()) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <MantineProvider>
+      <QueryClientProvider client={qc}>
+        <DirectoryPickerModal opened initialPath="/home/oleg" onClose={() => {}} onPick={onPick} />
+      </QueryClientProvider>
+    </MantineProvider>,
+  );
+  return onPick;
+}
+
+describe("DirectoryPickerModal", () => {
+  it("lists the folders returned for the current path", async () => {
+    renderPicker();
+    await waitFor(() => expect(screen.getByRole("button", { name: /sync/ })).toBeTruthy());
+  });
+
+  it("descends into a folder when it is clicked", async () => {
+    renderPicker();
+    fireEvent.click(await screen.findByRole("button", { name: /sync/ }));
+    await waitFor(() => expect(api.listDirs).toHaveBeenCalledWith("/home/oleg/sync"));
+    await waitFor(() => expect(screen.getByRole("button", { name: /bmt-share/ })).toBeTruthy());
+  });
+
+  it("calls onPick with the current path when confirmed", async () => {
+    const onPick = renderPicker();
+    await screen.findByRole("button", { name: /sync/ });
+    fireEvent.click(screen.getByRole("button", { name: /use this folder/i }));
+    expect(onPick).toHaveBeenCalledWith("/home/oleg");
+  });
+
+  it("creates a folder under the current path", async () => {
+    vi.mocked(api.createDir).mockResolvedValue({ path: "/home/oleg/fresh" });
+    renderPicker();
+    await screen.findByRole("button", { name: /sync/ });
+    fireEvent.click(screen.getByRole("button", { name: /new folder/i }));
+    fireEvent.change(screen.getByLabelText("new folder name"), { target: { value: "fresh" } });
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    await waitFor(() => expect(api.createDir).toHaveBeenCalledWith("/home/oleg", "fresh"));
+  });
+
+  it("falls back to the root listing when initialPath is unusable", async () => {
+    vi.mocked(api.listDirs).mockImplementation(async (p?: string | null) => {
+      if (p === "/home/oleg/gone") throw new Error("not found");
+      return listing("/home/oleg", ["sync"]);
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <DirectoryPickerModal opened initialPath="/home/oleg/gone" onClose={() => {}} onPick={() => {}} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+    await waitFor(() => expect(api.listDirs).toHaveBeenCalledWith("/home/oleg/gone"));
+    await waitFor(() => expect(api.listDirs).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(screen.getByRole("button", { name: /sync/ })).toBeTruthy());
+  });
+
+  const multiRoots = [
+    { label: "~", path: "/home/oleg" },
+    { label: "/data", path: "/data" },
+  ];
+
+  const virtualRootListing = () => ({
+    path: null,
+    parent: null,
+    roots: multiRoots,
+    entries: multiRoots.map((r) => ({ name: r.label, path: r.path })),
+  });
+
+  function renderAt(initialPath: string | undefined, onPick = vi.fn()) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <DirectoryPickerModal opened initialPath={initialPath} onClose={() => {}} onPick={onPick} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+    return onPick;
+  }
+
+  it("disables New folder and Use this folder at the virtual root level", async () => {
+    vi.mocked(api.listDirs).mockImplementation(async () => virtualRootListing());
+    renderAt(undefined);
+    await waitFor(() => expect(screen.getByRole("button", { name: /~/ })).toBeTruthy());
+    expect((screen.getByRole("button", { name: /new folder/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /use this folder/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("returns to the virtual root level via ↑ from a real root when several roots are configured", async () => {
+    vi.mocked(api.listDirs).mockImplementation(async (p?: string | null) =>
+      p === "/home/oleg"
+        ? { path: "/home/oleg", parent: null, roots: multiRoots, entries: [{ name: "sync", path: "/home/oleg/sync" }] }
+        : virtualRootListing());
+    renderAt("/home/oleg");
+    await screen.findByRole("button", { name: /sync/ });   // wait for the real listing, not the pre-load disabled state
+    const up = screen.getByRole("button", { name: "up one folder" });
+    expect((up as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(up);
+    await waitFor(() => expect(api.listDirs).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(screen.getByRole("button", { name: "roots" })).toBeTruthy());
+    expect((screen.getByRole("button", { name: /use this folder/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("shows a newly created folder after the listing refetches", async () => {
+    let created = false;
+    vi.mocked(api.listDirs).mockImplementation(async (p?: string | null) =>
+      p === "/home/oleg/sync"
+        ? listing("/home/oleg/sync", ["bmt-share"], "/home/oleg")
+        : listing("/home/oleg", created ? ["sync", "fresh"] : ["sync"]));
+    vi.mocked(api.createDir).mockResolvedValue({ path: "/home/oleg/fresh" });
+    renderPicker();
+    await screen.findByRole("button", { name: /sync/ });
+    expect(screen.queryByRole("button", { name: /fresh/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /new folder/i }));
+    fireEvent.change(screen.getByLabelText("new folder name"), { target: { value: "fresh" } });
+    created = true;
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /fresh/ })).toBeTruthy());
+  });
+});

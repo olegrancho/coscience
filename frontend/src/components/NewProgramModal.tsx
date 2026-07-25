@@ -1,8 +1,9 @@
-import { Button, Modal, Stack, Textarea, TextInput } from "@mantine/core";
+import { ActionIcon, Button, Modal, Stack, Textarea, TextInput, Tooltip } from "@mantine/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
+import DirectoryPickerModal from "./DirectoryPickerModal";
 
 interface Props { opened: boolean; onClose: () => void }
 
@@ -14,6 +15,7 @@ export default function NewProgramModal({ opened, onClose }: Props) {
   const [workdir, setWorkdir] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState("");
+  const [browsing, setBrowsing] = useState(false);
 
   const submit = async () => {
     setError("");
@@ -44,8 +46,19 @@ export default function NewProgramModal({ opened, onClose }: Props) {
             + advanced
           </button>
         ) : (
-          <TextInput label="Workdir (optional)" value={workdir}
-                     onChange={(e) => setWorkdir(e.currentTarget.value)} />
+          <>
+            <TextInput label="Workdir (optional)" value={workdir}
+                       rightSectionPointerEvents="all"
+                       rightSection={
+                         <Tooltip label="Browse folders on the server" withArrow>
+                           <ActionIcon variant="subtle" size="sm" aria-label="browse folders"
+                                       onClick={() => setBrowsing(true)}>📁</ActionIcon>
+                         </Tooltip>
+                       }
+                       onChange={(e) => setWorkdir(e.currentTarget.value)} />
+            <DirectoryPickerModal opened={browsing} initialPath={workdir}
+                                  onClose={() => setBrowsing(false)} onPick={setWorkdir} />
+          </>
         )}
 
         {error && <div style={{ color: "red" }}>{error}</div>}
