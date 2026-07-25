@@ -48,3 +48,55 @@ def roots() -> list[Path]:
         candidates = [Path.home().resolve()]
     found = [p for p in candidates if p.is_dir()]
     return found or [Path.home().resolve()]
+
+
+def _label(p: Path) -> str:
+    return "~" if p == Path.home().resolve() else str(p)
+
+
+def _inside(p: Path, rs: list[Path]) -> bool:
+    return any(p.is_relative_to(r) for r in rs)
+
+
+def _checked(path: str) -> Path:
+    """Resolve `path` and confine it to the configured roots.
+
+    `resolve()` follows symlinks BEFORE the check, so a link pointing outside
+    the roots is rejected rather than followed.
+    """
+    p = Path(os.path.expanduser(str(path))).resolve()
+    if not _inside(p, roots()):
+        raise OutsideRoots(str(p))
+    return p
+
+
+def list_dirs(path: str | None = None) -> dict:
+    """Subdirectories of `path`.
+
+    With `path` None: the single configured root's contents, or — when several
+    roots are configured — a virtual root level whose entries are the roots.
+    """
+    rs = roots()
+    root_rows = [{"label": _label(r), "path": str(r)} for r in rs]
+    if path is None or not str(path).strip():
+        if len(rs) > 1:
+            return {"path": None, "parent": None, "roots": root_rows,
+                    "entries": [{"name": _label(r), "path": str(r)} for r in rs]}
+        path = str(rs[0])
+
+    p = _checked(path)
+    if not p.is_dir():
+        raise NotFound(str(p))
+
+    entries = []
+    for child in sorted(p.iterdir(), key=lambda c: c.name):
+        if child.name.startswith("."):
+            continue
+        try:
+            if child.is_dir() and _inside(child.resolve(), rs):
+                entries.append({"name": child.name, "path": str(child)})
+        except OSError:
+            continue                     # unreadable/dangling: skip, don't fail the listing
+
+    parent = None if any(p == r for r in rs) else str(p.parent)
+    return {"path": str(p), "parent": parent, "roots": root_rows, "entries": entries}
