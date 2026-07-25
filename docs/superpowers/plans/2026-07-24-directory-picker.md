@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **Never commit or push without explicit approval** (project `CLAUDE.md`). Each task ends with a prepared commit step — show the command and the staged diff, and wait for Oleg's approval before running it.
+- **Commits: authorized for this branch only.** Oleg has approved local commits on `feat/directory-picker` for this plan's tasks. **Never push, never merge** — that stays his call (project `CLAUDE.md`).
 - Runtime is **Linux-only**; `/` is the only path separator that needs rejecting in folder names. Do not add Windows path handling.
 - `COSCIENCE_BROWSE_ROOTS` **must be read at call time**, never captured at import — every root test monkeypatches it against a `tmp_path`.
 - Confinement uses the codebase's existing idiom: `.resolve()` then `.is_relative_to(root)` (as in `service.py:1155`, `http_api.py:917`).
@@ -154,11 +154,11 @@ def roots() -> list[Path]:
 Run: `/home/oleg/venvs/coscience/bin/python -m pytest tests/test_fs_browse_roots.py -v`
 Expected: PASS (6 tests)
 
-- [ ] **Step 5: Prepare the commit (await approval before running)**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/coscience/fs_browse.py tests/test_fs_browse_roots.py
-git commit -m "feat(fs-browse): configurable browse roots, default \$HOME"
+git commit -m "feat(fs-browse): configurable browse roots, default $HOME"
 ```
 
 ---
@@ -359,7 +359,7 @@ def list_dirs(path: str | None = None) -> dict:
 Run: `/home/oleg/venvs/coscience/bin/python -m pytest tests/test_fs_browse_list.py -v`
 Expected: PASS (14 tests)
 
-- [ ] **Step 5: Prepare the commit (await approval before running)**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/coscience/fs_browse.py tests/test_fs_browse_list.py
@@ -466,7 +466,7 @@ def make_dir(parent: str, name: str) -> dict:
 Run: `/home/oleg/venvs/coscience/bin/python -m pytest tests/test_fs_browse_mkdir.py -v`
 Expected: PASS (11 tests, counting the 6 parametrised cases)
 
-- [ ] **Step 5: Prepare the commit (await approval before running)**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/coscience/fs_browse.py tests/test_fs_browse_mkdir.py
@@ -625,7 +625,7 @@ Expected: PASS (8 tests)
 Run: `/home/oleg/venvs/coscience/bin/python -m pytest -q`
 Expected: exit 0, no failures (the suite was 643 passing before this plan; expect 643 + the new tests)
 
-- [ ] **Step 6: Prepare the commit (await approval before running)**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/coscience/http_api.py tests/test_http_fs_browse.py
@@ -884,7 +884,7 @@ export default function DirectoryPickerModal({ opened, initialPath, onClose, onP
 Run (from `frontend/`): `npx vitest run src/components/DirectoryPickerModal.test.tsx`
 Expected: PASS (4 tests)
 
-- [ ] **Step 6: Prepare the commit (await approval before running)**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add frontend/src/api.ts frontend/src/components/DirectoryPickerModal.tsx \
@@ -1032,7 +1032,7 @@ pgrep -f "coscience-h[t]tp" | xargs -r kill
 
 Verify: the folder icon sits inside the project-folder field on a program page; clicking it opens the modal at `~`; descending, `＋ New folder`, and `Use this folder` all work; the picked path saves and the existing notification fires.
 
-- [ ] **Step 7: Prepare the commit (await approval before running)**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add frontend/src/views/ProgramDetail.tsx frontend/src/components/NewProgramModal.tsx \
