@@ -99,6 +99,53 @@ describe("DirectoryPickerModal", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /sync/ })).toBeTruthy());
   });
 
+  const multiRoots = [
+    { label: "~", path: "/home/oleg" },
+    { label: "/data", path: "/data" },
+  ];
+
+  const virtualRootListing = () => ({
+    path: null,
+    parent: null,
+    roots: multiRoots,
+    entries: multiRoots.map((r) => ({ name: r.label, path: r.path })),
+  });
+
+  function renderAt(initialPath: string | undefined, onPick = vi.fn()) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <DirectoryPickerModal opened initialPath={initialPath} onClose={() => {}} onPick={onPick} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+    return onPick;
+  }
+
+  it("disables New folder and Use this folder at the virtual root level", async () => {
+    vi.mocked(api.listDirs).mockImplementation(async () => virtualRootListing());
+    renderAt(undefined);
+    await waitFor(() => expect(screen.getByRole("button", { name: /~/ })).toBeTruthy());
+    expect((screen.getByRole("button", { name: /new folder/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /use this folder/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("returns to the virtual root level via ↑ from a real root when several roots are configured", async () => {
+    vi.mocked(api.listDirs).mockImplementation(async (p?: string | null) =>
+      p === "/home/oleg"
+        ? { path: "/home/oleg", parent: null, roots: multiRoots, entries: [{ name: "sync", path: "/home/oleg/sync" }] }
+        : virtualRootListing());
+    renderAt("/home/oleg");
+    await screen.findByRole("button", { name: /sync/ });   // wait for the real listing, not the pre-load disabled state
+    const up = screen.getByRole("button", { name: "up one folder" });
+    expect((up as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(up);
+    await waitFor(() => expect(api.listDirs).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(screen.getByRole("button", { name: "roots" })).toBeTruthy());
+    expect((screen.getByRole("button", { name: /use this folder/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("shows a newly created folder after the listing refetches", async () => {
     let created = false;
     vi.mocked(api.listDirs).mockImplementation(async (p?: string | null) =>

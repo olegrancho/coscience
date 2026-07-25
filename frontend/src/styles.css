@@ -286,6 +286,8 @@ h1, h2, h3, h4, h5, .ff-display {
   font-family: inherit; font-size: 13px; font-weight: 600; color: var(--machine);
 }
 .linklike:hover { text-decoration: underline; }
+.linklike:disabled { color: var(--ink-faint); cursor: default; }
+.linklike:disabled:hover { text-decoration: none; }
 
 .muted-note {
   display: flex; gap: 9px; align-items: flex-start;
