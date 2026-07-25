@@ -117,7 +117,8 @@ def make_dir(parent: str, name: str) -> dict:
         raise NotFound(str(base))
 
     target = _checked(str(base / clean))
-    if target.exists():
+    try:
+        target.mkdir()
+    except FileExistsError:
         raise AlreadyExists(str(target))
-    target.mkdir()
     return {"path": str(target)}
