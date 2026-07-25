@@ -56,3 +56,41 @@ def test_concurrent_create_race(root, monkeypatch):
 
     with pytest.raises(fs_browse.AlreadyExists):
         fs_browse.make_dir(str(root), "concurrent-create")
+
+
+def test_rejects_a_name_whose_utf8_encoding_exceeds_255_bytes(root):
+    """A byte limit, not a character count: a real filesystem (ext4, xfs)
+    rejects a NAME_MAX-exceeding component with ENAMETOOLONG, which must not
+    reach mkdir() and escape as a raw OSError/500."""
+    with pytest.raises(fs_browse.InvalidName):
+        fs_browse.make_dir(str(root), "a" * 300)
+
+
+def test_name_at_exactly_255_bytes_is_accepted(root):
+    out = fs_browse.make_dir(str(root), "a" * 255)
+    assert out == {"path": str(root / ("a" * 255))}
+
+
+def test_mkdir_oserror_other_than_exists_becomes_create_failed(root, monkeypatch):
+    """EROFS/ENOSPC/... must not escape as a raw OSError (-> 500); they become
+    a BrowseError the HTTP layer can map to a 4xx."""
+    def mock_mkdir(self, *args, **kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "mkdir", mock_mkdir)
+
+    with pytest.raises(fs_browse.CreateFailed):
+        fs_browse.make_dir(str(root), "no-room")
+
+
+def test_mkdir_permission_error_is_not_swallowed_by_create_failed(root, monkeypatch):
+    """PermissionError is an OSError subclass; the CreateFailed fallback must
+    not catch it, so it stays a bare PermissionError and the HTTP layer's
+    existing PermissionError -> 403 mapping still fires."""
+    def mock_mkdir(self, *args, **kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "mkdir", mock_mkdir)
+
+    with pytest.raises(PermissionError):
+        fs_browse.make_dir(str(root), "no-access")

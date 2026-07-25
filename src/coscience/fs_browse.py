@@ -33,6 +33,12 @@ class AlreadyExists(BrowseError):
     """A folder of that name is already there."""
 
 
+class CreateFailed(BrowseError):
+    """`mkdir` failed for a reason other than the target already existing
+    (e.g. read-only filesystem, disk full) — not the client's fault to
+    diagnose, but must not escape as an unmapped 500."""
+
+
 def roots() -> list[Path]:
     """The directories browsing is confined to, from COSCIENCE_BROWSE_ROOTS
     (colon-separated, `~` expanded); defaults to the server user's home.
@@ -63,16 +69,23 @@ def _checked(path: str) -> Path:
 
     `resolve()` follows symlinks BEFORE the check, so a link pointing outside
     the roots is rejected rather than followed. A pathological input (e.g. a
-    null byte) makes `resolve()` raise a raw ValueError/OSError; that's not a
-    BrowseError, so it's converted to NotFound here rather than left to
-    escape past the module's exception contract.
+    null byte) makes `resolve()` raise a raw ValueError/OSError, and a symlink
+    loop raises RuntimeError; none of those are a BrowseError, so they're
+    converted to NotFound here rather than left to escape past the module's
+    exception contract.
+
+    No `~` expansion here: this is request input, not configuration (that's
+    `roots()`, which expands `~` itself), and expanding it would let an
+    unauthenticated caller use `?path=~someuser` to enumerate accounts via
+    the 403 body — or `?path=~nosuchuser` to fall through to a literal
+    `./~nosuchuser` relative to the server's CWD, leaking it.
     """
     try:
-        p = Path(os.path.expanduser(str(path))).resolve()
-    except (OSError, ValueError):
+        p = Path(str(path)).resolve()
+    except (OSError, ValueError, RuntimeError):
         raise NotFound(str(path))
     if not _inside(p, roots()):
-        raise OutsideRoots(str(p))
+        raise OutsideRoots(str(path))
     return p
 
 
@@ -117,6 +130,8 @@ def make_dir(parent: str, name: str) -> dict:
     clean = str(name or "").strip()
     if clean in ("", ".", "..") or "/" in clean or "\0" in clean:
         raise InvalidName(str(name))
+    if len(clean.encode("utf-8")) > 255:
+        raise InvalidName(str(name))
 
     base = _checked(parent)
     if not base.is_dir():
@@ -127,4 +142,11 @@ def make_dir(parent: str, name: str) -> dict:
         target.mkdir()
     except FileExistsError:
         raise AlreadyExists(str(target))
+    except PermissionError:
+        raise
+    except OSError as exc:
+        # ENAMETOOLONG (belt-and-braces past the check above), EROFS, ENOSPC,
+        # ... : a real filesystem failure, not one of the cases above. Must
+        # not escape as an unmapped 500.
+        raise CreateFailed(exc.strerror or str(exc)) from exc
     return {"path": str(target)}

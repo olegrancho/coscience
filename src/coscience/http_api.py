@@ -614,8 +614,11 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def browse_dirs(path: str | None = Query(default=None)) -> dict:
         try:
             return fs_browse.list_dirs(path)
-        except fs_browse.OutsideRoots as exc:
-            raise HTTPException(status_code=403, detail=f"outside the allowed roots: {exc}")
+        except fs_browse.OutsideRoots:
+            # Constant detail: the exception carries the requested path, and
+            # echoing it (or a resolved path) back to an unauthenticated LAN
+            # caller is an enumeration/leak primitive, not useful detail.
+            raise HTTPException(status_code=403, detail="outside the allowed roots")
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=f"permission denied: {exc}")
         except fs_browse.NotFound as exc:
@@ -629,12 +632,14 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=400, detail=f"invalid folder name: {exc}")
         except fs_browse.AlreadyExists as exc:
             raise HTTPException(status_code=409, detail=f"already exists: {exc}")
-        except fs_browse.OutsideRoots as exc:
-            raise HTTPException(status_code=403, detail=f"outside the allowed roots: {exc}")
+        except fs_browse.OutsideRoots:
+            raise HTTPException(status_code=403, detail="outside the allowed roots")
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=f"permission denied: {exc}")
         except fs_browse.NotFound as exc:
             raise HTTPException(status_code=404, detail=f"not a directory: {exc}")
+        except fs_browse.CreateFailed as exc:
+            raise HTTPException(status_code=400, detail=f"could not create the folder: {exc}")
 
     @api.get("/programs")
     def list_programs(status: str | None = Query(default=None)) -> list[dict]:
