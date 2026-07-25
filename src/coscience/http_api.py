@@ -619,10 +619,10 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             # echoing it (or a resolved path) back to an unauthenticated LAN
             # caller is an enumeration/leak primitive, not useful detail.
             raise HTTPException(status_code=403, detail="outside the allowed roots")
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=f"permission denied: {exc}")
-        except fs_browse.NotFound as exc:
-            raise HTTPException(status_code=404, detail=f"not a directory: {exc}")
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="permission denied")
+        except fs_browse.NotFound:
+            raise HTTPException(status_code=404, detail="not a directory")
 
     @api.post("/fs/dirs", status_code=201)
     def create_dir(body: DirCreateIn) -> dict:
@@ -634,10 +634,10 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=409, detail=f"already exists: {exc}")
         except fs_browse.OutsideRoots:
             raise HTTPException(status_code=403, detail="outside the allowed roots")
-        except PermissionError as exc:
-            raise HTTPException(status_code=403, detail=f"permission denied: {exc}")
-        except fs_browse.NotFound as exc:
-            raise HTTPException(status_code=404, detail=f"not a directory: {exc}")
+        except PermissionError:
+            raise HTTPException(status_code=403, detail="permission denied")
+        except fs_browse.NotFound:
+            raise HTTPException(status_code=404, detail="not a directory")
         except fs_browse.CreateFailed as exc:
             raise HTTPException(status_code=400, detail=f"could not create the folder: {exc}")
 
