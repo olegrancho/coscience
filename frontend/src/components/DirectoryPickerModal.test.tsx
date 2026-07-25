@@ -80,4 +80,39 @@ describe("DirectoryPickerModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
     await waitFor(() => expect(api.createDir).toHaveBeenCalledWith("/home/oleg", "fresh"));
   });
+
+  it("falls back to the root listing when initialPath is unusable", async () => {
+    vi.mocked(api.listDirs).mockImplementation(async (p?: string | null) => {
+      if (p === "/home/oleg/gone") throw new Error("not found");
+      return listing("/home/oleg", ["sync"]);
+    });
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <DirectoryPickerModal opened initialPath="/home/oleg/gone" onClose={() => {}} onPick={() => {}} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+    await waitFor(() => expect(api.listDirs).toHaveBeenCalledWith("/home/oleg/gone"));
+    await waitFor(() => expect(api.listDirs).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(screen.getByRole("button", { name: /sync/ })).toBeTruthy());
+  });
+
+  it("shows a newly created folder after the listing refetches", async () => {
+    let created = false;
+    vi.mocked(api.listDirs).mockImplementation(async (p?: string | null) =>
+      p === "/home/oleg/sync"
+        ? listing("/home/oleg/sync", ["bmt-share"], "/home/oleg")
+        : listing("/home/oleg", created ? ["sync", "fresh"] : ["sync"]));
+    vi.mocked(api.createDir).mockResolvedValue({ path: "/home/oleg/fresh" });
+    renderPicker();
+    await screen.findByRole("button", { name: /sync/ });
+    expect(screen.queryByRole("button", { name: /fresh/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /new folder/i }));
+    fireEvent.change(screen.getByLabelText("new folder name"), { target: { value: "fresh" } });
+    created = true;
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /fresh/ })).toBeTruthy());
+  });
 });
