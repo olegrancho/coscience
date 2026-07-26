@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from coscience import auth, fs_browse
+from coscience import artifacts, auth, fs_browse
 from coscience.service import NotFoundError, Service, service_from_env
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -55,6 +55,16 @@ class SprintSubmit(BaseModel):
     resources_required: dict[str, float] | None = None
     artifacts_bound: list[str] | None = None
     artifacts_create: list[dict] | None = None
+
+
+class ArtifactAdoptIn(BaseModel):
+    aid: str
+    title: str = ""
+    kind: str = "md"
+    files: list[str] = Field(default_factory=list)   # paths inside the program's workdir
+    content: str = ""                                # inline alternative to files
+    filename: str = ""
+    note: str = ""
 
 
 class ArtifactRevertIn(BaseModel):
@@ -528,6 +538,21 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             "style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:")
         resp.headers["X-Content-Type-Options"] = "nosniff"
         return resp
+
+    @api.post("/programs/{program_id}/artifacts", status_code=201)
+    def adopt_artifact(program_id: str, body: ArtifactAdoptIn,
+                       user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.adopt_artifact(
+                program_id, body.aid, title=body.title, kind=body.kind,
+                files=body.files, content=body.content, filename=body.filename,
+                note=body.note, by=(user.username if user else ""))
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except artifacts.ArtifactBusy as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     @api.post("/programs/{program_id}/artifacts/{aid}/revert")
     def revert_artifact(program_id: str, aid: str, body: ArtifactRevertIn,

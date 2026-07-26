@@ -11,7 +11,7 @@ import re
 import time
 from dataclasses import dataclass
 
-from coscience import graph, threads, usage_meter
+from coscience import artifacts, graph, threads, usage_meter
 from coscience.models import Sprint, SprintStatus, Idea, set_status
 from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
 
@@ -258,6 +258,7 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
         "thread_replies": list(output.thread_replies),
         "edge_ops": list(output.edge_ops),
         "artifact_tasks": list(output.artifact_tasks),
+        "adopt_artifacts": list(output.adopt_artifacts),
         "proposals": [
             {"suffix": p.suffix, "goals": p.goals, "plan": p.plan,
              "priority": p.priority, "resources_required": p.resources_required,
@@ -288,6 +289,7 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         thread_replies=list(data.get("thread_replies", [])),
         edge_ops=list(data.get("edge_ops", [])),
         artifact_tasks=list(data.get("artifact_tasks", [])),
+        adopt_artifacts=list(data.get("adopt_artifacts", [])),
         proposals=[ProposedSprint(**p) for p in data.get("proposals", [])],
     )
     return StagedCycle(cycle=int(data["cycle"]), output=output,
@@ -541,6 +543,33 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         if sid not in pm.proposed_ids:
             submitted.append(sid)
 
+    # --- adoption: output that already exists becomes an artifact right now ---
+    # The lightweight counterpart to artifact_tasks above: no sprint, no cap slot,
+    # no compute grant. Sources resolve against the program's workdir (the same
+    # tree the PM's session explored) and may not escape it. One bad entry — a
+    # path outside the tree, an artifact another holder is editing — is skipped,
+    # never fatal: the rest of the cycle still applies.
+    adopted: list[str] = []
+    base = _resolve_workdir(substrate, substrate.load_program(program_id).workdir)
+    for spec in staged.output.adopt_artifacts:
+        if not isinstance(spec, dict):
+            continue
+        aid = str(spec.get("aid") or "").strip()
+        if not aid:
+            continue
+        try:
+            sources = artifacts.resolve_sources(base, [str(f) for f in spec.get("files", [])])
+            artifacts.adopt(
+                substrate, program_id, aid,
+                title=str(spec.get("title") or aid), kind=str(spec.get("kind") or "md"),
+                now=now_ts, created_by=f"pm:{program_id}", sources=sources,
+                content=str(spec.get("content") or ""),
+                filename=str(spec.get("filename") or ""),
+                note=str(spec.get("note") or ""))
+        except (ValueError, OSError, artifacts.ArtifactBusy):
+            continue
+        adopted.append(aid)
+
     # --- idea pool: prune, add, re-rank, and re-summarise (protection enforced here) ---
     # Protection is pinned-only: the PM may prune ANY idea that is not pinned. Human,
     # commented, and demoted ideas are auto-pinned when created, so they're protected
@@ -737,5 +766,5 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     return {"program": program_id, "cycle": cycle, "submitted": submitted,
             "proposed": proposed, "dropped": dropped, "skipped": False,
             "ideas_added": ideas_added, "ideas_removed": ideas_removed,
-            "pool_size": len(ideas_by_id),
+            "pool_size": len(ideas_by_id), "adopted": adopted,
             "edges_added": edges_added, "edges_removed": edges_removed}

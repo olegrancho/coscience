@@ -1131,6 +1131,25 @@ class Service:
             })
         return out
 
+    def adopt_artifact(self, program_id: str, aid: str, title: str = "", kind: str = "md",
+                       files: list | None = None, content: str = "", filename: str = "",
+                       note: str = "", by: str = "") -> dict:
+        """Register output that already exists as an artifact (new, or a new version
+        of an existing one) and snapshot it — no sprint, no compute grant. `files`
+        resolve against the program's workdir and may not escape it, the same rule
+        the PM's own adoption follows."""
+        from coscience import artifacts
+        from coscience.pm_agent import _resolve_workdir
+        self._require_program(program_id)
+        base = _resolve_workdir(self.substrate, self.substrate.load_program(program_id).workdir)
+        sources = artifacts.resolve_sources(base, [str(f) for f in (files or [])])
+        vid = artifacts.adopt(self.substrate, program_id, aid, title=title, kind=kind,
+                              now=time.time(), created_by=by or "human",
+                              sources=sources, content=content, filename=filename,
+                              note=note)
+        self.substrate.commit(f"artifact {program_id}/{aid}: adopted {vid or '(no change)'}")
+        return self.get_artifact(program_id, aid)
+
     def get_artifact(self, program_id: str, aid: str) -> dict:
         from coscience import threads as _th
         if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():

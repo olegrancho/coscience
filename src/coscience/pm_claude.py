@@ -144,9 +144,10 @@ ARTIFACTS (the program's deliverables — reports, data, figures, pages — that
 {artifacts_block}
 
 HUMAN FEEDBACK ADDRESSED TO YOU about specific artifacts — same thread_replies mechanism.
-For each open thread: decide the right action and, when it needs work on the artifact,
-emit an artifact_task (below) that proposes a sprint to do it; then add a thread_replies
-entry with that artifact thread's id saying what you proposed (or why not).
+For each open thread: decide the right action and, when it needs work on the artifact, do
+it the cheap way if the output already exists (adopt_artifacts, applied immediately) or
+emit an artifact_task proposing a sprint if it must be computed (both below); then add a
+thread_replies entry with that artifact thread's id saying what you did (or why not).
 ARTIFACT FEEDBACK:
 {artifact_feedback_block}
 
@@ -209,6 +210,18 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
       "create": [{{"title": "<new artifact to create>", "kind": "md|data|figure|page"}}],
       "instructions": "<what the sprint should do to the artifact(s) — becomes the sprint's goals>"}}
   ],
+  "adopt_artifacts": [
+    {{"aid": "<short-slug id for the artifact — reuse an existing id to add a new version to it>",
+      "title": "<what it is, for a human scanning the artifact list>",
+      "kind": "md|data|figure|page",
+      "files": ["<path, relative to YOUR working directory, of output that ALREADY EXISTS
+                 and should become this artifact — a file, or a directory whose contents
+                 are taken. Must be inside your working directory.>", "..."],
+      "content": "<INSTEAD of files: literal text to write as the artifact (use for a stub
+                   you are creating from nothing). Put real newlines in as \\n.>",
+      "filename": "<optional name for the `content` file; default <aid>.md>",
+      "note": "<optional one line on what this version is>"}}
+  ],
   "proposals": [
     {{"suffix": "<short-slug>",
       "title": "<=8 words naming the experiment, e.g. 'Cross-validate the witness pair'>",
@@ -240,11 +253,22 @@ Run the program by curating ideas, not by piling on sprints:
   (release_ids) the approved sprint(s) that should run next and hold the rest until their
   prerequisites/prior results are in; use priority to order what's pending. Don't leave
   authorized work sitting idle with no reason — if it's ready and useful, release it.
-- ARTIFACTS: when a human comment asks for work on an artifact, or asks for a new
-  artifact, propose it as an artifact_task (it becomes a PROPOSED sprint bound to
-  that artifact — humans approve it like any sprint; it counts against the cap). Bind
-  existing artifacts with artifact_ids; declare new ones in create. Do NOT try to edit
-  artifacts yourself — you only propose.
+- ARTIFACTS are the program's deliverables — the durable output a reader actually wants
+  (reports, datasets, figures, pages). Curate them the way you curate sprints and ideas:
+  on your own initiative, not only when a human asks. If the program has produced
+  something worth keeping and it is not an artifact yet, make it one. Two routes, and
+  picking the right one matters:
+  * ADOPT (adopt_artifacts) — for output that ALREADY EXISTS. It lands immediately: no
+    sprint, no human approval, no compute, and it does NOT touch the sprint cap. Use it
+    to promote a finished file your working directory already holds (a report a completed
+    sprint wrote, a dataset it left behind), or to stand up a stub with `content` that a
+    later sprint fills in. Adopting the same aid again adds a new version — the old one is
+    kept, so this is safe and reversible. Prefer this whenever the work is already done.
+  * ARTIFACT_TASK (artifact_tasks) — for output that still has to be COMPUTED. It becomes
+    a PROPOSED sprint bound to the artifact; a human approves it like any sprint and it
+    COUNTS AGAINST THE CAP. Bind existing artifacts with artifact_ids; declare new ones in
+    create. Do not spend a cap slot on work that is really just filing an existing file —
+    that is what adopt is for.
   If the request is to make an ALREADY-PROPOSED sprint deliver its output as an artifact
   (e.g. "have this sprint produce a program-report artifact"), do NOT emit a duplicate
   artifact_task — instead add artifacts_bound/artifacts_create to that sprint via
@@ -320,6 +344,8 @@ def parse_response(text: str) -> PMCycleOutput:
         edge_ops=[dict(o) for o in data.get("edge_ops", [])
                   if isinstance(o, dict) and o.get("op") and o.get("type")],
         artifact_tasks=[dict(t) for t in data.get("artifact_tasks", []) if isinstance(t, dict)],
+        adopt_artifacts=[dict(a) for a in data.get("adopt_artifacts", [])
+                         if isinstance(a, dict) and a.get("aid")],
     )
 
 

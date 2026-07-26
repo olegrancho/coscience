@@ -5,6 +5,7 @@ import argparse
 import time
 from pathlib import Path
 
+from coscience import artifacts
 from coscience.claude_executor import ClaudeAgent
 from coscience.dispatcher import CycleReport, Dispatcher
 from coscience.loop_status import LoopStatus
@@ -91,6 +92,19 @@ def main(argv: list[str] | None = None) -> int:
     pgc.add_argument("--workdir", default="",
                      help="project folder this program's agents run in (default: the control repo)")
 
+    art = sub.add_parser("artifact", help="manage a program's deliverables")
+    artsub = art.add_subparsers(dest="artifact_command", required=True)
+    arta = artsub.add_parser(
+        "add", help="adopt existing output as an artifact (no sprint, no approval)")
+    arta.add_argument("--repo", required=True, type=Path)
+    arta.add_argument("--program", required=True)
+    arta.add_argument("--id", required=True, help="artifact id (reuse one to add a version)")
+    arta.add_argument("--title", default="")
+    arta.add_argument("--kind", default="md", choices=["md", "data", "figure", "page"])
+    arta.add_argument("--note", default="", help="one line on what this version is")
+    arta.add_argument("files", nargs="+", type=Path,
+                      help="files/directories to adopt (a directory's contents are taken)")
+
     pm = sub.add_parser("pm", help="run the PM agent: propose sprints for active programs")
     pm.add_argument("--repo", required=True, type=Path)
     pmmode = pm.add_mutually_exclusive_group()
@@ -107,6 +121,20 @@ def main(argv: list[str] | None = None) -> int:
                 Program(id=args.id, title=args.title, goals=args.goals,
                         workdir=args.workdir))
             print(args.id)
+            return 0
+
+    if args.command == "artifact":
+        if args.artifact_command == "add":
+            # A human at a shell may adopt from anywhere they can read (unlike an
+            # agent, whose sources are confined to the program's workdir).
+            substrate = Substrate(args.repo)
+            sources = artifacts.resolve_sources(Path.cwd(), args.files, restrict=False)
+            vid = artifacts.adopt(substrate, args.program, args.id,
+                                  title=args.title or args.id, kind=args.kind,
+                                  now=time.time(), created_by="cli",
+                                  sources=sources, note=args.note)
+            substrate.commit(f"artifact {args.program}/{args.id}: adopted {vid or '(no change)'}")
+            print(f"{args.program}/{args.id} {vid or 'unchanged'}")
             return 0
 
     if args.command == "worker":

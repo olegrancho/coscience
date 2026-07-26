@@ -1,7 +1,8 @@
 """Operations on the versioned artifact store: create, cut a version (with the
-dedup rule), seed/snapshot the `work/` copy, revert, archive, and the exclusive
-lock (acquire/release + stale reap). All filesystem + tree logic lives here so
-substrate.py stays a thin persistence seam. Substrate holds meta.md I/O."""
+dedup rule), seed/snapshot the `work/` copy, adopt existing output, revert,
+archive, and the exclusive lock (acquire/release + stale reap). All filesystem +
+tree logic lives here so substrate.py stays a thin persistence seam. Substrate
+holds meta.md I/O."""
 from __future__ import annotations
 
 import fcntl
@@ -10,6 +11,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from coscience.models import Artifact, ArtifactVersion
+
+
+class ArtifactBusy(RuntimeError):
+    """The artifact is locked by another holder (a running sprint or open chat)."""
 
 
 def create_artifact(substrate, program_id: str, aid: str, title: str,
@@ -94,6 +99,74 @@ def cut_version_for(substrate, program_id: str, aid: str, holder_id: str,
         if substrate.load_artifact(program_id, aid).lock.get("holder_id") != holder_id:
             return None
         return cut_version(substrate, program_id, aid, holder_id, now, note)
+
+
+# --- adoption: turn output that already exists into an artifact, in one call ---
+def resolve_sources(base, names, restrict: bool = True) -> list[Path]:
+    """Resolve caller-supplied source names against `base`. With `restrict` (the
+    default, used for anything an agent names) every path must land inside `base`
+    after symlink resolution, so a program's agent cannot adopt another program's
+    files. Raises ValueError on an escape or a path that does not exist."""
+    base = Path(base).resolve()
+    out: list[Path] = []
+    for name in names:
+        p = Path(name)
+        p = (p if p.is_absolute() else base / p).resolve()
+        if restrict and p != base and base not in p.parents:
+            raise ValueError(f"source outside the working directory: {name}")
+        if not p.exists():
+            raise ValueError(f"no such file or directory: {name}")
+        out.append(p)
+    return out
+
+
+def _copy_into(work: Path, src: Path) -> None:
+    """A file lands at work/<name>; a directory's CONTENTS land at work/ so a
+    `page` artifact's index.html ends up at the top level where it is served."""
+    if src.is_dir():
+        shutil.copytree(src, work, dirs_exist_ok=True)
+    else:
+        shutil.copy2(src, work / src.name)
+
+
+def adopt(substrate, program_id: str, aid: str, title: str, kind: str, now: float,
+          created_by: str, sources=None, content: str = "", filename: str = "",
+          note: str = "") -> str | None:
+    """Register existing output as an artifact and snapshot it, in one step:
+    create the artifact if new, lay the sources (and/or `content`) over a copy of
+    the current version, cut the next version, and leave nothing locked.
+
+    This is the lightweight path — no sprint, no compute grant, no approval. Use
+    it to promote work that is already done; a sprint's `artifacts_create` remains
+    the path for output a worker still has to compute.
+
+    Returns the new version id, or None when the result is byte-identical to the
+    current version (the dedup rule). Raises ArtifactBusy if another holder — a
+    running sprint or an open chat — has the artifact locked."""
+    aid = str(aid).strip()
+    if not aid:
+        raise ValueError("aid is required")
+    sources = list(sources or [])
+    if not sources and not content:
+        raise ValueError("adopt needs sources or content")
+    with _lock_guard(substrate):
+        d = substrate.artifact_dir(program_id, aid)
+        if (d / "meta.md").is_file():
+            held = substrate.load_artifact(program_id, aid).lock.get("holder_id")
+            if held and held != created_by:
+                raise ArtifactBusy(f"artifact {aid!r} is held by {held}")
+        else:
+            create_artifact(substrate, program_id, aid, title or aid, kind or "md")
+        # Layer over the current version rather than replacing it, so adopting one
+        # file into an existing artifact adds to it instead of truncating it.
+        work = seed_work(substrate, program_id, aid)
+        for src in sources:
+            _copy_into(work, Path(src))
+        if content:
+            (work / (filename or f"{aid}.md")).write_text(content)
+        vid = cut_version(substrate, program_id, aid, created_by, now, note=note)
+        shutil.rmtree(work, ignore_errors=True)
+        return vid
 
 
 def revert(substrate, program_id: str, aid: str, vid: str) -> None:

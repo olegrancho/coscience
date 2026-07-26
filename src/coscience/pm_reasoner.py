@@ -80,6 +80,7 @@ class PMCycleOutput:
     thread_replies: list[dict] = field(default_factory=list)  # [{thread_id, text}] PM answers to open feedback threads
     edge_ops: list[dict] = field(default_factory=list)  # [{op:"add"|"delete", type, src, dst, rationale, confidence?, evidence?}]
     artifact_tasks: list[dict] = field(default_factory=list)  # [{suffix, artifact_ids, create:[{title,kind}], instructions}]
+    adopt_artifacts: list[dict] = field(default_factory=list)  # [{aid, title, kind, files:[...], content, filename, note}]
 
 
 class Reasoner(Protocol):
