@@ -11,7 +11,13 @@ from coscience.pm_agent import pm_beat
 def pm_run_once(substrate, reasoner, usage_ok=None) -> list[dict]:
     summaries = []
     for program in substrate.iter_programs(status=ProgramStatus.ACTIVE):
-        summaries.append(pm_beat(substrate, program.id, reasoner, usage_ok=usage_ok))
+        # One program's beat must not abort the pass: a raise here used to unwind to
+        # the loop's handler, so every program sorted after the broken one never beat.
+        try:
+            summaries.append(pm_beat(substrate, program.id, reasoner, usage_ok=usage_ok))
+        except Exception as exc:
+            summaries.append({"program": program.id, "error": f"{exc}"[:200],
+                              "submitted": [], "proposed": [], "skipped": True})
     return summaries
 
 

@@ -361,12 +361,16 @@ class ClaudeCodeReasoner:
     def _default_invoke(self, prompt: str, model: str = "", cwd: str = "") -> str:
         # --output-format json gives us the reply text plus cost/token usage in one
         # envelope; we unwrap `result` and stash the cost for the dashboard.
-        cmd = [self.claude_bin, "-p", prompt, "--output-format", "json"]
+        cmd = [self.claude_bin, "-p", "--output-format", "json"]
         if model:
             cmd += ["--model", model]
+        # Prompt goes on STDIN, never as an argv element: Linux caps a single argv
+        # string at MAX_ARG_STRLEN (128 KiB) and a busy program's context blows past
+        # it, which made execve fail with E2BIG on every beat.
         # Run in the program's workdir so the tool-enabled session explores that
         # tree, not whatever cwd the loop process happened to launch from.
-        proc = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd or None)
+        proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
+                              cwd=cwd or None)
         if proc.returncode != 0:
             raise PMReasonerError(
                 f"claude exited {proc.returncode}: {(proc.stderr or '')[:200]}")
@@ -441,10 +445,13 @@ def chat_reply(context: PMContext, history: list[dict], message: str,
                claude_bin: str = "claude") -> str:
     """Shell the `claude` binary for one conversational PM reply (plain text)."""
     prompt = render_chat_prompt(context, history, message)
-    cmd = [claude_bin, "-p", prompt, "--output-format", "text"]
+    cmd = [claude_bin, "-p", "--output-format", "text"]
     if context.model:
         cmd += ["--model", context.model]
-    proc = subprocess.run(cmd, capture_output=True, text=True, cwd=context.workdir or None)
+    # Prompt on STDIN — see _default_invoke: as an argv element it trips E2BIG once
+    # the program's context passes 128 KiB.
+    proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
+                          cwd=context.workdir or None)
     if proc.returncode != 0:
         raise PMReasonerError(f"claude exited {proc.returncode}: {(proc.stderr or '')[:200]}")
     return (proc.stdout or "").strip()

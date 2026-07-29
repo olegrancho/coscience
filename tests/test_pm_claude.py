@@ -1,8 +1,9 @@
 import json
+import stat
 
 import pytest
 
-from coscience.pm_claude import (ClaudeCodeReasoner, PMReasonerError,
+from coscience.pm_claude import (ClaudeCodeReasoner, PMReasonerError, chat_reply,
                                  parse_response, render_prompt)
 from coscience.pm_reasoner import PMContext
 
@@ -170,6 +171,37 @@ def test_chat_reply_runs_in_workdir(monkeypatch):
 
 def test_render_prompt_notes_working_directory():
     assert "working directory" in render_prompt(_ctx())
+
+
+# Linux caps a SINGLE argv string at MAX_ARG_STRLEN (32 pages = 128 KiB), regardless
+# of the much larger total ARG_MAX. A busy program's PM prompt goes past that, and
+# passing it as `claude -p <prompt>` made execve fail with E2BIG ("Argument list too
+# long") on every beat. The prompt must travel on stdin instead.
+_OVER_MAX_ARG_STRLEN = 200_000
+
+
+def _stdin_counting_claude(tmp_path):
+    """A stand-in `claude` that reports how many bytes it received on stdin."""
+    fake = tmp_path / "claude"
+    fake.write_text('#!/usr/bin/env bash\nn=$(wc -c | tr -d " ")\n'
+                    'printf \'{"result":"%s","usage":{}}\' "$n"\n')
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    return fake
+
+
+def test_default_invoke_passes_a_prompt_over_the_argv_limit_on_stdin(tmp_path):
+    fake = _stdin_counting_claude(tmp_path)
+    prompt = "x" * _OVER_MAX_ARG_STRLEN
+    out = ClaudeCodeReasoner(claude_bin=str(fake))._default_invoke(prompt)
+    assert out == str(_OVER_MAX_ARG_STRLEN)
+
+
+def test_chat_reply_passes_a_prompt_over_the_argv_limit_on_stdin(tmp_path):
+    fake = _stdin_counting_claude(tmp_path)
+    ctx = _ctx()
+    ctx.goals = "g" * _OVER_MAX_ARG_STRLEN          # blows past the single-arg cap
+    reply = chat_reply(ctx, [], "hi?", claude_bin=str(fake))
+    assert int(json.loads(reply)["result"]) > _OVER_MAX_ARG_STRLEN
 
 
 def test_render_prompt_includes_guidance():

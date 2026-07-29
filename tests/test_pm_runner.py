@@ -33,6 +33,30 @@ def test_pm_throttles_instead_of_calling_when_usage_exhausted(substrate):
     assert len(fake.calls) == 1
 
 
+def test_one_failing_program_does_not_starve_the_others(substrate):
+    # A program whose beat raises (e.g. its prompt tripped an exec limit) used to
+    # unwind the whole pass, so every program sorted after it never beat at all.
+    substrate.save_program(Program(id="a-broken", title="A", goals="x"))
+    substrate.save_program(Program(id="b-fine", title="B", goals="y"))
+
+    class _ExplodesOnFirstProgram:
+        def __init__(self):
+            self.seen = []
+
+        def run(self, context):
+            self.seen.append(context.program_id)
+            if context.program_id == "a-broken":
+                raise OSError(7, "Argument list too long", "claude")
+            return _out("z")
+
+    reasoner = _ExplodesOnFirstProgram()
+    summaries = pm_run_once(substrate, reasoner)
+    assert reasoner.seen == ["a-broken", "b-fine"]           # kept going
+    assert substrate.load_sprint("b-fine-c0-z").program == "b-fine"
+    broken = [s for s in summaries if s["program"] == "a-broken"]
+    assert "Argument list too long" in broken[0]["error"]
+
+
 def test_pm_loop_runs_max_rounds_with_injected_sleep(substrate):
     substrate.save_program(Program(id="a", title="A", goals="x"))
     fake = FakeReasoner([_out("p"), _out("q")])
