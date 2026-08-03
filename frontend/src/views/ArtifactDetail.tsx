@@ -2,12 +2,12 @@ import { ActionIcon, Badge, Button, Card, Group, Loader, Stack, Text, Textarea, 
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { FeedbackThread } from "../components/FeedbackThread";
 import { api } from "../api";
 import { buildArtifactTree, type TreeRow } from "../components/artifactTree";
-import { BackLink, EmptyState, RelTime, StatusBadge, isImageName } from "../components/ui";
+import { BackLink, EmptyState, RelTime, StatusBadge, isImageName, liveChatId } from "../components/ui";
 import { UserChip } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -140,7 +140,9 @@ export default function ArtifactDetail() {
   });
   const openChat = useMutation({
     mutationFn: () => api.createChat(id, `Edit ${artifact.data?.title || aid}`, [aid]),
-    onSuccess: (t) => navigate(`/programs/${id}/chat?c=${t.id}`),
+    // replace: this page redirects to the chat from here on, so leaving it in
+    // history would just swallow the first back press.
+    onSuccess: (t) => navigate(`/programs/${id}/chat?c=${t.id}`, { replace: true }),
     onError: (e) => notifications.show({ color: "red", title: "Couldn't open chat", message: String(e) }),
   });
   const addComment = async () => {
@@ -174,6 +176,13 @@ export default function ArtifactDetail() {
     return <EmptyState title="Artifact not found">Nothing here at “{aid}”. It may have been removed.</EmptyState>;
   }
   const art = artifact.data;
+
+  // While a chat holds the artifact, the chat IS the artifact's page — it carries
+  // the live working copy. Every link in the app routes through here, so this one
+  // guard covers the program card, sprint links, bookmarks and the back button.
+  const chat = liveChatId(art.lock);
+  if (chat) return <Navigate to={`/programs/${id}/chat?c=${chat}`} replace />;
+
   const rows = buildArtifactTree(art.versions, art.current);
 
   const discard = () => {

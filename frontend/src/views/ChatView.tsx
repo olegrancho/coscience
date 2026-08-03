@@ -2,7 +2,7 @@ import { ActionIcon, Badge, Button, Card, Group, Loader, Menu, SegmentedControl,
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
 import { api, type ChatScope } from "../api";
@@ -310,8 +310,9 @@ export default function ChatView() {
                       <Text size="xs" c="dimmed" style={{ whiteSpace: "nowrap" }}>🔒 bound</Text>
                     </Tooltip>
                   </Group>
+                  {/* No "full view" link: while this chat holds the artifact, its
+                      page redirects right back here. Release frees it. */}
                   <Group gap={10} wrap="nowrap">
-                    <Link to={`/programs/${id}/artifacts/${aid}`} className="view" style={{ whiteSpace: "nowrap" }}>full view →</Link>
                     <Button
                       size="xs" color="green" variant="light" loading={saveVersion.isPending} disabled={busy}
                       onClick={() => saveVersion.mutate()}
@@ -335,10 +336,7 @@ export default function ChatView() {
                          alt={imgName} style={{ maxWidth: "100%" }} />
                   </div>
                 ) : !workName || workfile.data?.binary ? (
-                  <Stack gap={6}>
-                    <Text size="sm" c="dimmed">Nothing to preview yet — ask the planner to create the file, or save a version.</Text>
-                    <Link to={`/programs/${id}/artifacts/${aid}`} className="view">open artifact</Link>
-                  </Stack>
+                  <Text size="sm" c="dimmed">Nothing to preview yet — ask the planner to create the file, or save a version.</Text>
                 ) : workfile.isLoading ? (
                   <Loader size="sm" color="machine" />
                 ) : (

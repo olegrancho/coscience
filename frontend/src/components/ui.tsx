@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { Stack, Text, Tooltip } from "@mantine/core";
 import { Link } from "react-router-dom";
-import type { RunAgg, SprintActivity, Usage, VoteTally } from "../api";
+import type { ArtifactLock, RunAgg, SprintActivity, Usage, VoteTally } from "../api";
 import { SPRINT_STATE_ORDER, statusVar } from "./status";
 
 /** A stable per-browser id so 👍/👎 counts reflect distinct people without auth.
@@ -284,6 +284,12 @@ function RunStat({ label, agg }: { label: string; agg: RunAgg }) {
  *  place: the chat, the artifact page, the sprint documents and the overview
  *  thumbnails all have to agree on what counts as showable. */
 export const isImageName = (n: string) => /\.(png|jpe?g|gif|svg|webp)$/i.test(n);
+
+/** The id of the chat editing this artifact right now, or "" if none. A chat
+ *  holds the lock as "chat:<tid>" from "Open chat" until Release — that whole
+ *  window, the artifact lives in the chat, so links point there instead. */
+export const liveChatId = (lock: ArtifactLock | undefined): string =>
+  lock?.holder_kind === "chat" ? (lock.holder_id ?? "").replace(/^chat:/, "") : "";
 
 /** The Claude models a sprint worker / PM reasoner can run on. Always explicit —
  *  the backend resolves a stored "" to DEFAULT_MODEL, so there is no "default" to pick. */

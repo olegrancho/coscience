@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import ArtifactDetail from "./ArtifactDetail";
 import { api } from "../api";
 
@@ -13,13 +13,22 @@ beforeEach(() => {
   })) as any;
 });
 
+/** Stands in for the chat view so a redirect is observable, `?c=` and all. */
+function ChatStub() {
+  const [sp] = useSearchParams();
+  return <div>chat page c={sp.get("c")}</div>;
+}
+
 function renderAt() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
       <MantineProvider>
         <MemoryRouter initialEntries={["/programs/p/artifacts/doc"]}>
-          <Routes><Route path="/programs/:id/artifacts/:aid" element={<ArtifactDetail />} /></Routes>
+          <Routes>
+            <Route path="/programs/:id/artifacts/:aid" element={<ArtifactDetail />} />
+            <Route path="/programs/:id/chat" element={<ChatStub />} />
+          </Routes>
         </MemoryRouter>
       </MantineProvider>
     </QueryClientProvider>);
@@ -64,6 +73,26 @@ describe("ArtifactDetail", () => {
     renderAt();
     await waitFor(() => expect(screen.getByText("tighten intro")).toBeTruthy());
     expect(screen.getByText(/p-c1-x/)).toBeTruthy();
+  });
+
+  it("redirects to the chat editing it, and stays put for a sprint lock", async () => {
+    vi.spyOn(api, "getArtifact").mockResolvedValue({
+      id: "doc", program: "p", title: "Doc", kind: "md", current: "", archived: false,
+      lock: { holder_kind: "chat", holder_id: "chat:ab12" }, current_files: [],
+      linked_sprints: [], threads: [], versions: [],
+    } as any);
+    const { unmount } = renderAt();
+    await waitFor(() => expect(screen.getByText(/chat page c=ab12/)).toBeTruthy());
+    unmount();
+
+    vi.spyOn(api, "getArtifact").mockResolvedValue({
+      id: "doc", program: "p", title: "Doc", kind: "md", current: "", archived: false,
+      lock: { holder_kind: "sprint", holder_id: "s1" }, current_files: [],
+      linked_sprints: [], threads: [], versions: [],
+    } as any);
+    renderAt();
+    await waitFor(() => expect(screen.getByText("Doc")).toBeTruthy());
+    expect(screen.queryByText(/chat page/)).toBeNull();
   });
 
   it("shows an Open chat action", async () => {

@@ -8,7 +8,7 @@ import Md from "../components/Md";
 import { FeedbackThread } from "../components/FeedbackThread";
 import DirectoryPickerModal from "../components/DirectoryPickerModal";
 import { api } from "../api";
-import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl, isImageName } from "../components/ui";
+import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl, isImageName, liveChatId } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
 import LineageCard from "../components/LineageCard";
 import type { ArtifactRow } from "../api";
@@ -344,7 +344,12 @@ export default function ProgramDetail() {
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
             {artifacts.data.map((a) => (
-              <Link key={a.id} to={`/programs/${id}/artifacts/${a.id}`} style={{ textDecoration: "none", color: "inherit" }}>
+              // An artifact being edited in a chat lives there until Release, so go
+              // straight to it — the artifact page would only redirect anyway.
+              <Link key={a.id} style={{ textDecoration: "none", color: "inherit" }}
+                    to={liveChatId(a.lock)
+                      ? `/programs/${id}/chat?c=${liveChatId(a.lock)}`
+                      : `/programs/${id}/artifacts/${a.id}`}>
                 {/* The excerpt rides in the tooltip: a glance at a document's opening
                     without spending card height on it, the way a figure spends none. */}
                 <Card withBorder padding="sm" radius="md" style={{ height: "100%" }}
@@ -353,7 +358,7 @@ export default function ProgramDetail() {
                     <Text size="sm" fw={600} truncate style={{ minWidth: 0 }}>{a.title || a.id}</Text>
                     {a.lock.holder_id && (
                       <Badge size="xs" color="signal" variant="light" title={`locked by ${a.lock.holder_kind ?? "agent"} ${a.lock.holder_id}`}>
-                        🔒 locked
+                        {liveChatId(a.lock) ? "💬 in chat" : "🔒 locked"}
                       </Badge>
                     )}
                   </Group>
