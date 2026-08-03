@@ -284,6 +284,15 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"file not found: {name}")
 
+    # Raw bytes for a sprint document (distinct 'file-raw' segment), so a figure the
+    # agent left beside its scratchpad renders instead of reading as binary.
+    @api.get("/sprints/{sprint_id}/file-raw/{name}")
+    def sprint_file_raw(sprint_id: str, name: str):
+        try:
+            return FileResponse(service.sprint_file_path(sprint_id, name))
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"file not found: {name}")
+
     @api.post("/sprints/{sprint_id}/comments", status_code=201)
     def comment_sprint(sprint_id: str, body: SprintCommentIn,
                        user: "auth.User | None" = Depends(current_user)) -> dict:
@@ -506,6 +515,16 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.read_artifact_file(program_id, aid, vid, name)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"file not found: {name}")
+
+    # Raw bytes for one file inside a committed version. /download can't stand in:
+    # it zips any version holding more than one file, so a figure stored next to its
+    # generator script would arrive as application/zip and never render.
+    @api.get("/programs/{program_id}/artifacts/{aid}/versions/{vid}/raw/{name:path}")
+    def read_artifact_version_raw(program_id: str, aid: str, vid: str, name: str):
+        try:
+            return FileResponse(service.artifact_version_file_path(program_id, aid, vid, name))
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="file not found")
 
     @api.get("/programs/{program_id}/artifacts/{aid}/versions/{vid}/download")
     def download_artifact_version(program_id: str, aid: str, vid: str):

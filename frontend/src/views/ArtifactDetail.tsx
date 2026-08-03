@@ -7,7 +7,7 @@ import Md from "../components/Md";
 import { FeedbackThread } from "../components/FeedbackThread";
 import { api } from "../api";
 import { buildArtifactTree, type TreeRow } from "../components/artifactTree";
-import { BackLink, EmptyState, RelTime, StatusBadge } from "../components/ui";
+import { BackLink, EmptyState, RelTime, StatusBadge, isImageName } from "../components/ui";
 import { UserChip } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -19,6 +19,10 @@ function CurrentVersion(
   { pid, aid, kind, current, files }:
   { pid: string; aid: string; kind: string; current: string; files: string[] },
 ) {
+  // A figure's deliverable is the image, but its version may also hold the script
+  // that drew it — so address the image file directly. The download route zips
+  // anything multi-file, which an <img> can't render.
+  const imgName = files.find(isImageName) ?? "";
   const name = files[0];
   const textLike = kind !== "figure" && kind !== "page";
   const file = useQuery({
@@ -29,7 +33,11 @@ function CurrentVersion(
 
   if (kind === "figure") {
     if (!current) return <Text size="sm" c="dimmed">No content yet.</Text>;
-    return <img src={api.artifactDownloadUrl(pid, aid, current)} style={{ maxWidth: "100%" }} alt="" />;
+    if (!imgName) return <Text size="sm" c="dimmed">No image in this version — download to view.</Text>;
+    return (
+      <img src={api.artifactVersionRawUrl(pid, aid, current, imgName)}
+           style={{ maxWidth: "100%" }} alt={imgName} />
+    );
   }
 
   if (kind === "page") {

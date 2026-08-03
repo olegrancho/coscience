@@ -280,6 +280,11 @@ function RunStat({ label, agg }: { label: string; agg: RunAgg }) {
   );
 }
 
+/** Does this filename name an image the browser can render inline? Kept in one
+ *  place: the chat, the artifact page, the sprint documents and the overview
+ *  thumbnails all have to agree on what counts as showable. */
+export const isImageName = (n: string) => /\.(png|jpe?g|gif|svg|webp)$/i.test(n);
+
 /** The Claude models a sprint worker / PM reasoner can run on. Always explicit —
  *  the backend resolves a stored "" to DEFAULT_MODEL, so there is no "default" to pick. */
 export const MODEL_OPTIONS = [

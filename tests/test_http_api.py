@@ -61,6 +61,27 @@ def test_sprint_files_missing_is_404(client):
     assert client.get("/api/sprints/nope/files").status_code == 404
 
 
+def test_sprint_file_raw_serves_an_image_the_json_reader_calls_binary(client):
+    """An agent that drew a figure without registering it as an artifact leaves it
+    in the sprint dir. The JSON reader reports binary with no content, so the raw
+    route is the only way the dashboard can show it."""
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+    client.post("/api/sprints", json={"id": "sp1", "goals": "g", "plan": ["a"]})
+    (client.svc.substrate.sprint_dir("sp1") / "fig.png").write_bytes(png)
+
+    assert client.get("/api/sprints/sp1/files").json()[0]["binary"] is True
+    r = client.get("/api/sprints/sp1/file-raw/fig.png")
+    assert r.status_code == 200
+    assert r.content == png
+    assert r.headers["content-type"] == "image/png"
+
+
+def test_sprint_file_raw_rejects_traversal_and_hidden(client):
+    client.post("/api/sprints", json={"id": "sp1", "goals": "g", "plan": ["a"]})
+    assert client.get("/api/sprints/sp1/file-raw/..%2Fsprint.md").status_code == 404
+    assert client.get("/api/sprints/sp1/file-raw/ghost.png").status_code == 404
+
+
 def test_sprint_comment_round_trip(client):
     client.post("/api/sprints", json={"id": "sp1", "goals": "g", "plan": ["a"]})
     r = client.post("/api/sprints/sp1/comments", json={"text": "check the edge case"})

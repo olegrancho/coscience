@@ -8,7 +8,7 @@ import { Transcript } from "../components/Transcript";
 import { FeedbackThread } from "../components/FeedbackThread";
 import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
-import { AbsTime, BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, voterId } from "../components/ui";
+import { AbsTime, BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, isImageName, voterId } from "../components/ui";
 import SprintEditModal from "../components/SprintEditModal";
 import { useMe, useIsMine, UserChip, OTHER_SHADE } from "../auth";
 
@@ -67,7 +67,8 @@ function fmtSize(n: number): string {
 /** One collapsible agent document. Scratchpad + log open by default (the live
  *  view of what the agent is doing); instructions + artifacts start folded. */
 function FileBlock({ f, sprintId, live }: { f: SprintFile; sprintId: string; live?: boolean }) {
-  const [open, setOpen] = useState(f.kind === "scratchpad" || f.kind === "log");
+  const isImage = isImageName(f.name);
+  const [open, setOpen] = useState(f.kind === "scratchpad" || f.kind === "log" || isImage);
   const [full, setFull] = useState(false);
   const isMd = f.name.endsWith(".md");
 
@@ -97,7 +98,7 @@ function FileBlock({ f, sprintId, live }: { f: SprintFile; sprintId: string; liv
       </button>
       {open && (
         <div style={{ padding: "12px 14px" }}>
-          {f.truncated && (
+          {f.truncated && !isImage && (
             <Group gap={10} align="center" mb={10}>
               <SegmentedControl
                 size="xs" value={full ? "full" : "recent"}
@@ -112,7 +113,12 @@ function FileBlock({ f, sprintId, live }: { f: SprintFile; sprintId: string; liv
               {showingFull && fullQ.isFetching && <Loader size="xs" />}
             </Group>
           )}
-          {f.binary ? (
+          {isImage ? (
+            // A figure the agent produced without registering it as an artifact:
+            // the JSON reader reports it as binary, so serve the bytes instead.
+            <img src={api.sprintFileRawUrl(sprintId, f.name)}
+                 style={{ maxWidth: "100%", borderRadius: 6 }} alt={f.name} />
+          ) : f.binary ? (
             <Text size="sm" c="dimmed">Binary file — not shown.</Text>
           ) : showingFull && fullQ.isLoading ? (
             <Group gap={8}><Loader size="xs" /><Text size="sm" c="dimmed">Loading full log…</Text></Group>

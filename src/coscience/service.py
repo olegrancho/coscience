@@ -28,6 +28,16 @@ class NotFoundError(KeyError):
     """A requested sprint or result does not exist."""
 
 
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
+# Never worth quoting on an overview card, even though some are technically text.
+_OPAQUE_SUFFIXES = {".pyc", ".pyo", ".so", ".o", ".bin", ".zip", ".gz", ".tar",
+                    ".npy", ".npz", ".h5", ".hdf5", ".pkl", ".parquet", ".pdf"}
+
+
+def _is_image_name(name: str) -> bool:
+    return Path(name).suffix.lower() in _IMAGE_SUFFIXES
+
+
 class Service:
     def __init__(self, repo_root, pool: ResourcePool | None = None):
         self.repo_root = Path(repo_root)
@@ -442,16 +452,26 @@ class Service:
         docs.sort(key=lambda f: (self._DOC_ORDER[f["kind"]], f["name"]))
         return docs
 
-    def read_sprint_file(self, sprint_id: str, name: str) -> dict:
-        """Full (untruncated) content of one sprint document — backs the UI's
-        'show full log' toggle, where list_sprint_files tails large files.
-        Path-guarded to the sprint directory (no traversal, no hidden files)."""
+    def sprint_file_path(self, sprint_id: str, name: str) -> Path:
+        """Guarded resolution of one file in a sprint directory: no traversal, no
+        hidden/internal files, must sit directly in the sprint dir. Shared by the
+        JSON reader and the raw-bytes route (so a figure the agent dropped next to
+        its scratchpad can be shown instead of flagged as binary)."""
         self._load_sprint(sprint_id)  # raises NotFoundError for unknown sprints
         d = self.substrate.sprint_dir(sprint_id).resolve()
-        path = (d / name).resolve()
+        try:
+            path = (d / name).resolve()
+        except (ValueError, OSError):
+            raise NotFoundError(name)
         if (path.parent != d or not path.is_file()
                 or path.name.startswith(".") or path.name in self._DOC_HIDDEN):
             raise NotFoundError(name)
+        return path
+
+    def read_sprint_file(self, sprint_id: str, name: str) -> dict:
+        """Full (untruncated) content of one sprint document — backs the UI's
+        'show full log' toggle, where list_sprint_files tails large files."""
+        path = self.sprint_file_path(sprint_id, name)
         label, kind = self._DOC_LABELS.get(path.name, (path.name, "artifact"))
         raw = path.read_bytes()
         binary = b"\x00" in raw[:8192]
@@ -1122,15 +1142,54 @@ class Service:
             return []
         return sorted(str(p.relative_to(vdir)) for p in vdir.rglob("*") if p.is_file())
 
+    _THUMB_CHARS = 240          # enough for an overview card, not a second copy of the doc
+
     def list_artifacts(self, program_id: str) -> list[dict]:
         out = []
         for a in self.substrate.iter_artifacts(program_id):
+            files = self._artifact_version_files(program_id, a.id, a.current) if a.current else []
             out.append({
                 "id": a.id, "title": a.title, "kind": a.kind, "current": a.current,
                 "archived": a.archived, "lock": a.lock,
                 "version_count": sum(1 for v in a.versions if not v.archived),
+                # Enough for the overview to draw a thumbnail without a request per
+                # card: the file names (the caller picks the image) and, for text
+                # kinds, the opening of the document.
+                "files": files,
+                "excerpt": self._artifact_excerpt(program_id, a, files),
             })
         return out
+
+    def _artifact_excerpt(self, program_id: str, art, files: list[str]) -> str:
+        """The opening of an artifact's current text file, for overview thumbnails.
+        Figures have nothing to quote. Tries candidates in turn rather than trusting
+        the first name: a code artifact's alphabetically-first file is often a build
+        leftover (a .pyc under __pycache__), which would leave the card blank."""
+        if art.kind == "figure" or not files or not art.current:
+            return ""
+        for name in self._excerpt_candidates(files):
+            try:
+                raw = self._guarded_file(program_id, art.id, art.current,
+                                         name).read_bytes()[:self._THUMB_CHARS * 4]
+            except (NotFoundError, OSError):
+                continue
+            if b"\x00" in raw:
+                continue                          # compiled/binary: try the next file
+            text = raw.decode("utf-8", errors="replace").strip()
+            if text:
+                return text[:self._THUMB_CHARS]
+        return ""
+
+    @staticmethod
+    def _excerpt_candidates(files: list[str]) -> list[str]:
+        """Readable files, prose first — a README says more about an artifact on a
+        card than whichever source file happens to sort first."""
+        usable = [f for f in files
+                  if not _is_image_name(f)
+                  and "__pycache__" not in f
+                  and Path(f).suffix.lower() not in _OPAQUE_SUFFIXES]
+        prose = [f for f in usable if Path(f).suffix.lower() in {".md", ".txt", ".rst"}]
+        return prose + [f for f in usable if f not in prose]
 
     def adopt_artifact(self, program_id: str, aid: str, title: str = "", kind: str = "md",
                        files: list | None = None, content: str = "", filename: str = "",
@@ -1190,6 +1249,12 @@ class Service:
         if not path.is_file() or not path.is_relative_to(vdir):
             raise NotFoundError(relpath)
         return path
+
+    def artifact_version_file_path(self, program_id: str, aid: str, vid: str, name: str) -> Path:
+        """Guarded path to one file inside a committed version, for the raw-bytes
+        route. The /download route can't serve a figure whose version also holds its
+        generator script — it zips anything multi-file — so images address the file."""
+        return self._guarded_file(program_id, aid, vid, name)
 
     def read_artifact_file(self, program_id: str, aid: str, vid: str, name: str) -> dict:
         path = self._guarded_file(program_id, aid, vid, name)

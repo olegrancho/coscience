@@ -81,7 +81,7 @@ export interface GraphEdge {
 export interface Graph { nodes: GraphNode[]; edges: GraphEdge[] }
 export interface ArtifactVersionT { id: string; parent: string; created_at: number; created_by: string; archived: boolean; note: string }
 export interface ArtifactLock { holder_kind?: string; holder_id?: string; acquired_at?: number; last_activity?: number }
-export interface ArtifactRow { id: string; title: string; kind: string; current: string; archived: boolean; lock: ArtifactLock; version_count: number }
+export interface ArtifactRow { id: string; title: string; kind: string; current: string; archived: boolean; lock: ArtifactLock; version_count: number; files: string[]; excerpt: string }
 export interface LinkedSprint { id: string; status: string; title: string }
 export interface ArtifactDetailT {
   id: string; program: string; title: string; kind: string; current: string;
@@ -164,6 +164,10 @@ export const api = {
     fetch(`/api/programs/${id}/artifacts/${aid}/work/${name}`).then(j<ArtifactFileT>),
   artifactWorkRawUrl: (id: string, aid: string, name: string) =>
     `/api/programs/${id}/artifacts/${aid}/work-raw/${name}`,
+  // A single file out of a committed version. Use for images: artifactDownloadUrl
+  // zips versions holding more than one file (e.g. a figure beside its generator).
+  artifactVersionRawUrl: (pid: string, aid: string, vid: string, name: string) =>
+    `/api/programs/${pid}/artifacts/${aid}/versions/${vid}/raw/${name}`,
   replan: (id: string) =>
     fetch(`/api/programs/${id}/replan`, { method: "POST" }).then(
       j<{ program: string; cycle: number; submitted: string[]; skipped?: boolean; busy?: boolean; throttled?: boolean }>),
@@ -235,6 +239,8 @@ export const api = {
   getSprintFiles: (id: string) => fetch(`/api/sprints/${id}/files`).then(j<SprintFile[]>),
   getSprintFile: (id: string, name: string) =>
     fetch(`/api/sprints/${id}/files/${encodeURIComponent(name)}`).then(j<SprintFile>),
+  sprintFileRawUrl: (id: string, name: string) =>
+    `/api/sprints/${id}/file-raw/${encodeURIComponent(name)}`,
   addSprintComment: (id: string, text: string, target: "worker" | "pm", threadId?: string) =>
     fetch(`/api/sprints/${id}/comments`, {
       method: "POST", headers: { "Content-Type": "application/json" },

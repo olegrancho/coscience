@@ -6,7 +6,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
 import { api, type ChatScope } from "../api";
-import { BackLink, RelTime } from "../components/ui";
+import { BackLink, RelTime, isImageName } from "../components/ui";
 import { UserChip, useIsMine, OTHER_SHADE } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -57,7 +57,6 @@ export default function ChatView() {
     refetchInterval: busy ? 2000 : false,
   });
   const files = work.data ?? [];
-  const isImageName = (n: string) => /\.(png|jpe?g|gif|svg|webp)$/i.test(n);
   const isBinaryName = (n: string) => /\.(png|jpe?g|gif|svg|webp|pdf|zip|npy|npz|h5|hdf5|pkl|parquet|bin|ico|mp4|mov)$/i.test(n);
   // A figure's deliverable IS the image — prefer it over any build script so the
   // panel shows the picture, not the .py source. Otherwise render the first text file.

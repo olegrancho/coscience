@@ -8,11 +8,30 @@ import Md from "../components/Md";
 import { FeedbackThread } from "../components/FeedbackThread";
 import DirectoryPickerModal from "../components/DirectoryPickerModal";
 import { api } from "../api";
-import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl } from "../components/ui";
+import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl, isImageName } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
 import LineageCard from "../components/LineageCard";
+import type { ArtifactRow } from "../api";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
+
+const THUMB_PX = 44;
+
+/** The picture an artifact holds, riding at the right of the card's subtitle row.
+ *  Sized to that row so the card keeps the height it had before thumbnails existed.
+ *  Null when the current version has no image. */
+function ArtifactThumb({ pid, a }: { pid: string; a: ArtifactRow }) {
+  const img = (a.files ?? []).find(isImageName);
+  if (!img || !a.current) return null;
+  return (
+    <img src={api.artifactVersionRawUrl(pid, a.id, a.current, img)} alt="" loading="lazy"
+         style={{ width: THUMB_PX, height: THUMB_PX, flexShrink: 0, objectFit: "contain",
+                  borderRadius: 4, padding: 2,
+                  // Plots are usually saved on a transparent background — without an
+                  // explicit white tile they disappear against the dark theme.
+                  background: "#fff", border: "1px solid var(--hairline)" }} />
+  );
+}
 
 export default function ProgramDetail() {
   const { id = "" } = useParams();
@@ -326,7 +345,10 @@ export default function ProgramDetail() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
             {artifacts.data.map((a) => (
               <Link key={a.id} to={`/programs/${id}/artifacts/${a.id}`} style={{ textDecoration: "none", color: "inherit" }}>
-                <Card withBorder padding="sm" radius="md" style={{ height: "100%" }}>
+                {/* The excerpt rides in the tooltip: a glance at a document's opening
+                    without spending card height on it, the way a figure spends none. */}
+                <Card withBorder padding="sm" radius="md" style={{ height: "100%" }}
+                      title={a.excerpt?.trim() ? a.excerpt.replace(/^#+\s*/gm, "") : undefined}>
                   <Group justify="space-between" align="flex-start" wrap="nowrap" gap={6}>
                     <Text size="sm" fw={600} truncate style={{ minWidth: 0 }}>{a.title || a.id}</Text>
                     {a.lock.holder_id && (
@@ -335,13 +357,18 @@ export default function ProgramDetail() {
                       </Badge>
                     )}
                   </Group>
-                  <Group gap={6} mt={6} wrap="wrap">
-                    <Badge size="xs" color="machine" variant="light">{a.kind}</Badge>
-                    {a.archived && <Badge size="xs" color="gray" variant="light">archived</Badge>}
+                  <Group align="flex-start" wrap="nowrap" gap={8} mt={6}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <Group gap={6} wrap="wrap">
+                        <Badge size="xs" color="machine" variant="light">{a.kind}</Badge>
+                        {a.archived && <Badge size="xs" color="gray" variant="light">archived</Badge>}
+                      </Group>
+                      <Text size="xs" c="dimmed" mt={8} className="mono">
+                        {a.current || "—"} · {a.version_count} version{a.version_count === 1 ? "" : "s"}
+                      </Text>
+                    </div>
+                    <ArtifactThumb pid={id!} a={a} />
                   </Group>
-                  <Text size="xs" c="dimmed" mt={8} className="mono">
-                    {a.current || "—"} · {a.version_count} version{a.version_count === 1 ? "" : "s"}
-                  </Text>
                 </Card>
               </Link>
             ))}
