@@ -14,6 +14,7 @@ import shlex
 from pathlib import Path
 
 from coscience.executor import launch_detached
+from coscience.pm_reasoner import render_instructions
 
 # Read-only scope: explore + read, no writes/bash. Anything else needs a
 # permission it can't get in headless mode, so it simply can't mutate the tree.
@@ -76,7 +77,7 @@ this program's working directory.
 {longrun_note}
 
 PROGRAM GOALS:
-{context.goals}
+{context.goals}{render_instructions(context.instructions)}
 
 OPEN SPRINTS (proposed / approved / queued / running):
 {open_block}

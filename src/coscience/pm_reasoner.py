@@ -24,11 +24,28 @@ def coerce_resources(raw) -> dict[str, float]:
     return out
 
 
+def render_instructions(instructions: str) -> str:
+    """The program's house rules, as a prompt block for every PM prompt (empty text
+    renders nothing). Kept here so the reasoner, the chat preamble and the plain
+    chat prompt all word it identically. Unlike guidance, these are never a request
+    the PM answers — saying so keeps it from filing thread_replies against them."""
+    text = (instructions or "").strip()
+    if not text:
+        return ""
+    return (
+        "\n\nGENERAL INSTRUCTIONS (standing house rules from the human overseer — how "
+        "this program works: style, conventions, policy, what never to do). They hold "
+        "for everything you propose, write and decide, every cycle. Follow them "
+        "silently: they are not a question or a request, so do not reply to them or "
+        "report back on them.\n" + text)
+
+
 @dataclass
 class PMContext:
     program_id: str
     goals: str
     cycle: int
+    instructions: str = ""                             # standing house rules from the human; always in the prompt
     open_sprints: list[dict] = field(default_factory=list)
     completed: list[dict] = field(default_factory=list)
     failed: list[dict] = field(default_factory=list)   # sprints that failed, with why

@@ -340,6 +340,23 @@ class Substrate:
         path = self.program_dir(program_id) / "report.md"
         return path.read_text() if path.is_file() else ""
 
+    def save_instructions(self, program_id: str, text: str) -> None:
+        """Standing house rules for this program's PM — style, policy, what never to
+        do. Unlike guidance, they are never answered and never closed; they just hold.
+        Empty text removes the file, so "no instructions" has one representation."""
+        d = self.program_dir(program_id)
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / "instructions.md"
+        text = text.strip()
+        if text:
+            path.write_text(text + "\n")
+        elif path.is_file():
+            path.unlink()
+
+    def load_instructions(self, program_id: str) -> str:
+        path = self.program_dir(program_id) / "instructions.md"
+        return path.read_text().strip() if path.is_file() else ""
+
     def load_pm_state(self, program_id: str) -> PMState:
         path = self.program_dir(program_id) / "pm.md"
         if not path.is_file():

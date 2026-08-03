@@ -26,7 +26,7 @@ def _context_payload(context: PMContext) -> dict:
     """The per-category inputs the PM reacts to. The PM's own pending proposals
     (status 'proposed') are deliberately excluded — they are its output, not new
     input, so proposing does not re-trigger the next cycle."""
-    return {
+    payload = {
         "goals": context.goals,
         # Keyed on (thread_id, last-human-text) — same shape as idea_comments below —
         # so a new guidance message re-triggers the PM even if other guidance is unchanged.
@@ -47,6 +47,12 @@ def _context_payload(context: PMContext) -> dict:
         "artifact_feedback": sorted((f["artifact_id"], f["thread_id"], f["messages"][-1]["text"])
                                     for f in context.artifact_feedback),
     }
+    # Only present once a human writes instructions. An unconditional key would change
+    # every program's fingerprint the moment this code ships, waking each of them for a
+    # "change" nobody made — the payload is a wire format, not just a local dict.
+    if context.instructions:
+        payload["instructions"] = context.instructions
+    return payload
 
 
 def context_fingerprint(context: PMContext) -> str:
@@ -58,6 +64,7 @@ def context_fingerprint(context: PMContext) -> str:
 # Human labels for each payload category, used to say WHAT triggered a PM cycle.
 _TRIGGER_LABELS = {
     "goals": "goals edited",
+    "instructions": "instructions edited",
     "guidance": "guidance changed",
     "active": "sprint approved / state change",
     "completed": "a result completed",
@@ -170,6 +177,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
             graph_lines.append(f"{i.id}: {rel}")
     return PMContext(
         program_id=program_id, goals=program.goals, cycle=pm.cycle,
+        instructions=substrate.load_instructions(program_id),
         open_sprints=open_sprints, completed=completed, failed=failed,
         sprint_feedback=sprint_feedback,
         prior_proposals=list(pm.proposed_ids),

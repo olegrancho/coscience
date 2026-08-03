@@ -11,7 +11,8 @@ import re
 import subprocess
 
 from coscience.models import DEFAULT_MODEL
-from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
+from coscience.pm_reasoner import (PMContext, PMCycleOutput, ProposedSprint, coerce_resources,
+                                   render_instructions)
 
 
 class PMReasonerError(Exception):
@@ -54,6 +55,7 @@ def render_prompt(context: PMContext) -> str:
     artifact_feedback_block = _lines(context.artifact_feedback, _artifact_feedback_line)
 
     prior_block = ", ".join(context.prior_proposals) or "(none)"
+    instructions_block = render_instructions(context.instructions)
     guidance_block = ""
     if context.human_guidance:
         notes = "\n".join(f"- {g}" for g in context.human_guidance)
@@ -107,7 +109,7 @@ folder", "the data here", or "existing work", they mean your current working
 directory — inspect it there; do NOT go hunting up the filesystem tree.
 
 PROGRAM GOALS:
-{context.goals}{guidance_block}
+{context.goals}{instructions_block}{guidance_block}
 
 OPEN SPRINTS (already proposed/approved/queued/running — do not duplicate these).
 APPROVED sprints are a human-authorized queue that YOU manage: decide when each should
@@ -421,7 +423,7 @@ Your session runs in this program's working directory; "this folder"/"the data h
 means your current working directory — inspect it there, don't search the wider tree.
 
 PROGRAM GOALS:
-{context.goals}
+{context.goals}{render_instructions(context.instructions)}
 
 OPEN SPRINTS (proposed / approved / running):
 {open_block}

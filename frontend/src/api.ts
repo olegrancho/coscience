@@ -5,6 +5,7 @@ export interface SprintRef { id: string; status: string; goals: string; title: s
 export interface PMActivation { at: number; cycle: number; triggers: string[]; submitted: string[]; forced: boolean }
 export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
+  instructions: string;   // standing house rules, in every PM prompt
   activations: PMActivation[]; last_run: number | null;
 }
 export interface Idea {
@@ -179,6 +180,11 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workdir }),
     }).then(j<{ id: string; workdir: string; exists: boolean }>),
+  setProgramInstructions: (id: string, text: string) =>
+    fetch(`/api/programs/${id}/instructions`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }).then(j<Program>),
   listDirs: (path?: string | null) =>
     fetch(`/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ""}`).then(j<DirListing>),
   createDir: (parent: string, name: string) =>

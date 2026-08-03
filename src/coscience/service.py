@@ -520,6 +520,7 @@ class Service:
         return {
             "id": p.id, "title": p.title, "status": p.status.value, "goals": p.goals,
             "pm_model": p.pm_model, "workdir": p.workdir,
+            "instructions": self.substrate.load_instructions(program_id),
             "report": self.substrate.load_report(program_id),
             "cycle": pm.cycle,
             "activations": list(reversed(pm.activations)),   # newest first, for the timeline
@@ -587,6 +588,16 @@ class Service:
         self.substrate.save_program(program)
         exists = bool(wd) and os.path.isdir(os.path.expanduser(wd))
         return {"id": program_id, "workdir": wd, "exists": exists}
+
+    def set_program_instructions(self, program_id: str, text: str) -> dict:
+        """Replace this program's standing house rules for the PM. They land in every
+        PM prompt from the next cycle on, and the edit itself wakes the PM (the
+        fingerprint covers them), so a policy change is acted on without waiting for
+        unrelated activity."""
+        self._require_program(program_id)
+        self.substrate.save_instructions(program_id, str(text or ""))
+        self.substrate.commit(f"program {program_id}: instructions updated")
+        return self.get_program(program_id)
 
     def _require_program(self, program_id: str) -> None:
         if not (self.substrate.program_dir(program_id) / "program.md").is_file():

@@ -112,6 +112,10 @@ class ProgramWorkdirIn(BaseModel):
     workdir: str = ""
 
 
+class ProgramInstructionsIn(BaseModel):
+    text: str = ""                 # "" clears them
+
+
 class DirCreateIn(BaseModel):
     parent: str
     name: str
@@ -727,6 +731,13 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def set_program_workdir(program_id: str, body: ProgramWorkdirIn) -> dict:
         try:
             return service.set_program_workdir(program_id, body.workdir)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.post("/programs/{program_id}/instructions")
+    def set_program_instructions(program_id: str, body: ProgramInstructionsIn) -> dict:
+        try:
+            return service.set_program_instructions(program_id, body.text)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
 

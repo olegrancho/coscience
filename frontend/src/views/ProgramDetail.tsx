@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Button, Card, Group, Loader, Stack, Text, TextInput, Tooltip } from "@mantine/core";
+import { ActionIcon, Badge, Button, Card, Group, Loader, Stack, Text, Textarea, TextInput, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -37,6 +37,8 @@ export default function ProgramDetail() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
   const [note, setNote] = useState("");
+  // The instructions being edited, or null when the card is just displaying them.
+  const [draft, setDraft] = useState<string | null>(null);
   const [proposing, setProposing] = useState(false);
   const [replanning, setReplanning] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -103,6 +105,11 @@ export default function ProgramDetail() {
   const seenGuidance = async (tid: string) => {
     try { await api.seenGuidanceThread(id, tid); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't mark seen", message: String(e) }); }
+  };
+  const saveInstructions = async () => {
+    if (draft === null) return;
+    try { await api.setProgramInstructions(id, draft); setDraft(null); notifications.show({ color: "teal", title: "Instructions saved", message: "The AI follows them from its next cycle." }); refresh(); }
+    catch (e) { notifications.show({ color: "red", title: "Couldn't save", message: String(e) }); }
   };
   const setPmModel = async (model: string) => {
     try { await api.setProgramModel(id, model); notifications.show({ color: "teal", title: "Planner model set", message: model ? `The PM will plan on ${model}.` : "Back to the default model." }); refresh(); }
@@ -222,6 +229,38 @@ export default function ProgramDetail() {
           )}
         </Card>
       )}
+
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <Group justify="space-between" align="baseline" mb={4} wrap="nowrap">
+          <div className="eyebrow">general instructions</div>
+          {draft === null && (
+            <button type="button" className="linklike" onClick={() => setDraft(p.instructions)}
+              title={p.instructions ? "Edit the general instructions" : "Add general instructions"}>
+              {p.instructions ? "Edit" : "Add"}
+            </button>
+          )}
+        </Group>
+        <Text size="xs" c="dimmed" mb="sm">
+          House rules for this program — style, conventions, what never to do. They sit in
+          every planner prompt, so the AI just follows them; unlike guidance, it doesn't
+          reply to them or mark them done.
+        </Text>
+        {draft !== null ? (
+          <Stack gap={8}>
+            <Textarea autosize minRows={4} value={draft} autoFocus
+              placeholder="e.g. Cite a source for every claim. Never propose work needing new equipment. Report numbers in SI units."
+              onChange={(e) => setDraft(e.currentTarget.value)} />
+            <Group gap={8}>
+              <Button variant="light" color="machine" onClick={saveInstructions}>Save</Button>
+              <Button variant="subtle" color="gray" onClick={() => setDraft(null)}>Cancel</Button>
+            </Group>
+          </Stack>
+        ) : p.instructions ? (
+          <Text size="sm" style={{ whiteSpace: "pre-wrap", maxWidth: 680 }}>{p.instructions}</Text>
+        ) : (
+          <Text size="sm" c="dimmed">None — the AI works from the goals and your guidance alone.</Text>
+        )}
+      </Card>
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 4 }}>your guidance to the AI</div>
