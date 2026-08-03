@@ -12,7 +12,8 @@ from uuid import uuid4
 
 from coscience import graph, threads
 from coscience.ledger import Ledger
-from coscience.models import Sprint, SprintStatus, Program, ProgramStatus, Idea, ChatThread, set_status
+from coscience.models import (DEFAULT_MODEL, Sprint, SprintStatus, Program, ProgramStatus,
+                              Idea, ChatThread, set_status)
 from coscience.resources import ResourcePool, load_pool
 from coscience.substrate import Substrate
 
@@ -210,11 +211,11 @@ class Service:
             sprint.resources_required = {k: float(v) for k, v in resources_required.items()}
         if preemptible is not None:
             sprint.preemptible = preemptible
-        if model is not None and model != sprint.model:
+        if model is not None and str(model or DEFAULT_MODEL) != sprint.model:
             # The model is switchable at any time. A detached agent can't change model
             # mid-process, so if one is already running we stop it; the next dispatch
             # beat relaunches on the new model and resumes from the scratchpad.
-            sprint.model = str(model)
+            sprint.model = str(model or DEFAULT_MODEL)
             self._restart_agent_for_model(sprint_id)
         self.substrate.save_sprint(sprint)
 
@@ -519,11 +520,11 @@ class Service:
         self.substrate.save_program(program)
 
     def set_program_model(self, program_id: str, model: str) -> dict:
-        """Set the Claude model the PM reasoner uses for this program ("" = default)."""
+        """Set the Claude model the PM reasoner uses for this program ("" = DEFAULT_MODEL)."""
         if not (self.substrate.program_dir(program_id) / "program.md").is_file():
             raise NotFoundError(program_id)
         program = self.substrate.load_program(program_id)
-        program.pm_model = str(model or "")
+        program.pm_model = str(model or DEFAULT_MODEL)
         self.substrate.save_program(program)
         return {"id": program_id, "pm_model": program.pm_model}
 

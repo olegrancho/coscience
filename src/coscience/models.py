@@ -30,6 +30,13 @@ class BeatOutcome(StrEnum):
     COMPLETED = "completed"
 
 
+# The model agents run on when nothing else is chosen. Every launcher passes
+# `--model` explicitly, so a run's model is never "whatever the host's claude
+# config happens to say" — a value the platform can't see and that differs
+# between hosts. Records that predate this (model: "") resolve to it on load.
+DEFAULT_MODEL = "claude-sonnet-5"
+
+
 @dataclass
 class Lease:
     id: str
@@ -57,13 +64,17 @@ class Sprint:
     summary: str = ""
     created_at: float | None = None   # wall-clock of first save; orders sprints by appearance
     threads: list[dict] = field(default_factory=list)  # feedback threads (see coscience.threads)
-    model: str = ""                   # Claude model for this sprint's worker; "" = launcher default
+    model: str = ""                   # Claude model for this sprint's worker; "" resolves to DEFAULT_MODEL
     votes: list[dict] = field(default_factory=list)  # 👍/👎 signal [{by, value:+1|-1, at}]; one per voter
     decisions: list[dict] = field(default_factory=list)  # legacy governance trail [{by, action, at}]; superseded by status_history (read-only for old sprints)
     status_history: list[dict] = field(default_factory=list)  # lifecycle timeline [{status, at, by, action}]; action="" for system transitions
     edges: list[dict] = field(default_factory=list)  # outbound lineage/evidential edges (see coscience.graph)
     artifacts_bound: list[str] = field(default_factory=list)   # existing artifact ids this sprint edits (locked as a resource)
     artifacts_create: list[dict] = field(default_factory=list)  # new artifacts to produce: [{aid, title, kind}]
+
+    def __post_init__(self) -> None:
+        if not self.model:
+            self.model = DEFAULT_MODEL
 
 
 def set_status(sprint: "Sprint", new_status: "SprintStatus",
@@ -187,8 +198,12 @@ class Program:
     title: str
     goals: str
     status: ProgramStatus = ProgramStatus.ACTIVE
-    pm_model: str = ""                 # Claude model for this program's PM reasoner; "" = default
+    pm_model: str = ""                 # Claude model for this program's PM reasoner; "" resolves to DEFAULT_MODEL
     workdir: str = ""                  # project folder this program's agents run in; "" = control repo
+
+    def __post_init__(self) -> None:
+        if not self.pm_model:
+            self.pm_model = DEFAULT_MODEL
 
 
 @dataclass

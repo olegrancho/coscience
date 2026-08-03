@@ -254,7 +254,7 @@ export default function SprintDetail() {
       await api.editSprint(id, { model });
       notifications.show({ color: "teal", title: "Model set",
         message: live ? "Restarting the agent on the new model — it resumes from its scratchpad."
-                      : model ? `This sprint will run on ${model}.` : "Back to the default model." });
+                      : `This sprint will run on ${model}.` });
       refresh();
     } catch (e) { notifications.show({ color: "red", title: "Couldn't set model", message: String(e) }); }
   };

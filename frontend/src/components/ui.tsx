@@ -280,9 +280,9 @@ function RunStat({ label, agg }: { label: string; agg: RunAgg }) {
   );
 }
 
-/** The Claude models a sprint worker / PM reasoner can run on. "" = launcher default. */
+/** The Claude models a sprint worker / PM reasoner can run on. Always explicit —
+ *  the backend resolves a stored "" to DEFAULT_MODEL, so there is no "default" to pick. */
 export const MODEL_OPTIONS = [
-  { value: "", label: "Default" },
   { value: "claude-sonnet-5", label: "Sonnet 5" },
   { value: "claude-opus-5", label: "Opus 5" },
   { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },

@@ -1,6 +1,6 @@
 import pytest
 
-from coscience.models import SprintStatus
+from coscience.models import DEFAULT_MODEL, SprintStatus
 from coscience.service import NotFoundError, Service
 
 
@@ -33,7 +33,7 @@ def test_submit_then_list_and_get(tmp_path):
     assert row == {"id": "sp1", "status": "proposed", "title": "cure", "summary": "",
                    "goals": "cure", "program": None, "priority": 3, "steps": 1,
                    "results": [], "rationale": "", "resources_required": {"gpu": 1.0},
-                   "started_at": None, "model": "", "activity": None,
+                   "started_at": None, "model": DEFAULT_MODEL, "activity": None,
                    "votes": {"up": 0, "down": 0, "mine": 0}}
     detail = svc.get_sprint("sp1")
     assert detail["status"] == "proposed"
@@ -374,7 +374,7 @@ def test_demote_rejects_executing_sprint(tmp_path):
 def test_sprint_model_round_trips_and_is_editable_while_executing(tmp_path):
     svc = Service(tmp_path)
     svc.submit_sprint(id="sp1", goals="g", plan=["a"])
-    assert svc.get_sprint("sp1")["model"] == ""          # default: launcher's model
+    assert svc.get_sprint("sp1")["model"] == DEFAULT_MODEL   # never blank: no implicit model
     svc.edit_sprint("sp1", model="claude-sonnet-4-6")
     assert svc.get_sprint("sp1")["model"] == "claude-sonnet-4-6"
     _executing(svc, "sp1")
@@ -383,15 +383,29 @@ def test_sprint_model_round_trips_and_is_editable_while_executing(tmp_path):
     assert svc.list_sprints()[0]["model"] == "claude-opus-4-8"
 
 
+def test_legacy_blank_model_resolves_and_is_written_back(tmp_path):
+    """Records written before models were explicit carry model: "". They must load as
+    DEFAULT_MODEL — so nothing runs on the host claude config's unseen choice — and
+    persist that literal on the next save."""
+    from coscience.models import Sprint, SprintStatus
+    svc = Service(tmp_path)
+    sprint = Sprint(id="sp1", status=SprintStatus.PROPOSED, goals="g")
+    sprint.model = ""                                  # bypass __post_init__: an old record
+    svc.substrate.save_sprint(sprint)
+    assert svc.get_sprint("sp1")["model"] == DEFAULT_MODEL
+    svc.edit_sprint("sp1", priority=2)                 # any save stamps it on disk
+    assert "model: ''" not in (svc.substrate.sprint_dir("sp1") / "sprint.md").read_text()
+
+
 def test_program_pm_model_round_trips(tmp_path):
     from coscience.models import Program, ProgramStatus
     svc = Service(tmp_path)
     svc.substrate.save_program(Program(id="p1", title="P", goals="g", status=ProgramStatus.ACTIVE))
-    assert svc.get_program("p1")["pm_model"] == ""
+    assert svc.get_program("p1")["pm_model"] == DEFAULT_MODEL
     svc.set_program_model("p1", "claude-sonnet-4-6")
     assert svc.get_program("p1")["pm_model"] == "claude-sonnet-4-6"
-    svc.set_program_model("p1", "")                       # clearing returns to default
-    assert svc.get_program("p1")["pm_model"] == ""
+    svc.set_program_model("p1", "")                       # clearing resolves to the default
+    assert svc.get_program("p1")["pm_model"] == DEFAULT_MODEL
 
 
 def test_program_workdir_round_trips_and_flags_existence(tmp_path):
