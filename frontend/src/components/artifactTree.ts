@@ -25,9 +25,13 @@ export function buildArtifactTree(versions: ArtifactVersionT[], current: string)
   }
   const byIdOrder = (a: ArtifactVersionT, b: ArtifactVersionT) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   const out: TreeRow[] = [];
+  // Depth counts forks above a version, not links: an only child continues its
+  // parent's line at the same indent. Otherwise a plain linear history — the
+  // common case — renders as a staircase whose indentation says nothing.
   const walk = (v: ArtifactVersionT, depth: number) => {
     out.push({ v, depth, onCurrentPath: path.has(v.id) });
-    for (const c of (children.get(v.id) ?? []).slice().sort(byIdOrder)) walk(c, depth + 1);
+    const kids = (children.get(v.id) ?? []).slice().sort(byIdOrder);
+    for (const c of kids) walk(c, kids.length > 1 ? depth + 1 : depth);
   };
   for (const r of roots.slice().sort(byIdOrder)) walk(r, 0);
   return out;

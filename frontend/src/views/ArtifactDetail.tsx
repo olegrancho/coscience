@@ -68,13 +68,16 @@ function CurrentVersion(
   return <div className="report-leaf"><Md>{file.data.content}</Md></div>;
 }
 
-/** One row in the version-tree sidebar: id, author, age, note, plus a
- *  view/revert action (non-current rows) and an archive/unarchive toggle. */
+/** One row in the version-tree sidebar: id, author, age, plus a view/revert
+ *  action (non-current rows) and an archive/unarchive toggle. The note is folded
+ *  away behind the header — notes run a few hundred characters, so showing every
+ *  one at once buries the list. Rows without a note don't toggle. */
 function VersionRow(
   { pid, aid, row, current }:
   { pid: string; aid: string; row: TreeRow; current: string },
 ) {
   const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
   const invalidate = () => qc.invalidateQueries({ queryKey: ["artifact", pid, aid] });
   const revert = useMutation({ mutationFn: () => api.revertArtifact(pid, aid, row.v.id), onSuccess: invalidate });
   const archiveToggle = useMutation({
@@ -82,28 +85,38 @@ function VersionRow(
     onSuccess: invalidate,
   });
   const isCurrent = row.v.id === current;
+  const note = row.v.note?.trim() ?? "";
 
   return (
-    <Group
-      gap={8} wrap="nowrap" align="flex-start"
+    <Stack
+      gap={4}
       style={{
         padding: `6px 6px 6px ${6 + row.depth * 14}px`,
         borderRadius: 6, opacity: row.v.archived ? 0.5 : 1,
         background: row.onCurrentPath ? "var(--machine-weak)" : "transparent",
       }}
     >
-      <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+      <Group gap={8} wrap="nowrap" align="flex-start">
+      <button
+        type="button" disabled={!note} onClick={() => setOpen((o) => !o)}
+        aria-expanded={note ? open : undefined}
+        title={note ? (open ? "Hide the note" : "Show the note") : undefined}
+        style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2,
+          alignItems: "stretch", textAlign: "left", background: "none", border: "none",
+          padding: 0, font: "inherit", color: "inherit", cursor: note ? "pointer" : "default" }}
+      >
         <Group gap={6} wrap="nowrap">
+          {/* Fixed-width caret so ids stay aligned whether or not a row has a note. */}
+          <Text size="xs" c="dimmed" style={{ width: 9, flexShrink: 0 }}>{note ? (open ? "▾" : "▸") : ""}</Text>
           <Text size="sm" fw={isCurrent ? 700 : 500} className="mono">{row.v.id}</Text>
           {isCurrent && <Badge size="xs" color="machine" variant="light">current</Badge>}
           {row.v.archived && <Badge size="xs" color="gray" variant="light">archived</Badge>}
         </Group>
-        <Group gap={6} wrap="nowrap">
+        <Group gap={6} wrap="nowrap" pl={15}>
           <UserChip username={row.v.created_by} />
           <Text size="xs" c="dimmed"><RelTime at={row.v.created_at} /></Text>
         </Group>
-        {row.v.note && <Text size="xs" c="dimmed" style={{ lineHeight: 1.4 }}>{row.v.note}</Text>}
-      </Stack>
+      </button>
       <Group gap={4} wrap="nowrap">
         {!isCurrent && (
           <Button
@@ -115,15 +128,23 @@ function VersionRow(
             Revert
           </Button>
         )}
-        <ActionIcon
-          variant="subtle" size="sm" color="gray"
-          aria-label={row.v.archived ? "unarchive version" : "archive version"}
-          onClick={() => archiveToggle.mutate()} loading={archiveToggle.isPending}
-        >
-          {row.v.archived ? "↺" : "🗄"}
-        </ActionIcon>
+        <Tooltip withArrow label={row.v.archived
+          ? "Unarchive — count this version again"
+          : "Archive — mark this version as noise. It stays here and stays revertable; it just dims and stops counting."}>
+          <ActionIcon
+            variant="subtle" size="sm" color="gray"
+            aria-label={row.v.archived ? "unarchive version" : "archive version"}
+            onClick={() => archiveToggle.mutate()} loading={archiveToggle.isPending}
+          >
+            {row.v.archived ? "↺" : "🗄"}
+          </ActionIcon>
+        </Tooltip>
       </Group>
-    </Group>
+      </Group>
+      {note && open && (
+        <Text size="xs" c="dimmed" pl={15} style={{ lineHeight: 1.45 }}>{note}</Text>
+      )}
+    </Stack>
   );
 }
 
@@ -133,6 +154,9 @@ export default function ArtifactDetail() {
   const navigate = useNavigate();
   const [comment, setComment] = useState("");
   const artifact = useQuery({ queryKey: ["artifact", id, aid], queryFn: () => api.getArtifact(id, aid) });
+  // Breadcrumb wants the program's name; the artifact payload only carries its id.
+  // Same key the program page uses, so arriving from there is a cache hit.
+  const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["artifact", id, aid] });
   const archiveArtifact = useMutation({
     mutationFn: (archived: boolean) => api.archiveArtifact(id, aid, archived),
@@ -194,7 +218,7 @@ export default function ArtifactDetail() {
   return (
     <Stack gap="lg">
       <div>
-        <BackLink to={`/programs/${id}`}>{art.program || id}</BackLink>
+        <BackLink to={`/programs/${id}`}>{program.data?.title || art.program || id}</BackLink>
         <Group justify="space-between" align="flex-start" wrap="nowrap" mt={4}>
           <Group gap={10} align="center" wrap="wrap">
             <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 23, fontWeight: 600, margin: 0, lineHeight: 1.25 }}>

@@ -10,11 +10,19 @@ describe("buildArtifactTree", () => {
     expect(buildArtifactTree([], "")).toEqual([]);
   });
 
-  it("linear chain has increasing depth, all on current path when current is the leaf", () => {
+  it("linear chain stays flush left — no fork, no indent", () => {
     const rows = buildArtifactTree([v("v1"), v("v2", "v1"), v("v3", "v2")], "v3");
     expect(rows.map((r) => r.v.id)).toEqual(["v1", "v2", "v3"]);
-    expect(rows.map((r) => r.depth)).toEqual([0, 1, 2]);
+    expect(rows.map((r) => r.depth)).toEqual([0, 0, 0]);
     expect(rows.every((r) => r.onCurrentPath)).toBe(true);
+  });
+
+  it("indents at the fork, and the branches keep their own indent afterwards", () => {
+    // v1 -> v2 -> v3 ; v1 -> v4 (fork at v1) ; v4 -> v5 (only child)
+    const rows = buildArtifactTree(
+      [v("v1"), v("v2", "v1"), v("v3", "v2"), v("v4", "v1"), v("v5", "v4")], "v3");
+    const depth = Object.fromEntries(rows.map((r) => [r.v.id, r.depth]));
+    expect(depth).toEqual({ v1: 0, v2: 1, v3: 1, v4: 1, v5: 1 });
   });
 
   it("branch: only the ancestors of current are on the path", () => {

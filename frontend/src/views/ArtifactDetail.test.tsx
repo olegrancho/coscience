@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
@@ -73,6 +73,29 @@ describe("ArtifactDetail", () => {
     renderAt();
     await waitFor(() => expect(screen.getByText("tighten intro")).toBeTruthy());
     expect(screen.getByText(/p-c1-x/)).toBeTruthy();
+  });
+
+  it("folds a version's note away until its header is clicked", async () => {
+    vi.spyOn(api, "getArtifact").mockResolvedValue({
+      id: "doc", program: "p", title: "Doc", kind: "md", current: "v2",
+      archived: false, lock: {}, current_files: [], linked_sprints: [], threads: [],
+      versions: [
+        { id: "v1", parent: "", created_at: 1, created_by: "human", archived: false, note: "why I changed it" },
+        { id: "v2", parent: "v1", created_at: 2, created_by: "human", archived: false, note: "" },
+      ],
+    } as any);
+    renderAt();
+    await waitFor(() => expect(screen.getByText("v1")).toBeTruthy());
+    expect(screen.queryByText("why I changed it")).toBeNull();
+
+    fireEvent.click(screen.getByText("v1"));
+    expect(screen.getByText("why I changed it")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("v1"));
+    expect(screen.queryByText("why I changed it")).toBeNull();
+
+    // A note-less version has nothing to unfold, so its header doesn't toggle.
+    expect(screen.getByText("v2").closest("button")!.hasAttribute("disabled")).toBe(true);
   });
 
   it("redirects to the chat editing it, and stays put for a sprint lock", async () => {
