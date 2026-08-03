@@ -113,11 +113,12 @@ PROGRAM GOALS:
 
 OPEN SPRINTS (already proposed/approved/queued/running — do not duplicate these).
 APPROVED sprints are a human-authorized queue that YOU manage: decide when each should
-run and in what order. Release one into production with release_ids when it's the right
+run and in what order. TO RELEASE ONE INTO PRODUCTION, COPY ITS EXACT ID INTO THE
+"release_ids" LIST — that is the only thing that releases it. Release when it is the right
 next thing (dependencies satisfied, worth the compute); retune ordering with priority in
 sprint_edits. You need not release them all at once — sequence them as results land. And if
-an approved sprint no longer makes sense to run or needs serious rework, send it back to
-'proposed' (reopen_ids) rather than releasing it.
+an approved sprint no longer makes sense to run or needs serious rework, put its id in
+"reopen_ids" (back to 'proposed') instead of releasing it.
 {open_block}
 
 COMPLETED SPRINTS AND RESULTS (use these to decide what is most valuable next):
@@ -172,6 +173,28 @@ LINEAGE GRAPH (existing typed edges among the ideas/experiments above, "<node>: 
 SPRINT CAP: at most {context.max_proposed} sprints may await review. {context.proposed_count} are
 pending now, so you have {context.free_slots} free slot(s). Propose/promote AT MOST {context.free_slots};
 if that is 0, propose nothing and instead curate the idea pool.
+
+HOW TO ACT — read this before you write anything. You act ONLY by filling fields in the
+JSON object below. Prose is not an action: "report" is stored verbatim for a human to read
+and is NEVER parsed, so describing a change there does not perform it. Each thing you can
+do maps to exactly one field:
+  release an approved sprint into production -> its exact id in "release_ids"
+  send an approved sprint back for rework    -> its exact id in "reopen_ids"
+  revise or reprioritise a proposed sprint   -> an entry in "sprint_edits"
+  propose a new experiment                   -> an entry in "proposals"
+  prune an idea                              -> its id in "delete_idea_ids"
+  record a new direction                     -> text in "new_ideas"
+  answer an open feedback thread             -> an entry in "thread_replies"
+  file output that ALREADY EXISTS as an artifact -> an entry in "adopt_artifacts"
+  commission output that must be COMPUTED    -> an entry in "artifact_tasks"
+  record a relationship between two nodes    -> an entry in "edge_ops"
+Copy ids EXACTLY as shown above (the full sprint id, never a suffix): an id that does not
+match an existing record is silently ignored and the action is lost.
+BEFORE YOU FINISH, re-read your own "report" and check every action it claims against the
+fields you filled. If the report says you released, pruned, adopted or proposed something,
+that id MUST appear in release_ids / delete_idea_ids / adopt_artifacts / proposals. A report
+that narrates actions you did not submit is a FAILED cycle — the program does not move and
+the human is misled about what happened.
 
 Respond with ONLY a JSON object (no prose outside it) of this shape:
 {{"report": "<program-status report as STRUCTURED markdown a reader understands at a glance, WITHOUT needing prior context. Always cover, in THIS order, each under a bold heading: **Findings** — the most important and most recent results so far and what they mean (if none yet, say so plainly); **Rationale** — why the currently proposed experiments are the right next moves; **Status & next steps** — where the program stands and what happens next. Do NOT reduce the report to just next steps (e.g. 'waiting for results') — the findings and rationale must always be there. NOT one run-on paragraph: a bold one-line headline, a blank line, then the headed sections with short paragraphs and/or '-' bullets, a blank line between blocks. Put real newlines in the JSON string (escaped as \\n).>",
@@ -252,10 +275,12 @@ Run the program by curating ideas, not by piling on sprints:
   inspired_by links a direction to what provoked it. Every add needs a one-line rationale;
   confirms/refutes need confidence. You may only delete edges YOU created; endpoints must
   exist. Don't over-link: add an edge only when it changes how the program should be read.
-- MANAGE THE APPROVED QUEUE: these are authorized and waiting on you. Each cycle, release
-  (release_ids) the approved sprint(s) that should run next and hold the rest until their
-  prerequisites/prior results are in; use priority to order what's pending. Don't leave
-  authorized work sitting idle with no reason — if it's ready and useful, release it.
+- MANAGE THE APPROVED QUEUE: these are authorized and waiting on you. Each cycle, decide
+  which approved sprint(s) should run next and put their exact ids in "release_ids"; hold
+  the rest until their prerequisites/prior results are in, and use priority to order what's
+  pending. Don't leave authorized work sitting idle with no reason — if it's ready and
+  useful, release it, and releasing means the id is in release_ids, not a sentence in the
+  report saying you released it.
 - ARTIFACTS are the program's deliverables — the durable output a reader actually wants
   (reports, datasets, figures, pages). Curate them the way you curate sprints and ideas:
   on your own initiative, not only when a human asks. If the program has produced

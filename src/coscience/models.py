@@ -217,4 +217,7 @@ class PMState:
     # per-category signatures of the last reasoned context, so the next cycle can
     # name WHAT changed; and a capped timeline of activations for the dashboard.
     last_signals: dict = field(default_factory=dict)
-    activations: list[dict] = field(default_factory=list)  # [{at, cycle, triggers, submitted, forced}]
+    # [{at, cycle, triggers, submitted, forced, released, reopened, release_skipped,
+    #   unbacked_claims}] — the actions carry the cycle's own record of what it applied,
+    # so a release the reasoner claimed but never submitted stays visible in the substrate.
+    activations: list[dict] = field(default_factory=list)

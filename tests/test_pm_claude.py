@@ -113,6 +113,19 @@ def test_render_prompt_explains_the_approved_queue():
     assert "release_ids" in p and "APPROVED" in p
 
 
+def test_render_prompt_maps_every_action_to_its_field():
+    # A cycle once narrated a release/prune/adopt in `report` while leaving the action
+    # lists empty, so nothing happened. The prompt must state the mechanism, not just the
+    # policy: each action names the field that performs it.
+    p = render_prompt(_ctx())
+    for field in ("release_ids", "reopen_ids", "sprint_edits", "proposals",
+                  "delete_idea_ids", "new_ideas", "thread_replies",
+                  "adopt_artifacts", "artifact_tasks", "edge_ops"):
+        assert f'"{field}"' in p, field
+    assert "Prose is not an action" in p                  # report is never parsed
+    assert "FAILED cycle" in p                            # claiming an unsubmitted action
+
+
 def test_render_prompt_notes_report_structure():
     p = render_prompt(_ctx())
     assert "Findings" in p and "Rationale" in p          # report must always carry these

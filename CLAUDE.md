@@ -6,6 +6,13 @@ sprints, results). Runtime is **Linux-only** (uses `/proc`, `os.killpg`,
 `fcntl`); it does not run natively on Windows. More than one host may run the
 full platform (backend + agent loops), not just a single production box.
 
+## How work moves
+
+`docs/sprint-lifecycle.md` is the authoritative sprint state machine: the states and
+which actor owns each transition. Read it before explaining, changing or debugging
+sprint flow — notably, **`approve` authorizes but does not schedule**; the approved pool
+is the PM's queue and the PM releases from it.
+
 ## Two repos, don't confuse them
 
 - **Code** — this repo.

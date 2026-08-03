@@ -21,6 +21,63 @@ MAX_PROPOSED = 4
 
 MAX_EDGE_OPS = 100   # bound the edges the PM may add per cycle (headroom for lineage back-fill)
 
+# A cycle once wrote a report saying it had released a sprint, pruned the idea pool and
+# adopted an artifact while every action list came back empty — nothing happened, and no
+# channel showed it. `report` is free prose the machinery never parses, so these two
+# helpers close the gap: the ledger states what was ACTUALLY applied, and the claim check
+# flags prose that describes an action the cycle did not submit.
+_CLAIM_CHECKS = (
+    # (what the prose claims, pattern, the summary key that would back it up)
+    ("released an approved sprint", r"\breleas(?:e|ed|es|ing)\b", "released"),
+    ("pruned the idea pool", r"\bprun(?:e|ed|es|ing)\b", "ideas_removed"),
+    ("adopted an artifact", r"\badopt(?:ed|s|ing)\b", "adopted"),
+)
+
+
+def unbacked_claims(report: str, actions: dict) -> list[str]:
+    """Actions the report text describes but the cycle never submitted.
+
+    Deliberately a heuristic on the prose, so it only ever WARNS — a false positive
+    must not cost a cycle. `actions` maps the summary key to what was applied."""
+    flagged = []
+    for label, pattern, key in _CLAIM_CHECKS:
+        applied = actions.get(key)
+        count = applied if isinstance(applied, int) else len(applied or ())
+        if not count and re.search(pattern, report or "", re.I):
+            flagged.append(label)
+    return flagged
+
+
+def actions_ledger(actions: dict) -> str:
+    """A markdown block stating what the platform actually did this cycle.
+
+    Appended under the reasoner's report so a human reading the dashboard sees the
+    applied actions next to the narrative about them. Machine-written from the
+    post-apply results, so unlike the report it cannot claim something that didn't
+    happen."""
+    def _ids(key):
+        return ", ".join(str(i) for i in actions.get(key) or ())
+
+    lines = []
+    for label, key in (("Released", "released"), ("Reopened", "reopened"),
+                       ("Proposed", "submitted"), ("Adopted", "adopted")):
+        if actions.get(key):
+            lines.append(f"- {label}: {_ids(key)}")
+    if actions.get("dropped"):
+        lines.append(f"- Not proposed (over the cap): {_ids('dropped')}")
+    for key, label in (("ideas_added", "Ideas added"), ("ideas_removed", "Ideas pruned")):
+        if actions.get(key):
+            lines.append(f"- {label}: {actions[key]}")
+    for key, label in (("release_skipped", "Release FAILED"), ("reopen_skipped", "Reopen FAILED")):
+        for skip in actions.get(key) or ():
+            lines.append(f"- {label}: `{skip['id']}` — {skip['why']}")
+    for claim in actions.get("unbacked_claims") or ():
+        lines.append(f"- ⚠️ the report above says it {claim}, but no such action was submitted")
+    if not lines:
+        lines.append("- No actions submitted this cycle.")
+    return ("\n\n---\n\n**Actions this cycle** (recorded by the platform, not the planner)\n\n"
+            + "\n".join(lines) + "\n")
+
 
 def _context_payload(context: PMContext) -> dict:
     """The per-category inputs the PM reacts to. The PM's own pending proposals
@@ -725,12 +782,20 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     # dispatcher runs queued sprints by priority as compute frees. Guarded to this
     # program's approved sprints. ---
     released: list[str] = []
+    release_skipped: list[dict] = []
     for sid in staged.output.release_ids:
         sid = str(sid)
         if not (substrate.sprint_dir(sid) / "sprint.md").is_file():
+            # Most often a suffix or a mistyped id. Silently dropping it made a lost
+            # release indistinguishable from a deliberate hold — say which it was.
+            release_skipped.append({"id": sid, "why": "no such sprint"})
             continue
         sp = substrate.load_sprint(sid)
-        if sp.program != program_id or sp.status != SprintStatus.APPROVED:
+        if sp.program != program_id:
+            release_skipped.append({"id": sid, "why": f"belongs to program {sp.program}"})
+            continue
+        if sp.status != SprintStatus.APPROVED:
+            release_skipped.append({"id": sid, "why": f"status is {sp.status.value}, not approved"})
             continue
         set_status(sp, SprintStatus.QUEUED, by="pm", action="run")
         substrate.save_sprint(sp)
@@ -740,18 +805,30 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     # obsolete. Guarded to approved sprints of this program only — the PM must not
     # touch queued/executing work (a human deliberately released those).
     reopened: list[str] = []
+    reopen_skipped: list[dict] = []
     for sid in staged.output.reopen_ids:
         sid = str(sid)
         if not (substrate.sprint_dir(sid) / "sprint.md").is_file():
+            reopen_skipped.append({"id": sid, "why": "no such sprint"})
             continue
         sp = substrate.load_sprint(sid)
-        if sp.program != program_id or sp.status != SprintStatus.APPROVED:
+        if sp.program != program_id:
+            reopen_skipped.append({"id": sid, "why": f"belongs to program {sp.program}"})
+            continue
+        if sp.status != SprintStatus.APPROVED:
+            reopen_skipped.append({"id": sid, "why": f"status is {sp.status.value}, not approved"})
             continue
         set_status(sp, SprintStatus.PROPOSED, by="pm", action="reopen")
         substrate.save_sprint(sp)
         reopened.append(sid)
 
-    substrate.save_report(program_id, staged.output.report)
+    actions = {"released": released, "reopened": reopened, "submitted": submitted,
+               "dropped": dropped, "adopted": adopted,
+               "ideas_added": ideas_added, "ideas_removed": ideas_removed,
+               "release_skipped": release_skipped, "reopen_skipped": reopen_skipped}
+    actions["unbacked_claims"] = unbacked_claims(staged.output.report, actions)
+    # The reasoner's prose, then the platform's own record of what it applied.
+    substrate.save_report(program_id, staged.output.report + actions_ledger(actions))
 
     pm.cycle = cycle + 1
     pm.last_run = now_ts
@@ -760,12 +837,23 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         if sid not in pm.proposed_ids:
             pm.proposed_ids.append(sid)
     pm.log.append(f"cycle {cycle}: proposed {proposed}"
-                  + (f", dropped {dropped} (cap)" if dropped else ""))
+                  + (f", released {released}" if released else "")
+                  + (f", reopened {reopened}" if reopened else "")
+                  + (f", dropped {dropped} (cap)" if dropped else "")
+                  + (f", FAILED to release {[s['id'] for s in release_skipped]}"
+                     if release_skipped else "")
+                  + (f", UNBACKED CLAIMS {actions['unbacked_claims']}"
+                     if actions["unbacked_claims"] else ""))
     if new_signals is not None:                        # we actually reasoned this beat
         pm.last_signals = new_signals
+        # Releases live here too, not just in the loop's log file: pm.md travels with
+        # the substrate, so a dropped action stays evidence after the log rotates.
         pm.activations.append({
             "at": now_ts, "cycle": cycle, "triggers": trigger_labels,
             "submitted": list(submitted), "forced": bool(force),
+            "released": list(released), "reopened": list(reopened),
+            "release_skipped": [dict(s) for s in release_skipped],
+            "unbacked_claims": list(actions["unbacked_claims"]),
         })
         pm.activations = pm.activations[-50:]          # keep the recent timeline bounded
     substrate.save_pm_state(pm)
@@ -775,4 +863,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             "proposed": proposed, "dropped": dropped, "skipped": False,
             "ideas_added": ideas_added, "ideas_removed": ideas_removed,
             "pool_size": len(ideas_by_id), "adopted": adopted,
-            "edges_added": edges_added, "edges_removed": edges_removed}
+            "edges_added": edges_added, "edges_removed": edges_removed,
+            "released": released, "reopened": reopened,
+            "release_skipped": release_skipped, "reopen_skipped": reopen_skipped,
+            "unbacked_claims": actions["unbacked_claims"]}
