@@ -27,6 +27,39 @@ def _make_pm_reasoner():
     return ClaudeCodeReasoner()
 
 
+def pm_beat_line(summaries: list[dict], reasoned: int) -> str:
+    """The PM loop's one-line beat summary.
+
+    Releases and lost actions get their own words: a cycle that released nothing, and one
+    that asked to release an id which doesn't resolve, used to print the same line as a
+    healthy idle beat — so a PM silently failing to release looked exactly like a PM with
+    nothing to do."""
+    parts = []
+    ids = [sid for s in summaries for sid in s["submitted"]]
+    released = [sid for s in summaries for sid in s.get("released") or ()]
+    reopened = [sid for s in summaries for sid in s.get("reopened") or ()]
+    missed = [k for s in summaries
+              for k in list(s.get("release_skipped") or ()) + list(s.get("reopen_skipped") or ())]
+    unbacked = [c for s in summaries for c in s.get("unbacked_claims") or ()]
+    if ids:
+        parts.append(f"proposed {', '.join(ids)}")
+    if released:
+        parts.append(f"released {', '.join(released)}")
+    if reopened:
+        parts.append(f"reopened {', '.join(reopened)}")
+    parts += [f"SKIPPED {k['id']} ({k['why']})" for k in missed]
+    if unbacked:
+        parts.append("WARNING report claims it " + "; ".join(unbacked)
+                     + " — no such action was submitted")
+    if parts:
+        return " · ".join(parts)
+    if reasoned:
+        return "reasoned — no new proposals"
+    if any(s.get("throttled") for s in summaries):
+        return "paused — Claude usage exhausted; resumes after reset"
+    return "idle — no input changed"
+
+
 def dispatch_once(repo_root: Path) -> CycleReport:
     disp = Dispatcher(
         Substrate(repo_root), ClaudeAgent(),
@@ -179,17 +212,8 @@ def main(argv: list[str] | None = None) -> int:
             summaries = pm_run_once(substrate, reasoner, usage_ok=claude_usage_ok)
             ids = [sid for s in summaries for sid in s["submitted"]]
             reasoned = sum(0 if s.get("skipped") else 1 for s in summaries)
-            throttled = any(s.get("throttled") for s in summaries)
-            if ids:
-                last = f"proposed {', '.join(ids)}"
-            elif reasoned:
-                last = "reasoned — no new proposals"
-            elif throttled:
-                last = "paused — Claude usage exhausted; resumes after reset"
-            else:
-                last = "idle — no input changed"
             # reasoned == Claude calls this beat (skipped cycles don't call Claude)
-            return last, {"proposed": len(ids)}, reasoned
+            return pm_beat_line(summaries, reasoned), {"proposed": len(ids)}, reasoned
         _status_loop(LoopStatus("PM", uses_claude=True), _beat,
                      args.interval, args.max_rounds)
         return 0
