@@ -4,6 +4,16 @@ import { Link } from "react-router-dom";
 import type { ArtifactLock, RunAgg, SprintActivity, Usage, VoteTally } from "../api";
 import { SPRINT_STATE_ORDER, statusVar } from "./status";
 
+/** Break a view out of the app's centered 980px column to fill the canvas
+ *  (navbar 232 + canvas padding 60 = 292px reserved), capped so text lines don't get
+ *  absurdly wide. For views whose content IS a document — an artifact's text, or a chat
+ *  bound to one — where the 980px column leaves the prose narrower than the chat that
+ *  edits it. */
+export const canvasBreakout: CSSProperties = {
+  width: "min(calc(100vw - 292px), 1500px)",
+  marginLeft: "calc((980px - min(100vw - 292px, 1500px)) / 2)",
+};
+
 /** A stable per-browser id so 👍/👎 counts reflect distinct people without auth.
  *  Not identifying — just enough to enforce one vote per browser and toggle it. */
 export function voterId(): string {

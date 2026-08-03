@@ -6,7 +6,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
 import { api, type ChatScope } from "../api";
-import { BackLink, RelTime, isImageName } from "../components/ui";
+import { BackLink, RelTime, canvasBreakout, isImageName } from "../components/ui";
 import { UserChip, useIsMine, OTHER_SHADE } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -159,14 +159,11 @@ export default function ChatView() {
   }
   const hiddenCount = sorted.length - visible.length;
 
-  // Bound chats break out of the app's centered 980px column to fill the canvas
-  // (navbar 232 + canvas padding 60 = 292px reserved), capped so lines don't get
-  // absurdly wide. The artifact is the point here, so it gets the room; the chat
-  // shrinks to a secondary side column. Unbound chats keep the tight column.
-  const breakout = bound
-    ? { width: "min(calc(100vw - 292px), 1500px)",
-        marginLeft: "calc((980px - min(100vw - 292px, 1500px)) / 2)" }
-    : undefined;
+  // Bound chats fill the canvas: the artifact is the point here, so it gets the room
+  // and the chat shrinks to a secondary side column. Unbound chats keep the tight
+  // column. Same breakout the artifact page uses, so a document is the same width
+  // whether you are reading it or chatting with it.
+  const breakout = bound ? canvasBreakout : undefined;
 
   return (
     <Stack gap="lg" style={breakout}>

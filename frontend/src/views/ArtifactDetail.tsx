@@ -7,7 +7,7 @@ import Md from "../components/Md";
 import { FeedbackThread } from "../components/FeedbackThread";
 import { api } from "../api";
 import { buildArtifactTree, type TreeRow } from "../components/artifactTree";
-import { BackLink, EmptyState, RelTime, StatusBadge, isImageName, liveChatId } from "../components/ui";
+import { BackLink, EmptyState, RelTime, StatusBadge, canvasBreakout, isImageName, liveChatId } from "../components/ui";
 import { UserChip } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -216,7 +216,10 @@ export default function ArtifactDetail() {
   const undiscard = () => archiveArtifact.mutate(false);
 
   return (
-    <Stack gap="lg">
+    // Same canvas breakout as a bound chat: the artifact IS the page, so its text gets
+    // at least the width it has in the chat that edits it, not the 980px column minus a
+    // 300px version rail.
+    <Stack gap="lg" style={canvasBreakout}>
       <div>
         <BackLink to={`/programs/${id}`}>{program.data?.title || art.program || id}</BackLink>
         <Group justify="space-between" align="flex-start" wrap="nowrap" mt={4}>
