@@ -154,9 +154,11 @@ def gather_context(substrate, program_id: str) -> PMContext:
     completed: list[dict] = []
     failed: list[dict] = []
     sprint_feedback: list[dict] = []
-    for s in substrate.iter_sprints():
-        if s.program != program_id:
-            continue
+    # Walk the sprint tree ONCE. Every pass re-reads and re-parses every sprint.md in
+    # the substrate, and this runs on every idle beat of the PM loop — the lineage
+    # block below used to trigger a second full walk for the same program.
+    program_sprints = [s for s in substrate.iter_sprints() if s.program == program_id]
+    for s in program_sprints:
         for th in s.threads:
             if (th.get("target") == "pm" and threads.needs_reply(th)
                     and s.status not in (SprintStatus.CANCELED, SprintStatus.PARKED)):
@@ -224,8 +226,8 @@ def gather_context(substrate, program_id: str) -> PMContext:
                  | {s["id"] for s in open_sprints}
                  | {s["id"] for s in completed} | {s["id"] for s in failed})
     graph_lines: list[str] = []
-    for s in substrate.iter_sprints():
-        if s.program == program_id and s.id in shown_ids and s.edges:
+    for s in program_sprints:
+        if s.id in shown_ids and s.edges:
             rel = "; ".join(f"{e['type']} {e['dst']}" for e in s.edges)
             graph_lines.append(f"{s.id}: {rel}")
     for i in ideas:

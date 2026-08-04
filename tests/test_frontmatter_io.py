@@ -40,3 +40,20 @@ def test_roundtrips_frontmatter_value_containing_triple_dash():
     fm2, body = parse(serialize(fm, ""))
     assert fm2["messages"][0]["text"] == reply
     assert body == ""
+
+
+def test_parse_falls_back_when_the_fast_loader_rejects_a_document(monkeypatch):
+    """parse() prefers libyaml for speed, but must never become stricter than the
+    pure-python loader: anything the C loader refuses is re-parsed with SafeLoader."""
+    import yaml
+
+    from coscience import frontmatter_io
+
+    class Rejecting(yaml.SafeLoader):
+        def get_single_data(self):
+            raise yaml.YAMLError("nope")
+
+    monkeypatch.setattr(frontmatter_io, "_CLoader", Rejecting)
+    fm, body = parse("---\nstatus: approved\n---\n\nbody\n")
+    assert fm == {"status": "approved"}
+    assert body == "body\n"

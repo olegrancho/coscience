@@ -93,3 +93,17 @@ def test_gather_context_workdir_falls_back_to_control_repo(tmp_path):
     sub = Substrate(tmp_path / "repo")
     sub.save_program(Program(id="p1", title="t", goals="g", workdir="/no/such/dir"))
     assert gather_context(sub, "p1").workdir == str(sub.repo_root)
+
+
+def test_gather_context_walks_the_sprint_tree_once(substrate):
+    """The PM loop beats every 5s and each walk re-parses every sprint.md in the
+    substrate, so a second walk doubles the idle cost of the whole platform."""
+    substrate.save_program(Program(id="p1", title="C", goals="g"))
+    substrate.save_sprint(Sprint(id="p1-a", status=SprintStatus.PROPOSED, goals="a",
+                                 plan=["do it"], program="p1"))
+    walks = []
+    real = substrate.iter_sprints
+    substrate.iter_sprints = lambda *a, **k: (walks.append(1), real(*a, **k))[1]
+
+    gather_context(substrate, "p1")
+    assert len(walks) == 1
