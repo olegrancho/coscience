@@ -6,7 +6,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
 import { api, type ChatScope } from "../api";
-import { BackLink, RelTime, canvasBreakout, isImageName } from "../components/ui";
+import { BackLink, RelTime, ZoomableImg, canvasBreakout, isImageName } from "../components/ui";
 import { UserChip, useIsMine, OTHER_SHADE } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -329,8 +329,8 @@ export default function ChatView() {
                   <Loader size="sm" color="machine" />
                 ) : imgName ? (
                   <div style={{ maxHeight: "calc(100vh - 190px)", overflow: "auto", textAlign: "center" }}>
-                    <img src={`${api.artifactWorkRawUrl(id, aid, imgName)}?t=${work.dataUpdatedAt}`}
-                         alt={imgName} style={{ maxWidth: "100%" }} />
+                    <ZoomableImg src={`${api.artifactWorkRawUrl(id, aid, imgName)}?t=${work.dataUpdatedAt}`}
+                                 alt={imgName} style={{ maxWidth: "100%" }} />
                   </div>
                 ) : !workName || workfile.data?.binary ? (
                   <Text size="sm" c="dimmed">Nothing to preview yet — ask the planner to create the file, or save a version.</Text>

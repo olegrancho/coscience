@@ -7,7 +7,7 @@ import Md from "../components/Md";
 import { FeedbackThread } from "../components/FeedbackThread";
 import { api } from "../api";
 import { buildArtifactTree, type TreeRow } from "../components/artifactTree";
-import { BackLink, EmptyState, RelTime, StatusBadge, canvasBreakout, isImageName, liveChatId } from "../components/ui";
+import { BackLink, EmptyState, RelTime, StatusBadge, ZoomableImg, canvasBreakout, isImageName, liveChatId } from "../components/ui";
 import { UserChip } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -35,8 +35,8 @@ function CurrentVersion(
     if (!current) return <Text size="sm" c="dimmed">No content yet.</Text>;
     if (!imgName) return <Text size="sm" c="dimmed">No image in this version — download to view.</Text>;
     return (
-      <img src={api.artifactVersionRawUrl(pid, aid, current, imgName)}
-           style={{ maxWidth: "100%" }} alt={imgName} />
+      <ZoomableImg src={api.artifactVersionRawUrl(pid, aid, current, imgName)}
+                   style={{ maxWidth: "100%" }} alt={imgName} />
     );
   }
 

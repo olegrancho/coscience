@@ -8,7 +8,7 @@ import { Transcript } from "../components/Transcript";
 import { FeedbackThread } from "../components/FeedbackThread";
 import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
-import { AbsTime, BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, isImageName, voterId } from "../components/ui";
+import { AbsTime, BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, ZoomableImg, isImageName, voterId } from "../components/ui";
 import SprintEditModal from "../components/SprintEditModal";
 import { useMe, useIsMine, UserChip, OTHER_SHADE } from "../auth";
 
@@ -116,8 +116,8 @@ function FileBlock({ f, sprintId, live }: { f: SprintFile; sprintId: string; liv
           {isImage ? (
             // A figure the agent produced without registering it as an artifact:
             // the JSON reader reports it as binary, so serve the bytes instead.
-            <img src={api.sprintFileRawUrl(sprintId, f.name)}
-                 style={{ maxWidth: "100%", borderRadius: 6 }} alt={f.name} />
+            <ZoomableImg src={api.sprintFileRawUrl(sprintId, f.name)}
+                         style={{ maxWidth: "100%", borderRadius: 6 }} alt={f.name} />
           ) : f.binary ? (
             <Text size="sm" c="dimmed">Binary file — not shown.</Text>
           ) : showingFull && fullQ.isLoading ? (

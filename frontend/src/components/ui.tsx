@@ -1,5 +1,6 @@
-import type { CSSProperties, ReactNode } from "react";
-import { Stack, Text, Tooltip } from "@mantine/core";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
+import { useState } from "react";
+import { Modal, Stack, Text, Tooltip } from "@mantine/core";
 import { Link } from "react-router-dom";
 import type { ArtifactLock, RunAgg, SprintActivity, Usage, VoteTally } from "../api";
 import { SPRINT_STATE_ORDER, statusVar } from "./status";
@@ -294,6 +295,57 @@ function RunStat({ label, agg }: { label: string; agg: RunAgg }) {
  *  place: the chat, the artifact page, the sprint documents and the overview
  *  thumbnails all have to agree on what counts as showable. */
 export const isImageName = (n: string) => /\.(png|jpe?g|gif|svg|webp)$/i.test(n);
+
+/** An `<img>` that opens full-size in an overlay when clicked. Inline it looks and
+ *  sizes exactly like the plain tag it replaces — figures are laid out small, and a
+ *  plot is only readable at the size the screen allows.
+ *
+ *  Plain `<img>` rather than a `<button>` wrapper: the program page's thumbnail sits
+ *  inside a card-wide `<a>`, and a button nested in an anchor is invalid HTML. */
+export function ZoomableImg(props: ComponentProps<"img">) {
+  const { style, onClick, alt, ...rest } = props;
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <img
+        {...rest}
+        alt={alt}
+        style={{ ...style, cursor: "zoom-in" }}
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          // The thumbnail's card is a link; zooming shouldn't also navigate.
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen(true);
+          onClick?.(e);
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          setOpen(true);
+        }}
+      />
+      <Modal opened={open} onClose={() => setOpen(false)} size="auto" centered padding={0}
+             withCloseButton={false}>
+        <img
+          src={rest.src}
+          alt={alt}
+          onClick={() => setOpen(false)}
+          style={{ display: "block", maxWidth: "92vw", maxHeight: "92vh",
+                   objectFit: "contain", cursor: "zoom-out" }}
+        />
+        {/* Fit-to-viewport downscales a figure wider than the screen. The raw file in
+            its own tab is the way to actually see those pixels. */}
+        <a href={rest.src} target="_blank" rel="noreferrer"
+           style={{ display: "block", padding: "6px 10px", fontSize: 11,
+                    color: "var(--ink-faint)", textAlign: "right" }}>
+          Open original ↗
+        </a>
+      </Modal>
+    </>
+  );
+}
 
 /** The id of the chat editing this artifact right now, or "" if none. A chat
  *  holds the lock as "chat:<tid>" from "Open chat" until Release — that whole

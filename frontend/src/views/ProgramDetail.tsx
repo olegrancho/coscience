@@ -8,7 +8,7 @@ import Md from "../components/Md";
 import { FeedbackThread } from "../components/FeedbackThread";
 import DirectoryPickerModal from "../components/DirectoryPickerModal";
 import { api } from "../api";
-import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl, isImageName, liveChatId } from "../components/ui";
+import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl, ZoomableImg, isImageName, liveChatId } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
 import LineageCard from "../components/LineageCard";
 import type { ArtifactRow } from "../api";
@@ -24,7 +24,7 @@ function ArtifactThumb({ pid, a }: { pid: string; a: ArtifactRow }) {
   const img = (a.files ?? []).find(isImageName);
   if (!img || !a.current) return null;
   return (
-    <img src={api.artifactVersionRawUrl(pid, a.id, a.current, img)} alt="" loading="lazy"
+    <ZoomableImg src={api.artifactVersionRawUrl(pid, a.id, a.current, img)} alt={img} loading="lazy"
          style={{ width: THUMB_PX, height: THUMB_PX, flexShrink: 0, objectFit: "contain",
                   borderRadius: 4, padding: 2,
                   // Plots are usually saved on a transparent background — without an
