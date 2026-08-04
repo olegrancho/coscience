@@ -125,6 +125,15 @@ def test_beat_line_distinguishes_release_outcomes():
         [{"submitted": [], "unbacked_claims": ["released an approved sprint"]}], reasoned=1)
 
 
+def test_beat_line_names_a_program_whose_beat_raised():
+    # pm_run_once catches a per-program failure so the other programs still beat; the
+    # summary then looks like a skip, and a broken program hid behind "idle" for hours.
+    from coscience.cli import pm_beat_line
+    line = pm_beat_line([{"program": "kg", "submitted": [], "skipped": True,
+                          "error": "while parsing a block mapping"}], reasoned=0)
+    assert line == "ERROR kg: while parsing a block mapping"
+
+
 def test_beat_line_still_reports_throttling():
     from coscience.cli import pm_beat_line
     line = pm_beat_line([{"submitted": [], "skipped": True, "throttled": True}], reasoned=0)

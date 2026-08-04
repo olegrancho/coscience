@@ -35,6 +35,10 @@ def pm_beat_line(summaries: list[dict], reasoned: int) -> str:
     healthy idle beat — so a PM silently failing to release looked exactly like a PM with
     nothing to do."""
     parts = []
+    # A program whose beat raised is caught per-program (pm_runner) and comes back as
+    # {"error": …, "skipped": True} — which, unsaid, reads exactly like a healthy idle
+    # beat. kg-biomed's PM sat broken for 18h behind "idle — no input changed".
+    errors = [f"ERROR {s['program']}: {s['error']}" for s in summaries if s.get("error")]
     ids = [sid for s in summaries for sid in s["submitted"]]
     released = [sid for s in summaries for sid in s.get("released") or ()]
     reopened = [sid for s in summaries for sid in s.get("reopened") or ()]
@@ -51,6 +55,7 @@ def pm_beat_line(summaries: list[dict], reasoned: int) -> str:
     if unbacked:
         parts.append("WARNING report claims it " + "; ".join(unbacked)
                      + " — no such action was submitted")
+    parts += errors
     if parts:
         return " · ".join(parts)
     if reasoned:
