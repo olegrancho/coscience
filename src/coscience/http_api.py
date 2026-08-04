@@ -513,7 +513,11 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
 
-    @api.get("/programs/{program_id}/artifacts/{aid}/versions/{vid}/files/{name}")
+    # {name:path}: a document artifact keeps its figures in a subdirectory, so a
+    # version's file names are relative paths ("figures/fig1.png"). Without the
+    # converter a nested name never matched and read as "file not found"; the guard
+    # in _guarded_file already confines the resolved path to the version dir.
+    @api.get("/programs/{program_id}/artifacts/{aid}/versions/{vid}/files/{name:path}")
     def read_artifact_file(program_id: str, aid: str, vid: str, name: str) -> dict:
         try:
             return service.read_artifact_file(program_id, aid, vid, name)

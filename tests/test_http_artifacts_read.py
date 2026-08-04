@@ -36,6 +36,23 @@ def test_read_file(substrate):
     assert r.json()["content"] == "hello"
 
 
+def test_read_file_in_a_subdirectory(substrate):
+    # A manuscript keeps its figures in figures/, so a version's file names are
+    # relative paths; the route has to accept the slash (and still refuse an escape).
+    artifacts.create_artifact(substrate, "p", "doc", "doc", "md")
+    work = artifacts.seed_work(substrate, "p", "doc")
+    (work / "figures").mkdir()
+    (work / "figures" / "note.txt").write_text("caption")
+    (work / "manuscript.md").write_text("# Title")
+    artifacts.cut_version(substrate, "p", "doc", "human", now=1.0)
+
+    c = _client(substrate)
+    assert c.get("/api/programs/p/artifacts/doc/versions/v1/files/figures/note.txt"
+                 ).json()["content"] == "caption"
+    assert c.get("/api/programs/p/artifacts/doc/versions/v1/files/../../meta.md"
+                 ).status_code == 404
+
+
 def test_download_single_file_raw(substrate):
     _seed(substrate, "doc", {"content.md": "hello"})
     c = _client(substrate)

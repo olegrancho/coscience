@@ -23,8 +23,10 @@ function CurrentVersion(
   // that drew it — so address the image file directly. The download route zips
   // anything multi-file, which an <img> can't render.
   const imgName = files.find(isImageName) ?? "";
-  const name = files[0];
   const textLike = kind !== "figure" && kind !== "page";
+  // For a text kind the document is the deliverable, and any images beside it are its
+  // figures — so read the first text file, not whatever sorts first ("figures/…" would).
+  const name = (textLike ? files.find((f) => !isImageName(f)) : undefined) ?? files[0];
   const file = useQuery({
     queryKey: ["artifact-file", pid, aid, current, name],
     queryFn: () => api.readArtifactFile(pid, aid, current, name!),
@@ -64,8 +66,15 @@ function CurrentVersion(
     );
   }
 
-  // md / text (and any other unrecognized kind falls back to markdown rendering)
-  return <div className="report-leaf"><Md>{file.data.content}</Md></div>;
+  // md / text (and any other unrecognized kind falls back to markdown rendering).
+  // Figures the document ships alongside itself are served from this same version.
+  return (
+    <div className="report-leaf">
+      <Md resolveSrc={(src) => api.artifactVersionRawUrl(pid, aid, current, src)}>
+        {file.data.content}
+      </Md>
+    </div>
+  );
 }
 
 /** One row in the version-tree sidebar: id, author, age, plus a view/revert

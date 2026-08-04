@@ -126,4 +126,24 @@ describe("ArtifactDetail", () => {
     renderAt();
     await waitFor(() => expect(screen.getByText(/open chat/i)).toBeTruthy());
   });
+
+  it("renders the document, not a figure, when a doc ships figures beside it", async () => {
+    // Files come back sorted, so "figures/…" precedes "manuscript.md" — reading the
+    // first file would have fed a PNG to the markdown reader.
+    vi.spyOn(api, "getArtifact").mockResolvedValue({
+      id: "doc", program: "p", title: "Manuscript", kind: "md", current: "v1",
+      archived: false, lock: {}, linked_sprints: [], threads: [],
+      current_files: ["figures/figure1.png", "manuscript.md"],
+      versions: [{ id: "v1", parent: "", created_at: 1, created_by: "human", archived: false, note: "" }],
+    } as any);
+    const read = vi.spyOn(api, "readArtifactFile").mockResolvedValue(
+      { name: "manuscript.md", size: 40, content: "# Title\n\n![f1](figures/figure1.png)", binary: false } as any);
+    renderAt();
+
+    await waitFor(() => expect(screen.getByText("Title")).toBeTruthy());
+    expect(read).toHaveBeenCalledWith("p", "doc", "v1", "manuscript.md");
+    // and its relative figure resolves to the version's raw-file route
+    const img = document.querySelector("img")!;
+    expect(img.getAttribute("src")).toBe(api.artifactVersionRawUrl("p", "doc", "v1", "figures/figure1.png"));
+  });
 });

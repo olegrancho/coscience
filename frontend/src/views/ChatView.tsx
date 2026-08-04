@@ -60,8 +60,10 @@ export default function ChatView() {
   const isBinaryName = (n: string) => /\.(png|jpe?g|gif|svg|webp|pdf|zip|npy|npz|h5|hdf5|pkl|parquet|bin|ico|mp4|mov)$/i.test(n);
   // A figure's deliverable IS the image — prefer it over any build script so the
   // panel shows the picture, not the .py source. Otherwise render the first text file.
-  const imgName = files.find(isImageName) ?? "";
+  // ...unless the artifact IS a document that ships figures: then the text file is the
+  // deliverable and the images are its illustrations, resolved inside the markdown.
   const textName = files.find((n) => !isBinaryName(n)) ?? "";
+  const imgName = textName ? "" : files.find(isImageName) ?? "";
   const workName = imgName || textName || files[0] || "";
   const workfile = useQuery({
     queryKey: ["workfile", id, aid, workName],
@@ -338,7 +340,9 @@ export default function ChatView() {
                   <Loader size="sm" color="machine" />
                 ) : (
                   <div className="report-leaf" style={{ maxHeight: "calc(100vh - 190px)", overflow: "auto" }}>
-                    <Md>{workfile.data?.content ?? ""}</Md>
+                    <Md resolveSrc={(src) => `${api.artifactWorkRawUrl(id, aid, src)}?t=${work.dataUpdatedAt}`}>
+                      {workfile.data?.content ?? ""}
+                    </Md>
                   </div>
                 )}
               </Stack>
