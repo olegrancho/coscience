@@ -35,9 +35,12 @@ function CurrentVersion(
 
   // The figure's caption. `enabled` on the file's presence means a figure without one
   // costs no request; the version's file list already told us whether it exists.
+  // Distinct leading key from `file` above ("artifact-desc" vs "artifact-file"): a
+  // figure whose files sort description.md first would otherwise collide with the
+  // (unused-for-figures) `file` query's key on the exact same [pid, aid, current, name].
   const hasDesc = kind === "figure" && files.includes(DESCRIPTION_FILE);
   const desc = useQuery({
-    queryKey: ["artifact-file", pid, aid, current, DESCRIPTION_FILE],
+    queryKey: ["artifact-desc", pid, aid, current, DESCRIPTION_FILE],
     queryFn: () => api.readArtifactFile(pid, aid, current, DESCRIPTION_FILE),
     enabled: hasDesc && !!current,
   });
@@ -61,7 +64,7 @@ function CurrentVersion(
         ) : (
           <Text size="sm" c="dimmed">
             No description yet — a figure should ship a{" "}
-            <span className="mono">description.md</span> saying what it shows.
+            <span className="mono">{DESCRIPTION_FILE}</span> saying what it shows.
           </Text>
         )}
       </Stack>
