@@ -6,7 +6,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
 import { api, type ChatScope } from "../api";
-import { BackLink, RelTime, ZoomableImg, canvasBreakout, isImageName } from "../components/ui";
+import { BackLink, DESCRIPTION_FILE, RelTime, ZoomableImg, canvasBreakout, isImageName } from "../components/ui";
 import { UserChip, useIsMine, OTHER_SHADE } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -62,13 +62,27 @@ export default function ChatView() {
   // panel shows the picture, not the .py source. Otherwise render the first text file.
   // ...unless the artifact IS a document that ships figures: then the text file is the
   // deliverable and the images are its illustrations, resolved inside the markdown.
-  const textName = files.find((n) => !isBinaryName(n)) ?? "";
+  // The figure's own description.md is its caption, not a text deliverable, so it never
+  // wins that choice — it renders under the image instead.
+  const descName = files.includes(DESCRIPTION_FILE) ? DESCRIPTION_FILE : "";
+  const textName = files.find((n) => !isBinaryName(n) && n !== descName) ?? "";
   const imgName = textName ? "" : files.find(isImageName) ?? "";
   const workName = imgName || textName || files[0] || "";
   const workfile = useQuery({
     queryKey: ["workfile", id, aid, workName],
     queryFn: () => api.readArtifactWorkFile(id, aid, workName!),
     enabled: !!workName && !imgName,       // images render via <img>, not the JSON reader
+    refetchInterval: busy ? 2000 : false,
+  });
+  // Only alongside an image: with no image the description IS the pane's text file and
+  // `workfile` above already renders it, so fetching twice would just double the work.
+  // Distinct leading key ("descfile" vs "workfile"): a figure whose description.md is
+  // chosen as `workName` (no image yet) would otherwise collide on the same
+  // [id, aid, DESCRIPTION_FILE] tuple as the `workfile` query above.
+  const descfile = useQuery({
+    queryKey: ["descfile", id, aid, DESCRIPTION_FILE],
+    queryFn: () => api.readArtifactWorkFile(id, aid, DESCRIPTION_FILE),
+    enabled: !!aid && !!descName && !!imgName,
     refetchInterval: busy ? 2000 : false,
   });
 
@@ -333,6 +347,13 @@ export default function ChatView() {
                   <div style={{ maxHeight: "calc(100vh - 190px)", overflow: "auto", textAlign: "center" }}>
                     <ZoomableImg src={`${api.artifactWorkRawUrl(id, aid, imgName)}?t=${work.dataUpdatedAt}`}
                                  alt={imgName} style={{ maxWidth: "100%" }} />
+                    {descName && (
+                      <div className="report-leaf" style={{ textAlign: "left", marginTop: 12 }}>
+                        <Md resolveSrc={(src) => `${api.artifactWorkRawUrl(id, aid, src)}?t=${work.dataUpdatedAt}`}>
+                          {descfile.data?.content ?? ""}
+                        </Md>
+                      </div>
+                    )}
                   </div>
                 ) : !workName || workfile.data?.binary ? (
                   <Text size="sm" c="dimmed">Nothing to preview yet — ask the planner to create the file, or save a version.</Text>

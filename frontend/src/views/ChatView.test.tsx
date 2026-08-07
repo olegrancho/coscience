@@ -41,4 +41,23 @@ describe("ChatView bound split-view", () => {
     renderAt();
     await waitFor(() => expect(screen.getByText(/save as version/i)).toBeTruthy());
   });
+
+  it("shows a bound figure's live description under the image", async () => {
+    vi.spyOn(api, "getProgram").mockResolvedValue({ id: "p", title: "P" } as any);
+    vi.spyOn(api, "listChats").mockResolvedValue([
+      { id: "c1", title: "edit fig", scope: "full", created_at: 1, busy: false,
+        messages: 0, last_at: 1, artifacts: ["fig"] }] as any);
+    vi.spyOn(api, "getChatThread").mockResolvedValue({
+      id: "c1", title: "edit fig", scope: "full", created_at: 1, turns_done: 0,
+      busy: false, messages: [], live: "", artifacts: ["fig"] } as any);
+    vi.spyOn(api, "listArtifactWorkFiles").mockResolvedValue(["description.md", "plot.png"]);
+    vi.spyOn(api, "readArtifactWorkFile").mockResolvedValue({
+      name: "description.md", size: 9, content: "Log-log gap size.", binary: false } as any);
+    renderAt();
+    // The image stays the pane's subject even though a text file is now present.
+    await waitFor(() => expect(screen.getByAltText("plot.png")).toBeTruthy());
+    // The description query only enables once the image is confirmed, so its data
+    // lands a render after the image does — wait for it rather than racing it.
+    await waitFor(() => expect(screen.getByText("Log-log gap size.")).toBeTruthy());
+  });
 });
