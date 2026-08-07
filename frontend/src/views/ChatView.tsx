@@ -64,7 +64,9 @@ export default function ChatView() {
   // deliverable and the images are its illustrations, resolved inside the markdown.
   // The figure's own description.md is its caption, not a text deliverable, so it never
   // wins that choice — it renders under the image instead.
-  const descName = files.includes(DESCRIPTION_FILE) ? DESCRIPTION_FILE : "";
+  // Only a caption when there's an image to caption: with no image, description.md
+  // IS the pane's text deliverable (see below), not something to strip out of it.
+  const descName = files.includes(DESCRIPTION_FILE) && files.some(isImageName) ? DESCRIPTION_FILE : "";
   const textName = files.find((n) => !isBinaryName(n) && n !== descName) ?? "";
   const imgName = textName ? "" : files.find(isImageName) ?? "";
   const workName = imgName || textName || files[0] || "";
@@ -93,6 +95,7 @@ export default function ChatView() {
     if (wasBusy.current && !busy) {
       qc.invalidateQueries({ queryKey: ["work", id, aid] });
       qc.invalidateQueries({ queryKey: ["workfile", id, aid, workName] });
+      qc.invalidateQueries({ queryKey: ["descfile", id, aid, DESCRIPTION_FILE] });
     }
     wasBusy.current = busy;
   }, [busy, qc, id, aid, workName]);
@@ -108,6 +111,7 @@ export default function ChatView() {
       }
       qc.invalidateQueries({ queryKey: ["work", id, aid] });
       qc.invalidateQueries({ queryKey: ["workfile", id, aid, workName] });
+      qc.invalidateQueries({ queryKey: ["descfile", id, aid, DESCRIPTION_FILE] });
     },
     onError: (e) => notifications.show({ color: "red", title: "Couldn't save version", message: String(e) }),
   });
