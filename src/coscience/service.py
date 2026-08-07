@@ -818,9 +818,12 @@ class Service:
             ctx = gather_context(self.substrate, program_id)
             prompt = chat_agent.render_preamble(ctx, thread.scope) + "\n\nHuman: " + message
         if thread.artifacts:
+            figure_note = ""
+            if any(self._artifact_kind(program_id, a) == "figure" for a in thread.artifacts):
+                figure_note = " " + FIGURE_DESCRIPTION_NOTE
             prompt = (f"[ARTIFACT] You are editing artifact(s) {thread.artifacts} — your working "
                       f"directory IS the artifact's working copy. Create and edit files here; "
-                      f"the human snapshots them as versions.\n\n") + prompt
+                      f"the human snapshots them as versions.{figure_note}\n\n") + prompt
         thread.announced_scope = thread.scope
         launch = launch or chat_agent.launch_turn
         token = launch(thread_dir=self.substrate.chat_thread_dir(program_id, thread_id),
@@ -1224,6 +1227,13 @@ class Service:
                               note=note)
         self.substrate.commit(f"artifact {program_id}/{aid}: adopted {vid or '(no change)'}")
         return self.get_artifact(program_id, aid)
+
+    def _artifact_kind(self, program_id: str, aid: str) -> str:
+        """The artifact's kind, or "" when it doesn't exist yet — a chat can be bound
+        to an id whose artifact the agent has still to create."""
+        if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            return ""
+        return self.substrate.load_artifact(program_id, aid).kind
 
     def get_artifact(self, program_id: str, aid: str) -> dict:
         from coscience import threads as _th

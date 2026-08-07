@@ -297,6 +297,9 @@ Run the program by curating ideas, not by piling on sprints:
     COUNTS AGAINST THE CAP. Bind existing artifacts with artifact_ids; declare new ones in
     create. Do not spend a cap slot on work that is really just filing an existing file —
     that is what adopt is for.
+  A `figure` artifact is the image PLUS a `description.md` beside it — what the figure
+  shows, its axes and units, and what a reader should conclude. Ask for both when you
+  propose one, and write one when you adopt a plot that arrives without it.
   If the request is to make an ALREADY-PROPOSED sprint deliver its output as an artifact
   (e.g. "have this sprint produce a program-report artifact"), do NOT emit a duplicate
   artifact_task — instead add artifacts_bound/artifacts_create to that sprint via

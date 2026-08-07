@@ -182,3 +182,18 @@ def test_instructions_require_finished_json_signal(tmp_path):
     assert "finished.json" in text
     assert "DETACHED-JOB PROTOCOL" in text
     assert "not available to you" in text           # background tooling declared disabled
+
+
+def test_instructions_ask_a_figure_for_a_description(tmp_path):
+    ctx = ExecutionContext(artifacts=[
+        {"aid": "gap-plot", "kind": "figure", "work_path": str(tmp_path / "w")}])
+    text = build_instructions(_sprint(), ctx, tmp_path / "scratchpad.md")
+    assert "description.md" in text
+    assert "axes and units" in text
+
+
+def test_instructions_dont_ask_a_report_for_a_description(tmp_path):
+    ctx = ExecutionContext(artifacts=[
+        {"aid": "report", "kind": "md", "work_path": str(tmp_path / "w")}])
+    text = build_instructions(_sprint(), ctx, tmp_path / "scratchpad.md")
+    assert "description.md" not in text
