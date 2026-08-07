@@ -296,6 +296,9 @@ function RunStat({ label, agg }: { label: string; agg: RunAgg }) {
  *  thumbnails all have to agree on what counts as showable. */
 export const isImageName = (n: string) => /\.(png|jpe?g|gif|svg|webp)$/i.test(n);
 
+/** A figure artifact's caption rides beside its image under exactly this name. */
+export const DESCRIPTION_FILE = "description.md";
+
 /** An `<img>` that opens full-size in an overlay when clicked. Inline it looks and
  *  sizes exactly like the plain tag it replaces — figures are laid out small, and a
  *  plot is only readable at the size the screen allows.
