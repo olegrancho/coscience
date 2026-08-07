@@ -11,6 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from coscience import graph, threads
+from coscience.artifacts import DESCRIPTION_FILE, FIGURE_DESCRIPTION_NOTE
 from coscience.ledger import Ledger
 from coscience.models import (DEFAULT_MODEL, Sprint, SprintStatus, Program, ProgramStatus,
                               Idea, ChatThread, set_status)
@@ -817,9 +818,12 @@ class Service:
             ctx = gather_context(self.substrate, program_id)
             prompt = chat_agent.render_preamble(ctx, thread.scope) + "\n\nHuman: " + message
         if thread.artifacts:
+            figure_note = ""
+            if any(self._artifact_kind(program_id, a) == "figure" for a in thread.artifacts):
+                figure_note = " " + FIGURE_DESCRIPTION_NOTE
             prompt = (f"[ARTIFACT] You are editing artifact(s) {thread.artifacts} — your working "
                       f"directory IS the artifact's working copy. Create and edit files here; "
-                      f"the human snapshots them as versions.\n\n") + prompt
+                      f"the human snapshots them as versions.{figure_note}\n\n") + prompt
         thread.announced_scope = thread.scope
         launch = launch or chat_agent.launch_turn
         token = launch(thread_dir=self.substrate.chat_thread_dir(program_id, thread_id),
@@ -1173,12 +1177,15 @@ class Service:
 
     def _artifact_excerpt(self, program_id: str, art, files: list[str]) -> str:
         """The opening of an artifact's current text file, for overview thumbnails.
-        Figures have nothing to quote. Tries candidates in turn rather than trusting
-        the first name: a code artifact's alphabetically-first file is often a build
-        leftover (a .pyc under __pycache__), which would leave the card blank."""
-        if art.kind == "figure" or not files or not art.current:
+        A figure's only quotable file is its description.md, so that is its sole
+        candidate. Other kinds try candidates in turn rather than trusting the first
+        name: a code artifact's alphabetically-first file is often a build leftover
+        (a .pyc under __pycache__), which would leave the card blank."""
+        if not files or not art.current:
             return ""
-        for name in self._excerpt_candidates(files):
+        candidates = ([f for f in files if f == DESCRIPTION_FILE] if art.kind == "figure"
+                      else self._excerpt_candidates(files))
+        for name in candidates:
             try:
                 raw = self._guarded_file(program_id, art.id, art.current,
                                          name).read_bytes()[:self._THUMB_CHARS * 4]
@@ -1220,6 +1227,13 @@ class Service:
                               note=note)
         self.substrate.commit(f"artifact {program_id}/{aid}: adopted {vid or '(no change)'}")
         return self.get_artifact(program_id, aid)
+
+    def _artifact_kind(self, program_id: str, aid: str) -> str:
+        """The artifact's kind, or "" when it doesn't exist yet — a chat can be bound
+        to an id whose artifact the agent has still to create."""
+        if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            return ""
+        return self.substrate.load_artifact(program_id, aid).kind
 
     def get_artifact(self, program_id: str, aid: str) -> dict:
         from coscience import threads as _th

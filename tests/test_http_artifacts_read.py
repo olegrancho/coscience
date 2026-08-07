@@ -137,3 +137,29 @@ def test_page_serve_has_csp(substrate):
 def test_get_missing_404(substrate):
     c = _client(substrate)
     assert c.get("/api/programs/p/artifacts/ghost").status_code == 404
+
+
+def test_figure_excerpt_comes_from_its_description(substrate):
+    """A figure's card used to be blank — its only quotable file is description.md."""
+    artifacts.create_artifact(substrate, "p", "fig", "fig", "figure")
+    work = artifacts.seed_work(substrate, "p", "fig")
+    (work / "plot.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    (work / "description.md").write_text("Gap size against prime index; log-log axes.")
+    artifacts.cut_version(substrate, "p", "fig", "human", now=1.0)
+    c = _client(substrate)
+
+    row = {a["id"]: a for a in c.get("/api/programs/p/artifacts").json()}["fig"]
+    assert "log-log axes" in row["excerpt"]
+
+
+def test_figure_excerpt_ignores_prose_under_another_name(substrate):
+    """Exactly one filename renders, so a README doesn't quietly stand in for it."""
+    artifacts.create_artifact(substrate, "p", "fig", "fig", "figure")
+    work = artifacts.seed_work(substrate, "p", "fig")
+    (work / "plot.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    (work / "README.md").write_text("how to regenerate this plot")
+    artifacts.cut_version(substrate, "p", "fig", "human", now=1.0)
+    c = _client(substrate)
+
+    row = {a["id"]: a for a in c.get("/api/programs/p/artifacts").json()}["fig"]
+    assert row["excerpt"] == ""

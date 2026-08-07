@@ -146,4 +146,77 @@ describe("ArtifactDetail", () => {
     const img = document.querySelector("img")!;
     expect(img.getAttribute("src")).toBe(api.artifactVersionRawUrl("p", "doc", "v1", "figures/figure1.png"));
   });
+
+  it("renders a figure's description under the image", async () => {
+    vi.spyOn(api, "getArtifact").mockResolvedValue({
+      id: "fig", program: "p", title: "Gap plot", kind: "figure", current: "v1",
+      archived: false, lock: {}, current_files: ["description.md", "plot.png"],
+      linked_sprints: [], threads: [], versions: [
+        { id: "v1", parent: "", created_at: 1, created_by: "human", archived: false, note: "" }],
+    } as any);
+    vi.spyOn(api, "readArtifactFile").mockResolvedValue({
+      name: "description.md", size: 9, content: "Gap size against prime index.", binary: false } as any);
+    renderAt();
+    await waitFor(() => expect(screen.getByText("Gap size against prime index.")).toBeTruthy());
+    expect(screen.getByAltText("plot.png")).toBeTruthy();
+    expect(api.readArtifactFile).toHaveBeenCalledWith("p", "doc", "v1", "description.md");
+  });
+
+  it("says so when a figure has no description", async () => {
+    vi.spyOn(api, "getArtifact").mockResolvedValue({
+      id: "fig", program: "p", title: "Gap plot", kind: "figure", current: "v1",
+      archived: false, lock: {}, current_files: ["plot.png"],
+      linked_sprints: [], threads: [], versions: [
+        { id: "v1", parent: "", created_at: 1, created_by: "human", archived: false, note: "" }],
+    } as any);
+    const read = vi.spyOn(api, "readArtifactFile");
+    renderAt();
+    await waitFor(() => expect(screen.getByAltText("plot.png")).toBeTruthy());
+    expect(screen.getByText(/no description yet/i)).toBeTruthy();
+    expect(read).not.toHaveBeenCalled();          // absent file -> no request
+  });
+
+  it("skips fetching the description when the version has no image (e.g. a pdf figure)", async () => {
+    // The caption only ever renders alongside the image (the `!imgName` early return
+    // above fires first), so fetching description.md when the deliverable is a
+    // non-image file like a pdf would just be discarded work.
+    vi.spyOn(api, "getArtifact").mockResolvedValue({
+      id: "fig", program: "p", title: "Gap plot", kind: "figure", current: "v1",
+      archived: false, lock: {}, current_files: ["description.md", "plot.pdf"],
+      linked_sprints: [], threads: [], versions: [
+        { id: "v1", parent: "", created_at: 1, created_by: "human", archived: false, note: "" }],
+    } as any);
+    const read = vi.spyOn(api, "readArtifactFile");
+    renderAt();
+    await waitFor(() => expect(screen.getByText(/download to view/i)).toBeTruthy());
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("shows an error, not a blank caption, when the description fails to load", async () => {
+    vi.spyOn(api, "getArtifact").mockResolvedValue({
+      id: "fig", program: "p", title: "Gap plot", kind: "figure", current: "v1",
+      archived: false, lock: {}, current_files: ["description.md", "plot.png"],
+      linked_sprints: [], threads: [], versions: [
+        { id: "v1", parent: "", created_at: 1, created_by: "human", archived: false, note: "" }],
+    } as any);
+    vi.spyOn(api, "readArtifactFile").mockRejectedValue(new Error("404"));
+    renderAt();
+    await waitFor(() => expect(screen.getByAltText("plot.png")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/couldn.t load the description/i)).toBeTruthy());
+  });
+
+  it("resolves an image the description references by relative path", async () => {
+    vi.spyOn(api, "getArtifact").mockResolvedValue({
+      id: "fig", program: "p", title: "Gap plot", kind: "figure", current: "v1",
+      archived: false, lock: {}, current_files: ["description.md", "plot.png", "panels/b.png"],
+      linked_sprints: [], threads: [], versions: [
+        { id: "v1", parent: "", created_at: 1, created_by: "human", archived: false, note: "" }],
+    } as any);
+    vi.spyOn(api, "readArtifactFile").mockResolvedValue({
+      name: "description.md", size: 9, content: "Panel B:\n\n![B](panels/b.png)", binary: false } as any);
+    renderAt();
+    const b = await screen.findByAltText("B");
+    expect(b.getAttribute("src")).toContain("panels/b.png");
+    expect(b.getAttribute("src")).not.toBe("panels/b.png");   // resolved, not left relative
+  });
 });

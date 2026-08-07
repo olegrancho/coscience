@@ -42,3 +42,22 @@ def test_bound_turn_reacquires_after_reap(substrate):
     a = substrate.load_artifact("p", "doc")
     assert a.lock["holder_id"] == f"chat:{cid}"
     assert (substrate.artifact_dir("p", "doc") / "work").is_dir()
+
+
+def test_bound_figure_turn_asks_for_a_description(substrate):
+    substrate.save_program(Program(id="p", title="P", goals="g"))
+    artifacts.create_artifact(substrate, "p", "fig", "Fig", "figure")
+    svc = Service(substrate.repo_root)
+    cid = svc.create_chat("p", artifacts=["fig"])["id"]
+    calls = {}
+    svc.post_chat_message("p", cid, "redraw it on a log axis",
+                          launch=lambda **kw: calls.update(kw) or "tok")
+    assert "description.md" in calls["prompt"]
+
+
+def test_bound_document_turn_says_nothing_about_descriptions(substrate):
+    svc, cid = _bound_chat(substrate)                      # binds an `md` artifact
+    calls = {}
+    svc.post_chat_message("p", cid, "make the title bold",
+                          launch=lambda **kw: calls.update(kw) or "tok")
+    assert "description.md" not in calls["prompt"]

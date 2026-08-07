@@ -7,7 +7,7 @@ import Md from "../components/Md";
 import { FeedbackThread } from "../components/FeedbackThread";
 import { api } from "../api";
 import { buildArtifactTree, type TreeRow } from "../components/artifactTree";
-import { BackLink, EmptyState, RelTime, StatusBadge, ZoomableImg, canvasBreakout, isImageName, liveChatId } from "../components/ui";
+import { BackLink, DESCRIPTION_FILE, EmptyState, RelTime, StatusBadge, ZoomableImg, canvasBreakout, isImageName, liveChatId } from "../components/ui";
 import { UserChip } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -33,12 +33,48 @@ function CurrentVersion(
     enabled: textLike && !!current && !!name,
   });
 
+  // The figure's caption. `enabled` on the file's presence means a figure without one
+  // costs no request; the version's file list already told us whether it exists.
+  // Also requires an image: a version holding description.md beside a non-image
+  // deliverable (e.g. a pdf) never renders the caption (see the `!imgName` return
+  // below), so fetching it would just be discarded.
+  // Distinct leading key from `file` above ("artifact-desc" vs "artifact-file"): a
+  // figure whose files sort description.md first would otherwise collide with the
+  // (unused-for-figures) `file` query's key on the exact same [pid, aid, current, name].
+  const hasDesc = kind === "figure" && files.includes(DESCRIPTION_FILE) && !!imgName;
+  const desc = useQuery({
+    queryKey: ["artifact-desc", pid, aid, current, DESCRIPTION_FILE],
+    queryFn: () => api.readArtifactFile(pid, aid, current, DESCRIPTION_FILE),
+    enabled: hasDesc && !!current,
+  });
+
   if (kind === "figure") {
     if (!current) return <Text size="sm" c="dimmed">No content yet.</Text>;
     if (!imgName) return <Text size="sm" c="dimmed">No image in this version — download to view.</Text>;
     return (
-      <ZoomableImg src={api.artifactVersionRawUrl(pid, aid, current, imgName)}
-                   style={{ maxWidth: "100%" }} alt={imgName} />
+      <Stack gap="md">
+        <ZoomableImg src={api.artifactVersionRawUrl(pid, aid, current, imgName)}
+                     style={{ maxWidth: "100%" }} alt={imgName} />
+        {hasDesc ? (
+          desc.isLoading ? <Loader size="sm" color="machine" />
+          : desc.error || !desc.data ? <Text size="sm" c="red">Couldn't load the description.</Text>
+          : (
+            // resolveSrc for the same reason the text branch has one: a description may
+            // reference a second panel by relative path, which would otherwise resolve
+            // against the dashboard route.
+            <div className="report-leaf">
+              <Md resolveSrc={(src) => api.artifactVersionRawUrl(pid, aid, current, src)}>
+                {desc.data.content}
+              </Md>
+            </div>
+          )
+        ) : (
+          <Text size="sm" c="dimmed">
+            No description yet — a figure should ship a{" "}
+            <span className="mono">{DESCRIPTION_FILE}</span> saying what it shows.
+          </Text>
+        )}
+      </Stack>
     );
   }
 

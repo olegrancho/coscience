@@ -11,6 +11,7 @@ import json
 import shlex
 from pathlib import Path
 
+from coscience.artifacts import FIGURE_DESCRIPTION_NOTE
 from coscience.executor import (ExecutionContext, is_running, launch_detached,
                                 terminate_detached)
 from coscience.models import Sprint
@@ -47,12 +48,14 @@ def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
             alines = "\n".join(
                 f'- `{a["aid"]}` ({a["kind"]}): write this artifact\'s files into {a["work_path"]}'
                 for a in context.artifacts)
+            figure_note = ("\n\n" + FIGURE_DESCRIPTION_NOTE
+                           if any(a.get("kind") == "figure" for a in context.artifacts) else "")
             artifacts_section = (
                 "\n\n## Artifacts to produce (deliverables)\n"
                 "Write each artifact's files into its working directory below. The platform "
                 "snapshots each working copy as a new immutable version when this sprint "
                 "completes — you do not manage version numbers yourself; just create and edit "
-                "the current files in place.\n" + alines)
+                "the current files in place.\n" + alines + figure_note)
         if context.assess_reason:
             assess_section = f"""
 ## Resuming to check a detached job ({context.assess_reason})
