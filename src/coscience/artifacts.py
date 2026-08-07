@@ -12,6 +12,17 @@ from pathlib import Path
 
 from coscience.models import Artifact, ArtifactVersion
 
+# A figure artifact's caption rides inside the version under exactly this name, so it
+# versions with the image instead of drifting from it. One name, no fallbacks: a wrong
+# name shows a visible "no description yet" line rather than silently standing in.
+DESCRIPTION_FILE = "description.md"
+
+FIGURE_DESCRIPTION_NOTE = (
+    f"A figure artifact is the image PLUS a `{DESCRIPTION_FILE}` beside it in the same "
+    "directory: what the figure shows, its axes and units, and what a reader should "
+    "conclude from it. Write both — an image with no description is half an artifact."
+)
+
 
 class ArtifactBusy(RuntimeError):
     """The artifact is locked by another holder (a running sprint or open chat)."""

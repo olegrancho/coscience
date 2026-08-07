@@ -11,6 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from coscience import graph, threads
+from coscience.artifacts import DESCRIPTION_FILE, FIGURE_DESCRIPTION_NOTE
 from coscience.ledger import Ledger
 from coscience.models import (DEFAULT_MODEL, Sprint, SprintStatus, Program, ProgramStatus,
                               Idea, ChatThread, set_status)
@@ -1173,12 +1174,15 @@ class Service:
 
     def _artifact_excerpt(self, program_id: str, art, files: list[str]) -> str:
         """The opening of an artifact's current text file, for overview thumbnails.
-        Figures have nothing to quote. Tries candidates in turn rather than trusting
-        the first name: a code artifact's alphabetically-first file is often a build
-        leftover (a .pyc under __pycache__), which would leave the card blank."""
-        if art.kind == "figure" or not files or not art.current:
+        A figure's only quotable file is its description.md, so that is its sole
+        candidate. Other kinds try candidates in turn rather than trusting the first
+        name: a code artifact's alphabetically-first file is often a build leftover
+        (a .pyc under __pycache__), which would leave the card blank."""
+        if not files or not art.current:
             return ""
-        for name in self._excerpt_candidates(files):
+        candidates = ([f for f in files if f == DESCRIPTION_FILE] if art.kind == "figure"
+                      else self._excerpt_candidates(files))
+        for name in candidates:
             try:
                 raw = self._guarded_file(program_id, art.id, art.current,
                                          name).read_bytes()[:self._THUMB_CHARS * 4]
