@@ -5,10 +5,13 @@ can hand results straight to clients.
 """
 from __future__ import annotations
 
+import math
 import os
 import time
 from pathlib import Path
 from uuid import uuid4
+
+import yaml
 
 from coscience import graph, threads
 from coscience.artifacts import DESCRIPTION_FILE, FIGURE_DESCRIPTION_NOTE
@@ -1414,3 +1417,36 @@ class Service:
                 for l in ledger.all_leases()
             ],
         }
+
+    def set_capacity(self, capacity: dict) -> dict:
+        """Replace the declared resource pool. Validates, writes
+        .coscience/resources.yaml atomically, commits, and returns fresh ledger
+        status. Lowering a limit below what is currently leased is allowed and
+        drains: running work keeps its lease, new grants stop."""
+        clean: dict[str, float] = {}
+        for raw_key, raw_val in (capacity or {}).items():
+            key = str(raw_key).strip()
+            if not key:
+                raise ValueError("a resource needs a name")
+            if key == "resources":
+                # ResourcePool.from_dict treats a top-level `resources:` mapping as
+                # the wrapper, so a resource actually named that would vanish.
+                raise ValueError("'resources' is reserved and can't be a resource name")
+            if key in clean:
+                raise ValueError(f"duplicate resource name: {key}")
+            if isinstance(raw_val, bool) or not isinstance(raw_val, (int, float)):
+                raise ValueError(f"{key}: capacity must be a number")
+            val = float(raw_val)
+            if not math.isfinite(val):
+                raise ValueError(f"{key}: capacity must be a finite number")
+            if val < 0:
+                raise ValueError(f"{key}: capacity can't be negative")
+            clean[key] = val
+
+        path = self.repo_root / ".coscience" / "resources.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(yaml.safe_dump(clean, sort_keys=True))
+        os.replace(tmp, path)      # atomic: a dispatcher reading it never sees a partial file
+        self.substrate.commit("capacity updated")
+        return self.ledger_status()
