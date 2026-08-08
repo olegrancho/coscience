@@ -1445,8 +1445,15 @@ class Service:
 
         path = self.repo_root / ".coscience" / "resources.yaml"
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(yaml.safe_dump(clean, sort_keys=True))
-        os.replace(tmp, path)      # atomic: a dispatcher reading it never sees a partial file
+        # Unique per call: PUT /api/capacity is a sync route, so FastAPI runs it
+        # in a threadpool and concurrent calls are genuinely concurrent. A shared
+        # tmp name lets one thread's os.replace pull the file out from under
+        # another thread's write/replace.
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
+        try:
+            tmp.write_text(yaml.safe_dump(clean, sort_keys=True))
+            os.replace(tmp, path)  # atomic: a dispatcher reading it never sees a partial file
+        finally:
+            tmp.unlink(missing_ok=True)
         self.substrate.commit("capacity updated")
         return self.ledger_status()

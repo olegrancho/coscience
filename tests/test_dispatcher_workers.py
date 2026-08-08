@@ -65,3 +65,28 @@ def test_two_workers_run_two_sprints_at_once(substrate):
     disp.ledger.load()
     assert disp.ledger.lease_for("a") is not None
     assert disp.ledger.lease_for("b") is not None
+
+
+def test_the_cap_holds_across_cycles_with_persistent_leases(substrate):
+    # A lease that never expires on its own (linger=50, finished=False) is what
+    # exposes the dispatcher's own effective_requirement call: if it stops
+    # attaching WORKER_KEY, cycle 2+ keeps granting new sprints on top of the
+    # still-held first one, since select_grants only screens sprints that are
+    # still leaseless.
+    for sid in ("a", "b", "c"):
+        substrate.save_sprint(_queued(sid))
+    disp = Dispatcher(substrate, FakeAgent(linger=50, finished=False),
+                      ResourcePool({WORKER_KEY: 1.0}), SchedulerPolicy(aging_interval=0.0))
+    for t in range(5):
+        disp.run_one_cycle(now=float(t))
+        disp.ledger.load()
+        assert len(disp.ledger.all_leases()) <= 1
+
+
+def test_a_granted_lease_records_one_worker_slot(substrate):
+    substrate.save_sprint(_queued("a"))
+    disp = Dispatcher(substrate, FakeAgent(linger=50, finished=False),
+                      ResourcePool({WORKER_KEY: 1.0}), SchedulerPolicy(aging_interval=0.0))
+    disp.run_one_cycle(now=0.0)
+    disp.ledger.load()
+    assert disp.ledger.lease_for("a").amounts[WORKER_KEY] == 1.0

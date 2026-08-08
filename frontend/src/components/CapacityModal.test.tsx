@@ -81,6 +81,28 @@ describe("CapacityModal", () => {
     expect(screen.getByText(/running work finish/i)).toBeTruthy();
   });
 
+  it("cannot fire Save twice from a fast double-click", async () => {
+    // api.setCapacity resolves only when we say so, so both clicks land while
+    // the first call is still in flight — exactly the window a real double-click
+    // (or an impatient double-tap) races through.
+    let resolveSave: ((v: unknown) => void) | undefined;
+    (api.setCapacity as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise((resolve) => { resolveSave = resolve; }),
+    );
+    renderModal();
+    const saveButton = screen.getByRole("button", { name: /save/i }) as HTMLButtonElement;
+
+    fireEvent.click(saveButton);
+    expect(saveButton.disabled).toBe(true);
+    fireEvent.click(saveButton);
+
+    expect(api.setCapacity).toHaveBeenCalledTimes(1);
+
+    resolveSave?.({ capacity: {}, used: {}, available: {}, leases: [] });
+    await waitFor(() => expect(saveButton.disabled).toBe(false));
+    expect(api.setCapacity).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps an in-progress edit when the ledger poll hands back a same-valued capacity object", () => {
     // main.tsx polls ["ledger"] every ~10s while the modal is open (Task 7 mounts
     // it over that page), which hands the modal a new `capacity` object on every

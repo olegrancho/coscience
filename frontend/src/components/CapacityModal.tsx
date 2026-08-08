@@ -19,20 +19,25 @@ export default function CapacityModal({ opened, onClose, capacity, used }: Props
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const wasOpened = useRef(false);
 
   // Re-seed from the server on the false->true open transition only, so a
   // stale local edit can't overwrite a change made elsewhere. Gating on
   // `opened` alone (or including `capacity` in the deps) would also re-seed
   // on every background ledger poll while the modal is already open,
-  // silently discarding whatever the user is mid-typing.
+  // silently discarding whatever the user is mid-typing. `capacity` is read
+  // from the closure, not the deps array, precisely because it can't be
+  // trusted to signal "did the server value actually change" — a new poll
+  // hands back a fresh object every ~10s even when nothing changed.
   useEffect(() => {
     if (opened && !wasOpened.current) {
       setRows(Object.entries(capacity).map(([key, v]) => ({ key, value: String(v) })));
       setAdding(false); setNewKey(""); setNewValue(""); setError("");
     }
     wasOpened.current = opened;
-  }, [opened, capacity]);
+  }, [opened]);
 
   const collect = (): Record<string, number> | null => {
     const out: Record<string, number> = {};
@@ -55,14 +60,25 @@ export default function CapacityModal({ opened, onClose, capacity, used }: Props
   const shrinking = rows.filter((r) => (used[r.key] ?? 0) > Number(r.value));
 
   const save = async () => {
+    // Guard on a ref, not just the `saving` state: a double-click dispatches
+    // both handlers before React has a chance to re-render and disable the
+    // button, so the check has to be synchronous with the first call.
+    if (savingRef.current) return;
     setError("");
     const payload = collect();
     if (!payload) return;
+    savingRef.current = true;
+    setSaving(true);
     try {
       await api.setCapacity(payload);
       qc.invalidateQueries({ queryKey: ["ledger"] });
       onClose();
-    } catch (e) { setError(String(e)); }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   return (
@@ -102,7 +118,7 @@ export default function CapacityModal({ opened, onClose, capacity, used }: Props
         ))}
 
         {error && <div style={{ color: "red" }}>{error}</div>}
-        <Button onClick={save}>Save</Button>
+        <Button onClick={save} disabled={saving} loading={saving}>Save</Button>
       </Stack>
     </Modal>
   );

@@ -1,3 +1,5 @@
+import threading
+
 import pytest
 import yaml
 
@@ -78,3 +80,49 @@ def test_rejected_input_leaves_the_file_untouched(tmp_path):
     with pytest.raises(ValueError):
         svc.set_capacity({"cpu": -1})
     assert svc.pool.capacity == {"cpu": 4.0}
+
+
+def test_concurrent_writes_never_race_on_the_shared_tmp_file(tmp_path):
+    # PUT /api/capacity is a sync route, so FastAPI runs concurrent calls in a
+    # threadpool for real. A shared ".tmp" name let one thread's os.replace pull
+    # the file out from under another thread's write/replace, surfacing as
+    # FileNotFoundError. Each thread writes a distinct, individually-valid value
+    # so we can also confirm the file that lands is one of the values written,
+    # not a torn mix of two writers.
+    svc = Service(tmp_path)
+    n_threads = 8
+    calls_per_thread = 15
+    written_values = [{"workers": float(i)}
+                       for i in range(n_threads * calls_per_thread)]
+    errors: list[Exception] = []
+    lock = threading.Lock()
+
+    def worker(values):
+        for v in values:
+            try:
+                svc.set_capacity(v)
+            except ValueError:
+                pass  # a legitimate outcome of validation, not a race symptom
+            except Exception as exc:  # noqa: BLE001 - we want to see anything else
+                with lock:
+                    errors.append(exc)
+
+    threads = [
+        threading.Thread(target=worker,
+                         args=(written_values[i * calls_per_thread:(i + 1) * calls_per_thread],))
+        for i in range(n_threads)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], f"unexpected non-ValueError errors: {errors!r}"
+
+    path = tmp_path / ".coscience" / "resources.yaml"
+    assert path.is_file()
+    # No stray per-call tmp file left behind (would get swept into the substrate
+    # by the next `git add -A`).
+    assert list(path.parent.glob("resources.yaml.*.tmp")) == []
+    final = yaml.safe_load(path.read_text())
+    assert final in written_values
