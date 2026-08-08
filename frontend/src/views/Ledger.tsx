@@ -1,14 +1,18 @@
-import { Card, Loader, Stack, Table, Text } from "@mantine/core";
+import { Button, Card, Group, Loader, Stack, Table, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
+import CapacityModal from "../components/CapacityModal";
 import { EmptyState, Gauge, UsagePanel } from "../components/ui";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
+const WORKER_KEY = "workers";
 
 export default function Ledger() {
   const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.getLedger });
   const usage = useQuery({ queryKey: ["usage"], queryFn: api.getUsage });
+  const [editing, setEditing] = useState(false);
   if (ledger.isLoading) return <Loader color="machine" />;
   if (ledger.error || !ledger.data) return <EmptyState title="Couldn't load compute">Try again in a moment.</EmptyState>;
   const l = ledger.data;
@@ -28,7 +32,18 @@ export default function Ledger() {
       </Card>
 
       <Card padding="lg" radius="md" style={cardStyle}>
-        <div className="eyebrow" style={{ marginBottom: 16 }}>capacity in use</div>
+        <Group justify="space-between" style={{ marginBottom: 16 }}>
+          <div className="eyebrow">capacity in use</div>
+          <Button size="xs" variant="default" onClick={() => setEditing(true)}>Edit capacity</Button>
+        </Group>
+
+        {!(WORKER_KEY in l.capacity) && (
+          <Text size="sm" c="dimmed" style={{ marginBottom: 16 }}>
+            No worker cap — any number of agents can run at once. Add a{" "}
+            <code>{WORKER_KEY}</code> limit to bound it.
+          </Text>
+        )}
+
         {keys.length ? (
           <Stack gap={16}>
             {keys.map((k) => <Gauge key={k} label={k} used={l.used[k] ?? 0} capacity={l.capacity[k]} />)}
@@ -61,6 +76,9 @@ export default function Ledger() {
           </Table>
         )}
       </Card>
+
+      <CapacityModal opened={editing} onClose={() => setEditing(false)}
+                     capacity={l.capacity} used={l.used} />
     </Stack>
   );
 }
