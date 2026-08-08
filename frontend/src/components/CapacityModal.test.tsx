@@ -18,7 +18,9 @@ beforeAll(() => {
   })) as unknown as typeof window.matchMedia);
 });
 
-function renderModal(capacity = { cpu: 16, workers: 1 }, used = { cpu: 2, workers: 1 }) {
+// Explicit Record type (rather than letting TS infer from the defaults) so a
+// partial capacity/used map — e.g. a pool missing the "workers" key — type-checks.
+function renderModal(capacity: Record<string, number> = { cpu: 16, workers: 1 }, used: Record<string, number> = { cpu: 2, workers: 1 }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <MantineProvider>
