@@ -1,0 +1,103 @@
+import { Button, Group, Modal, Stack, Text, TextInput } from "@mantine/core";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { api } from "../api";
+
+interface Props {
+  opened: boolean;
+  onClose: () => void;
+  capacity: Record<string, number>;
+  used: Record<string, number>;
+}
+
+interface Row { key: string; value: string }
+
+export default function CapacityModal({ opened, onClose, capacity, used }: Props) {
+  const qc = useQueryClient();
+  const [rows, setRows] = useState<Row[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [newKey, setNewKey] = useState("");
+  const [newValue, setNewValue] = useState("");
+  const [error, setError] = useState("");
+
+  // Re-seed from the server every time the modal opens, so a stale local edit
+  // can't overwrite a change made elsewhere.
+  useEffect(() => {
+    if (!opened) return;
+    setRows(Object.entries(capacity).map(([key, v]) => ({ key, value: String(v) })));
+    setAdding(false); setNewKey(""); setNewValue(""); setError("");
+  }, [opened, capacity]);
+
+  const collect = (): Record<string, number> | null => {
+    const out: Record<string, number> = {};
+    const entries = [...rows, ...(adding && newKey.trim() ? [{ key: newKey, value: newValue }] : [])];
+    for (const row of entries) {
+      const key = row.key.trim();
+      if (!key) { setError("Every resource needs a name."); return null; }
+      if (key in out) { setError(`Two resources are both called "${key}".`); return null; }
+      const n = Number(row.value);
+      if (row.value.trim() === "" || !Number.isFinite(n) || n < 0) {
+        setError(`${key}: capacity must be zero or more.`); return null;
+      }
+      out[key] = n;
+    }
+    return out;
+  };
+
+  // Limits being lowered under what's already leased — worth saying out loud,
+  // because the answer (drain, don't kill) isn't obvious.
+  const shrinking = rows.filter((r) => (used[r.key] ?? 0) > Number(r.value));
+
+  const save = async () => {
+    setError("");
+    const payload = collect();
+    if (!payload) return;
+    try {
+      await api.setCapacity(payload);
+      qc.invalidateQueries({ queryKey: ["ledger"] });
+      onClose();
+    } catch (e) { setError(String(e)); }
+  };
+
+  return (
+    <Modal opened={opened} onClose={onClose} title="Edit capacity">
+      <Stack>
+        {rows.map((row, i) => (
+          <Group key={row.key} gap="xs" wrap="nowrap">
+            <TextInput label={`${row.key} capacity`} style={{ flex: 1 }}
+                       value={row.value}
+                       onChange={(e) => setRows(rows.map((r, j) =>
+                         j === i ? { ...r, value: e.currentTarget.value } : r))} />
+            <Button variant="subtle" color="gray" aria-label={`remove ${row.key}`}
+                    style={{ alignSelf: "flex-end" }}
+                    onClick={() => setRows(rows.filter((_, j) => j !== i))}>✕</Button>
+          </Group>
+        ))}
+
+        {adding ? (
+          <Group gap="xs" wrap="nowrap">
+            <TextInput label="new resource name" style={{ flex: 1 }} value={newKey}
+                       onChange={(e) => setNewKey(e.currentTarget.value)} />
+            <TextInput label="new resource capacity" style={{ width: 120 }} value={newValue}
+                       onChange={(e) => setNewValue(e.currentTarget.value)} />
+          </Group>
+        ) : (
+          <button type="button" className="linklike" style={{ textAlign: "left" }}
+                  onClick={() => setAdding(true)}>
+            + add resource
+          </button>
+        )}
+
+        {shrinking.map((r) => (
+          <Text key={r.key} size="sm" c="dimmed">
+            {used[r.key]} {r.key} in use — lowering below that lets running work finish
+            and blocks new grants.
+          </Text>
+        ))}
+
+        {error && <div style={{ color: "red" }}>{error}</div>}
+        <Button onClick={save}>Save</Button>
+      </Stack>
+    </Modal>
+  );
+}
