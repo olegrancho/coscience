@@ -65,9 +65,6 @@ the 10s `["ledger"]` poll from fighting the user: a refetch mid-adjustment
 updates `l.capacity` underneath, but the overlay stays on top, so a half-finished
 adjustment never snaps back to the server's value.
 
-**Pending values render dimmed** until the save succeeds, so "typed but not yet
-written" is visible on screen rather than assumed.
-
 **One save, 1s after the last click.** The timer resets on every click; when it
 fires, a single `api.setCapacity({ ...l.capacity, ...pending })` goes out. On
 success the overlay clears and `["ledger"]` is invalidated, so the gauges
@@ -98,6 +95,6 @@ omitted, and calls `onAdjust` with `+1` / `-1` when it is supplied.
 ## Out of scope
 
 Adding, removing or renaming resources (the modal's job); per-resource step
-sizes; an undo affordance; any confirmation before reaching 0 — the request was
-explicitly for speed, and the dimmed pending state plus a gauge reading `0` make
-the state visible without an extra click.
+sizes; an undo affordance; a distinct visual treatment for not-yet-saved values;
+any confirmation before reaching 0 — the request was explicitly for speed, and a
+1s window is short enough that the gauge reading `0` is the signal.

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vitest";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { MantineProvider } from "@mantine/core";
@@ -13,6 +13,7 @@ vi.mock("../api", () => ({
   },
 }));
 
+import { api } from "../api";
 import Ledger from "./Ledger";
 
 beforeAll(() => {
@@ -59,5 +60,69 @@ describe("Compute page", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /edit capacity/i })).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /edit capacity/i }));
     await waitFor(() => expect(screen.getByLabelText("workers capacity")).toBeTruthy());
+  });
+});
+
+describe("Compute page steppers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.setCapacity).mockResolvedValue({ capacity: {}, used: {}, available: {}, leases: [] });
+    ledger.mockResolvedValue({
+      capacity: { cpu: 16, workers: 1 }, used: { cpu: 2, workers: 0 },
+      available: { cpu: 14, workers: 1 }, leases: [],
+    });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const readout = (label: string) =>
+    screen.getByLabelText(`increase ${label}`).parentElement!.parentElement!.textContent;
+
+  it("shows the new number at once, without saving yet", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("increase cpu")).toBeTruthy());
+    fireEvent.click(screen.getByLabelText("increase cpu"));
+    expect(readout("cpu")).toContain("2 / 17");
+    expect(api.setCapacity).not.toHaveBeenCalled();
+  });
+
+  it("saves once, with the whole map, after the debounce", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("increase cpu")).toBeTruthy());
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByLabelText("increase cpu"));
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    expect(api.setCapacity).toHaveBeenCalledTimes(1);
+    expect(api.setCapacity).toHaveBeenCalledWith({ cpu: 17, workers: 1 });
+  });
+
+  it("collapses rapid clicks into one save", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("increase cpu")).toBeTruthy());
+    vi.useFakeTimers();
+    for (let i = 0; i < 4; i++) fireEvent.click(screen.getByLabelText("increase cpu"));
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    expect(api.setCapacity).toHaveBeenCalledTimes(1);
+    expect(api.setCapacity).toHaveBeenCalledWith({ cpu: 20, workers: 1 });
+  });
+
+  it("can't take a resource below zero", async () => {
+    ledger.mockResolvedValue({
+      capacity: { workers: 0 }, used: { workers: 0 }, available: { workers: 0 }, leases: [],
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("decrease workers")).toBeTruthy());
+    expect((screen.getByLabelText("decrease workers") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("reverts and explains when the save is rejected", async () => {
+    vi.mocked(api.setCapacity).mockRejectedValue(new Error("422 capacity can't be negative"));
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("increase cpu")).toBeTruthy());
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByLabelText("increase cpu"));
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    vi.useRealTimers();
+    await waitFor(() => expect(screen.getByText(/422 capacity can't be negative/)).toBeTruthy());
+    expect(readout("cpu")).toContain("2 / 16");
   });
 });

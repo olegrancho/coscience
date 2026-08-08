@@ -1,6 +1,6 @@
 import { Button, Card, Group, Loader, Stack, Table, Text } from "@mantine/core";
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import CapacityModal from "../components/CapacityModal";
@@ -8,11 +8,51 @@ import { EmptyState, Gauge, UsagePanel } from "../components/ui";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 const WORKER_KEY = "workers";
+/** One save per adjustment, not one per click — each save is also a substrate commit. */
+const SAVE_DEBOUNCE_MS = 1000;
 
 export default function Ledger() {
+  const qc = useQueryClient();
   const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.getLedger });
   const usage = useQuery({ queryKey: ["usage"], queryFn: api.getUsage });
   const [editing, setEditing] = useState(false);
+  // Locally adjusted capacities, layered over the server's. The 10s ledger poll
+  // would otherwise snap a half-finished adjustment back mid-click.
+  const [pending, setPending] = useState<Record<string, number>>({});
+  const [saveError, setSaveError] = useState("");
+  const pendingRef = useRef(pending);
+  const capacityRef = useRef<Record<string, number>>({});
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  pendingRef.current = pending;
+  if (ledger.data) capacityRef.current = ledger.data.capacity;
+
+  const save = useCallback(async () => {
+    timerRef.current = null;
+    const edits = pendingRef.current;
+    if (!Object.keys(edits).length) return;
+    try {
+      await api.setCapacity({ ...capacityRef.current, ...edits });
+      setPending({});                    // server now agrees; drop the overlay
+      qc.invalidateQueries({ queryKey: ["ledger"] });
+    } catch (e) {
+      setPending({});                    // revert: never show a number the server rejected
+      setSaveError(String(e));
+    }
+  }, [qc]);
+
+  // A pending adjustment shouldn't die with the page.
+  useEffect(() => () => { if (timerRef.current) void save(); }, [save]);
+
+  const adjust = (key: string, delta: number) => {
+    setSaveError("");
+    setPending((prev) => {
+      const from = prev[key] ?? capacityRef.current[key] ?? 0;
+      return { ...prev, [key]: Math.max(0, from + delta) };
+    });
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => { void save(); }, SAVE_DEBOUNCE_MS);
+  };
+
   if (ledger.isLoading) return <Loader color="machine" />;
   if (ledger.error || !ledger.data) return <EmptyState title="Couldn't load compute">Try again in a moment.</EmptyState>;
   const l = ledger.data;
@@ -46,9 +86,15 @@ export default function Ledger() {
 
         {keys.length ? (
           <Stack gap={16}>
-            {keys.map((k) => <Gauge key={k} label={k} used={l.used[k] ?? 0} capacity={l.capacity[k]} />)}
+            {keys.map((k) => (
+              <Gauge key={k} label={k} used={l.used[k] ?? 0}
+                     capacity={pending[k] ?? l.capacity[k]}
+                     onAdjust={(delta) => adjust(k, delta)} />
+            ))}
           </Stack>
         ) : <Text size="sm" c="dimmed">No compute pool is configured yet, so there's nothing to meter.</Text>}
+
+        {saveError && <Text size="sm" c="red" style={{ marginTop: 12 }}>{saveError}</Text>}
       </Card>
 
       <Card padding="lg" radius="md" style={cardStyle}>

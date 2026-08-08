@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 
-import { ZoomableImg } from "./ui";
+import { Gauge, ZoomableImg } from "./ui";
 
 // jsdom has no matchMedia; MantineProvider's color-scheme effect needs it.
 beforeAll(() => {
@@ -53,5 +53,32 @@ describe("ZoomableImg", () => {
     fireEvent.click(screen.getByAltText("plot.png"));
 
     expect(onNavigate).not.toHaveBeenCalled();
+  });
+});
+
+describe("Gauge steppers", () => {
+  const renderGauge = (props: Partial<Parameters<typeof Gauge>[0]> = {}) =>
+    render(<MantineProvider><Gauge label="cpu" used={2} capacity={16} {...props} /></MantineProvider>);
+
+  it("renders no stepper buttons when onAdjust is omitted", () => {
+    renderGauge();
+    expect(screen.queryByLabelText("increase cpu")).toBeNull();
+    expect(screen.queryByLabelText("decrease cpu")).toBeNull();
+  });
+
+  it("reports +1 and -1 through onAdjust", () => {
+    const onAdjust = vi.fn();
+    renderGauge({ onAdjust });
+    fireEvent.click(screen.getByLabelText("increase cpu"));
+    expect(onAdjust).toHaveBeenCalledWith(1);
+    fireEvent.click(screen.getByLabelText("decrease cpu"));
+    expect(onAdjust).toHaveBeenCalledWith(-1);
+  });
+
+  it("won't decrease below zero", () => {
+    const onAdjust = vi.fn();
+    renderGauge({ capacity: 0, onAdjust });
+    fireEvent.click(screen.getByLabelText("decrease cpu"));
+    expect(onAdjust).not.toHaveBeenCalled();
   });
 });

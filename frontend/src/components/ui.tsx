@@ -160,15 +160,36 @@ export function StateBar({ counts }: { counts: Record<string, number> }) {
   );
 }
 
-/** A labelled capacity gauge: used / capacity. */
-export function Gauge({ label, used, capacity }: { label: string; used: number; capacity: number }) {
+/** A labelled capacity gauge: used / capacity. Pass `onAdjust` to get -/+ steppers
+ *  beside the readout; without it the gauge is read-only (the Overview renders it
+ *  that way). */
+export function Gauge({ label, used, capacity, onAdjust }: {
+  label: string; used: number; capacity: number;
+  onAdjust?: (delta: number) => void;
+}) {
   const pct = capacity > 0 ? Math.min(100, (used / capacity) * 100) : 0;
   const hot = pct >= 85;
+  const stepStyle = {
+    border: "1px solid var(--hairline)", borderRadius: 4, background: "transparent",
+    color: "var(--ink-muted)", cursor: "pointer", fontSize: 12, lineHeight: "14px",
+    padding: "0 6px",
+  };
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
         <span className="mono" style={{ fontSize: 12, color: "var(--ink-muted)" }}>{label}</span>
-        <span className="mono" style={{ fontSize: 12 }}>{used} / {capacity}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span className="mono" style={{ fontSize: 12 }}>{used} / {capacity}</span>
+          {onAdjust && (
+            <>
+              {/* zero is a real setting (a full stop for this resource), so it's a floor */}
+              <button type="button" aria-label={`decrease ${label}`} style={stepStyle}
+                      disabled={capacity <= 0} onClick={() => onAdjust(-1)}>−</button>
+              <button type="button" aria-label={`increase ${label}`} style={stepStyle}
+                      onClick={() => onAdjust(1)}>+</button>
+            </>
+          )}
+        </span>
       </div>
       <div style={{ height: 8, borderRadius: 999, background: "var(--paper-2)", overflow: "hidden" }}>
         <div style={{ height: "100%", width: `${pct}%`, background: hot ? "var(--signal)" : "var(--machine)" }} />
