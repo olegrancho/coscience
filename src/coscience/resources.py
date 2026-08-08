@@ -26,3 +26,16 @@ def load_pool(repo_root) -> ResourcePool:
     if not path.is_file():
         return ResourcePool()
     return ResourcePool.from_yaml(path)
+
+
+WORKER_KEY = "workers"
+
+
+def effective_requirement(required: dict[str, float], pool: ResourcePool) -> dict[str, float]:
+    """What a sprint actually consumes. When the pool declares a worker cap, every
+    sprint costs one worker slot on top of what it declares — that is what bounds
+    the number of agent processes running at once. A pool with no `workers` key is
+    uncapped, exactly as before."""
+    if WORKER_KEY not in pool.capacity:
+        return dict(required)
+    return {**required, WORKER_KEY: 1.0}

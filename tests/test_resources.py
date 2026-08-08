@@ -1,4 +1,5 @@
 from coscience.resources import ResourcePool, load_pool
+from coscience.resources import WORKER_KEY, effective_requirement
 
 
 def test_from_dict_bare_mapping_coerces_floats():
@@ -27,3 +28,31 @@ def test_load_pool_reads_coscience_dir(tmp_path):
     d.mkdir()
     (d / "resources.yaml").write_text("resources:\n  runtime_slots: 4\n")
     assert load_pool(tmp_path).capacity == {"runtime_slots": 4.0}
+
+
+def test_effective_requirement_is_unchanged_without_a_worker_cap():
+    pool = ResourcePool({"cpu": 8.0})
+    assert effective_requirement({"cpu": 2.0}, pool) == {"cpu": 2.0}
+
+
+def test_effective_requirement_adds_a_worker_slot_when_capped():
+    pool = ResourcePool({"cpu": 8.0, WORKER_KEY: 2.0})
+    assert effective_requirement({"cpu": 2.0}, pool) == {"cpu": 2.0, WORKER_KEY: 1.0}
+
+
+def test_effective_requirement_bounds_a_sprint_declaring_nothing():
+    pool = ResourcePool({WORKER_KEY: 1.0})
+    assert effective_requirement({}, pool) == {WORKER_KEY: 1.0}
+
+
+def test_effective_requirement_does_not_mutate_its_input():
+    pool = ResourcePool({WORKER_KEY: 1.0})
+    required = {"cpu": 1.0}
+    effective_requirement(required, pool)
+    assert required == {"cpu": 1.0}
+
+
+def test_effective_requirement_ignores_a_self_declared_worker_amount():
+    # A sprint may not buy itself extra slots; one agent is one slot.
+    pool = ResourcePool({WORKER_KEY: 4.0})
+    assert effective_requirement({WORKER_KEY: 3.0}, pool) == {WORKER_KEY: 1.0}
