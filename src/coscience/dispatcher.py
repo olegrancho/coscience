@@ -8,7 +8,7 @@ from pathlib import Path
 
 from coscience.ledger import Ledger
 from coscience.models import BeatOutcome, SprintStatus, set_status
-from coscience.resources import ResourcePool
+from coscience.resources import ResourcePool, effective_requirement
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
 from coscience.worker import Worker
@@ -76,7 +76,10 @@ class Dispatcher:
                  and not artifacts.sprint_blocked(self.substrate, s)]
         for sprint in self.policy.select_grants(needs, queue, self.ledger, now):
             eff = self.policy.effective_priority(sprint, queue.get(sprint.id, now), now)
-            if self.ledger.acquire(sprint.id, sprint.resources_required, now, ttl,
+            if self.ledger.acquire(sprint.id,
+                                   effective_requirement(sprint.resources_required,
+                                                         self.ledger.pool),
+                                   now, ttl,
                                    priority=eff, preemptible=sprint.preemptible):
                 # Acquire the sprint's artifact locks (instantiating create-targets).
                 # If a same-cycle race lost the atomic acquire, give the lease back

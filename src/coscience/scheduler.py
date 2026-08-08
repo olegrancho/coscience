@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from coscience.ledger import Ledger
 from coscience.models import Lease, Sprint
+from coscience.resources import effective_requirement
 
 
 @dataclass
@@ -26,8 +27,9 @@ class SchedulerPolicy:
 
         granted: list[Sprint] = []
         for sprint in sorted(candidates, key=sort_key):
-            if all(avail.get(k, 0.0) >= v for k, v in sprint.resources_required.items()):
-                for k, v in sprint.resources_required.items():
+            need = effective_requirement(sprint.resources_required, ledger.pool)
+            if all(avail.get(k, 0.0) >= v for k, v in need.items()):
+                for k, v in need.items():
                     avail[k] = avail.get(k, 0.0) - v
                 granted.append(sprint)
         return granted
@@ -40,7 +42,7 @@ class SchedulerPolicy:
         lowest-priority preemptible holders below the candidate's priority, just
         enough to cover the deficit; returns [] if the safe-point set can't cover
         it (nothing is killed — the candidate waits for a job/turn to finish)."""
-        need = candidate.resources_required
+        need = effective_requirement(candidate.resources_required, ledger.pool)
         avail = dict(ledger.available())
         deficit = {k: v - avail.get(k, 0.0) for k, v in need.items()
                    if v - avail.get(k, 0.0) > 0}
