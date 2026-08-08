@@ -80,4 +80,32 @@ describe("CapacityModal", () => {
     expect(screen.getByText(/14 cpu in use/i)).toBeTruthy();
     expect(screen.getByText(/running work finish/i)).toBeTruthy();
   });
+
+  it("keeps an in-progress edit when the ledger poll hands back a same-valued capacity object", () => {
+    // main.tsx polls ["ledger"] every ~10s while the modal is open (Task 7 mounts
+    // it over that page), which hands the modal a new `capacity` object on every
+    // tick even when nothing changed server-side. Re-seeding on that reference
+    // change — instead of only on open — would silently wipe this edit.
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <CapacityModal opened onClose={() => {}} capacity={{ cpu: 16, workers: 1 }} used={{ cpu: 2, workers: 1 }} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+
+    fireEvent.change(screen.getByLabelText("cpu capacity"), { target: { value: "20" } });
+
+    // A fresh object literal with the same values simulates the poll's new reference.
+    rerender(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <CapacityModal opened onClose={() => {}} capacity={{ cpu: 16, workers: 1 }} used={{ cpu: 2, workers: 1 }} />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+
+    expect((screen.getByLabelText("cpu capacity") as HTMLInputElement).value).toBe("20");
+  });
 });

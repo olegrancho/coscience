@@ -1,6 +1,6 @@
 import { Button, Group, Modal, Stack, Text, TextInput } from "@mantine/core";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 
 interface Props {
@@ -19,13 +19,19 @@ export default function CapacityModal({ opened, onClose, capacity, used }: Props
   const [newKey, setNewKey] = useState("");
   const [newValue, setNewValue] = useState("");
   const [error, setError] = useState("");
+  const wasOpened = useRef(false);
 
-  // Re-seed from the server every time the modal opens, so a stale local edit
-  // can't overwrite a change made elsewhere.
+  // Re-seed from the server on the false->true open transition only, so a
+  // stale local edit can't overwrite a change made elsewhere. Gating on
+  // `opened` alone (or including `capacity` in the deps) would also re-seed
+  // on every background ledger poll while the modal is already open,
+  // silently discarding whatever the user is mid-typing.
   useEffect(() => {
-    if (!opened) return;
-    setRows(Object.entries(capacity).map(([key, v]) => ({ key, value: String(v) })));
-    setAdding(false); setNewKey(""); setNewValue(""); setError("");
+    if (opened && !wasOpened.current) {
+      setRows(Object.entries(capacity).map(([key, v]) => ({ key, value: String(v) })));
+      setAdding(false); setNewKey(""); setNewValue(""); setError("");
+    }
+    wasOpened.current = opened;
   }, [opened, capacity]);
 
   const collect = (): Record<string, number> | null => {
