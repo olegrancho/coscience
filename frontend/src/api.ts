@@ -6,6 +6,7 @@ export interface PMActivation { at: number; cycle: number; triggers: string[]; s
 export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
   instructions: string;   // standing house rules, in every PM prompt
+  max_proposed: number;   // cap on sprints awaiting review; 0 = platform default
   activations: PMActivation[]; last_run: number | null;
 }
 export interface Idea {
@@ -185,6 +186,11 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
     }).then(j<Program>),
+  setProgramMaxProposed: (id: string, n: number) =>
+    fetch(`/api/programs/${id}/max_proposed`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ n }),
+    }).then(j<{ id: string; max_proposed: number }>),
   listDirs: (path?: string | null) =>
     fetch(`/api/fs/dirs${path ? `?path=${encodeURIComponent(path)}` : ""}`).then(j<DirListing>),
   createDir: (parent: string, name: string) =>

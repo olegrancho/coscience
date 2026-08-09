@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
+import { MODEL_OPTIONS } from "./components/ui";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -91,5 +92,20 @@ describe("api client", () => {
     const f = mockFetch(200, ["content.md"]);
     await api.listArtifactWorkFiles("p", "doc");
     expect(f).toHaveBeenCalledWith("/api/programs/p/artifacts/doc/work");
+  });
+
+  it("setProgramMaxProposed posts the cap to the program's max_proposed endpoint", async () => {
+    const fetchMock = mockFetch(200, { id: "p1", max_proposed: 6 });
+
+    await expect(api.setProgramMaxProposed("p1", 6)).resolves.toEqual({ id: "p1", max_proposed: 6 });
+    expect(fetchMock).toHaveBeenCalledWith("/api/programs/p1/max_proposed", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ n: 6 }),
+    }));
+  });
+});
+
+describe("MODEL_OPTIONS", () => {
+  it("offers Opus 4.8", () => {
+    expect(MODEL_OPTIONS).toContainEqual({ value: "claude-opus-4-8", label: "Opus 4.8" });
   });
 });
