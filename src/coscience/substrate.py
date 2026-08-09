@@ -295,6 +295,7 @@ class Substrate:
             status=ProgramStatus(fm.get("status", "active")),
             pm_model=str(fm.get("pm_model", "")),
             workdir=str(fm.get("workdir", "")),
+            max_proposed=int(fm.get("max_proposed", 0)),
         )
 
     def save_program(self, program: Program) -> None:
@@ -303,6 +304,8 @@ class Substrate:
             fm["pm_model"] = program.pm_model
         if program.workdir:
             fm["workdir"] = program.workdir
+        if program.max_proposed:
+            fm["max_proposed"] = program.max_proposed
         d = self.program_dir(program.id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "program.md").write_text(serialize(fm, program.goals.strip() + "\n"))
