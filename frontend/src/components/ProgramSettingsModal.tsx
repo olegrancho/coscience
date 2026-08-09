@@ -54,10 +54,19 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
     const folder = workdir.trim();
     setSaving(true);
     try {
+      let workdirResult: { workdir: string; exists: boolean } | undefined;
       if (model !== was.model) await api.setProgramModel(program.id, model);
-      if (folder !== was.workdir) await api.setProgramWorkdir(program.id, folder);
+      if (folder !== was.workdir) workdirResult = await api.setProgramWorkdir(program.id, folder);
       if (cap !== was.maxProposed) await api.setProgramMaxProposed(program.id, cap);
       if (instructions !== was.instructions) await api.setProgramInstructions(program.id, instructions);
+      const staleWorkdir = workdirResult?.workdir && !workdirResult.exists;
+      notifications.show({
+        color: staleWorkdir ? "yellow" : "teal",
+        title: "Settings saved",
+        message: staleWorkdir
+          ? `Saved, but ${workdirResult!.workdir} doesn't exist yet — agents fall back to the control repo until it does.`
+          : "Program settings updated.",
+      });
       onSaved();
       onClose();
     } catch (e) {
@@ -96,6 +105,7 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
           description="How many experiments may wait for your review at once. Blank = 4."
           min={1}
           max={20}
+          allowDecimal={false}
           value={maxProposed}
           onChange={setMaxProposed}
         />
@@ -111,7 +121,7 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
         />
 
         <Group justify="flex-end" gap={8}>
-          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button variant="default" onClick={onClose} disabled={saving}>Cancel</Button>
           <Button color="machine" loading={saving} onClick={save}>Save</Button>
         </Group>
       </Stack>

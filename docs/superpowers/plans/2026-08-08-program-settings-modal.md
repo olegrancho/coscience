@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Never commit or push without explicit approval from the user — do the `git add`/`git commit` steps only if the user has approved committing; otherwise leave the work staged-but-uncommitted and say so.
-- Runtime is Linux-only. Backend tests: `python3 -m pytest`. Frontend tests: `npm test` from `frontend/`.
+- Runtime is Linux-only. Backend tests: `~/venvs/coscience/bin/python -m pytest`. Frontend tests: `npm test` from `frontend/`.
 - `max_proposed` accepts `0` (clear the override) or `1..20`. Negative or `>20` → 422.
 - The inline header controls and the instructions card in `ProgramDetail.tsx` are **not** moved or removed by any task in this plan.
 - Model IDs are exact strings, never date-suffixed: the new option is `claude-opus-4-8`.
@@ -63,7 +63,7 @@ def test_unset_max_proposed_writes_no_frontmatter_key(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python3 -m pytest tests/test_program_max_proposed.py -v`
+Run: `~/venvs/coscience/bin/python -m pytest tests/test_program_max_proposed.py -v`
 Expected: FAIL — `TypeError: Program.__init__() got an unexpected keyword argument 'max_proposed'` (and an `AttributeError` on the first test).
 
 - [ ] **Step 3: Write minimal implementation**
@@ -93,7 +93,7 @@ and in `save_program`, beside the other optional keys:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python3 -m pytest tests/test_program_max_proposed.py tests/test_program_substrate.py -v`
+Run: `~/venvs/coscience/bin/python -m pytest tests/test_program_max_proposed.py tests/test_program_substrate.py -v`
 Expected: PASS (the existing `test_save_then_load_program` equality check still holds, because the new field defaults to 0 on both sides).
 
 - [ ] **Step 5: Commit** *(only with the user's approval — see Global Constraints)*
@@ -171,7 +171,7 @@ def test_program_cap_below_the_existing_queue_proposes_nothing(substrate):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python3 -m pytest tests/test_program_max_proposed.py -v`
+Run: `~/venvs/coscience/bin/python -m pytest tests/test_program_max_proposed.py -v`
 Expected: the four new tests FAIL — the cap tests propose both sprints because the code still uses the global `MAX_PROPOSED` of 4; `test_context_uses_the_program_cap_when_set` fails on `assert 4 == 2`.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -204,7 +204,7 @@ In the apply path, replace `slots = MAX_PROPOSED - open_proposed` with:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python3 -m pytest tests/test_program_max_proposed.py tests/test_pm_ideas.py tests/test_parked.py tests/test_pm_adopt_artifacts.py -v`
+Run: `~/venvs/coscience/bin/python -m pytest tests/test_program_max_proposed.py tests/test_pm_ideas.py tests/test_parked.py tests/test_pm_adopt_artifacts.py -v`
 Expected: PASS — the existing tests use programs with no cap set, so they still see `MAX_PROPOSED`.
 
 - [ ] **Step 5: Commit** *(only with the user's approval)*
@@ -280,7 +280,7 @@ def test_unknown_program_is_404(client):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python3 -m pytest tests/test_http_max_proposed.py -v`
+Run: `~/venvs/coscience/bin/python -m pytest tests/test_http_max_proposed.py -v`
 Expected: FAIL — `KeyError: 'max_proposed'` on the payload test, 404s on the POST tests (no such route).
 
 - [ ] **Step 3: Write minimal implementation**
@@ -331,7 +331,7 @@ and the route after `set_program_workdir`:
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python3 -m pytest tests/test_http_max_proposed.py tests/test_http_api.py tests/test_service_programs.py -v`
+Run: `~/venvs/coscience/bin/python -m pytest tests/test_http_max_proposed.py tests/test_http_api.py tests/test_service_programs.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit** *(only with the user's approval)*
@@ -748,7 +748,7 @@ git commit -m "feat(frontend): program settings modal"
 After Task 5, run the whole suite before calling the feature done:
 
 ```bash
-python3 -m pytest -q
+~/venvs/coscience/bin/python -m pytest -q
 cd frontend && npm test && npm run build
 ```
 

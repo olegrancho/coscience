@@ -6,14 +6,19 @@ import { MantineProvider } from "@mantine/core";
 vi.mock("../api", () => ({
   api: {
     setProgramModel: vi.fn().mockResolvedValue({}),
-    setProgramWorkdir: vi.fn().mockResolvedValue({}),
+    setProgramWorkdir: vi.fn().mockResolvedValue({ id: "p1", workdir: "/tmp/proj2", exists: true }),
     setProgramMaxProposed: vi.fn().mockResolvedValue({}),
     setProgramInstructions: vi.fn().mockResolvedValue({}),
     listDirs: vi.fn().mockResolvedValue({ path: null, parent: null, roots: [], entries: [] }),
   },
 }));
 
+vi.mock("@mantine/notifications", () => ({
+  notifications: { show: vi.fn() },
+}));
+
 import { api } from "../api";
+import { notifications } from "@mantine/notifications";
 import ProgramSettingsModal from "./ProgramSettingsModal";
 
 beforeAll(() => {
@@ -90,6 +95,30 @@ describe("ProgramSettingsModal", () => {
     fireEvent.change(screen.getByLabelText("standing instructions"), { target: { value: "new rules" } });
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(api.setProgramInstructions).not.toHaveBeenCalled();
+  });
+
+  it("shows a teal success toast on a clean save", async () => {
+    renderModal();
+    fireEvent.change(screen.getByLabelText("standing instructions"), { target: { value: "new rules" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(notifications.show).toHaveBeenCalledWith(
+      expect.objectContaining({ color: "teal", message: "Program settings updated." }),
+    ));
+  });
+
+  it("warns in yellow when the saved folder doesn't exist yet", async () => {
+    vi.mocked(api.setProgramWorkdir).mockResolvedValueOnce({ id: "p1", workdir: "/nope", exists: false });
+    renderModal();
+    fireEvent.change(screen.getByLabelText("project folder"), { target: { value: "/nope" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(notifications.show).toHaveBeenCalledWith(
+      expect.objectContaining({
+        color: "yellow",
+        message: "Saved, but /nope doesn't exist yet — agents fall back to the control repo until it does.",
+      }),
+    ));
   });
 
   it("keeps in-progress edits when the program is refetched while open", () => {

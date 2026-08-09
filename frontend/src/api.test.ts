@@ -108,4 +108,9 @@ describe("MODEL_OPTIONS", () => {
   it("offers Opus 4.8", () => {
     expect(MODEL_OPTIONS).toContainEqual({ value: "claude-opus-4-8", label: "Opus 4.8" });
   });
+
+  it("has no duplicate values", () => {
+    const values = MODEL_OPTIONS.map((o) => o.value);
+    expect(new Set(values).size).toBe(values.length);
+  });
 });
