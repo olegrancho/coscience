@@ -19,6 +19,14 @@ from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coer
 # Humans can propose beyond it; this only gates the PM's own proposing/promoting.
 MAX_PROPOSED = 4
 
+
+def program_cap(program) -> int:
+    """How many sprints may await review for this program: its own setting, or the
+    global default when unset. One helper so the prompt's number and the number the
+    apply path enforces can never drift apart."""
+    return program.max_proposed or MAX_PROPOSED
+
+
 MAX_EDGE_OPS = 100   # bound the edges the PM may add per cycle (headroom for lineage back-fill)
 
 # A cycle once wrote a report saying it had released a sprint, pruned the idea pool and
@@ -242,7 +250,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
         prior_proposals=list(pm.proposed_ids),
         human_guidance=guidance, guidance_feedback=guidance_feedback,
         ideas=idea_dicts, idea_feedback=idea_feedback,
-        proposed_count=proposed_count, max_proposed=MAX_PROPOSED,
+        proposed_count=proposed_count, max_proposed=program_cap(program),
         model=program.pm_model,
         workdir=_resolve_workdir(substrate, program.workdir),
         graph_lines=graph_lines,
@@ -543,7 +551,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     # the PM can never push past it, whatever the reasoner returns.
     open_proposed = sum(1 for s in substrate.iter_sprints(status=SprintStatus.PROPOSED)
                         if s.program == program_id)
-    slots = MAX_PROPOSED - open_proposed
+    slots = program_cap(substrate.load_program(program_id)) - open_proposed
     for prop in staged.output.proposals:
         # A demoted idea is a human "do not pursue as a sprint" — the PM may not
         # promote it back, whatever the reasoner returns.
