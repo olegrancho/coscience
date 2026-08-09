@@ -10,6 +10,7 @@ import DirectoryPickerModal from "../components/DirectoryPickerModal";
 import { api } from "../api";
 import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl, ZoomableImg, isImageName, liveChatId } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
+import ProgramSettingsModal from "../components/ProgramSettingsModal";
 import LineageCard from "../components/LineageCard";
 import type { ArtifactRow } from "../api";
 
@@ -46,6 +47,7 @@ export default function ProgramDetail() {
   const [ideasExpanded, setIdeasExpanded] = useState(false);
   const [pmExpanded, setPmExpanded] = useState(false);
   const [browsing, setBrowsing] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
   const guidance = useQuery({ queryKey: ["guidance", id], queryFn: () => api.listGuidance(id) });
@@ -155,6 +157,12 @@ export default function ProgramDetail() {
             <Button variant="light" color="machine" loading={replanning} onClick={replan}
                     title="Run the PM planner now instead of waiting for its next cycle">Replan now</Button>
             <Button color="machine" onClick={() => setProposing(true)}>Propose experiment</Button>
+            <Tooltip label="Program settings" withArrow>
+              <ActionIcon variant="light" color="gray" size="lg" radius="md"
+                          onClick={() => setSettingsOpen(true)} aria-label="program settings">
+                ⚙
+              </ActionIcon>
+            </Tooltip>
             <Tooltip label="Chat with the PM planner" withArrow>
               <ActionIcon variant="light" color="green" size="lg" radius="md"
                           component={Link} to={`/programs/${id}/chat`} aria-label="chat with the planner">
@@ -163,6 +171,12 @@ export default function ProgramDetail() {
             </Tooltip>
           </Group>
         </Group>
+        <ProgramSettingsModal
+          opened={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          program={p}
+          onSaved={refresh}
+        />
         <Group gap={10} mt={9} align="center">
           <StatusBadge status={p.status} />
           <Text size="sm" c="dimmed">the AI has run <span className="mono">{p.cycle}</span> planning {p.cycle === 1 ? "cycle" : "cycles"}</Text>
