@@ -163,9 +163,10 @@ export function StateBar({ counts }: { counts: Record<string, number> }) {
 /** A labelled capacity gauge: used / capacity. Pass `onAdjust` to get -/+ steppers
  *  beside the readout; without it the gauge is read-only (the Overview renders it
  *  that way). */
-export function Gauge({ label, used, capacity, onAdjust }: {
+export function Gauge({ label, used, capacity, onAdjust, pending }: {
   label: string; used: number; capacity: number;
   onAdjust?: (delta: number) => void;
+  pending?: boolean;        // capacity edited locally, not yet written to the server
 }) {
   const pct = capacity > 0 ? Math.min(100, (used / capacity) * 100) : 0;
   const hot = pct >= 85;
@@ -179,7 +180,9 @@ export function Gauge({ label, used, capacity, onAdjust }: {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
         <span className="mono" style={{ fontSize: 12, color: "var(--ink-muted)" }}>{label}</span>
         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span className="mono" style={{ fontSize: 12 }}>{used} / {capacity}</span>
+          <span className="mono" style={pending
+            ? { fontSize: 12, opacity: 0.45, fontStyle: "italic" }
+            : { fontSize: 12 }}>{used} / {capacity}</span>
           {onAdjust && (
             <>
               {/* zero is a real setting (a full stop for this resource), so it's a floor */}

@@ -105,6 +105,17 @@ describe("Compute page steppers", () => {
     expect(api.setCapacity).toHaveBeenCalledWith({ cpu: 20, workers: 1 });
   });
 
+  it("dims an unsaved number and undims it once saved", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("increase cpu")).toBeTruthy());
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByLabelText("increase cpu"));
+    expect(screen.getByText("2 / 17").style.opacity).toBe("0.45");
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    vi.useRealTimers();
+    await waitFor(() => expect(screen.getByText("2 / 16").style.opacity).toBe(""));
+  });
+
   it("can't take a resource below zero", async () => {
     ledger.mockResolvedValue({
       capacity: { workers: 0 }, used: { workers: 0 }, available: { workers: 0 }, leases: [],

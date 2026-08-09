@@ -89,6 +89,7 @@ export default function Ledger() {
             {keys.map((k) => (
               <Gauge key={k} label={k} used={l.used[k] ?? 0}
                      capacity={pending[k] ?? l.capacity[k]}
+                     pending={k in pending}
                      onAdjust={(delta) => adjust(k, delta)} />
             ))}
           </Stack>

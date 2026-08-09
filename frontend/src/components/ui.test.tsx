@@ -82,3 +82,20 @@ describe("Gauge steppers", () => {
     expect(onAdjust).not.toHaveBeenCalled();
   });
 });
+
+describe("Gauge pending state", () => {
+  const renderGauge = (props: Partial<Parameters<typeof Gauge>[0]> = {}) =>
+    render(<MantineProvider><Gauge label="cpu" used={2} capacity={16} {...props} /></MantineProvider>);
+
+  it("reads normally when the capacity is the server's", () => {
+    renderGauge({ onAdjust: vi.fn() });
+    expect(screen.getByText("2 / 16").style.opacity).toBe("");
+  });
+
+  it("dims the readout while the capacity is unsaved", () => {
+    renderGauge({ onAdjust: vi.fn(), pending: true });
+    const readout = screen.getByText("2 / 16");
+    expect(readout.style.opacity).toBe("0.45");
+    expect(readout.style.fontStyle).toBe("italic");
+  });
+});
