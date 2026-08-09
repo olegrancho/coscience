@@ -41,6 +41,13 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
     wasOpened.current = opened;
   }, [opened]);
 
+  // Drop any in-flight folder browse when the dialog closes, so a picker left
+  // open doesn't reappear the next time settings is opened. Separate from the
+  // seeding effect above — it must not gate on `wasOpened`, or reseed fields.
+  useEffect(() => {
+    if (!opened) setBrowsing(false);
+  }, [opened]);
+
   const save = async () => {
     const was = seeded.current;
     const cap = maxProposed === "" ? 0 : Number(maxProposed);

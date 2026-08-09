@@ -55,6 +55,7 @@ describe("ProgramSettingsModal", () => {
 
   it("seeds every field from the program", () => {
     renderModal();
+    expect((screen.getByLabelText("planner model") as HTMLSelectElement).value).toBe("claude-opus-5");
     expect((screen.getByLabelText("project folder") as HTMLInputElement).value).toBe("/tmp/proj");
     expect((screen.getByLabelText("max proposed experiments") as HTMLInputElement).value).toBe("6");
     expect((screen.getByLabelText("standing instructions") as HTMLTextAreaElement).value).toBe("be careful");
