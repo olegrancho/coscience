@@ -89,6 +89,10 @@ class SprintPatch(BaseModel):
     model: str | None = None
 
 
+class CapacityUpdate(BaseModel):
+    capacity: dict[str, float] = Field(default_factory=dict)
+
+
 class VoteIn(BaseModel):
     by: str                       # opaque per-browser voter id
     value: int                    # +1 👍, -1 👎, 0 clear (toggling handled server-side)
@@ -657,6 +661,13 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     @api.get("/ledger")
     def ledger_status() -> dict:
         return service.ledger_status()
+
+    @api.put("/capacity")
+    def set_capacity(body: CapacityUpdate) -> dict:
+        try:
+            return service.set_capacity(body.capacity)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     @api.get("/usage")
     def usage_stats() -> dict:

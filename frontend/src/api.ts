@@ -299,6 +299,11 @@ export const api = {
   listResults: () => fetch("/api/results").then(j<ResultRow[]>),
   getResult: (id: string) => fetch(`/api/results/${id}`).then(j<ResultRow>),
   getLedger: () => fetch("/api/ledger").then(j<Ledger>),
+  setCapacity: (capacity: Record<string, number>) =>
+    fetch("/api/capacity", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ capacity }),
+    }).then(j<Ledger>),
   getUsage: () => fetch("/api/usage").then(j<Usage>),
   listArtifacts: (pid: string) => fetch(`/api/programs/${pid}/artifacts`).then(j<ArtifactRow[]>),
   getArtifact: (pid: string, aid: string) =>
