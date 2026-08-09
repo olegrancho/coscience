@@ -524,6 +524,7 @@ class Service:
         return {
             "id": p.id, "title": p.title, "status": p.status.value, "goals": p.goals,
             "pm_model": p.pm_model, "workdir": p.workdir,
+            "max_proposed": p.max_proposed,
             "instructions": self.substrate.load_instructions(program_id),
             "report": self.substrate.load_report(program_id),
             "cycle": pm.cycle,
@@ -552,6 +553,19 @@ class Service:
         program.pm_model = str(model or DEFAULT_MODEL)
         self.substrate.save_program(program)
         return {"id": program_id, "pm_model": program.pm_model}
+
+    def set_program_max_proposed(self, program_id: str, n: int) -> dict:
+        """Cap how many sprints may await review for this program. 0 clears the
+        override, putting the program back on the global default."""
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        n = int(n)
+        if n < 0 or n > 20:
+            raise ValueError("max_proposed must be between 0 and 20 (0 = default)")
+        program = self.substrate.load_program(program_id)
+        program.max_proposed = n
+        self.substrate.save_program(program)
+        return {"id": program_id, "max_proposed": program.max_proposed}
 
     def replan(self, program_id: str) -> dict:
         """Run one PM cycle for this program right now (forced) so a human edit or
