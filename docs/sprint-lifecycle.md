@@ -13,7 +13,7 @@ Three actors move sprints, and they own different edges:
 
 | State | Meaning |
 |---|---|
-| `proposed` | PM or human suggested it; awaiting review. Counts against the PM's cap (`MAX_PROPOSED`, 4). |
+| `proposed` | PM or human suggested it; awaiting review. Counts against the PM's cap (`Program.max_proposed`, falling back to `MAX_PROPOSED`, 4, when unset). |
 | `approved` | A human authorized it. **Authorized ≠ scheduled** — it is held here until released. |
 | `queued` | Released to the scheduler. Runs when a resource slot frees. |
 | `executing` | Lease granted; the worker agent is running. |

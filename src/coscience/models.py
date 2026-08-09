@@ -200,6 +200,7 @@ class Program:
     status: ProgramStatus = ProgramStatus.ACTIVE
     pm_model: str = ""                 # Claude model for this program's PM reasoner; "" resolves to DEFAULT_MODEL
     workdir: str = ""                  # project folder this program's agents run in; "" = control repo
+    max_proposed: int = 0              # cap on sprints awaiting review; 0 = use the global default
 
     def __post_init__(self) -> None:
         if not self.pm_model:
