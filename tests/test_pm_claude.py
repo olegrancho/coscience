@@ -303,10 +303,21 @@ def test_prompt_does_not_grow_with_program_history():
         c.completed = [{"id": f"p1-c{i}-x", "title": f"Sprint {i}",
                         "goals": "G" * 4000, "result": "R" * 5000,
                         "finished_at": float(i)} for i in range(n)]
-        c.prior_proposals = [f"p1-c{i}-x" for i in range(n)]
+        # A distinct id namespace from `completed`: history-collapse deliberately
+        # keeps every completed sprint's id visible (see _history_block), so reusing
+        # those ids here would make a prior_proposals containment check meaningless.
+        c.prior_proposals = [f"prior-{i}" for i in range(n)]
         return c
 
-    small = len(render_prompt(ctx_with(20)))
-    large = len(render_prompt(ctx_with(100)))
+    small_prompt = render_prompt(ctx_with(20))
+    large_prompt = render_prompt(ctx_with(100))
+    small, large = len(small_prompt), len(large_prompt)
     assert large - small < 8_000, f"prompt grew {large - small:,} B over 80 sprints"
     assert large < 60_000, f"prompt is {large:,} B with 100 sprints of history"
+    # Sprint ids are ~10 B each, dwarfed by the goals/results budget above, so an
+    # un-windowed prior_proposals list wouldn't trip either byte assertion above.
+    # Pin PRIOR_SHOWN directly so this test alone still catches that regression.
+    assert "prior-0" not in large_prompt, (
+        "byte budgets passed but the oldest prior-proposal id leaked into the "
+        "prompt — PRIOR_SHOWN windowing regressed")
+    assert "prior-99" in large_prompt, "newest prior-proposal id missing from the prompt"
