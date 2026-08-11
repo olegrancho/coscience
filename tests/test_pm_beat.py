@@ -180,3 +180,25 @@ def test_resume_after_cycle_bump_does_not_shift_ids(substrate):
     assert summary["submitted"] == []                # p1-c0-a already proposed
     assert substrate.load_sprint("p1-c0-a").status == SprintStatus.PROPOSED
     assert read_staging(substrate, "p1") is None
+
+
+def test_failed_reasoner_call_is_recorded_in_the_ledger(substrate):
+    from coscience import usage_meter
+    from coscience.pm_claude import PMReasonerError
+
+    substrate.save_program(Program(id="p1", title="P", goals="g"))
+
+    class Boom:
+        last_cost = {"cost": 0.5, "tokens": 1234}
+        last_prompt_bytes = 4096
+        def run(self, ctx):
+            raise PMReasonerError("bad json")
+
+    with pytest.raises(PMReasonerError):
+        pm_beat(substrate, "p1", Boom())
+
+    rows = usage_meter.load_runs(substrate.repo_root)
+    assert len(rows) == 1
+    assert rows[0]["ok"] is False
+    assert rows[0]["tokens"] == 1234          # the session burned these before it raised
+    assert rows[0]["prompt_bytes"] == 4096

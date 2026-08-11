@@ -531,11 +531,22 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         # About to reason -> capture what changed since the last reasoned cycle.
         new_signals = context_signals(context)
         trigger_labels = _triggers(pm.last_signals, new_signals, force)
-        output = reasoner.run(context)                 # the ONE reasoner call
-        lc = getattr(reasoner, "last_cost", None) or {}
-        usage_meter.record_run(substrate.repo_root, "pm", program_id,
-                               cost=lc.get("cost"), tokens=lc.get("tokens"),
-                               model=context.model)
+        def _record(ok: bool) -> None:
+            lc = getattr(reasoner, "last_cost", None) or {}
+            usage_meter.record_run(substrate.repo_root, "pm", program_id,
+                                   cost=lc.get("cost"), tokens=lc.get("tokens"),
+                                   turns=lc.get("turns"), model=context.model,
+                                   prompt_bytes=getattr(reasoner, "last_prompt_bytes", None),
+                                   ok=ok)
+        try:
+            output = reasoner.run(context)             # the ONE reasoner call
+        except Exception:
+            # The session ran and spent the window before it raised (a malformed-JSON
+            # parse is the common case). A call that leaves no row makes a retry loop
+            # invisible in the ledger — see Task 8.
+            _record(ok=False)
+            raise
+        _record(ok=True)
         write_staging(substrate, program_id, cycle, output, fingerprint, directive)  # COMMIT POINT
         staged = StagedCycle(cycle=cycle, output=output, fingerprint=fingerprint, directive=directive)
 

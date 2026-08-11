@@ -230,3 +230,21 @@ def test_render_prompt_omits_guidance_when_empty():
     from coscience.pm_reasoner import PMContext
     ctx = PMContext(program_id="p1", goals="g", cycle=0)
     assert "HUMAN GUIDANCE" not in render_prompt(ctx)
+
+
+def test_reasoner_reports_prompt_size_and_resets_stale_cost():
+    """last_prompt_bytes must be set before the call, so a raising call still
+    reports what it sent; last_cost must be cleared so a failure cannot report the
+    PREVIOUS call's cost as its own."""
+    r = ClaudeCodeReasoner(invoke=lambda p, m="", c="": '{"report": "ok"}')
+    r.run(_ctx())
+    assert r.last_prompt_bytes == len(render_prompt(_ctx()))
+
+    r.last_cost = {"cost": 9.99, "tokens": 1}       # stale value from the good call
+    def _boom(p, m="", c=""):
+        raise PMReasonerError("claude exited 1")
+    r._invoke = _boom
+    with pytest.raises(PMReasonerError):
+        r.run(_ctx())
+    assert r.last_cost is None                       # not 9.99
+    assert r.last_prompt_bytes == len(render_prompt(_ctx()))

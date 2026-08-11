@@ -388,6 +388,7 @@ class ClaudeCodeReasoner:
         self.claude_bin = claude_bin
         self._invoke = invoke or self._default_invoke
         self.last_cost: dict | None = None     # {cost, tokens} of the most recent call
+        self.last_prompt_bytes: int | None = None   # size of the prompt that call sent
 
     def _default_invoke(self, prompt: str, model: str = "", cwd: str = "") -> str:
         # --output-format json gives us the reply text plus cost/token usage in one
@@ -409,6 +410,7 @@ class ClaudeCodeReasoner:
             env = json.loads(proc.stdout)
             usage = env.get("usage") or {}
             self.last_cost = {"cost": env.get("total_cost_usd"),
+                              "turns": env.get("num_turns"),
                               "tokens": sum(int(usage.get(k, 0) or 0) for k in (
                                   "input_tokens", "output_tokens",
                                   "cache_creation_input_tokens", "cache_read_input_tokens"))}
@@ -418,6 +420,11 @@ class ClaudeCodeReasoner:
 
     def run(self, context: PMContext) -> PMCycleOutput:
         prompt = render_prompt(context)
+        # Stamp size BEFORE invoking and clear the previous call's cost: a call that
+        # raises must report its own prompt and no cost at all, never the last good
+        # call's numbers.
+        self.last_prompt_bytes = len(prompt)
+        self.last_cost = None
         # Injected invokes (tests) may take fewer args; degrade prompt+model+cwd ->
         # prompt+model -> prompt so the seam stays easy to fake.
         try:

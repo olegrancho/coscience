@@ -31,7 +31,7 @@ def _runs_path(repo_root) -> Path:
 
 
 def record_run(repo_root, kind: str, ref: str = "", *, cost=None, tokens=None,
-               model: str = "", prompt_bytes=None, ok: bool = True) -> None:
+               model: str = "", prompt_bytes=None, turns=None, ok: bool = True) -> None:
     """Append one Claude-call record. `kind` is 'pm' or 'worker'; `ref` is the
     program or sprint id. `cost` (USD), `tokens`, and `model` are recorded when
     known (the agent reports them on a clean run). `prompt_bytes` is the rendered
@@ -50,6 +50,8 @@ def record_run(repo_root, kind: str, ref: str = "", *, cost=None, tokens=None,
             rec["model"] = model
         if prompt_bytes is not None:
             rec["prompt_bytes"] = int(prompt_bytes)
+        if turns is not None:
+            rec["turns"] = int(turns)
         if not ok:
             rec["ok"] = False          # absent == succeeded, so existing rows still read correctly
         path = _runs_path(repo_root)
