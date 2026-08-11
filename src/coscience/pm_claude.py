@@ -19,16 +19,55 @@ class PMReasonerError(Exception):
     """The reasoner produced no usable PMCycleOutput."""
 
 
+# The PM's session has file tools and runs in the program's workdir, so a full
+# result is one read away. Inlining every result and every original goal on every
+# beat is what made the prompt grow with the program: at ~8.9 KB per completed
+# sprint, a program's planner got more expensive the more work it finished.
+RECENT_HISTORY = 8      # completed/failed sprints shown with detail
+RESULT_CHARS = 800      # per-result / per-error excerpt cap
+GOAL_CHARS = 400        # per-history-entry goal excerpt cap
+
+
+def _clip(text: str, limit: int) -> str:
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit].rstrip()}… [clipped; {len(text):,} chars — read the file for the rest]"
+
+
+def _history_block(items: list[dict], recent_fmt) -> str:
+    """Recent entries with detail, older ones as one line each. Older entries keep
+    their id and title rather than being dropped: the lineage graph and the
+    release_ids/reopen_ids instructions both tell the PM to copy ids EXACTLY, so an
+    id the prompt never shows is an action it can never take."""
+    if not items:
+        return "(none)"
+    split = max(0, len(items) - RECENT_HISTORY)
+    older, recent = items[:split], items[split:]
+    # Plain truncation, not _clip: on a 60-char label the "[clipped; N chars]"
+    # marker would be longer than the text it describes.
+    lines = [f"- {i['id']}: {(i.get('title') or i.get('goals', '')).strip()[:60]}"
+             for i in older]
+    if older:
+        lines.append(f"--- the {len(recent)} most recent, in detail ---")
+    lines += [recent_fmt(i) for i in recent]
+    return "\n".join(lines)
+
+
 def render_prompt(context: PMContext) -> str:
     def _lines(items, fmt):
         return "\n".join(fmt(i) for i in items) or "(none)"
 
     open_block = _lines(context.open_sprints,
                         lambda s: f"- {s['id']} [{s['status']}, priority {s.get('priority', 0)}]: {s['goals']}")
-    done_block = _lines(context.completed,
-                        lambda s: f"- {s['id']}: {s['goals']} -> result: {s['result']}")
-    failed_block = _lines(context.failed,
-                          lambda s: f"- {s['id']}: {s['goals']} -> FAILED: {s['error']}")
+    done_block = _history_block(
+        context.completed,
+        lambda s: (f"- {s['id']}: {_clip(s['goals'], GOAL_CHARS)}"
+                   f" -> result: {_clip(s['result'], RESULT_CHARS)}"))
+    failed_block = _history_block(
+        context.failed,
+        lambda s: (f"- {s['id']}: {_clip(s['goals'], GOAL_CHARS)}"
+                   f" -> FAILED: {_clip(s['error'], RESULT_CHARS)}"))
     def _feedback_line(f):
         history = " | ".join(f"{m['role']}: {m['text']}" for m in f["messages"])
         return (f"- {f['sprint_id']} [{f['status']}, "

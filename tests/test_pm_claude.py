@@ -248,3 +248,39 @@ def test_reasoner_reports_prompt_size_and_resets_stale_cost():
         r.run(_ctx())
     assert r.last_cost is None                       # not 9.99
     assert r.last_prompt_bytes == len(render_prompt(_ctx()))
+
+
+def _done(i, goals="G", result="R"):
+    return {"id": f"p1-c{i}-x", "title": f"Sprint {i}", "goals": goals,
+            "result": result, "finished_at": float(i)}
+
+
+def test_recent_results_are_clipped_not_inlined_whole():
+    ctx = _ctx()
+    ctx.completed = [_done(1, result="R" * 5000)]
+    p = render_prompt(ctx)
+    assert "R" * 800 in p
+    assert "R" * 900 not in p
+    assert "clipped" in p              # the PM is told text was withheld, so it can go read it
+
+
+def test_older_completed_sprints_collapse_to_one_line_but_keep_their_ids():
+    ctx = _ctx()
+    ctx.completed = [_done(i, goals="G" * 4000, result="R" * 5000) for i in range(20)]
+    p = render_prompt(ctx)
+    # The oldest survives as an id + title only — ids must stay resolvable for the
+    # lineage graph and for release_ids/reopen_ids.
+    assert "p1-c0-x" in p
+    assert "Sprint 0" in p
+    # ...but its bulk is gone, while the newest keeps its (clipped) detail.
+    assert p.count("R" * 800) == 8
+    assert p.count("G" * 400) == 8
+
+
+def test_failed_sprints_are_clipped_the_same_way():
+    ctx = _ctx()
+    ctx.failed = [{"id": "p1-c1-x", "title": "T", "goals": "G" * 4000,
+                   "error": "E" * 5000, "finished_at": 1.0}]
+    p = render_prompt(ctx)
+    assert "E" * 800 in p
+    assert "E" * 900 not in p
