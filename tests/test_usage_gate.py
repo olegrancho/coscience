@@ -1,4 +1,5 @@
 import datetime
+from types import SimpleNamespace
 
 from coscience.worker import _usage_ok_from_output
 
@@ -44,6 +45,23 @@ def test_the_gate_reads_the_configured_script(monkeypatch, tmp_path):
     from coscience import worker as worker_mod
     monkeypatch.undo()          # drop conftest's autouse stub — see the fail-closed test
     fake = tmp_path / "usage.py"
-    fake.write_text("print('5h: 3% (resets Thu 12:30) [live]')\n")
     monkeypatch.setenv("COSCIENCE_USAGE_SCRIPT", str(fake))
-    assert worker_mod.claude_usage_ok() is True
+
+    # A real host may have the actual usage skill installed and healthy, in which
+    # case claude_usage_ok() would return True regardless of whether the configured
+    # path was honoured (and it fails OPEN on error, so a broken wiring can't even
+    # be caught by forcing an error). Assert on the argv the gate actually shelled
+    # out with, not just the boolean, so a regression to the hardcoded default is
+    # caught on every host, real skill or not.
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(stdout="5h: 3% (resets Thu 12:30) [live]")
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", fake_run)
+    result = worker_mod.claude_usage_ok()
+
+    assert calls, "claude_usage_ok() never called subprocess.run"
+    assert calls[0][-1] == str(fake)     # honoured the configured path, not the default
+    assert result is True                # ... and read the controlled stdout correctly
