@@ -15,7 +15,7 @@ from coscience.pm_runner import pm_run_once
 from coscience.resources import load_pool
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
-from coscience.worker import Worker, claude_usage_ok
+from coscience.worker import AUTONOMOUS_THRESHOLD, Worker, claude_usage_ok
 
 
 def run_once(repo_root: Path) -> BeatOutcome:
@@ -214,7 +214,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         def _beat():
-            summaries = pm_run_once(substrate, reasoner, usage_ok=claude_usage_ok)
+            summaries = pm_run_once(substrate, reasoner,
+                                    usage_ok=lambda: claude_usage_ok(
+                                        AUTONOMOUS_THRESHOLD, fail_open=False))
             ids = [sid for s in summaries for sid in s["submitted"]]
             reasoned = sum(0 if s.get("skipped") else 1 for s in summaries)
             # reasoned == Claude calls this beat (skipped cycles don't call Claude)

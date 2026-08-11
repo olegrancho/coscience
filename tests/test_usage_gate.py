@@ -65,3 +65,29 @@ def test_the_gate_reads_the_configured_script(monkeypatch, tmp_path):
     assert calls, "claude_usage_ok() never called subprocess.run"
     assert calls[0][-1] == str(fake)     # honoured the configured path, not the default
     assert result is True                # ... and read the controlled stdout correctly
+
+
+def test_autonomous_threshold_reserves_headroom():
+    """At 85% used, a human-triggered call still goes through but an autonomous
+    loop stands down, leaving the rest of the window for the human."""
+    from coscience.worker import AUTONOMOUS_THRESHOLD, WORKER_THRESHOLD
+    out = "5h: 85% (resets Thu 12:30) | week: 40% (resets Sun 23:00) [live]"
+    assert _usage_ok_from_output(out) is True                              # human: 100
+    assert _usage_ok_from_output(out, threshold=WORKER_THRESHOLD) is True  # worker: 90
+    assert _usage_ok_from_output(out, threshold=AUTONOMOUS_THRESHOLD) is False  # PM loop: 80
+
+
+def test_gate_can_fail_closed(monkeypatch):
+    from coscience import worker as worker_mod
+    # conftest's autouse `_permissive_usage` fixture replaces
+    # worker_mod.claude_usage_ok with a lambda that always returns True. The
+    # `monkeypatch` fixture is function-scoped and SHARED with that fixture, so
+    # undo() restores the real function — without this the assertions below would
+    # be testing the stub.
+    monkeypatch.undo()
+
+    def _boom(*a, **k):
+        raise OSError("no such script")
+    monkeypatch.setattr(worker_mod.subprocess, "run", _boom)
+    assert worker_mod.claude_usage_ok() is True                    # default: fail open
+    assert worker_mod.claude_usage_ok(fail_open=False) is False    # loops: fail closed

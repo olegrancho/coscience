@@ -11,6 +11,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 
 from coscience import artifacts, feedback_harvest, usage_meter
@@ -67,15 +68,24 @@ def _usage_ok_from_output(out: str, now: "datetime.datetime | None" = None,
     return max(pcts, default=0.0) < threshold
 
 
-def claude_usage_ok(threshold: float = 100.0) -> bool:
-    """True if it's safe to launch a Claude agent — neither the 5-hour nor the
-    weekly usage window is exhausted. Fails open: if usage can't be read, returns
-    True (the worker still won't fabricate a result from a dead agent)."""
+# Usage is a fixed subscription window, not a bill: the scarce thing is the share
+# left for a human who wants a chat or a forced replan. Autonomous loops stand down
+# early and leave the top band for them; human-triggered paths keep the full 100.
+AUTONOMOUS_THRESHOLD = 80.0     # PM loop beats
+WORKER_THRESHOLD = 90.0         # worker agent launches
+
+
+def claude_usage_ok(threshold: float = 100.0, *, fail_open: bool = True) -> bool:
+    """True if it's safe to launch a Claude agent at this threshold — neither the
+    5-hour nor the weekly window has passed it. `fail_open` decides what an
+    unreadable usage script means: True for human-triggered work (never block a
+    person on a missing dotfile), False for autonomous loops (an unmetered loop is
+    exactly what burns a window unattended)."""
     try:
-        out = subprocess.run(["python3", usage_meter.usage_script_path()],
+        out = subprocess.run([sys.executable, usage_meter.usage_script_path()],
                              capture_output=True, text=True, timeout=10).stdout
     except Exception:
-        return True
+        return fail_open
     return _usage_ok_from_output(out, threshold=threshold)
 
 
@@ -181,7 +191,8 @@ class Worker:
         return self.agent.is_running(self.substrate.load_progress(sprint_id).agent_token)
 
     def _usage_ok(self) -> bool:
-        return (self._usage_gate or claude_usage_ok)()
+        return (self._usage_gate or
+                (lambda: claude_usage_ok(WORKER_THRESHOLD, fail_open=False)))()
 
     def _read_job_json(self, sprint_dir):
         """Read + normalize a declared detached job's job.json. Returns a clean dict

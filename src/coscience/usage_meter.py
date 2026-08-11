@@ -15,6 +15,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -117,7 +118,7 @@ def read_budget(ttl: float = 60.0) -> dict | None:
     if cached is not None and now - _budget_cache["ts"] < ttl:
         return cached
     try:
-        out = subprocess.run(["python3", usage_script_path()],
+        out = subprocess.run([sys.executable, usage_script_path()],
                              capture_output=True, text=True, timeout=10).stdout
     except Exception:
         return cached
