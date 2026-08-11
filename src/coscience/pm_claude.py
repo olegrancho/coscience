@@ -26,6 +26,7 @@ class PMReasonerError(Exception):
 RECENT_HISTORY = 8      # completed/failed sprints shown with detail
 RESULT_CHARS = 800      # per-result / per-error excerpt cap
 GOAL_CHARS = 400        # per-history-entry goal excerpt cap
+PRIOR_SHOWN = 20        # prior proposal ids rendered; the full list stays in pm.md
 
 
 def _clip(text: str, limit: int) -> str:
@@ -93,7 +94,12 @@ def render_prompt(context: PMContext) -> str:
         return f"- artifact [{f['artifact_id']}], thread {f['thread_id']}: {history}"
     artifact_feedback_block = _lines(context.artifact_feedback, _artifact_feedback_line)
 
-    prior_block = ", ".join(context.prior_proposals) or "(none)"
+    # pm.proposed_ids is append-only and never trimmed — it is the substrate's audit
+    # record and stays complete on disk. Only the rendering is windowed.
+    prior = list(context.prior_proposals)
+    prior_block = ", ".join(prior[-PRIOR_SHOWN:]) or "(none)"
+    if len(prior) > PRIOR_SHOWN:
+        prior_block += f" (+{len(prior) - PRIOR_SHOWN} earlier, omitted)"
     instructions_block = render_instructions(context.instructions)
     guidance_block = ""
     if context.human_guidance:

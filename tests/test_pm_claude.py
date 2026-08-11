@@ -284,3 +284,29 @@ def test_failed_sprints_are_clipped_the_same_way():
     p = render_prompt(ctx)
     assert "E" * 800 in p
     assert "E" * 900 not in p
+
+
+def test_prior_proposals_are_windowed_in_the_prompt():
+    ctx = _ctx()
+    ctx.prior_proposals = [f"p1-c{i}-x" for i in range(60)]
+    p = render_prompt(ctx)
+    assert "p1-c59-x" in p            # newest kept
+    assert "p1-c0-x" not in p         # oldest dropped from the prompt only
+    assert "40 earlier" in p          # the PM is told the list was trimmed
+
+
+def test_prompt_does_not_grow_with_program_history():
+    """The whole point of Phase 2: a program that has finished 100 sprints must not
+    cost meaningfully more per beat than one that has finished 20."""
+    def ctx_with(n):
+        c = _ctx()
+        c.completed = [{"id": f"p1-c{i}-x", "title": f"Sprint {i}",
+                        "goals": "G" * 4000, "result": "R" * 5000,
+                        "finished_at": float(i)} for i in range(n)]
+        c.prior_proposals = [f"p1-c{i}-x" for i in range(n)]
+        return c
+
+    small = len(render_prompt(ctx_with(20)))
+    large = len(render_prompt(ctx_with(100)))
+    assert large - small < 8_000, f"prompt grew {large - small:,} B over 80 sprints"
+    assert large < 60_000, f"prompt is {large:,} B with 100 sprints of history"
