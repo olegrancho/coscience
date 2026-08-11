@@ -20,7 +20,6 @@ from coscience.executor import process_token, terminate_detached as _terminate
 from coscience.models import BeatOutcome, Result, Sprint, SprintStatus, set_status
 from coscience.substrate import Substrate
 
-_USAGE_SCRIPT = os.path.expanduser("~/.claude/skills/usage/usage.py")
 # After this many real (non-usage) failures, a sprint is marked FAILED rather than
 # relaunched forever — so a deterministically-broken sprint can't burn usage.
 MAX_AGENT_FAILURES = 3
@@ -73,7 +72,7 @@ def claude_usage_ok(threshold: float = 100.0) -> bool:
     weekly usage window is exhausted. Fails open: if usage can't be read, returns
     True (the worker still won't fabricate a result from a dead agent)."""
     try:
-        out = subprocess.run(["python3", _USAGE_SCRIPT],
+        out = subprocess.run(["python3", usage_meter.usage_script_path()],
                              capture_output=True, text=True, timeout=10).stdout
     except Exception:
         return True

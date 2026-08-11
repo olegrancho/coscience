@@ -18,7 +18,15 @@ import subprocess
 import time
 from pathlib import Path
 
-_USAGE_SCRIPT = os.path.expanduser("~/.claude/skills/usage/usage.py")
+def usage_script_path() -> str:
+    """Where the usage skill lives. Overridable because it is a personal dotfile:
+    a host without it silently loses BOTH the budget panel and the usage gate, and
+    `CLAUDE.md` says more than one host may run the full platform. Resolved per call,
+    not at import, so tests and a relaunched process pick up the environment."""
+    return os.environ.get("COSCIENCE_USAGE_SCRIPT",
+                          os.path.expanduser("~/.claude/skills/usage/usage.py"))
+
+
 _USAGE_RE = re.compile(r"(\w+):\s*(\d+)%\s*\(resets ([^)]+)\)")
 _HOUR = 3600
 _DAY = 86400
@@ -109,7 +117,7 @@ def read_budget(ttl: float = 60.0) -> dict | None:
     if cached is not None and now - _budget_cache["ts"] < ttl:
         return cached
     try:
-        out = subprocess.run(["python3", _USAGE_SCRIPT],
+        out = subprocess.run(["python3", usage_script_path()],
                              capture_output=True, text=True, timeout=10).stdout
     except Exception:
         return cached
