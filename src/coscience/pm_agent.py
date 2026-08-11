@@ -155,6 +155,17 @@ def _triggers(last_signals: dict, new_signals: dict, forced: bool) -> list[str]:
     return changed or (["manual replan"] if forced else [])
 
 
+def _finished_at(sprint) -> float:
+    """When this sprint reached its terminal state. `set_status` stamps every
+    transition, so the last entry is the finish; 0.0 for records written before
+    status history existed, which sorts them oldest."""
+    hist = sprint.status_history or []
+    try:
+        return float(hist[-1].get("at") or 0.0)
+    except (AttributeError, TypeError, ValueError):
+        return 0.0
+
+
 def gather_context(substrate, program_id: str) -> PMContext:
     program = substrate.load_program(program_id)
     pm = substrate.load_pm_state(program_id)
@@ -187,15 +198,20 @@ def gather_context(substrate, program_id: str) -> PMContext:
                     result = substrate.load_result(s.results[0]).summary
                 except OSError:
                     result = ""
-            completed.append({"id": s.id, "goals": s.goals, "result": result})
+            completed.append({"id": s.id, "goals": s.goals, "result": result,
+                              "title": s.title, "finished_at": _finished_at(s)})
         elif s.status == SprintStatus.FAILED:
             err = substrate.load_progress(s.id).last_error
-            failed.append({"id": s.id, "goals": s.goals, "error": err})
+            failed.append({"id": s.id, "goals": s.goals, "error": err,
+                           "title": s.title, "finished_at": _finished_at(s)})
         elif s.status in (SprintStatus.PROPOSED, SprintStatus.APPROVED,
                           SprintStatus.QUEUED, SprintStatus.EXECUTING,
                           SprintStatus.HIBERNATED):
             open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals,
                                  "priority": s.priority})
+    # Oldest first, so "the most recent N" is expressible when the prompt is rendered.
+    completed.sort(key=lambda s: s["finished_at"])
+    failed.sort(key=lambda s: s["finished_at"])
     guidance_threads = substrate.load_guidance(program_id)
     # Standing guidance shown every cycle as background context (latest text per
     # thread, whether open or already addressed) plus the open threads the PM must
