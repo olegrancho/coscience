@@ -24,7 +24,7 @@ def test_record_and_aggregate_runs(tmp_path):
 
 def test_run_stats_empty(tmp_path):
     empty = {"total": 0, "last_hour": 0, "last_day": 0, "last": None,
-             "cost": 0, "cost_day": 0, "tokens": 0}
+             "cost": 0, "cost_day": 0, "tokens": 0, "failed": 0}
     stats = usage_meter.run_stats(tmp_path)
     assert stats == {"pm": empty, "worker": empty}
 
@@ -44,3 +44,24 @@ def test_record_run_is_best_effort(tmp_path):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text('{"ts": 1, "kind": "pm"}\nnot json\n')
     assert usage_meter.run_stats(tmp_path, now=10**12)["pm"]["total"] == 1
+
+
+def test_record_run_stores_prompt_bytes_and_failure(tmp_path):
+    usage_meter.record_run(tmp_path, "pm", "p1", tokens=100, prompt_bytes=4096)
+    usage_meter.record_run(tmp_path, "pm", "p1", tokens=50, ok=False)
+
+    rows = usage_meter.load_runs(tmp_path)
+    assert rows[0]["prompt_bytes"] == 4096
+    assert "ok" not in rows[0]          # success stays the absent default — old rows read as ok
+    assert rows[1]["ok"] is False
+    assert "prompt_bytes" not in rows[1]  # unknown values are omitted, never zero-filled
+
+
+def test_run_stats_counts_failed_calls(tmp_path):
+    usage_meter.record_run(tmp_path, "pm", "p1", tokens=100)
+    usage_meter.record_run(tmp_path, "pm", "p1", tokens=50, ok=False)
+
+    stats = usage_meter.run_stats(tmp_path)
+    assert stats["pm"]["total"] == 2
+    assert stats["pm"]["failed"] == 1
+    assert stats["worker"]["failed"] == 0

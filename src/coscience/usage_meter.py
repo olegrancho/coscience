@@ -31,11 +31,15 @@ def _runs_path(repo_root) -> Path:
 
 
 def record_run(repo_root, kind: str, ref: str = "", *, cost=None, tokens=None,
-               model: str = "") -> None:
+               model: str = "", prompt_bytes=None, ok: bool = True) -> None:
     """Append one Claude-call record. `kind` is 'pm' or 'worker'; `ref` is the
     program or sprint id. `cost` (USD), `tokens`, and `model` are recorded when
-    known (the agent reports them on a clean run). Best-effort — never let logging
-    break a beat."""
+    known (the agent reports them on a clean run). `prompt_bytes` is the rendered
+    prompt we sent — without it the total is unattributable, since a beat's cost is
+    roughly the prompt multiplied by however many turns the agent took. `ok=False`
+    records a call that raised: it still burned the window, and a call that leaves
+    no row makes a retry loop invisible in the ledger. Best-effort — never let
+    logging break a beat."""
     try:
         rec = {"ts": time.time(), "kind": kind, "ref": ref}
         if cost is not None:
@@ -44,6 +48,10 @@ def record_run(repo_root, kind: str, ref: str = "", *, cost=None, tokens=None,
             rec["tokens"] = int(tokens)
         if model:
             rec["model"] = model
+        if prompt_bytes is not None:
+            rec["prompt_bytes"] = int(prompt_bytes)
+        if not ok:
+            rec["ok"] = False          # absent == succeeded, so existing rows still read correctly
         path = _runs_path(repo_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a") as f:
@@ -84,6 +92,7 @@ def run_stats(repo_root, now: float | None = None) -> dict:
             "cost_day": round(sum(float(r.get("cost", 0) or 0) for r in rs
                                   if now - float(r.get("ts", 0)) <= _DAY), 4),
             "tokens": sum(int(r.get("tokens", 0) or 0) for r in rs),
+            "failed": sum(1 for r in rs if r.get("ok") is False),
         }
 
     return {"pm": agg("pm"), "worker": agg("worker")}
