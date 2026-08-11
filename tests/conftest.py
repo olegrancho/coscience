@@ -85,9 +85,11 @@ def agent():
     return FakeAgent()
 
 
-def write_raw_sprint(repo_root, sprint_id, status, goals, plan, body="notes"):
+def write_raw_sprint(repo_root, sprint_id, status, goals, plan, body="notes", program=None):
     """Write a sprint.md directly to disk (bypasses Substrate, for arrange steps)."""
     d = repo_root / "sprints" / sprint_id
     d.mkdir(parents=True, exist_ok=True)
     fm = {"status": status, "goals": goals, "plan": plan}
+    if program is not None:
+        fm["program"] = program
     (d / "sprint.md").write_text(serialize(fm, body))

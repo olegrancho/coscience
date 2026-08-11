@@ -160,6 +160,8 @@ def _finished_at(sprint) -> float:
     transition, so the last entry is the finish; 0.0 for records written before
     status history existed, which sorts them oldest."""
     hist = sprint.status_history or []
+    if not hist:
+        return 0.0
     try:
         return float(hist[-1].get("at") or 0.0)
     except (AttributeError, TypeError, ValueError):

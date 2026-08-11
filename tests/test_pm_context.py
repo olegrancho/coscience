@@ -63,6 +63,19 @@ def test_completed_sprints_carry_title_and_sort_oldest_first(substrate):
     assert ctx.completed[1]["finished_at"] == 200.0
 
 
+def test_finished_at_handles_legacy_sprint_with_no_status_history(substrate):
+    # write_raw_sprint bypasses Substrate.save_sprint entirely, so no
+    # status_history seeding happens — this reproduces a record written before
+    # the field existed. load_sprint must not crash gather_context on it.
+    from tests.conftest import write_raw_sprint
+    substrate.save_program(Program(id="p1", title="C", goals="g"))
+    write_raw_sprint(substrate.repo_root, "p1-legacy", "done", "g", ["x"], program="p1")
+
+    ctx = gather_context(substrate, "p1")
+    assert [s["id"] for s in ctx.completed] == ["p1-legacy"]
+    assert ctx.completed[0]["finished_at"] == 0.0
+
+
 def test_gather_context_includes_human_guidance(tmp_path):
     from coscience.substrate import Substrate
     from coscience.models import Program
