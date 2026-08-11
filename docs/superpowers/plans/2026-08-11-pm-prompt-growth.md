@@ -486,7 +486,9 @@ def _history_block(items: list[dict], recent_fmt) -> str:
         return "(none)"
     split = max(0, len(items) - RECENT_HISTORY)
     older, recent = items[:split], items[split:]
-    lines = [f"- {i['id']}: {i.get('title') or _clip(i.get('goals', ''), 60)}"
+    # Plain truncation, not _clip: on a 60-char label the "[clipped; N chars]"
+    # marker would be longer than the text it describes.
+    lines = [f"- {i['id']}: {(i.get('title') or i.get('goals', '')).strip()[:60]}"
              for i in older]
     if older:
         lines.append(f"--- the {len(recent)} most recent, in detail ---")
@@ -637,45 +639,63 @@ Independent of Phase 2 and mergeable separately. These bound what the loops may 
 - Test: `tests/test_usage_gate.py`
 
 **Interfaces:**
-- Produces: `COSCIENCE_USAGE_SCRIPT` env var overrides the default path in both modules.
+- Produces: `usage_meter.usage_script_path() -> str`, honouring `$COSCIENCE_USAGE_SCRIPT`. `worker.py` calls it instead of holding its own copy of the constant. Task 7 relies on `worker.claude_usage_ok` using it.
+
+Resolve the path in a *function*, not a module-level constant, in exactly one module. A constant would freeze the value at import time — forcing tests to `importlib.reload(worker)`, which rebinds the `Worker` class and leaves earlier `from coscience.worker import Worker` bindings pointing at a stale class. One function, called per use, avoids that entirely and removes the duplicated constant.
 
 - [ ] **Step 1: Write the failing test**
 
 Append to `tests/test_usage_gate.py`:
 
 ```python
-def test_usage_script_path_is_configurable(monkeypatch, tmp_path):
-    import importlib
+def test_usage_script_path_honours_the_env_var(monkeypatch):
+    from coscience import usage_meter
+    monkeypatch.delenv("COSCIENCE_USAGE_SCRIPT", raising=False)
+    assert usage_meter.usage_script_path().endswith(".claude/skills/usage/usage.py")
+    monkeypatch.setenv("COSCIENCE_USAGE_SCRIPT", "/opt/usage.py")
+    assert usage_meter.usage_script_path() == "/opt/usage.py"
+
+
+def test_the_gate_reads_the_configured_script(monkeypatch, tmp_path):
     from coscience import worker as worker_mod
+    monkeypatch.undo()          # drop conftest's autouse stub — see the fail-closed test
     fake = tmp_path / "usage.py"
-    fake.write_text("print('5h: 3% (resets 1pm)')\n")
+    fake.write_text("print('5h: 3% (resets Thu 12:30) [live]')\n")
     monkeypatch.setenv("COSCIENCE_USAGE_SCRIPT", str(fake))
-    importlib.reload(worker_mod)
-    try:
-        assert worker_mod._USAGE_SCRIPT == str(fake)
-        assert worker_mod.claude_usage_ok() is True
-    finally:
-        monkeypatch.delenv("COSCIENCE_USAGE_SCRIPT")
-        importlib.reload(worker_mod)
+    assert worker_mod.claude_usage_ok() is True
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `~/venvs/coscience/bin/python -m pytest tests/test_usage_gate.py -v -k configurable`
-Expected: FAIL — `_USAGE_SCRIPT` still points at the home-directory default.
+Run: `~/venvs/coscience/bin/python -m pytest tests/test_usage_gate.py -v -k "env_var or configured_script"`
+Expected: FAIL — `AttributeError: module 'coscience.usage_meter' has no attribute 'usage_script_path'`.
 
 - [ ] **Step 3: Implement**
 
-In **both** `src/coscience/usage_meter.py` and `src/coscience/worker.py`, replace the `_USAGE_SCRIPT` assignment with:
+In `src/coscience/usage_meter.py`, replace the `_USAGE_SCRIPT` constant (line 22) with:
 
 ```python
-# Overridable because it is a personal dotfile: a host without it silently loses
-# both the budget panel and the usage gate. See local_setup_*.md per host.
-_USAGE_SCRIPT = os.environ.get(
-    "COSCIENCE_USAGE_SCRIPT", os.path.expanduser("~/.claude/skills/usage/usage.py"))
+def usage_script_path() -> str:
+    """Where the usage skill lives. Overridable because it is a personal dotfile:
+    a host without it silently loses BOTH the budget panel and the usage gate, and
+    `CLAUDE.md` says more than one host may run the full platform. Resolved per call,
+    not at import, so tests and a relaunched process pick up the environment."""
+    return os.environ.get("COSCIENCE_USAGE_SCRIPT",
+                          os.path.expanduser("~/.claude/skills/usage/usage.py"))
 ```
 
-Both modules already import `os` — no new imports needed.
+Update its one use inside `read_budget` to call `usage_script_path()`.
+
+In `src/coscience/worker.py`, delete the module's own `_USAGE_SCRIPT` constant and call the shared helper in `claude_usage_ok` — `usage_meter` is already imported there (line 16):
+
+```python
+        out = subprocess.run([sys.executable, usage_meter.usage_script_path()],
+                             capture_output=True, text=True, timeout=10).stdout
+```
+
+(The `sys.executable` swap lands in Task 7; use `"python3"` here and change it there, or bring both forward together — either is fine as long as the tests pass at each commit.)
+
+Both modules already import `os` — no new imports needed. Grep for any other `_USAGE_SCRIPT` reference and update it: `grep -rn "_USAGE_SCRIPT" src/ tests/`.
 
 - [ ] **Step 4: Run the tests**
 
@@ -719,24 +739,33 @@ git commit -m "feat(usage): make the usage-script path configurable per host"
 Append to `tests/test_usage_gate.py`:
 
 ```python
-def test_autonomous_threshold_reserves_headroom(monkeypatch):
-    from coscience import worker as worker_mod
-    monkeypatch.setattr(worker_mod.subprocess, "run",
-                        lambda *a, **k: type("P", (), {"stdout": "5h: 85% (resets 1pm)"})())
-    # A human-triggered call still gets through at 85% used...
-    assert worker_mod.claude_usage_ok() is True
-    # ...but an autonomous loop stands down, leaving the rest for the human.
-    assert worker_mod.claude_usage_ok(worker_mod.AUTONOMOUS_THRESHOLD) is False
+def test_autonomous_threshold_reserves_headroom():
+    """At 85% used, a human-triggered call still goes through but an autonomous
+    loop stands down, leaving the rest of the window for the human."""
+    from coscience.worker import AUTONOMOUS_THRESHOLD, WORKER_THRESHOLD
+    out = "5h: 85% (resets Thu 12:30) | week: 40% (resets Sun 23:00) [live]"
+    assert _usage_ok_from_output(out) is True                              # human: 100
+    assert _usage_ok_from_output(out, threshold=WORKER_THRESHOLD) is True  # worker: 90
+    assert _usage_ok_from_output(out, threshold=AUTONOMOUS_THRESHOLD) is False  # PM loop: 80
 
 
 def test_gate_can_fail_closed(monkeypatch):
     from coscience import worker as worker_mod
+    # conftest's autouse `_permissive_usage` fixture replaces
+    # worker_mod.claude_usage_ok with a lambda that always returns True. The
+    # `monkeypatch` fixture is function-scoped and SHARED with that fixture, so
+    # undo() restores the real function — without this the assertions below would
+    # be testing the stub.
+    monkeypatch.undo()
+
     def _boom(*a, **k):
         raise OSError("no such script")
     monkeypatch.setattr(worker_mod.subprocess, "run", _boom)
     assert worker_mod.claude_usage_ok() is True                    # default: fail open
     assert worker_mod.claude_usage_ok(fail_open=False) is False    # loops: fail closed
 ```
+
+`_usage_ok_from_output` is already imported at the top of `tests/test_usage_gate.py`. It only fails open on a stale `[cached <stamp>]` marker, so a `[live]` line goes straight to the percentage check.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -765,14 +794,14 @@ def claude_usage_ok(threshold: float = 100.0, *, fail_open: bool = True) -> bool
     person on a missing dotfile), False for autonomous loops (an unmetered loop is
     exactly what burns a window unattended)."""
     try:
-        out = subprocess.run([sys.executable, _USAGE_SCRIPT],
+        out = subprocess.run([sys.executable, usage_meter.usage_script_path()],
                              capture_output=True, text=True, timeout=10).stdout
     except Exception:
         return fail_open
     return _usage_ok_from_output(out, threshold=threshold)
 ```
 
-`worker.py` does **not** currently import `sys` — add `import sys` to its import block (after `import subprocess`). (`python3` on `PATH` is not necessarily the venv interpreter; `sys.executable` is. Make the same swap in `usage_meter.read_budget`, which shells out the same way.)
+`worker.py` does **not** currently import `sys` — add `import sys` to its import block (after `import subprocess`). (`python3` on `PATH` is not necessarily the venv interpreter; `sys.executable` is. Make the same swap in `usage_meter.read_budget`, which shells out the same way.) `usage_script_path()` comes from Task 6.
 
 Wire the two autonomous callers. In `src/coscience/cli.py:217`:
 
