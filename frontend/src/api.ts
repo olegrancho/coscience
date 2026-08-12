@@ -42,6 +42,13 @@ export interface UsageWindow { pct: number; resets: string }
 export interface RunAgg {
   total: number; last_hour: number; last_day: number; last: number | null;
   cost: number; cost_day: number; tokens: number;
+  // Per-component split. `tokens` is their sum, but the components price very
+  // differently — a cache read is a tenth of fresh input, output five times it —
+  // so the total alone says nothing about spend. Rows recorded before the split
+  // existed contribute 0 here while still counting in `tokens`.
+  input_tokens: number; output_tokens: number;
+  cache_creation_input_tokens: number; cache_read_input_tokens: number;
+  thinking_tokens: number;
 }
 export interface Usage {
   budget: { windows: Record<string, UsageWindow>; live: boolean } | null;
