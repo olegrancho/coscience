@@ -39,7 +39,8 @@ describe("compress / brainstorm", () => {
     renderAt();
     fireEvent.click(await screen.findByText("Compress"));
     await waitFor(() => expect(show).toHaveBeenCalled());
-    return show.mock.calls.at(-1)![0] as { color?: string; message?: string };
+    // Not .at(-1): tsconfig targets ES2020, and `npm run build` typechecks tests.
+    return show.mock.calls[show.mock.calls.length - 1][0] as { color?: string; message?: string };
   }
 
   it("says the planner stood down rather than 'nothing to do'", async () => {

@@ -71,7 +71,8 @@ describe("replan", () => {
     renderAt();
     fireEvent.click(await screen.findByText("Replan now"));
     await waitFor(() => expect(show).toHaveBeenCalled());
-    return show.mock.calls.at(-1)![0] as { color?: string; message?: string };
+    // Not .at(-1): tsconfig targets ES2020, and `npm run build` typechecks tests.
+    return show.mock.calls[show.mock.calls.length - 1][0] as { color?: string; message?: string };
   }
 
   it("warns when the planner stood down instead of claiming it re-planned", async () => {
