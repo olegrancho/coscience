@@ -199,13 +199,18 @@ def gather_context(substrate, program_id: str) -> PMContext:
                     "messages": [{"role": m["role"], "text": m["text"]} for m in th["messages"]],
                 })
         if s.status == SprintStatus.DONE:
-            result = ""
+            result = result_id = ""
             if s.results:
                 try:
                     result = substrate.load_result(s.results[0]).summary
+                    result_id = s.results[0]
                 except OSError:
                     result = ""
             completed.append({"id": s.id, "goals": s.goals, "result": result,
+                              # The id the prompt turns into a readable path for the
+                              # clipped excerpt. Not a fingerprint input (see
+                              # _context_payload, which reads id + result only).
+                              "result_id": result_id,
                               "title": s.title, "finished_at": _finished_at(s)})
         elif s.status == SprintStatus.FAILED:
             err = substrate.load_progress(s.id).last_error
@@ -276,6 +281,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
         proposed_count=proposed_count, max_proposed=program_cap(program),
         model=program.pm_model,
         workdir=_resolve_workdir(substrate, program.workdir),
+        results_dir=str(substrate.repo_root / "results"),
         graph_lines=graph_lines,
         artifacts=artifact_dicts, artifact_feedback=artifact_feedback,
     )
@@ -551,14 +557,22 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             substrate.save_pm_state(pm)
             return {"program": program_id, "cycle": cycle,
                     "submitted": [], "proposed": [], "skipped": True, "throttled": True}
-        if (fingerprint == pm.failed_fingerprint
+        if (not force and fingerprint == pm.failed_fingerprint
                 and pm.consecutive_failures >= FAILURE_BACKOFF):
             # Same context, already failed FAILURE_BACKOFF times — retrying spends a
             # full agentic session for the same raise. Wait for something to change.
+            # `force` is exempt: the backoff exists to stop the LOOP spinning, and a
+            # human pressing Replan/Compress/Brainstorm is precisely the escape hatch
+            # from a stuck PM. Without this term the feature disables its own fix.
             pm.last_run = time.time() if now is None else now
             substrate.save_pm_state(pm)
             return {"program": program_id, "cycle": cycle, "submitted": [],
                     "proposed": [], "skipped": True, "backoff": True}
+        if force:
+            # A human asking for this beat is an explicit "try again": clear the count
+            # so they get a fresh run of FAILURE_BACKOFF attempts, not one retry that
+            # drops straight back behind the gate.
+            pm.consecutive_failures = 0
         # About to reason -> capture what changed since the last reasoned cycle.
         new_signals = context_signals(context)
         trigger_labels = _triggers(pm.last_signals, new_signals, force)

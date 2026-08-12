@@ -45,6 +45,10 @@ def pm_beat_line(summaries: list[dict], reasoned: int) -> str:
     missed = [k for s in summaries
               for k in list(s.get("release_skipped") or ()) + list(s.get("reopen_skipped") or ())]
     unbacked = [c for s in summaries for c in s.get("unbacked_claims") or ()]
+    # A backed-off program is stuck, not idle: it stopped calling the reasoner after
+    # repeated failures on unchanged input. Said as a part (not a fallback line) so a
+    # beat where other programs reasoned still shows it.
+    stood_down = [s["program"] for s in summaries if s.get("backoff")]
     if ids:
         parts.append(f"proposed {', '.join(ids)}")
     if released:
@@ -55,6 +59,10 @@ def pm_beat_line(summaries: list[dict], reasoned: int) -> str:
     if unbacked:
         parts.append("WARNING report claims it " + "; ".join(unbacked)
                      + " — no such action was submitted")
+    if stood_down:
+        parts.append(f"STOOD DOWN {', '.join(stood_down)} — repeated planner failures on "
+                     "unchanged input; see the failed (ok: false) rows in the run ledger, "
+                     "then Replan to retry")
     parts += errors
     if parts:
         return " · ".join(parts)

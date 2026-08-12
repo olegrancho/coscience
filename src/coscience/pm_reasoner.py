@@ -59,6 +59,10 @@ class PMContext:
     max_proposed: int = 4                              # cap the PM may not exceed
     model: str = ""                                    # Claude model for this PM cycle; "" = default
     workdir: str = ""                                  # resolved cwd for the reasoner's claude session ("" = inherit)
+    # Absolute path of the substrate's results/ dir. Rendered so the PM can reach the
+    # full text behind a clipped excerpt; deliberately NOT a fingerprint input (it is
+    # a location, not something the PM reacts to) — see pm_agent._context_payload.
+    results_dir: str = ""
     directive: str = ""                                # "compress" | "brainstorm" | "" — a human-triggered directed cycle
     graph_lines: list[str] = field(default_factory=list)  # windowed lineage-graph adjacency, one line per node with edges
     artifacts: list[dict] = field(default_factory=list)          # program artifacts: [{id, title, kind}]

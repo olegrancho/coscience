@@ -29,11 +29,22 @@ GOAL_CHARS = 400        # per-history-entry goal excerpt cap
 PRIOR_SHOWN = 20        # prior proposal ids rendered; the full list stays in pm.md
 
 
-def _clip(text: str, limit: int) -> str:
+def _clip(text: str, limit: int, source: str = "") -> str:
+    """Excerpt `text`, naming where the full copy lives when we know. In production
+    every result summary is clipped, so the marker is the PM's only route back to the
+    rest of it: an unresolvable "read the file" is not an escape hatch."""
     text = (text or "").strip()
     if len(text) <= limit:
         return text
-    return f"{text[:limit].rstrip()}… [clipped; {len(text):,} chars — read the file for the rest]"
+    where = f" — full text: {source}" if source else ""
+    return f"{text[:limit].rstrip()}… [clipped; {len(text):,} chars{where}]"
+
+
+def _result_path(context: PMContext, item: dict) -> str:
+    """Absolute path of a completed sprint's result file, or "" if we can't resolve
+    one (a hand-built context in tests, or a sprint that recorded no result)."""
+    rid = str(item.get("result_id") or "")
+    return f"{context.results_dir}/{rid}.md" if context.results_dir and rid else ""
 
 
 def _history_block(items: list[dict], recent_fmt) -> str:
@@ -64,7 +75,7 @@ def render_prompt(context: PMContext) -> str:
     done_block = _history_block(
         context.completed,
         lambda s: (f"- {s['id']}: {_clip(s['goals'], GOAL_CHARS)}"
-                   f" -> result: {_clip(s['result'], RESULT_CHARS)}"))
+                   f" -> result: {_clip(s['result'], RESULT_CHARS, _result_path(context, s))}"))
     failed_block = _history_block(
         context.failed,
         lambda s: (f"- {s['id']}: {_clip(s['goals'], GOAL_CHARS)}"
@@ -144,6 +155,12 @@ def render_prompt(context: PMContext) -> str:
 
     graph_block = _lines(context.graph_lines, lambda ln: f"- {ln}") if context.graph_lines else "(none yet)"
 
+    # The clip markers point at absolute paths under this directory. It sits in the
+    # substrate, which for a program with its own workdir is nowhere near the session's
+    # cwd — so the location has to be stated, not implied.
+    results_note = (f"{context.results_dir}/" if context.results_dir
+                    else "the control repo's results/ directory")
+
     return f"""You are the PM agent for a research program. You maintain two things:
 a small set of PROPOSED SPRINTS (concrete next experiments, which humans approve), and
 an IDEA POOL (short, vague candidate directions you grow and prune over time). You only
@@ -151,7 +168,14 @@ PROPOSE and curate; humans approve sprints.{directive_block}
 
 Your session runs in this program's working directory. If the goals refer to "this
 folder", "the data here", or "existing work", they mean your current working
-directory — inspect it there; do NOT go hunting up the filesystem tree.
+directory — inspect it there; do NOT go hunting up the filesystem tree for it.
+
+One directory outside it is yours to read — this program's sprint results, which live in
+{results_note}
+The result excerpts below are CLIPPED. When one is cut short and the detail decides
+something, read the full file at the exact path given in its clip marker. That directory
+is the only place to look outside your working directory; the rule above still holds
+everywhere else.
 
 PROGRAM GOALS:
 {context.goals}{instructions_block}{guidance_block}

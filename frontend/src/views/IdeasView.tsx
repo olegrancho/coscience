@@ -205,6 +205,9 @@ export default function IdeasView() {
       const quiet = r.busy || r.throttled || r.skipped || noChange;
       const msg = r.busy ? "The PM is already reasoning — try again in a moment."
         : r.throttled ? "Claude usage is exhausted; it will resume after the reset."
+        // Same escape hatch as Replan: a stood-down planner must not be reported as
+        // "nothing to do" — it failed and never ran.
+        : r.backoff ? "The planner has failed repeatedly on this input and stood down — it did not run. See the failed PM runs (ok: false) in .coscience/runs.jsonl."
         : r.skipped ? "Nothing to do this cycle."
         : mode === "brainstorm"
           ? (added > 0 ? `Added ${added} new idea${added === 1 ? "" : "s"} — ${r.pool_size ?? "?"} in the pool.`

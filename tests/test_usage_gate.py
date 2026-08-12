@@ -77,6 +77,61 @@ def test_autonomous_threshold_reserves_headroom():
     assert _usage_ok_from_output(out, threshold=AUTONOMOUS_THRESHOLD) is False  # PM loop: 80
 
 
+def _usage_at(pct):
+    """A fake subprocess.run returning the usage script's line at `pct` used."""
+    def _run(*a, **k):
+        return SimpleNamespace(
+            stdout=f"5h: {pct}% (resets Thu 12:30) | week: 40% (resets Sun 23:00) [live]")
+    return _run
+
+
+def _no_usage_script(*a, **k):
+    raise OSError("no such script")
+
+
+def test_the_pm_loop_gate_stands_down_early_and_fails_closed(monkeypatch, tmp_path):
+    """The loop's own wiring, not claude_usage_ok in isolation: both call sites could
+    be reverted to a bare claude_usage_ok() and the whole suite stayed green."""
+    from coscience import cli as cli_mod
+    from coscience import worker as worker_mod
+    monkeypatch.undo()          # conftest's autouse stub — see test_gate_can_fail_closed
+    # cli does `from coscience.worker import claude_usage_ok`, so if this module was
+    # first imported while the stub was installed it captured the stub. Re-point it at
+    # the real function (undone above) — otherwise the assertions below test the stub.
+    monkeypatch.setattr(cli_mod, "claude_usage_ok", worker_mod.claude_usage_ok)
+
+    gates = []
+
+    def fake_pm_run_once(substrate, reasoner, usage_ok=None):
+        gates.append(usage_ok)
+        return []
+
+    monkeypatch.setattr(cli_mod, "pm_run_once", fake_pm_run_once)
+    monkeypatch.setattr(worker_mod.subprocess, "run", _usage_at(85))
+    cli_mod.main(["pm", "--repo", str(tmp_path), "--loop",
+                  "--max-rounds", "1", "--interval", "0"])
+
+    assert gates and gates[0] is not None, "the PM loop passed pm_run_once no usage gate"
+    # 85% used: a human-triggered call still goes through (threshold 100), so a gate
+    # that answers True here is not carrying AUTONOMOUS_THRESHOLD.
+    assert gates[0]() is False
+    # ...and an unreadable usage script must stop the loop, not wave it through.
+    monkeypatch.setattr(worker_mod.subprocess, "run", _no_usage_script)
+    assert gates[0]() is False
+
+
+def test_the_worker_gate_stands_down_early_and_fails_closed(monkeypatch, tmp_path):
+    from coscience import worker as worker_mod
+    from coscience.substrate import Substrate
+    monkeypatch.undo()          # conftest's autouse stub — see test_gate_can_fail_closed
+
+    worker = worker_mod.Worker(Substrate(tmp_path), agent=None)
+    monkeypatch.setattr(worker_mod.subprocess, "run", _usage_at(95))
+    assert worker._usage_ok() is False       # 95% > WORKER_THRESHOLD, under the human 100
+    monkeypatch.setattr(worker_mod.subprocess, "run", _no_usage_script)
+    assert worker._usage_ok() is False       # unreadable script -> hold, don't launch
+
+
 def test_gate_can_fail_closed(monkeypatch):
     from coscience import worker as worker_mod
     # conftest's autouse `_permissive_usage` fixture replaces

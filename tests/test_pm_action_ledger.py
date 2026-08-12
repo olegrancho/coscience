@@ -140,6 +140,23 @@ def test_beat_line_still_reports_throttling():
     assert line.startswith("paused — Claude usage exhausted")
 
 
+def test_beat_line_names_a_program_that_stood_down():
+    # A backed-off PM stopped reasoning after repeated failures. Reported as a skip it
+    # is word-for-word a healthy idle beat — the exact confusion the backoff was added
+    # to end, reintroduced one line lower.
+    from coscience.cli import pm_beat_line
+    line = pm_beat_line([{"program": "p3", "submitted": [], "skipped": True,
+                          "backoff": True}], reasoned=0)
+    assert line != "idle — no input changed"
+    assert "STOOD DOWN p3" in line
+    assert "ok: false" in line              # ...and where the failures are recorded
+
+    # It must survive a beat in which another program reasoned normally.
+    mixed = pm_beat_line([{"program": "p3", "submitted": [], "skipped": True, "backoff": True},
+                          {"program": "p1", "submitted": []}], reasoned=1)
+    assert "STOOD DOWN p3" in mixed
+
+
 def test_ledger_lists_each_kind_of_action():
     text = actions_ledger({"released": ["s1"], "reopened": ["s2"], "submitted": ["s3"],
                            "adopted": ["a1"], "dropped": ["s4"], "ideas_added": 2,

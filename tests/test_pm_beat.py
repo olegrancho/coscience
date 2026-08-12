@@ -109,6 +109,25 @@ def test_beat_reasons_again_after_idea_comment(substrate):
     assert summary["submitted"] == ["p1-c1-b"]
 
 
+def test_the_result_file_pointer_is_not_a_fingerprint_input(substrate):
+    """results_dir / result_id exist so the PM can READ a clipped result; they say
+    nothing about what changed. In the fingerprint they would be a new payload key —
+    every program on disk would re-fingerprint and wake at once on the next deploy."""
+    from coscience.models import Result, Sprint
+    from coscience.pm_agent import context_fingerprint, context_signals, gather_context
+    _prog(substrate)
+    substrate.save_result(Result(id="p1-c0-a-result", sprint="p1-c0-a", summary="found"))
+    substrate.save_sprint(Sprint(id="p1-c0-a", status=SprintStatus.DONE, goals="g",
+                                 plan=["x"], program="p1", results=["p1-c0-a-result"]))
+    ctx = gather_context(substrate, "p1")
+    assert ctx.results_dir and ctx.completed[0]["result_id"]      # they ARE populated
+
+    ctx.results_dir = "/somewhere/else/results"                   # a moved substrate
+    ctx.completed[0]["result_id"] = "renamed-result"
+    assert context_fingerprint(ctx) == context_fingerprint(gather_context(substrate, "p1"))
+    assert context_signals(ctx) == context_signals(gather_context(substrate, "p1"))
+
+
 def test_pm_reopens_approved_only(substrate):
     # The PM may pull an APPROVED sprint back to PROPOSED (obsolete), but must not
     # touch a QUEUED one (a human deliberately released it).
@@ -231,6 +250,74 @@ def test_repeated_reasoner_failures_back_off(substrate):
     assert len(calls) == 3
     assert substrate.load_pm_state("p1").consecutive_failures == 3
     assert len(usage_meter.load_runs(substrate.repo_root)) == 3
+
+
+def test_a_forced_beat_ignores_the_backoff(substrate):
+    """The backoff exists to stop the LOOP spinning. A human pressing Replan /
+    Compress / Brainstorm (all of which force) is the escape hatch FROM a stuck PM —
+    if force were gated too, the feature would disable its own fix."""
+    from coscience.models import Program
+    from coscience.pm_claude import PMReasonerError
+
+    substrate.save_program(Program(id="p1", title="P", goals="g"))
+
+    calls = []
+    class Boom:
+        last_cost = None
+        last_prompt_bytes = 10
+        def run(self, ctx):
+            calls.append(1)
+            raise PMReasonerError("bad json")
+
+    boom = Boom()
+    for _ in range(5):
+        try:
+            pm_beat(substrate, "p1", boom)
+        except PMReasonerError:
+            pass
+    assert len(calls) == 3                                  # backed off, as designed
+
+    with pytest.raises(PMReasonerError):
+        pm_beat(substrate, "p1", boom, force=True)          # the human insists
+    assert len(calls) == 4, "a forced beat never reached the reasoner"
+    # ...and the count restarts, so the human gets a fresh run of attempts rather
+    # than dropping straight back behind the gate after one retry.
+    assert substrate.load_pm_state("p1").consecutive_failures == 1
+
+    for _ in range(3):
+        try:
+            pm_beat(substrate, "p1", boom)
+        except PMReasonerError:
+            pass
+    assert len(calls) == 6                                  # 2 more, then backed off again
+
+
+def test_a_forced_beat_that_works_after_a_backoff_proposes(substrate):
+    # End to end, the way a human meets it: the PM is stuck, Replan is pressed, and
+    # the cycle it runs must actually land its proposals.
+    from coscience.models import Program
+    from coscience.pm_claude import PMReasonerError
+    from coscience.pm_reasoner import FakeReasoner
+
+    substrate.save_program(Program(id="p1", title="P", goals="g"))
+
+    class Boom:
+        last_cost = None
+        last_prompt_bytes = 10
+        def run(self, ctx):
+            raise PMReasonerError("bad json")
+
+    for _ in range(4):
+        try:
+            pm_beat(substrate, "p1", Boom())
+        except PMReasonerError:
+            pass
+    assert substrate.load_pm_state("p1").consecutive_failures == 3
+
+    summary = pm_beat(substrate, "p1", FakeReasoner([_out("a")]), force=True)
+    assert summary["submitted"] == ["p1-c0-a"]
+    assert not summary.get("backoff")
+    assert substrate.load_pm_state("p1").consecutive_failures == 0
 
 
 def test_a_changed_context_clears_the_backoff(substrate):

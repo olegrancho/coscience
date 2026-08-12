@@ -1,5 +1,7 @@
 import json
+import re
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -262,6 +264,41 @@ def test_recent_results_are_clipped_not_inlined_whole():
     assert "R" * 800 in p
     assert "R" * 900 not in p
     assert "clipped" in p              # the PM is told text was withheld, so it can go read it
+
+
+def test_a_clipped_result_names_the_file_that_holds_the_rest():
+    """Every production result is clipped, so the marker is the PM's only route to the
+    other ~80% of it. A pointer it cannot resolve is not an escape hatch."""
+    ctx = _ctx()
+    ctx.results_dir = "/substrate/results"
+    ctx.completed = [dict(_done(1, result="R" * 5000), result_id="p1-c1-x-result")]
+    p = render_prompt(ctx)
+    assert "/substrate/results/p1-c1-x-result.md" in p
+    # ...and the "don't hunt up the tree" rule must exempt that directory, or the
+    # prompt tells the PM to read a file it also forbids it to go and read.
+    preamble = p.split("PROGRAM GOALS:")[0]
+    assert "/substrate/results" in preamble
+
+
+def test_the_path_offered_for_a_clipped_result_is_the_real_file(substrate):
+    # End to end against a real substrate: the path the PM is handed must open, and
+    # hold the text that was cut. p3's session cwd is outside the substrate entirely,
+    # so nothing about this is reachable by guessing.
+    from coscience.models import Program, Result, Sprint, SprintStatus
+    from coscience.pm_agent import gather_context
+
+    substrate.save_program(Program(id="p1", title="P", goals="g"))
+    summary = "FINDING: the ladder holds. " + "z" * 5000
+    substrate.save_result(Result(id="p1-c0-a-result", sprint="p1-c0-a", summary=summary))
+    substrate.save_sprint(Sprint(id="p1-c0-a", status=SprintStatus.DONE, goals="g",
+                                 plan=["x"], program="p1", results=["p1-c0-a-result"]))
+
+    p = render_prompt(gather_context(substrate, "p1"))
+    m = re.search(r"full text: (\S+\.md)", p)
+    assert m, "a clipped result offered the PM no path at all"
+    path = Path(m.group(1))
+    assert path.is_file(), f"{path} does not exist"
+    assert summary in path.read_text()          # the WHOLE summary, not the excerpt
 
 
 def test_older_completed_sprints_collapse_to_one_line_but_keep_their_ids():
