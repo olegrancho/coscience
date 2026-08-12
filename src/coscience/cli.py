@@ -148,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
     pmmode = pm.add_mutually_exclusive_group()
     pmmode.add_argument("--once", action="store_true")
     pmmode.add_argument("--loop", action="store_true")
-    pm.add_argument("--interval", type=float, default=5.0)
+    pm.add_argument("--interval", type=float, default=60.0)
     pm.add_argument("--max-rounds", type=int, default=None)
 
     args = parser.parse_args(argv)

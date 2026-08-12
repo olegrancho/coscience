@@ -372,6 +372,8 @@ class Substrate:
             proposed_ids=list(fm.get("proposed_ids", [])),
             log=list(fm.get("log", [])),
             last_fingerprint=str(fm.get("last_fingerprint", "")),
+            consecutive_failures=int(fm.get("consecutive_failures", 0)),
+            failed_fingerprint=str(fm.get("failed_fingerprint", "")),
             last_signals=dict(fm.get("last_signals", {})),
             activations=list(fm.get("activations", [])),
         )
@@ -386,6 +388,10 @@ class Substrate:
         }
         if state.last_fingerprint:
             fm["last_fingerprint"] = state.last_fingerprint
+        if state.consecutive_failures:
+            fm["consecutive_failures"] = state.consecutive_failures
+        if state.failed_fingerprint:
+            fm["failed_fingerprint"] = state.failed_fingerprint
         if state.last_signals:
             fm["last_signals"] = state.last_signals
         if state.activations:

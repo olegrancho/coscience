@@ -215,6 +215,12 @@ class PMState:
     proposed_ids: list[str] = field(default_factory=list)
     log: list[str] = field(default_factory=list)
     last_fingerprint: str = ""
+    # Consecutive reasoner failures against THIS fingerprint. A cycle that raises
+    # (malformed JSON is the common one) has already spent its tokens, and the
+    # fingerprint gate cannot help: the context is unchanged, so the next beat would
+    # retry identically — every interval, forever.
+    consecutive_failures: int = 0
+    failed_fingerprint: str = ""
     # per-category signatures of the last reasoned context, so the next cycle can
     # name WHAT changed; and a capped timeline of activations for the dashboard.
     last_signals: dict = field(default_factory=dict)

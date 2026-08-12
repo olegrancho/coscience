@@ -19,6 +19,11 @@ from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coer
 # Humans can propose beyond it; this only gates the PM's own proposing/promoting.
 MAX_PROPOSED = 4
 
+# Attempts against one unchanged context before the PM stands down. Bounded, not
+# zero: a flaky call deserves a retry, a deterministic one does not deserve 720
+# per hour.
+FAILURE_BACKOFF = 3
+
 
 def program_cap(program) -> int:
     """How many sprints may await review for this program: its own setting, or the
@@ -546,6 +551,14 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             substrate.save_pm_state(pm)
             return {"program": program_id, "cycle": cycle,
                     "submitted": [], "proposed": [], "skipped": True, "throttled": True}
+        if (fingerprint == pm.failed_fingerprint
+                and pm.consecutive_failures >= FAILURE_BACKOFF):
+            # Same context, already failed FAILURE_BACKOFF times — retrying spends a
+            # full agentic session for the same raise. Wait for something to change.
+            pm.last_run = time.time() if now is None else now
+            substrate.save_pm_state(pm)
+            return {"program": program_id, "cycle": cycle, "submitted": [],
+                    "proposed": [], "skipped": True, "backoff": True}
         # About to reason -> capture what changed since the last reasoned cycle.
         new_signals = context_signals(context)
         trigger_labels = _triggers(pm.last_signals, new_signals, force)
@@ -563,6 +576,13 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             # parse is the common case). A call that leaves no row makes a retry loop
             # invisible in the ledger — see Task 8.
             _record(ok=False)
+            # Count it against THIS context: new information resets the counter, so a
+            # human approving something always gets a fresh attempt.
+            pm.consecutive_failures = (pm.consecutive_failures + 1
+                                       if fingerprint == pm.failed_fingerprint else 1)
+            pm.failed_fingerprint = fingerprint
+            pm.last_run = time.time() if now is None else now
+            substrate.save_pm_state(pm)
             raise
         _record(ok=True)
         write_staging(substrate, program_id, cycle, output, fingerprint, directive)  # COMMIT POINT
@@ -885,6 +905,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                      if actions["unbacked_claims"] else ""))
     if new_signals is not None:                        # we actually reasoned this beat
         pm.last_signals = new_signals
+        pm.consecutive_failures = 0
+        pm.failed_fingerprint = ""
         # Releases live here too, not just in the loop's log file: pm.md travels with
         # the substrate, so a dropped action stays evidence after the log rotates.
         pm.activations.append({

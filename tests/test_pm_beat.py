@@ -202,3 +202,62 @@ def test_failed_reasoner_call_is_recorded_in_the_ledger(substrate):
     assert rows[0]["ok"] is False
     assert rows[0]["tokens"] == 1234          # the session burned these before it raised
     assert rows[0]["prompt_bytes"] == 4096
+
+
+def test_repeated_reasoner_failures_back_off(substrate):
+    from coscience.models import Program
+    from coscience.pm_claude import PMReasonerError
+    from coscience import usage_meter
+
+    substrate.save_program(Program(id="p1", title="P", goals="g"))
+
+    calls = []
+    class Boom:
+        last_cost = None
+        last_prompt_bytes = 10
+        def run(self, ctx):
+            calls.append(1)
+            raise PMReasonerError("bad json")
+
+    boom = Boom()
+    for _ in range(6):
+        try:
+            pm_beat(substrate, "p1", boom)
+        except PMReasonerError:
+            pass
+
+    # Three attempts against unchanged context, then it stands down rather than
+    # burning a full agentic session every beat.
+    assert len(calls) == 3
+    assert substrate.load_pm_state("p1").consecutive_failures == 3
+    assert len(usage_meter.load_runs(substrate.repo_root)) == 3
+
+
+def test_a_changed_context_clears_the_backoff(substrate):
+    from coscience.models import Program, Sprint, SprintStatus
+    from coscience.pm_claude import PMReasonerError
+
+    substrate.save_program(Program(id="p1", title="P", goals="g"))
+
+    class Boom:
+        last_cost = None
+        last_prompt_bytes = 10
+        def run(self, ctx):
+            raise PMReasonerError("bad json")
+
+    for _ in range(4):
+        try:
+            pm_beat(substrate, "p1", Boom())
+        except PMReasonerError:
+            pass
+    assert substrate.load_pm_state("p1").consecutive_failures == 3
+
+    # A human doing something — approving a sprint here — is new information, so the
+    # PM must try again rather than stay stuck behind a stale failure count.
+    substrate.save_sprint(Sprint(id="p1-a", status=SprintStatus.APPROVED, goals="g",
+                                 plan=["x"], program="p1"))
+    try:
+        pm_beat(substrate, "p1", Boom())
+    except PMReasonerError:
+        pass
+    assert substrate.load_pm_state("p1").consecutive_failures == 1
