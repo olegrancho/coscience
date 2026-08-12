@@ -10,6 +10,7 @@ import json
 import re
 import subprocess
 
+from coscience import usage_meter
 from coscience.models import DEFAULT_MODEL
 from coscience.pm_reasoner import (PMContext, PMCycleOutput, ProposedSprint, coerce_resources,
                                    render_instructions)
@@ -478,11 +479,11 @@ class ClaudeCodeReasoner:
         try:
             env = json.loads(proc.stdout)
             usage = env.get("usage") or {}
+            breakdown = usage_meter.token_breakdown(usage)
             self.last_cost = {"cost": env.get("total_cost_usd"),
                               "turns": env.get("num_turns"),
-                              "tokens": sum(int(usage.get(k, 0) or 0) for k in (
-                                  "input_tokens", "output_tokens",
-                                  "cache_creation_input_tokens", "cache_read_input_tokens"))}
+                              "tokens": breakdown.get("tokens"),
+                              "usage": breakdown}
             return str(env.get("result") or "")
         except (json.JSONDecodeError, AttributeError):
             return proc.stdout or ""

@@ -24,9 +24,61 @@ def test_record_and_aggregate_runs(tmp_path):
 
 def test_run_stats_empty(tmp_path):
     empty = {"total": 0, "last_hour": 0, "last_day": 0, "last": None,
-             "cost": 0, "cost_day": 0, "tokens": 0, "failed": 0}
+             "cost": 0, "cost_day": 0, "tokens": 0, "failed": 0,
+             "input_tokens": 0, "output_tokens": 0,
+             "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+             "thinking_tokens": 0}
     stats = usage_meter.run_stats(tmp_path)
     assert stats == {"pm": empty, "worker": empty}
+
+
+# --- per-component token split -------------------------------------------------
+# The sum alone can't be read as cost: a cache read bills at a tenth of fresh
+# input and an output token at five times it.
+
+_ENVELOPE = {"input_tokens": 2, "output_tokens": 5,
+             "cache_creation_input_tokens": 8570, "cache_read_input_tokens": 8073,
+             "output_tokens_details": {"thinking_tokens": 3}}
+
+
+def test_token_breakdown_splits_and_sums():
+    br = usage_meter.token_breakdown(_ENVELOPE)
+    assert br["input_tokens"] == 2
+    assert br["cache_read_input_tokens"] == 8073
+    assert br["thinking_tokens"] == 3
+    # `tokens` is the four components only — thinking is already inside output.
+    assert br["tokens"] == 2 + 5 + 8570 + 8073
+
+
+def test_token_breakdown_omits_absent_fields():
+    """Absent must stay distinguishable from zero, or a pre-breakdown row reads
+    as a run that genuinely used no cache."""
+    assert usage_meter.token_breakdown({}) == {}
+    assert usage_meter.token_breakdown(None) == {}
+    br = usage_meter.token_breakdown({"input_tokens": 7})
+    assert "cache_read_input_tokens" not in br and "thinking_tokens" not in br
+    assert br["tokens"] == 7
+
+
+def test_record_run_stores_the_split(tmp_path):
+    br = usage_meter.token_breakdown(_ENVELOPE)
+    usage_meter.record_run(tmp_path, "pm", "p1", tokens=br["tokens"], usage=br)
+
+    row = usage_meter.load_runs(tmp_path)[0]
+    assert row["cache_read_input_tokens"] == 8073
+    assert row["output_tokens"] == 5
+    assert row["tokens"] == 16650          # unchanged meaning, so old rows still aggregate
+
+
+def test_run_stats_aggregates_components_and_tolerates_old_rows(tmp_path):
+    br = usage_meter.token_breakdown(_ENVELOPE)
+    usage_meter.record_run(tmp_path, "pm", "p1", tokens=br["tokens"], usage=br)
+    usage_meter.record_run(tmp_path, "pm", "p1", tokens=999)   # pre-breakdown row
+
+    pm = usage_meter.run_stats(tmp_path)["pm"]
+    assert pm["tokens"] == 16650 + 999     # the old row still counts in the total
+    assert pm["cache_read_input_tokens"] == 8073   # ...and contributes 0 to the split
+    assert pm["output_tokens"] == 5
 
 
 def test_run_stats_sums_cost_and_tokens(tmp_path):

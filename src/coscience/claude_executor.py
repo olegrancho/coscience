@@ -11,6 +11,7 @@ import json
 import shlex
 from pathlib import Path
 
+from coscience import usage_meter
 from coscience.artifacts import FIGURE_DESCRIPTION_NOTE
 from coscience.executor import (ExecutionContext, is_running, launch_detached,
                                 terminate_detached)
@@ -293,10 +294,10 @@ class ClaudeAgent:
         if result is None:
             return raw
         usage = result.get("usage") or {}
-        tokens = sum(int(usage.get(k, 0) or 0) for k in (
-            "input_tokens", "output_tokens",
-            "cache_creation_input_tokens", "cache_read_input_tokens"))
-        sidecar = {"cost": result.get("total_cost_usd"), "tokens": tokens,
+        breakdown = usage_meter.token_breakdown(usage)
+        sidecar = {"cost": result.get("total_cost_usd"),
+                   "tokens": breakdown.get("tokens"),
+                   "usage": breakdown,
                    "turns": result.get("num_turns"), "duration_ms": result.get("duration_ms")}
         try:
             (sprint_dir / "agent.cost.json").write_text(json.dumps(sidecar))

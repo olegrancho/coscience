@@ -95,6 +95,28 @@ def test_collect_unwraps_stream_result_and_writes_cost(tmp_path):
     assert cost["cost"] == 0.42 and cost["tokens"] == 1200
 
 
+def test_cost_sidecar_carries_the_token_split(tmp_path):
+    """Worker runs are the platform's largest token consumer, so the split that
+    makes the total readable as cost has to survive the sidecar."""
+    sprint_dir = tmp_path / "sprints" / "sp2"
+    sprint_dir.mkdir(parents=True)
+    (sprint_dir / "agent.out").write_text(_stream(
+        {"type": "result", "subtype": "success", "result": "done",
+         "total_cost_usd": 0.9, "num_turns": 6,
+         "usage": {"input_tokens": 2, "output_tokens": 5,
+                   "cache_creation_input_tokens": 8570,
+                   "cache_read_input_tokens": 8073,
+                   "output_tokens_details": {"thinking_tokens": 3}}},
+    ))
+    (sprint_dir / "agent.exit").write_text("0\n")
+    ClaudeAgent().collect(sprint_dir)
+
+    cost = json.loads((sprint_dir / "agent.cost.json").read_text())
+    assert cost["usage"]["cache_read_input_tokens"] == 8073
+    assert cost["usage"]["thinking_tokens"] == 3
+    assert cost["tokens"] == 16650
+
+
 def test_collect_keeps_raw_when_no_result_event(tmp_path):
     # A usage-limit message instead of a stream must survive for limit detection.
     sprint_dir = tmp_path / "sprints" / "sp1"

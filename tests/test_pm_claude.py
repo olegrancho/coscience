@@ -358,3 +358,31 @@ def test_prompt_does_not_grow_with_program_history():
         "byte budgets passed but the oldest prior-proposal id leaked into the "
         "prompt — PRIOR_SHOWN windowing regressed")
     assert "prior-99" in large_prompt, "newest prior-proposal id missing from the prompt"
+
+
+def test_reasoner_reports_the_token_split(monkeypatch):
+    """last_cost carries the per-component usage, not just the sum — the sum alone
+    can't be read as cost (a cache read bills at a tenth of fresh input). Drives
+    the real _default_invoke, since that is what parses the envelope; an injected
+    invoke returns raw text and never populates last_cost."""
+    from types import SimpleNamespace
+    import coscience.pm_claude as pm_claude
+
+    envelope = json.dumps({
+        "result": '{"report": "ok"}',
+        "total_cost_usd": 0.9, "num_turns": 6,
+        "usage": {"input_tokens": 2, "output_tokens": 5,
+                  "cache_creation_input_tokens": 8570,
+                  "cache_read_input_tokens": 8073,
+                  "output_tokens_details": {"thinking_tokens": 3}},
+    })
+    monkeypatch.setattr(pm_claude.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=0, stdout=envelope, stderr=""))
+
+    r = ClaudeCodeReasoner()
+    r.run(_ctx())
+
+    assert r.last_cost["tokens"] == 16650
+    assert r.last_cost["usage"]["cache_read_input_tokens"] == 8073
+    assert r.last_cost["usage"]["thinking_tokens"] == 3
+    assert r.last_cost["turns"] == 6

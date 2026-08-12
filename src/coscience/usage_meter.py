@@ -39,22 +39,65 @@ def _runs_path(repo_root) -> Path:
     return Path(repo_root) / ".coscience" / "runs.jsonl"
 
 
+# The four components of a Claude call's token usage, as the API names them.
+# Kept verbatim so a row in runs.jsonl reads the same as the upstream envelope.
+TOKEN_FIELDS = ("input_tokens", "output_tokens",
+                "cache_creation_input_tokens", "cache_read_input_tokens")
+
+
+def token_breakdown(usage) -> dict:
+    """Split a Claude envelope's `usage` into its components, plus the thinking
+    subtotal and their sum.
+
+    One place, because the sum on its own is misleading about cost: a cache read
+    bills at a tenth of fresh input and an output token at five times it, so two
+    runs reporting the same total can differ several-fold in what they actually
+    cost. Absent fields are omitted rather than zero-filled — a row written before
+    the split existed must stay distinguishable from a run that genuinely used
+    none."""
+    if not isinstance(usage, dict):
+        return {}
+    out = {}
+    for k in TOKEN_FIELDS:
+        v = usage.get(k)
+        if v is not None:
+            try:
+                out[k] = int(v)
+            except (TypeError, ValueError):
+                continue
+    # Thinking rides inside output_tokens; broken out because output is the
+    # priciest component and thinking is usually most of it.
+    details = usage.get("output_tokens_details")
+    if isinstance(details, dict) and details.get("thinking_tokens") is not None:
+        try:
+            out["thinking_tokens"] = int(details["thinking_tokens"])
+        except (TypeError, ValueError):
+            pass
+    if out:
+        out["tokens"] = sum(out.get(k, 0) for k in TOKEN_FIELDS)
+    return out
+
+
 def record_run(repo_root, kind: str, ref: str = "", *, cost=None, tokens=None,
-               model: str = "", prompt_bytes=None, turns=None, ok: bool = True) -> None:
+               model: str = "", prompt_bytes=None, turns=None, usage=None,
+               ok: bool = True) -> None:
     """Append one Claude-call record. `kind` is 'pm' or 'worker'; `ref` is the
     program or sprint id. `cost` (USD), `tokens`, and `model` are recorded when
     known (the agent reports them on a clean run). `prompt_bytes` is the rendered
     prompt we sent — without it the total is unattributable, since a beat's cost is
     roughly the prompt multiplied by however many turns the agent took. `ok=False`
     records a call that raised: it still burned the window, and a call that leaves
-    no row makes a retry loop invisible in the ledger. Best-effort — never let
-    logging break a beat."""
+    no row makes a retry loop invisible in the ledger. `usage` is a
+    `token_breakdown()` result — the per-component split, without which `tokens`
+    cannot be read as cost. Best-effort — never let logging break a beat."""
     try:
         rec = {"ts": time.time(), "kind": kind, "ref": ref}
         if cost is not None:
             rec["cost"] = float(cost)
         if tokens is not None:
             rec["tokens"] = int(tokens)
+        if usage:
+            rec.update(usage)          # carries its own `tokens`, agreeing with the arg
         if model:
             rec["model"] = model
         if prompt_bytes is not None:
@@ -103,6 +146,11 @@ def run_stats(repo_root, now: float | None = None) -> dict:
             "cost_day": round(sum(float(r.get("cost", 0) or 0) for r in rs
                                   if now - float(r.get("ts", 0)) <= _DAY), 4),
             "tokens": sum(int(r.get("tokens", 0) or 0) for r in rs),
+            # Per-component totals. Rows written before the split existed contribute
+            # 0 here while still counting in `tokens`, so a partial split is expected
+            # on a substrate with history.
+            **{k: sum(int(r.get(k, 0) or 0) for r in rs)
+               for k in (*TOKEN_FIELDS, "thinking_tokens")},
             "failed": sum(1 for r in rs if r.get("ok") is False),
         }
 

@@ -580,7 +580,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             lc = getattr(reasoner, "last_cost", None) or {}
             usage_meter.record_run(substrate.repo_root, "pm", program_id,
                                    cost=lc.get("cost"), tokens=lc.get("tokens"),
-                                   turns=lc.get("turns"), model=context.model,
+                                   turns=lc.get("turns"), usage=lc.get("usage"),
+                                   model=context.model,
                                    prompt_bytes=getattr(reasoner, "last_prompt_bytes", None),
                                    ok=ok)
         try:

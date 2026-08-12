@@ -36,14 +36,16 @@ JOB_MAX_SECONDS = float(os.environ.get("COSCIENCE_JOB_MAX_SECONDS", 7 * 24 * 360
 _USAGE_LIMIT_RE = re.compile(r"(session|usage|rate) limit|hit your .*limit|limit ·", re.I)
 
 
-def _read_cost(sprint_dir) -> tuple:
-    """Best-effort (cost, tokens) from the agent's cost sidecar; (None, None) if
-    absent (e.g. an interrupted run, or the fake agent in tests)."""
+def _read_cost(sprint_dir) -> dict:
+    """Best-effort usage from the agent's cost sidecar; {} if absent (an interrupted
+    run, or the fake agent in tests). Returns the whole sidecar so the per-component
+    split and `turns` reach the ledger — the executor has written `turns` since it
+    was added, and this function used to drop it on the floor."""
     try:
         data = json.loads((sprint_dir / "agent.cost.json").read_text())
-        return data.get("cost"), data.get("tokens")
+        return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError, ValueError):
-        return None, None
+        return {}
 
 
 def _usage_ok_from_output(out: str, now: "datetime.datetime | None" = None,
@@ -357,9 +359,11 @@ class Worker:
         progress.agent_token = ""
         # One Claude invocation just ended (clean, failed, or interrupted) — record it
         # with whatever cost/tokens the agent reported, so the dashboard can show spend.
-        cost, tokens = _read_cost(sprint_dir)
+        sidecar = _read_cost(sprint_dir)
         usage_meter.record_run(self.substrate.repo_root, "worker", sprint.id,
-                               cost=cost, tokens=tokens, model=sprint.model)
+                               cost=sidecar.get("cost"), tokens=sidecar.get("tokens"),
+                               turns=sidecar.get("turns"), usage=sidecar.get("usage"),
+                               model=sprint.model)
         if status == "interrupted" or (status == "failed" and _USAGE_LIMIT_RE.search(text or "")):
             # Transient: a kill/crash mid-run (resume from scratchpad) or a usage
             # limit (the usage gate holds relaunches). Don't count it; retry later.
