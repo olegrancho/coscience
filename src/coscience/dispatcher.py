@@ -79,9 +79,16 @@ class Dispatcher:
         # marker directly rather than via claude_usage_ok — this is about the pause,
         # and routing it through the usage gate would also stop grants whenever usage
         # merely ran high, which is a behaviour change nobody asked for.
-        needs = [] if is_paused(self.substrate.repo_root) else [
-            s for s in eligible if self.ledger.lease_for(s.id) is None
-            and not artifacts.sprint_blocked(self.substrate, s)]
+        # The exception while paused is LIVENESS: this loop also re-adopts a sprint
+        # that is still physically running but lost its lease (dispatcher down past
+        # the TTL). Drop that and reconcile below kills its live agent/job — exactly
+        # what pause promises never to do. The liveness test mirrors reconcile's own,
+        # and it starts nothing: a QUEUED sprint has neither a running agent nor a job.
+        paused = is_paused(self.substrate.repo_root)
+        needs = [s for s in eligible if self.ledger.lease_for(s.id) is None
+                 and not artifacts.sprint_blocked(self.substrate, s)
+                 and (not paused or self.worker.agent_running(s.id)
+                      or self.substrate.load_progress(s.id).job_token)]
         for sprint in self.policy.select_grants(needs, queue, self.ledger, now):
             eff = self.policy.effective_priority(sprint, queue.get(sprint.id, now), now)
             if self.ledger.acquire(sprint.id,
