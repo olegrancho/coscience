@@ -1428,11 +1428,13 @@ class Service:
 
     # --- ledger ---
     def ledger_status(self) -> dict:
+        from coscience.pause import is_paused
         ledger = self._ledger()
         return {
             "capacity": dict(self.pool.capacity),
             "used": ledger.used(),
             "available": ledger.available(),
+            "paused": is_paused(self.substrate.repo_root),
             "leases": [
                 {"id": l.id, "sprint_id": l.sprint_id, "amounts": l.amounts,
                  "granted_at": l.granted_at, "expires_at": l.expires_at,
@@ -1440,6 +1442,15 @@ class Service:
                 for l in ledger.all_leases()
             ],
         }
+
+    def set_pause(self, paused: bool) -> dict:
+        """Pause or resume the whole platform. Commits so the substrate history records
+        who stopped the machine and when, the way a capacity edit does. Returns fresh
+        ledger status so one round-trip re-renders the Compute page."""
+        from coscience.pause import set_paused
+        set_paused(self.substrate.repo_root, bool(paused))
+        self.substrate.commit("paused" if paused else "resumed")
+        return self.ledger_status()
 
     def set_capacity(self, capacity: dict) -> dict:
         """Replace the declared resource pool. Validates, writes

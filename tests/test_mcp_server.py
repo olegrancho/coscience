@@ -79,7 +79,7 @@ def test_results_round_trip(server, tmp_path):
 
 def test_ledger_status_shape(server):
     status = call(server, "ledger_status", {})
-    assert set(status) == {"capacity", "used", "available", "leases"}
+    assert set(status) == {"capacity", "used", "available", "leases", "paused"}
 
 
 def test_missing_sprint_raises_tool_error(server):
