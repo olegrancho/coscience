@@ -79,7 +79,7 @@ describe("Compute page", () => {
   it("shows what is still finishing while paused", async () => {
     ledger.mockResolvedValue({
       capacity: {}, used: {}, available: {},
-      leases: [{ id: "l1", sprint_id: "p1-c0-a" }], paused: true,
+      leases: [{ id: "l1", sprint_id: "p1-c0-a", amounts: { workers: 1 } }], paused: true,
     });
     renderPage();
     expect(await screen.findByText(/1 still finishing/i)).toBeTruthy();

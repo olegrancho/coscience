@@ -137,11 +137,11 @@ export default function Ledger() {
             </Table.Thead>
             <Table.Tbody>
               {l.leases.map((lease, i) => {
-                const x = lease as { id: string; sprint_id: string; amounts?: Record<string, number> };
+                const x = lease as { id: string; sprint_id: string; amounts: Record<string, number> };
                 return (
                   <Table.Tr key={i}>
                     <Table.Td><Link to={`/sprints/${x.sprint_id}`} className="mono" style={{ fontSize: 13, color: "var(--machine)", textDecoration: "none" }}>{x.sprint_id}</Link></Table.Td>
-                    <Table.Td className="mono" style={{ fontSize: 13 }}>{Object.entries(x.amounts ?? {}).map(([k, v]) => `${v} ${k}`).join(", ")}</Table.Td>
+                    <Table.Td className="mono" style={{ fontSize: 13 }}>{Object.entries(x.amounts).map(([k, v]) => `${v} ${k}`).join(", ")}</Table.Td>
                   </Table.Tr>
                 );
               })}
