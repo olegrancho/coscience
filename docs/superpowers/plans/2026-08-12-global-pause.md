@@ -14,7 +14,9 @@
 
 - Runtime is Linux-only. Tests run with `~/venvs/coscience/bin/python -m pytest`.
 - Frontend tests run with `cd frontend && npm test`.
-- Never commit or push without the human's explicit approval — including the `git commit` step at the end of each task. Ask first.
+- **Commit locally at the end of each task. Never push.** The human has authorized the
+  local commits in this plan; nothing leaves the machine. Do not run `git push`, and do
+  not deploy — deploying restarts live agent loops and is the human's call.
 - Paused means **no new Claude session starts**. A session already running is never killed.
 - `repo_root=None` must keep `claude_usage_ok` behaving exactly as it does today — existing callers and tests depend on it.
 
