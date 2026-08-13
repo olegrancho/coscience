@@ -567,6 +567,12 @@ class Service:
         self.substrate.save_program(program)
         return {"id": program_id, "max_proposed": program.max_proposed}
 
+    def _pm_reasoner(self):
+        """A reasoner that records its transcript, same as the loop's. Human-triggered
+        beats cost exactly what a loop beat costs, so they leave the same trace."""
+        from coscience.pm_claude import ClaudeCodeReasoner
+        return ClaudeCodeReasoner(transcript_dir=self.substrate.repo_root / ".coscience")
+
     def replan(self, program_id: str) -> dict:
         """Run one PM cycle for this program right now (forced) so a human edit or
         comment is acted on without waiting for the loop tick. The per-program lock
@@ -577,7 +583,7 @@ class Service:
         from coscience.pm_agent import pm_beat
         from coscience.pm_claude import ClaudeCodeReasoner
         from coscience.worker import claude_usage_ok
-        return pm_beat(self.substrate, program_id, ClaudeCodeReasoner(),
+        return pm_beat(self.substrate, program_id, self._pm_reasoner(),
                        usage_ok=claude_usage_ok, force=True)
 
     def run_pm_directive(self, program_id: str, mode: str) -> dict:
@@ -591,7 +597,7 @@ class Service:
         from coscience.pm_agent import pm_beat
         from coscience.pm_claude import ClaudeCodeReasoner
         from coscience.worker import claude_usage_ok
-        return pm_beat(self.substrate, program_id, ClaudeCodeReasoner(),
+        return pm_beat(self.substrate, program_id, self._pm_reasoner(),
                        usage_ok=claude_usage_ok, force=True, directive=mode)
 
     def set_program_workdir(self, program_id: str, workdir: str) -> dict:

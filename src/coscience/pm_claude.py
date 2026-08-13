@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from pathlib import Path
 
 from coscience import usage_meter
 from coscience.models import DEFAULT_MODEL
@@ -450,20 +451,59 @@ def parse_response(text: str) -> PMCycleOutput:
     )
 
 
+def _ignore_feeds(dirpath: Path) -> None:
+    """Keep transcripts out of the substrate's history. The substrate commits with
+    `git add -A`, and unlike a sprint's agent.out (written once per sprint) a PM feed is
+    rewritten every beat — committing it would add a fresh ~150 KB blob per beat, on a
+    repo that already makes dozens of commits a day. Self-installing so a substrate on
+    any host gets it without a manual step."""
+    ignore = dirpath / ".gitignore"
+    existing = ignore.read_text() if ignore.is_file() else ""
+    if "*.out" not in existing.splitlines():
+        ignore.write_text((existing.rstrip("\n") + "\n" if existing else "") + "*.out\n")
+
+
+def _final_envelope(raw: str) -> dict | None:
+    """The result envelope from a `claude -p` stdout, whichever output format wrote it.
+
+    stream-json emits one JSON event per line and ends with the `result` event; plain
+    `json` emits that envelope alone. Both are found by taking the last object carrying
+    a `result` key, so this reads either. None if there is no such object (a crash, or
+    output that isn't JSON at all) — the caller falls back to the raw text."""
+    found = None
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(ev, dict) and "result" in ev:
+            found = ev
+    return found
+
+
 class ClaudeCodeReasoner:
     """Reasoner backed by a headless Claude Code session. `invoke` is injectable
     for testing; the default shells out to the `claude` binary."""
 
-    def __init__(self, invoke=None, claude_bin: str = "claude"):
+    def __init__(self, invoke=None, claude_bin: str = "claude", transcript_dir=None):
         self.claude_bin = claude_bin
         self._invoke = invoke or self._default_invoke
         self.last_cost: dict | None = None     # {cost, tokens} of the most recent call
         self.last_prompt_bytes: int | None = None   # size of the prompt that call sent
+        # Where to keep each program's last transcript. None = don't (the http
+        # service's one-off beats, and every test that doesn't ask for one).
+        self.transcript_dir = Path(transcript_dir) if transcript_dir else None
+        self._transcript_path: Path | None = None   # set per-run by run()
 
     def _default_invoke(self, prompt: str, model: str = "", cwd: str = "") -> str:
-        # --output-format json gives us the reply text plus cost/token usage in one
-        # envelope; we unwrap `result` and stash the cost for the dashboard.
-        cmd = [self.claude_bin, "-p", "--output-format", "json"]
+        # stream-json (not json) so stdout carries the per-turn events — tool calls and
+        # all — ahead of the same final envelope. `num_turns` alone said the PM took 12
+        # turns but never what it did in them, and turns are what drive PM cost.
+        # --verbose is mandatory: print mode rejects stream-json without it.
+        cmd = [self.claude_bin, "-p", "--output-format", "stream-json", "--verbose"]
         if model:
             cmd += ["--model", model]
         # Prompt goes on STDIN, never as an argv element: Linux caps a single argv
@@ -476,17 +516,30 @@ class ClaudeCodeReasoner:
         if proc.returncode != 0:
             raise PMReasonerError(
                 f"claude exited {proc.returncode}: {(proc.stderr or '')[:200]}")
-        try:
-            env = json.loads(proc.stdout)
-            usage = env.get("usage") or {}
-            breakdown = usage_meter.token_breakdown(usage)
-            self.last_cost = {"cost": env.get("total_cost_usd"),
-                              "turns": env.get("num_turns"),
-                              "tokens": breakdown.get("tokens"),
-                              "usage": breakdown}
-            return str(env.get("result") or "")
-        except (json.JSONDecodeError, AttributeError):
+        self._write_transcript(proc.stdout or "")
+        env = _final_envelope(proc.stdout or "")
+        if env is None:
             return proc.stdout or ""
+        breakdown = usage_meter.token_breakdown(env.get("usage") or {})
+        self.last_cost = {"cost": env.get("total_cost_usd"),
+                          "turns": env.get("num_turns"),
+                          "tokens": breakdown.get("tokens"),
+                          "usage": breakdown}
+        return str(env.get("result") or "")
+
+    def _write_transcript(self, raw: str) -> None:
+        """Keep the run's event feed. Best-effort and overwriting: this is a debugging
+        window into the last beat per program, not an archive — the durable per-call
+        numbers already live in the run ledger."""
+        path = self._transcript_path
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _ignore_feeds(path.parent)
+            path.write_text(raw)
+        except OSError:
+            pass
 
     def run(self, context: PMContext) -> PMCycleOutput:
         prompt = render_prompt(context)
@@ -495,6 +548,9 @@ class ClaudeCodeReasoner:
         # call's numbers.
         self.last_prompt_bytes = len(prompt)
         self.last_cost = None
+        # One transcript per program, beside that program's pm lock.
+        self._transcript_path = (self.transcript_dir / f"pm-{context.program_id}.out"
+                                 if self.transcript_dir else None)
         # Injected invokes (tests) may take fewer args; degrade prompt+model+cwd ->
         # prompt+model -> prompt so the seam stays easy to fake.
         try:

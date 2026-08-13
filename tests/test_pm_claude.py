@@ -386,3 +386,84 @@ def test_reasoner_reports_the_token_split(monkeypatch):
     assert r.last_cost["usage"]["cache_read_input_tokens"] == 8073
     assert r.last_cost["usage"]["thinking_tokens"] == 3
     assert r.last_cost["turns"] == 6
+
+
+# --- PM transcript instrumentation -------------------------------------------------
+# The PM is a tool-enabled session and `num_turns` was the ONLY thing recorded about
+# it, so the axis that dominates PM cost (turns, not prompt bytes) was invisible:
+# nothing said whether 12 turns was 12 file reads or the planner going in circles.
+# stream-json gives the same envelope as `json` plus the per-turn events behind it.
+from types import SimpleNamespace
+
+
+def _stream(events) -> str:
+    return "\n".join(json.dumps(e) for e in events) + "\n"
+
+
+_RESULT_EVENT = {"type": "result", "subtype": "success", "result": '{"report": "ok"}',
+                 "total_cost_usd": 0.5, "num_turns": 9,
+                 "usage": {"input_tokens": 1, "output_tokens": 2,
+                           "cache_creation_input_tokens": 30, "cache_read_input_tokens": 70}}
+
+
+def test_default_invoke_asks_for_a_stream_json_transcript(monkeypatch):
+    import coscience.pm_claude as m
+    captured = {}
+
+    def fake_run(cmd, **kw):
+        captured["cmd"] = cmd
+        return SimpleNamespace(returncode=0, stdout=_stream([_RESULT_EVENT]), stderr="")
+
+    monkeypatch.setattr(m.subprocess, "run", fake_run)
+    ClaudeCodeReasoner()._default_invoke("prompt")
+    assert "stream-json" in captured["cmd"]
+    # stream-json in print mode is rejected without --verbose
+    assert "--verbose" in captured["cmd"]
+
+
+def test_default_invoke_reads_cost_from_the_stream_result_event(monkeypatch):
+    import coscience.pm_claude as m
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0,
+        stdout=_stream([{"type": "system", "subtype": "init"},
+                        {"type": "assistant", "message": {"content": []}},
+                        _RESULT_EVENT]),
+        stderr=""))
+    r = ClaudeCodeReasoner()
+    assert r._default_invoke("prompt") == '{"report": "ok"}'
+    assert r.last_cost["turns"] == 9
+    assert r.last_cost["cost"] == 0.5
+    assert r.last_cost["tokens"] == 103
+
+
+def test_run_writes_the_transcript_next_to_the_programs_lock(monkeypatch, tmp_path):
+    import coscience.pm_claude as m
+    stream = _stream([{"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": "Read", "input": {}}]}}, _RESULT_EVENT])
+    monkeypatch.setattr(m.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=0, stdout=stream, stderr=""))
+
+    ClaudeCodeReasoner(transcript_dir=tmp_path).run(_ctx())      # _ctx() is program p1
+
+    assert (tmp_path / "pm-p1.out").read_text() == stream
+
+
+def test_transcript_is_optional(monkeypatch):
+    """No transcript_dir (the http service's one-off beats) must still reason."""
+    import coscience.pm_claude as m
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout=_stream([_RESULT_EVENT]), stderr=""))
+    assert ClaudeCodeReasoner().run(_ctx()).report == "ok"
+
+
+def test_transcripts_are_kept_out_of_the_substrates_git_history(monkeypatch, tmp_path):
+    """The substrate commits with `git add -A`, and a PM transcript is REWRITTEN every
+    beat (unlike a sprint's agent.out, written once). Committing ~150 KB per beat would
+    bloat the data repo with pure debugging noise, so the dir ignores its own feeds."""
+    import coscience.pm_claude as m
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=0, stdout=_stream([_RESULT_EVENT]), stderr=""))
+
+    ClaudeCodeReasoner(transcript_dir=tmp_path).run(_ctx())
+
+    assert "*.out" in (tmp_path / ".gitignore").read_text()

@@ -9,7 +9,7 @@ def _seed_program(tmp_path):
 
 
 def _fake_reasoner_factory(outputs):
-    return lambda: FakeReasoner(list(outputs))
+    return lambda *a: FakeReasoner(list(outputs))
 
 
 def test_pm_once_proposes(tmp_path, monkeypatch, capsys):
@@ -37,3 +37,11 @@ def test_pm_loop_runs_max_rounds(tmp_path, monkeypatch):
     assert rc == 0
     # event-driven: round 1 reasons (cycle -> 1); round 2 sees no change and skips
     assert Substrate(tmp_path).load_pm_state("p1").cycle == 1
+
+
+def test_pm_loop_reasoner_writes_transcripts_into_the_substrate(tmp_path):
+    """The loop's reasoner keeps each program's event feed beside its pm lock — without
+    a transcript dir the PM's turns (what drives its cost) leave no trace at all."""
+    _seed_program(tmp_path)
+    reasoner = cli._make_pm_reasoner(Substrate(tmp_path))
+    assert reasoner.transcript_dir == tmp_path / ".coscience"

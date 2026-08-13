@@ -23,8 +23,10 @@ def run_once(repo_root: Path) -> BeatOutcome:
     return worker.run_one_beat()
 
 
-def _make_pm_reasoner():
-    return ClaudeCodeReasoner()
+def _make_pm_reasoner(substrate=None):
+    # Transcripts land in .coscience/, beside each program's pm lock.
+    return ClaudeCodeReasoner(
+        transcript_dir=(substrate.repo_root / ".coscience") if substrate else None)
 
 
 def pm_beat_line(summaries: list[dict], reasoned: int) -> str:
@@ -214,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "pm":
         substrate = Substrate(args.repo)
-        reasoner = _make_pm_reasoner()
+        reasoner = _make_pm_reasoner(substrate)
         if args.once or not args.loop:
             for summary in pm_run_once(substrate, reasoner):
                 print(f"{summary['program']}: cycle={summary['cycle']} "
