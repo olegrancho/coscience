@@ -10,6 +10,7 @@ from coscience.claude_executor import ClaudeAgent
 from coscience.dispatcher import CycleReport, Dispatcher
 from coscience.loop_status import LoopStatus
 from coscience.models import BeatOutcome, Program
+from coscience.pause import is_paused
 from coscience.pm_claude import ClaudeCodeReasoner
 from coscience.pm_runner import pm_run_once
 from coscience.resources import load_pool
@@ -216,7 +217,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "pm":
         substrate = Substrate(args.repo)
-        reasoner = _make_pm_reasoner(substrate)
+        if args.loop and is_paused(substrate.repo_root):
+            # Built lazily: constructing the reasoner is cheap, but a paused platform
+            # should be able to start its loop without touching Claude config at all.
+            reasoner = None
+        else:
+            reasoner = _make_pm_reasoner(substrate)
         if args.once or not args.loop:
             for summary in pm_run_once(substrate, reasoner):
                 print(f"{summary['program']}: cycle={summary['cycle']} "
@@ -224,6 +230,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         def _beat():
+            nonlocal reasoner
+            if is_paused(substrate.repo_root):
+                return "paused by human — Resume in Compute", {"proposed": 0}, 0
+            if reasoner is None:
+                reasoner = _make_pm_reasoner(substrate)
             summaries = pm_run_once(substrate, reasoner,
                                     usage_ok=lambda: claude_usage_ok(
                                         AUTONOMOUS_THRESHOLD, fail_open=False,

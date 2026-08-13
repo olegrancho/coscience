@@ -45,3 +45,23 @@ def test_pm_loop_reasoner_writes_transcripts_into_the_substrate(tmp_path):
     _seed_program(tmp_path)
     reasoner = cli._make_pm_reasoner(Substrate(tmp_path))
     assert reasoner.transcript_dir == tmp_path / ".coscience"
+
+
+def test_the_pm_loop_says_when_a_human_paused_it(tmp_path, monkeypatch, capsys):
+    """'paused — Claude usage exhausted' and a human pause are different situations;
+    the log has to tell them apart or a deliberate pause reads like an exhausted
+    window that will fix itself after the reset."""
+    from coscience import pause
+    _seed_program(tmp_path)
+    pause.set_paused(tmp_path, True)
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)   # no real sleeping
+
+    def _boom(*a):
+        raise AssertionError("the reasoner must not be built while paused")
+
+    monkeypatch.setattr(cli, "_make_pm_reasoner", _boom)
+
+    rc = cli.main(["pm", "--repo", str(tmp_path), "--loop", "--max-rounds", "1"])
+
+    assert rc == 0
+    assert "paused by human" in capsys.readouterr().out
