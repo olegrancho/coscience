@@ -86,6 +86,17 @@ describe("replan", () => {
     expect(String(n.message)).toMatch(/runs\.jsonl/);      // ...and where to look
   });
 
+  it("names the global pause instead of blaming an exhausted budget", async () => {
+    // Paused and throttled both stop the beat, but only a throttle clears itself at
+    // the usage reset. Telling a paused human to "wait for the reset" sends them off
+    // to wait for something that will never help — Resume is the only way out.
+    const n = await clickReplan({ skipped: true, paused: true });
+    expect(n.color).toBe("yellow");
+    expect(String(n.message)).toMatch(/paused/i);
+    expect(String(n.message)).toMatch(/resume/i);
+    expect(String(n.message)).not.toMatch(/reset/i);
+  });
+
   it("still reports a healthy quiet cycle as success", async () => {
     const n = await clickReplan({ skipped: false });
     expect(n.color).toBe("teal");

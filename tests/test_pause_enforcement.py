@@ -99,3 +99,50 @@ def test_work_already_running_drains_while_paused(substrate, monkeypatch):
     disp.ledger.load()
     assert disp.ledger.lease_for("sp1") is None
 
+
+# --- what the human is told -------------------------------------------------
+# Every human-triggered Claude path is gated on the same usage_ok, so a paused
+# platform reported itself as "usage exhausted; it will resume after the reset".
+# That points at a reset which changes nothing — only Resume does.
+
+def _paused_service(substrate, monkeypatch):
+    """A service on a paused substrate, with a reasoner that explodes if built —
+    nothing may reach Claude from here."""
+    _pause_only_gate(monkeypatch, substrate.repo_root)
+    substrate.save_program(Program(id="p", title="P", goals="g"))
+    pause.set_paused(substrate.repo_root, True)
+
+    class _NoReasoner:
+        def __init__(self, *a, **k):
+            raise AssertionError("no reasoner may be built while paused")
+    monkeypatch.setattr(pm_claude_mod, "ClaudeCodeReasoner", _NoReasoner)
+    return Service(substrate.repo_root)
+
+
+def test_replan_reports_the_pause_not_an_exhausted_budget(substrate, monkeypatch):
+    r = _paused_service(substrate, monkeypatch).replan("p")
+
+    assert r.get("paused") is True
+    assert r.get("throttled") is not True      # a reset would not clear this
+    assert r.get("skipped") is True
+
+
+def test_a_pm_directive_reports_the_pause_not_an_exhausted_budget(substrate, monkeypatch):
+    r = _paused_service(substrate, monkeypatch).run_pm_directive("p", "brainstorm")
+
+    assert r.get("paused") is True
+    assert r.get("throttled") is not True
+    assert r.get("skipped") is True
+
+
+def test_chat_tells_the_human_to_resume_rather_than_wait_for_a_reset(substrate, monkeypatch):
+    svc = _paused_service(substrate, monkeypatch)
+    cid = svc.create_chat("p")["id"]
+
+    thread = svc.post_chat_message("p", cid, "what next?")
+
+    reply = thread["messages"][-1]
+    assert reply["role"] == "pm"
+    assert "Resume" in reply["text"]
+    assert "usage is exhausted" not in reply["text"]
+    assert thread["busy"] is False             # nothing was launched

@@ -53,6 +53,16 @@ describe("compress / brainstorm", () => {
     expect(String(n.message)).toMatch(/runs\.jsonl/);
   });
 
+  it("names the global pause instead of blaming an exhausted budget", async () => {
+    // Same reason as Replan: a paused platform is not waiting on a usage reset, and
+    // "Nothing to do this cycle" would hide the pause entirely.
+    const n = await clickCompress({ skipped: true, paused: true });
+    expect(String(n.message)).toMatch(/paused/i);
+    expect(String(n.message)).toMatch(/resume/i);
+    expect(String(n.message)).not.toMatch(/Nothing to do/i);
+    expect(n.color).toBe("yellow");
+  });
+
   it("still reports an ordinary quiet cycle as before", async () => {
     const n = await clickCompress({ skipped: true });
     expect(String(n.message)).toMatch(/Nothing to do/i);

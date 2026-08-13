@@ -122,13 +122,17 @@ export default function ProgramDetail() {
     try {
       const r = await api.replan(id);
       const msg = r.busy ? "The PM is already reasoning — try again in a moment."
+        // Before the throttle line: a paused platform fails the usage gate too, and
+        // pointing the human at a usage reset would send them to wait for something
+        // that never clears it. Only Resume does.
+        : r.paused ? "Paused — Resume in Compute to re-plan."
         : r.throttled ? "Claude usage is exhausted; it will resume after the reset."
         // Stuck, not idle: the planner failed repeatedly on this input and stood
         // down, so it did NOT reason. Never let that read as a healthy re-plan.
         : r.backoff ? "The planner has failed repeatedly on this input and stood down — it did not re-plan. See the failed PM runs (ok: false) in .coscience/runs.jsonl."
         : r.submitted?.length ? `Proposed ${r.submitted.join(", ")}.`
         : "Re-planned — no new proposals.";
-      notifications.show({ color: r.busy || r.throttled || r.backoff ? "yellow" : "teal", title: "Replan", message: msg });
+      notifications.show({ color: r.busy || r.throttled || r.backoff || r.paused ? "yellow" : "teal", title: "Replan", message: msg });
       refresh();
     } catch (e) { notifications.show({ color: "red", title: "Replan failed", message: String(e) }); }
     finally { setReplanning(false); }

@@ -202,8 +202,11 @@ export default function IdeasView() {
       const added = r.ideas_added ?? 0;
       const removed = r.ideas_removed ?? 0;
       const noChange = added === 0 && removed === 0;
-      const quiet = r.busy || r.throttled || r.skipped || noChange;
+      const quiet = r.busy || r.throttled || r.skipped || r.paused || noChange;
       const msg = r.busy ? "The PM is already reasoning — try again in a moment."
+        // Ahead of both the throttle and the skip line: a paused platform fails the
+        // usage gate as well, and "Nothing to do this cycle" would hide the pause.
+        : r.paused ? `Paused — Resume in Compute to ${mode === "compress" ? "compress" : "brainstorm"}.`
         : r.throttled ? "Claude usage is exhausted; it will resume after the reset."
         // Same escape hatch as Replan: a stood-down planner must not be reported as
         // "nothing to do" — it failed and never ran.
