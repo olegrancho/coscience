@@ -226,7 +226,8 @@ def main(argv: list[str] | None = None) -> int:
         def _beat():
             summaries = pm_run_once(substrate, reasoner,
                                     usage_ok=lambda: claude_usage_ok(
-                                        AUTONOMOUS_THRESHOLD, fail_open=False))
+                                        AUTONOMOUS_THRESHOLD, fail_open=False,
+                                        repo_root=substrate.repo_root))
             ids = [sid for s in summaries for sid in s["submitted"]]
             reasoned = sum(0 if s.get("skipped") else 1 for s in summaries)
             # reasoned == Claude calls this beat (skipped cycles don't call Claude)

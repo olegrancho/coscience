@@ -146,3 +146,43 @@ def test_gate_can_fail_closed(monkeypatch):
     monkeypatch.setattr(worker_mod.subprocess, "run", _boom)
     assert worker_mod.claude_usage_ok() is True                    # default: fail open
     assert worker_mod.claude_usage_ok(fail_open=False) is False    # loops: fail closed
+
+
+def test_the_gate_refuses_while_paused(monkeypatch, tmp_path):
+    """Usage wide open, so only the pause can refuse."""
+    from coscience import pause, worker as worker_mod
+    monkeypatch.undo()                      # drop conftest's autouse stub
+    monkeypatch.setattr(worker_mod.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        stdout=_line(1, 1, "live")))
+
+    assert worker_mod.claude_usage_ok(repo_root=tmp_path) is True
+    pause.set_paused(tmp_path, True)
+    assert worker_mod.claude_usage_ok(repo_root=tmp_path) is False
+
+
+def test_a_paused_gate_never_runs_the_usage_script(monkeypatch, tmp_path):
+    """Checked before shelling out: a paused platform costs nothing to poll."""
+    from coscience import pause, worker as worker_mod
+    monkeypatch.undo()
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(stdout=_line(1, 1, "live"))
+
+    monkeypatch.setattr(worker_mod.subprocess, "run", fake_run)
+    pause.set_paused(tmp_path, True)
+
+    assert worker_mod.claude_usage_ok(repo_root=tmp_path) is False
+    assert calls == []
+
+
+def test_without_a_repo_root_the_gate_ignores_pause(monkeypatch, tmp_path):
+    """Existing callers pass no repo_root and must behave exactly as before."""
+    from coscience import pause, worker as worker_mod
+    monkeypatch.undo()
+    monkeypatch.setattr(worker_mod.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        stdout=_line(1, 1, "live")))
+    pause.set_paused(tmp_path, True)
+
+    assert worker_mod.claude_usage_ok() is True

@@ -19,6 +19,7 @@ from coscience.executor import ExecutionContext
 from coscience.executor import is_running as _job_is_running
 from coscience.executor import process_token, terminate_detached as _terminate
 from coscience.models import BeatOutcome, Result, Sprint, SprintStatus, set_status
+from coscience.pause import is_paused
 from coscience.substrate import Substrate
 
 # After this many real (non-usage) failures, a sprint is marked FAILED rather than
@@ -77,12 +78,20 @@ AUTONOMOUS_THRESHOLD = 80.0     # PM loop beats
 WORKER_THRESHOLD = 90.0         # worker agent launches
 
 
-def claude_usage_ok(threshold: float = 100.0, *, fail_open: bool = True) -> bool:
+def claude_usage_ok(threshold: float = 100.0, *, fail_open: bool = True,
+                    repo_root=None) -> bool:
     """True if it's safe to launch a Claude agent at this threshold — neither the
     5-hour nor the weekly window has passed it. `fail_open` decides what an
     unreadable usage script means: True for human-triggered work (never block a
     person on a missing dotfile), False for autonomous loops (an unmetered loop is
-    exactly what burns a window unattended)."""
+    exactly what burns a window unattended).
+
+    `repo_root` enables the human pause check, and is tested FIRST: a paused platform
+    starts no new Claude session whatever the windows say, and polling usage.py to
+    learn that would be wasted work. None (the default) skips the check, for callers
+    that hold no substrate."""
+    if repo_root is not None and is_paused(repo_root):
+        return False
     try:
         out = subprocess.run([sys.executable, usage_meter.usage_script_path()],
                              capture_output=True, text=True, timeout=10).stdout
@@ -194,7 +203,8 @@ class Worker:
 
     def _usage_ok(self) -> bool:
         return (self._usage_gate or
-                (lambda: claude_usage_ok(WORKER_THRESHOLD, fail_open=False)))()
+                (lambda: claude_usage_ok(WORKER_THRESHOLD, fail_open=False,
+                                         repo_root=self.substrate.repo_root)))()
 
     def _read_job_json(self, sprint_dir):
         """Read + normalize a declared detached job's job.json. Returns a clean dict

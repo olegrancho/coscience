@@ -584,7 +584,8 @@ class Service:
         from coscience.pm_claude import ClaudeCodeReasoner
         from coscience.worker import claude_usage_ok
         return pm_beat(self.substrate, program_id, self._pm_reasoner(),
-                       usage_ok=claude_usage_ok, force=True)
+                       usage_ok=lambda: claude_usage_ok(
+                           repo_root=self.substrate.repo_root), force=True)
 
     def run_pm_directive(self, program_id: str, mode: str) -> dict:
         """Run one directed PM cycle now: 'compress' (merge/prune/re-rank the idea
@@ -598,7 +599,9 @@ class Service:
         from coscience.pm_claude import ClaudeCodeReasoner
         from coscience.worker import claude_usage_ok
         return pm_beat(self.substrate, program_id, self._pm_reasoner(),
-                       usage_ok=claude_usage_ok, force=True, directive=mode)
+                       usage_ok=lambda: claude_usage_ok(
+                           repo_root=self.substrate.repo_root),
+                       force=True, directive=mode)
 
     def set_program_workdir(self, program_id: str, workdir: str) -> dict:
         """Set the project folder this program's sprint agents run in ("" = control
@@ -806,7 +809,7 @@ class Service:
         thread.messages.append({"role": "user", "text": message, "at": time.time(),
                                 "by": str(by or "")})
         from coscience.worker import claude_usage_ok
-        if launch is None and not claude_usage_ok():
+        if launch is None and not claude_usage_ok(repo_root=self.substrate.repo_root):
             thread.messages.append({"role": "pm", "at": time.time(),
                 "text": "_(Claude usage is exhausted — please try again after the reset.)_"})
             thread.messages = thread.messages[-200:]

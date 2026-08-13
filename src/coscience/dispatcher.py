@@ -8,6 +8,7 @@ from pathlib import Path
 
 from coscience.ledger import Ledger
 from coscience.models import BeatOutcome, SprintStatus, set_status
+from coscience.pause import is_paused
 from coscience.resources import ResourcePool, effective_requirement
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
@@ -72,8 +73,15 @@ class Dispatcher:
         # A sprint bound to artifacts is grantable only when none of its bound
         # artifacts is locked by another holder (the artifact is a capacity-1
         # resource). Filter those out before the pool scheduler runs.
-        needs = [s for s in eligible if self.ledger.lease_for(s.id) is None
-                 and not artifacts.sprint_blocked(self.substrate, s)]
+        # A paused platform starts nothing new. Guard the GRANT step only: reaping,
+        # releasing, reconciling and beating leased sprints all keep running below,
+        # which is what lets work already in flight drain to completion. Reads the
+        # marker directly rather than via claude_usage_ok — this is about the pause,
+        # and routing it through the usage gate would also stop grants whenever usage
+        # merely ran high, which is a behaviour change nobody asked for.
+        needs = [] if is_paused(self.substrate.repo_root) else [
+            s for s in eligible if self.ledger.lease_for(s.id) is None
+            and not artifacts.sprint_blocked(self.substrate, s)]
         for sprint in self.policy.select_grants(needs, queue, self.ledger, now):
             eff = self.policy.effective_priority(sprint, queue.get(sprint.id, now), now)
             if self.ledger.acquire(sprint.id,
