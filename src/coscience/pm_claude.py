@@ -493,8 +493,9 @@ class ClaudeCodeReasoner:
         self._invoke = invoke or self._default_invoke
         self.last_cost: dict | None = None     # {cost, tokens} of the most recent call
         self.last_prompt_bytes: int | None = None   # size of the prompt that call sent
-        # Where to keep each program's last transcript. None = don't (the http
-        # service's one-off beats, and every test that doesn't ask for one).
+        # Where to keep each program's last transcript. Both production callers pass
+        # one — the PM loop and the http service's human-triggered beats — so None
+        # means "no feed": tests, and any embedder that doesn't want the file.
         self.transcript_dir = Path(transcript_dir) if transcript_dir else None
         self._transcript_path: Path | None = None   # set per-run by run()
 
@@ -513,10 +514,12 @@ class ClaudeCodeReasoner:
         # tree, not whatever cwd the loop process happened to launch from.
         proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
                               cwd=cwd or None)
+        # Write the feed BEFORE the exit check: a crashed `claude` is exactly the run
+        # whose events you want to read, and raising first left it with no transcript.
+        self._write_transcript(proc.stdout or "")
         if proc.returncode != 0:
             raise PMReasonerError(
                 f"claude exited {proc.returncode}: {(proc.stderr or '')[:200]}")
-        self._write_transcript(proc.stdout or "")
         env = _final_envelope(proc.stdout or "")
         if env is None:
             return proc.stdout or ""

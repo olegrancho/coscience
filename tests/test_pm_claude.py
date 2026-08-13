@@ -448,8 +448,25 @@ def test_run_writes_the_transcript_next_to_the_programs_lock(monkeypatch, tmp_pa
     assert (tmp_path / "pm-p1.out").read_text() == stream
 
 
+def test_a_crashed_claude_still_leaves_its_transcript(monkeypatch, tmp_path):
+    """The run you most want the event feed for is the one that died. Writing the feed
+    after the returncode check meant a crash raised first and left nothing to read."""
+    import coscience.pm_claude as m
+    stream = _stream([{"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": "Read", "input": {}}]}}])      # no result event
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        returncode=1, stdout=stream, stderr="boom"))
+
+    with pytest.raises(m.PMReasonerError):
+        ClaudeCodeReasoner(transcript_dir=tmp_path).run(_ctx())     # _ctx() is program p1
+
+    assert (tmp_path / "pm-p1.out").read_text() == stream
+
+
 def test_transcript_is_optional(monkeypatch):
-    """No transcript_dir (the http service's one-off beats) must still reason."""
+    """The transcript is a debugging convenience, not a dependency: constructed with
+    no transcript_dir (as tests and embedders do — both production callers pass one),
+    the reasoner must still reason."""
     import coscience.pm_claude as m
     monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: SimpleNamespace(
         returncode=0, stdout=_stream([_RESULT_EVENT]), stderr=""))
