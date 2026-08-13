@@ -78,6 +78,7 @@ export interface ResultRow { id: string; sprint: string; summary: string; progra
 export interface Ledger {
   capacity: Record<string, number>; used: Record<string, number>;
   available: Record<string, number>; leases: unknown[];
+  paused: boolean;
 }
 export interface GraphNode {
   id: string; kind: "idea" | "experiment"; stage: "idea" | "experiment" | "result"; label: string;
@@ -316,6 +317,11 @@ export const api = {
     fetch("/api/capacity", {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ capacity }),
+    }).then(j<Ledger>),
+  setPause: (paused: boolean) =>
+    fetch("/api/pause", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paused }),
     }).then(j<Ledger>),
   getUsage: () => fetch("/api/usage").then(j<Usage>),
   listArtifacts: (pid: string) => fetch(`/api/programs/${pid}/artifacts`).then(j<ArtifactRow[]>),
