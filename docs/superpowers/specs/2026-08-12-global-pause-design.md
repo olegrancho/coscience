@@ -31,8 +31,13 @@ finishes normally. Nothing is killed and no scratchpad work is lost. Spend there
 stops within one agent run rather than instantly; the Compute page shows the count
 winding down so that wait is visible.
 
-A sprint that stops between agent runs while paused stays put: the worker's own
-mid-sprint gate (`worker.py:455`) refuses the resume, and it picks up after Resume.
+A sprint that stops between agent runs while paused starts no new agent: the worker's
+own mid-sprint gate (`worker.py:455`) refuses the resume, and it picks up after Resume.
+It may still be *hibernated* by the dispatcher's yield step, which releases its lease —
+and that is intended. Hibernation kills nothing (it only picks victims with no running
+agent and no live job, exactly the sprints the gate has parked), and it is the only way
+the "N still finishing" count ever reaches zero for a parked sprint. A paused platform
+whose last sprint sat leased-but-idle forever would report work in flight that isn't.
 
 ## State
 
@@ -105,6 +110,11 @@ paused by human — Resume in Compute
 
 skipping the cycle entirely. Distinct from the existing `paused — Claude usage
 exhausted`, so the log says which kind of stop it was.
+
+`coscience pm --once` is deliberately **not** pause-gated. It passes no usage gate
+today either: it is a human at a terminal asking for exactly one beat, which is an
+operator override rather than autonomous spend. The pause stops the machine running
+itself; it does not take the manual control away from the operator holding the shell.
 
 ## Frontend
 
