@@ -4,7 +4,7 @@
 
 **Goal:** A Pause/Resume button on the Compute page that stops the platform starting any new Claude session — PM beats, worker launches, Replan, Compress/Brainstorm and chat — while work already running drains to completion.
 
-**Architecture:** A marker file `.coscience/paused` in the substrate is the single source of truth, so all three processes (`coscience-http`, the PM loop, the dispatch loop) agree and the state survives a restart. Enforcement hangs off `claude_usage_ok()`, which is already the choke point every Claude-spending path calls. The dispatcher needs no change: its launches go through the Worker gate, while its reap/release bookkeeping keeps running so the drain completes.
+**Architecture:** A marker file `.coscience/paused` in the substrate is the single source of truth, so all three processes (`coscience-http`, the PM loop, the dispatch loop) agree and the state survives a restart. Enforcement hangs off `claude_usage_ok()`, which is already the choke point every Claude-spending path calls. The dispatcher needs one narrow guard on its **grant step only** — its launches go through the Worker gate, but grants run earlier and consult no gate, so without it a paused platform keeps taking leases for sprints that never start. Everything else in its cycle (reap, release, reconcile, beat) keeps running so the drain completes.
 
 **Tech Stack:** Python 3.12, FastAPI, pytest. React + TypeScript, Mantine, TanStack Query, Vitest + Testing Library.
 
@@ -264,6 +264,36 @@ Expected: PASS (all, including the pre-existing gate tests)
 
 ```python
         if launch is None and not claude_usage_ok(repo_root=self.substrate.repo_root):
+```
+
+- [ ] **Step 5b: Guard the dispatcher's grant step**
+
+Corrected during execution — the first draft of this plan wrongly said the dispatcher
+needed no change. Its *launches* go through the Worker gate, but the grant step runs
+earlier and consults no gate: it acquires a lease and flips a QUEUED sprint to
+EXECUTING regardless. Left alone, a paused platform keeps taking leases for sprints
+that never start, and Task 5 reports `leases.length` as "still finishing" — so that
+count would *grow* while paused.
+
+In `src/coscience/dispatcher.py`, add to the imports:
+
+```python
+from coscience.pause import is_paused
+```
+
+and in `run_one_cycle`, at the `# --- grants ---` step, replace the `needs = [...]`
+assignment (keeping the existing comment about artifact-bound sprints) with:
+
+```python
+        # A paused platform starts nothing new. Guard the GRANT step only: reaping,
+        # releasing, reconciling and beating leased sprints all keep running below,
+        # which is what lets work already in flight drain to completion. Reads the
+        # marker directly rather than via claude_usage_ok — this is about the pause,
+        # and routing it through the usage gate would also stop grants whenever usage
+        # merely ran high, which is a behaviour change nobody asked for.
+        needs = [] if is_paused(self.substrate.repo_root) else [
+            s for s in eligible if self.ledger.lease_for(s.id) is None
+            and not artifacts.sprint_blocked(self.substrate, s)]
 ```
 
 - [ ] **Step 6: Write the failing tests for worker wiring and for the drain**

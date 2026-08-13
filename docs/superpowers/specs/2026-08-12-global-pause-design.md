@@ -61,10 +61,23 @@ given and the marker exists, the function returns False without shelling out to 
 usage script. `repo_root=None` (the default) skips the pause check, which keeps every
 existing caller and test working. All five sites already hold the substrate.
 
-The **dispatcher needs no pause check.** Its launches go through the Worker gate, so
-grants stop on their own — while reaping finished agents, releasing leases and
-reconciling keep running. That is what lets the drain actually complete; a dispatcher
-frozen outright would strand the leases it was meant to collect.
+The **dispatcher needs one narrow guard, on its grant step only.**
+
+Its *launches* do go through the Worker gate, so no agent starts while paused. But the
+grant step runs earlier and consults no gate at all: it acquires a lease and flips a
+QUEUED sprint to EXECUTING regardless. Left alone, a paused platform would keep taking
+leases for sprints that never start — and since the Compute page reports
+`leases.length` as "still finishing", that count would *grow* while paused, which is
+the opposite of what the button promises.
+
+So `run_one_cycle` skips its grant loop when paused. Only that loop: reaping finished
+agents, releasing leases, reconciling and beating leased sprints all keep running,
+which is what lets work in flight drain to completion. A dispatcher frozen outright
+would strand the very leases it was meant to collect.
+
+The guard reads the marker directly rather than going through `claude_usage_ok` — this
+is about the pause specifically. Routing it through the usage gate would also stop
+grants whenever usage merely ran high, which is a behaviour change nobody asked for.
 
 New module `src/coscience/pause.py`, two functions:
 
