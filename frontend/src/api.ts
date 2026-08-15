@@ -91,11 +91,11 @@ export interface GraphEdge {
 export interface Graph { nodes: GraphNode[]; edges: GraphEdge[] }
 export interface ArtifactVersionT { id: string; parent: string; created_at: number; created_by: string; archived: boolean; note: string }
 export interface ArtifactLock { holder_kind?: string; holder_id?: string; acquired_at?: number; last_activity?: number }
-export interface ArtifactRow { id: string; title: string; kind: string; current: string; archived: boolean; lock: ArtifactLock; version_count: number; files: string[]; excerpt: string }
+export interface ArtifactRow { id: string; title: string; kind: string; current: string; archived: boolean; lock: ArtifactLock; version_count: number; files: string[]; excerpt: string; tags: string[] }
 export interface LinkedSprint { id: string; status: string; title: string }
 export interface ArtifactDetailT {
   id: string; program: string; title: string; kind: string; current: string;
-  archived: boolean; lock: ArtifactLock; versions: ArtifactVersionT[];
+  archived: boolean; lock: ArtifactLock; versions: ArtifactVersionT[]; tags: string[];
   threads: FeedbackThreadT[]; current_files: string[]; linked_sprints: LinkedSprint[];
 }
 export interface ArtifactFileT { name: string; size: number; content: string; binary: boolean }
@@ -361,4 +361,13 @@ export const api = {
     `/api/programs/${pid}/artifacts/${aid}/versions/${vid}/download`,
   artifactPageUrl: (pid: string, aid: string, vid: string, path: string) =>
     `/api/programs/${pid}/artifacts/${aid}/versions/${vid}/page/${path}`,
+  listArtifactVersionFiles: (pid: string, aid: string, vid: string) =>
+    fetch(`/api/programs/${pid}/artifacts/${aid}/versions/${vid}/files`).then(j<string[]>),
+  listArtifactTags: (pid: string) =>
+    fetch(`/api/programs/${pid}/artifact-tags`).then(j<string[]>),
+  setArtifactTags: (pid: string, aid: string, tags: string[]) =>
+    fetch(`/api/programs/${pid}/artifacts/${aid}/tags`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tags }),
+    }).then(j<ArtifactDetailT>),
 };

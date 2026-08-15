@@ -248,6 +248,7 @@ class Substrate:
                 for v in fm.get("versions", [])],
             threads=list(fm.get("threads", [])),
             archived=bool(fm.get("archived", False)),
+            tags=list(fm.get("tags", [])),
         )
 
     def save_artifact(self, artifact: Artifact) -> None:
@@ -266,6 +267,8 @@ class Substrate:
             fm["threads"] = list(artifact.threads)
         if artifact.archived:
             fm["archived"] = True
+        if artifact.tags:
+            fm["tags"] = list(artifact.tags)
         d = self.artifact_dir(artifact.program, artifact.id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "meta.md").write_text(serialize(fm, f"# {artifact.title or artifact.id}\n"))

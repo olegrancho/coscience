@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Button, Card, Group, Loader, Stack, Text, Textarea, Tooltip } from "@mantine/core";
+import { ActionIcon, Badge, Button, Card, Group, Loader, Popover, Stack, Text, Textarea, TextInput, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -12,58 +12,41 @@ import { UserChip } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
-/** Renders the artifact's current version, dispatching on `kind`. Text-like
- *  kinds (md/text/data/anything else) read the first current file; figure and
- *  page kinds hit the download/page endpoints directly (no file fetch). */
-function CurrentVersion(
-  { pid, aid, kind, current, files }:
-  { pid: string; aid: string; kind: string; current: string; files: string[] },
+/** Renders a version's content, dispatching on `kind`. Reused for both the
+ *  current version and the "viewing previous version" preview. */
+function VersionContent(
+  { pid, aid, kind, vid, files }:
+  { pid: string; aid: string; kind: string; vid: string; files: string[] },
 ) {
-  // A figure's deliverable is the image, but its version may also hold the script
-  // that drew it — so address the image file directly. The download route zips
-  // anything multi-file, which an <img> can't render.
   const imgName = files.find(isImageName) ?? "";
   const textLike = kind !== "figure" && kind !== "page";
-  // For a text kind the document is the deliverable, and any images beside it are its
-  // figures — so read the first text file, not whatever sorts first ("figures/…" would).
   const name = (textLike ? files.find((f) => !isImageName(f)) : undefined) ?? files[0];
   const file = useQuery({
-    queryKey: ["artifact-file", pid, aid, current, name],
-    queryFn: () => api.readArtifactFile(pid, aid, current, name!),
-    enabled: textLike && !!current && !!name,
+    queryKey: ["artifact-file", pid, aid, vid, name],
+    queryFn: () => api.readArtifactFile(pid, aid, vid, name!),
+    enabled: textLike && !!vid && !!name,
   });
 
-  // The figure's caption. `enabled` on the file's presence means a figure without one
-  // costs no request; the version's file list already told us whether it exists.
-  // Also requires an image: a version holding description.md beside a non-image
-  // deliverable (e.g. a pdf) never renders the caption (see the `!imgName` return
-  // below), so fetching it would just be discarded.
-  // Distinct leading key from `file` above ("artifact-desc" vs "artifact-file"): a
-  // figure whose files sort description.md first would otherwise collide with the
-  // (unused-for-figures) `file` query's key on the exact same [pid, aid, current, name].
   const hasDesc = kind === "figure" && files.includes(DESCRIPTION_FILE) && !!imgName;
   const desc = useQuery({
-    queryKey: ["artifact-desc", pid, aid, current, DESCRIPTION_FILE],
-    queryFn: () => api.readArtifactFile(pid, aid, current, DESCRIPTION_FILE),
-    enabled: hasDesc && !!current,
+    queryKey: ["artifact-desc", pid, aid, vid, DESCRIPTION_FILE],
+    queryFn: () => api.readArtifactFile(pid, aid, vid, DESCRIPTION_FILE),
+    enabled: hasDesc && !!vid,
   });
 
   if (kind === "figure") {
-    if (!current) return <Text size="sm" c="dimmed">No content yet.</Text>;
+    if (!vid) return <Text size="sm" c="dimmed">No content yet.</Text>;
     if (!imgName) return <Text size="sm" c="dimmed">No image in this version — download to view.</Text>;
     return (
       <Stack gap="md">
-        <ZoomableImg src={api.artifactVersionRawUrl(pid, aid, current, imgName)}
+        <ZoomableImg src={api.artifactVersionRawUrl(pid, aid, vid, imgName)}
                      style={{ maxWidth: "100%" }} alt={imgName} />
         {hasDesc ? (
           desc.isLoading ? <Loader size="sm" color="machine" />
           : desc.error || !desc.data ? <Text size="sm" c="red">Couldn't load the description.</Text>
           : (
-            // resolveSrc for the same reason the text branch has one: a description may
-            // reference a second panel by relative path, which would otherwise resolve
-            // against the dashboard route.
             <div className="report-leaf">
-              <Md resolveSrc={(src) => api.artifactVersionRawUrl(pid, aid, current, src)}>
+              <Md resolveSrc={(src) => api.artifactVersionRawUrl(pid, aid, vid, src)}>
                 {desc.data.content}
               </Md>
             </div>
@@ -79,18 +62,18 @@ function CurrentVersion(
   }
 
   if (kind === "page") {
-    if (!current) return <Text size="sm" c="dimmed">No content yet.</Text>;
+    if (!vid) return <Text size="sm" c="dimmed">No content yet.</Text>;
     return (
       <iframe
         title="artifact page"
         sandbox="allow-scripts"
-        src={api.artifactPageUrl(pid, aid, current, "index.html")}
+        src={api.artifactPageUrl(pid, aid, vid, "index.html")}
         style={{ width: "100%", height: 520, border: "1px solid var(--hairline)", borderRadius: 8 }}
       />
     );
   }
 
-  if (!current || !name) return <Text size="sm" c="dimmed">No content yet.</Text>;
+  if (!vid || !name) return <Text size="sm" c="dimmed">No content yet.</Text>;
   if (file.isLoading) return <Loader size="sm" color="machine" />;
   if (file.error || !file.data) return <Text size="sm" c="red">Couldn't load the file.</Text>;
 
@@ -102,34 +85,29 @@ function CurrentVersion(
     );
   }
 
-  // md / text (and any other unrecognized kind falls back to markdown rendering).
-  // Figures the document ships alongside itself are served from this same version.
   return (
     <div className="report-leaf">
-      <Md resolveSrc={(src) => api.artifactVersionRawUrl(pid, aid, current, src)}>
+      <Md resolveSrc={(src) => api.artifactVersionRawUrl(pid, aid, vid, src)}>
         {file.data.content}
       </Md>
     </div>
   );
 }
 
-/** One row in the version-tree sidebar: id, author, age, plus a view/revert
- *  action (non-current rows) and an archive/unarchive toggle. The note is folded
- *  away behind the header — notes run a few hundred characters, so showing every
- *  one at once buries the list. Rows without a note don't toggle. */
 function VersionRow(
-  { pid, aid, row, current }:
-  { pid: string; aid: string; row: TreeRow; current: string },
+  { pid, aid, row, current, viewing, onView }:
+  { pid: string; aid: string; row: TreeRow; current: string; viewing: string | null; onView: (vid: string | null) => void },
 ) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const invalidate = () => qc.invalidateQueries({ queryKey: ["artifact", pid, aid] });
-  const revert = useMutation({ mutationFn: () => api.revertArtifact(pid, aid, row.v.id), onSuccess: invalidate });
+  const revert = useMutation({ mutationFn: () => api.revertArtifact(pid, aid, row.v.id), onSuccess: () => { invalidate(); onView(null); } });
   const archiveToggle = useMutation({
     mutationFn: () => api.archiveArtifactVersion(pid, aid, row.v.id, !row.v.archived),
     onSuccess: invalidate,
   });
   const isCurrent = row.v.id === current;
+  const isViewing = row.v.id === viewing;
   const note = row.v.note?.trim() ?? "";
 
   return (
@@ -138,7 +116,8 @@ function VersionRow(
       style={{
         padding: `6px 6px 6px ${6 + row.depth * 14}px`,
         borderRadius: 6, opacity: row.v.archived ? 0.5 : 1,
-        background: row.onCurrentPath ? "var(--machine-weak)" : "transparent",
+        background: isViewing ? "var(--signal-weak)" : row.onCurrentPath ? "var(--machine-weak)" : "transparent",
+        border: isViewing ? "1px solid var(--signal)" : "1px solid transparent",
       }}
     >
       <Group gap={8} wrap="nowrap" align="flex-start">
@@ -151,10 +130,10 @@ function VersionRow(
           padding: 0, font: "inherit", color: "inherit", cursor: note ? "pointer" : "default" }}
       >
         <Group gap={6} wrap="nowrap">
-          {/* Fixed-width caret so ids stay aligned whether or not a row has a note. */}
           <Text size="xs" c="dimmed" style={{ width: 9, flexShrink: 0 }}>{note ? (open ? "▾" : "▸") : ""}</Text>
           <Text size="sm" fw={isCurrent ? 700 : 500} className="mono">{row.v.id}</Text>
           {isCurrent && <Badge size="xs" color="machine" variant="light">current</Badge>}
+          {isViewing && <Badge size="xs" color="signal" variant="light">viewing</Badge>}
           {row.v.archived && <Badge size="xs" color="gray" variant="light">archived</Badge>}
         </Group>
         <Group gap={6} wrap="nowrap" pl={15}>
@@ -163,6 +142,17 @@ function VersionRow(
         </Group>
       </button>
       <Group gap={4} wrap="nowrap">
+        {!isCurrent && (
+          isViewing ? (
+            <Button size="xs" variant="subtle" color="signal" onClick={() => onView(null)}>
+              Back
+            </Button>
+          ) : (
+            <Button size="xs" variant="subtle" onClick={() => onView(row.v.id)}>
+              View
+            </Button>
+          )
+        )}
         {!isCurrent && (
           <Button
             size="xs" variant="subtle" loading={revert.isPending}
@@ -193,24 +183,92 @@ function VersionRow(
   );
 }
 
+function TagEditor({ pid, aid, tags, onUpdate }: { pid: string; aid: string; tags: string[]; onUpdate: () => void }) {
+  const [opened, setOpened] = useState(false);
+  const [newTag, setNewTag] = useState("");
+  const allTags = useQuery({ queryKey: ["artifact-tags", pid], queryFn: () => api.listArtifactTags(pid), enabled: opened });
+  const setTags = useMutation({
+    mutationFn: (next: string[]) => api.setArtifactTags(pid, aid, next),
+    onSuccess: () => { onUpdate(); },
+    onError: (e) => notifications.show({ color: "red", title: "Couldn't update tags", message: String(e) }),
+  });
+
+  const toggle = (tag: string) => {
+    const next = tags.includes(tag) ? tags.filter((t) => t !== tag) : [...tags, tag];
+    setTags.mutate(next);
+  };
+  const addNew = () => {
+    const t = newTag.trim();
+    if (!t || tags.includes(t)) return;
+    setTags.mutate([...tags, t]);
+    setNewTag("");
+  };
+
+  const suggestions = (allTags.data ?? []).filter((t) => !tags.includes(t));
+
+  return (
+    <Group gap={6} wrap="wrap" align="center">
+      {tags.map((t) => (
+        <Badge key={t} size="sm" variant="light" color="grape"
+          style={{ cursor: "pointer" }} onClick={() => toggle(t)}
+          title="Click to remove">{t}</Badge>
+      ))}
+      <Popover opened={opened} onChange={setOpened} position="bottom-start" shadow="md" withArrow>
+        <Popover.Target>
+          <Button size="compact-xs" variant="subtle" color="dimmed" onClick={() => setOpened((o) => !o)}>
+            + tag
+          </Button>
+        </Popover.Target>
+        <Popover.Dropdown>
+          <Stack gap={8} style={{ minWidth: 180 }}>
+            {suggestions.length > 0 && (
+              <Stack gap={4}>
+                <Text size="xs" c="dimmed">Existing tags</Text>
+                <Group gap={4} wrap="wrap">
+                  {suggestions.map((t) => (
+                    <Badge key={t} size="sm" variant="outline" color="grape"
+                      style={{ cursor: "pointer" }} onClick={() => { toggle(t); setOpened(false); }}>
+                      {t}
+                    </Badge>
+                  ))}
+                </Group>
+              </Stack>
+            )}
+            <Group gap={4} wrap="nowrap">
+              <TextInput size="xs" placeholder="New tag…" value={newTag}
+                onChange={(e) => setNewTag(e.currentTarget.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { addNew(); setOpened(false); } }} />
+              <Button size="xs" variant="light" color="grape" onClick={() => { addNew(); setOpened(false); }}>Add</Button>
+            </Group>
+          </Stack>
+        </Popover.Dropdown>
+      </Popover>
+    </Group>
+  );
+}
+
 export default function ArtifactDetail() {
   const { id = "", aid = "" } = useParams();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [comment, setComment] = useState("");
+  const [viewingVersion, setViewingVersion] = useState<string | null>(null);
   const artifact = useQuery({ queryKey: ["artifact", id, aid], queryFn: () => api.getArtifact(id, aid) });
-  // Breadcrumb wants the program's name; the artifact payload only carries its id.
-  // Same key the program page uses, so arriving from there is a cache hit.
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["artifact", id, aid] });
+
+  const viewFiles = useQuery({
+    queryKey: ["artifact-version-files", id, aid, viewingVersion],
+    queryFn: () => api.listArtifactVersionFiles(id, aid, viewingVersion!),
+    enabled: !!viewingVersion,
+  });
+
   const archiveArtifact = useMutation({
     mutationFn: (archived: boolean) => api.archiveArtifact(id, aid, archived),
     onSuccess: invalidate,
   });
   const openChat = useMutation({
     mutationFn: () => api.createChat(id, `Edit ${artifact.data?.title || aid}`, [aid]),
-    // replace: this page redirects to the chat from here on, so leaving it in
-    // history would just swallow the first back press.
     onSuccess: (t) => navigate(`/programs/${id}/chat?c=${t.id}`, { replace: true }),
     onError: (e) => notifications.show({ color: "red", title: "Couldn't open chat", message: String(e) }),
   });
@@ -237,18 +295,15 @@ export default function ArtifactDetail() {
   };
   const seenThread = async (tid: string) => {
     try { await api.seenArtifactThread(id, aid, tid); invalidate(); }
-    catch { /* best-effort — not worth surfacing */ }
+    catch { /* best-effort */ }
   };
 
   if (artifact.isLoading) return <Loader color="machine" />;
   if (artifact.error || !artifact.data) {
-    return <EmptyState title="Artifact not found">Nothing here at “{aid}”. It may have been removed.</EmptyState>;
+    return <EmptyState title="Artifact not found">Nothing here at "{aid}". It may have been removed.</EmptyState>;
   }
   const art = artifact.data;
 
-  // While a chat holds the artifact, the chat IS the artifact's page — it carries
-  // the live working copy. Every link in the app routes through here, so this one
-  // guard covers the program card, sprint links, bookmarks and the back button.
   const chat = liveChatId(art.lock);
   if (chat) return <Navigate to={`/programs/${id}/chat?c=${chat}`} replace />;
 
@@ -260,13 +315,13 @@ export default function ArtifactDetail() {
   };
   const undiscard = () => archiveArtifact.mutate(false);
 
+  const showingVersion = viewingVersion ?? art.current;
+  const showingFiles = viewingVersion ? (viewFiles.data ?? []) : art.current_files;
+
   return (
-    // Same canvas breakout as a bound chat: the artifact IS the page, so its text gets
-    // at least the width it has in the chat that edits it, not the 980px column minus a
-    // 300px version rail.
     <Stack gap="lg" style={canvasBreakout}>
       <div>
-        <BackLink to={`/programs/${id}`}>{program.data?.title || art.program || id}</BackLink>
+        <BackLink to={`/programs/${id}/artifacts`}>{program.data?.title || art.program || id} / Artifacts</BackLink>
         <Group justify="space-between" align="flex-start" wrap="nowrap" mt={4}>
           <Group gap={10} align="center" wrap="wrap">
             <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 23, fontWeight: 600, margin: 0, lineHeight: 1.25 }}>
@@ -299,6 +354,9 @@ export default function ArtifactDetail() {
             )}
           </Group>
         </Group>
+        <div style={{ marginTop: 8 }}>
+          <TagEditor pid={id} aid={aid} tags={art.tags ?? []} onUpdate={invalidate} />
+        </div>
         {art.lock.holder_id && (
           <Card withBorder padding="sm" mt={10} style={{ background: "var(--paper)" }}>
             <Text size="sm">🔒 held by {art.lock.holder_kind} {art.lock.holder_id}</Text>
@@ -307,15 +365,35 @@ export default function ArtifactDetail() {
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 20, alignItems: "start" }}>
-        <Card padding="lg" radius="md" style={cardStyle}>
-          <div className="eyebrow" style={{ marginBottom: 10 }}>current version{art.current ? ` · ${art.current}` : ""}</div>
-          <CurrentVersion pid={id} aid={aid} kind={art.kind} current={art.current} files={art.current_files} />
+        <Card padding="lg" radius="md" style={{
+          ...cardStyle,
+          ...(viewingVersion ? { border: "2px solid var(--signal)", background: "var(--signal-weak)" } : {}),
+        }}>
+          {viewingVersion ? (
+            <Group gap={8} align="center" mb={10}>
+              <div className="eyebrow" style={{ color: "var(--signal)" }}>viewing previous version · {viewingVersion}</div>
+              <Badge size="xs" color="signal" variant="light">not current</Badge>
+              <Button size="compact-xs" variant="subtle" color="signal" onClick={() => setViewingVersion(null)}>
+                Back to current
+              </Button>
+            </Group>
+          ) : (
+            <div className="eyebrow" style={{ marginBottom: 10 }}>current version{art.current ? ` · ${art.current}` : ""}</div>
+          )}
+          {viewingVersion && viewFiles.isLoading ? (
+            <Loader size="sm" color="machine" />
+          ) : (
+            <VersionContent pid={id} aid={aid} kind={art.kind} vid={showingVersion} files={showingFiles} />
+          )}
         </Card>
         <Card padding="lg" radius="md" style={cardStyle}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>versions · {rows.length}</div>
           {rows.length ? (
             <Stack gap={2}>
-              {rows.map((row) => <VersionRow key={row.v.id} pid={id} aid={aid} row={row} current={art.current} />)}
+              {rows.map((row) => (
+                <VersionRow key={row.v.id} pid={id} aid={aid} row={row} current={art.current}
+                  viewing={viewingVersion} onView={setViewingVersion} />
+              ))}
             </Stack>
           ) : <Text size="sm" c="dimmed">No versions yet.</Text>}
         </Card>

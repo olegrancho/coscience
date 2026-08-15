@@ -23,16 +23,20 @@ export function buildArtifactTree(versions: ArtifactVersionT[], current: string)
       roots.push(v);
     }
   }
-  const byIdOrder = (a: ArtifactVersionT, b: ArtifactVersionT) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  // Newest first: reverse id order so v5 appears above v1.
+  const byIdDesc = (a: ArtifactVersionT, b: ArtifactVersionT) => (a.id > b.id ? -1 : a.id < b.id ? 1 : 0);
   const out: TreeRow[] = [];
   // Depth counts forks above a version, not links: an only child continues its
   // parent's line at the same indent. Otherwise a plain linear history — the
   // common case — renders as a staircase whose indentation says nothing.
+  //
+  // Walk newest-first: children before parents so the most recent version is on
+  // top. Within each fork, newest child comes first.
   const walk = (v: ArtifactVersionT, depth: number) => {
-    out.push({ v, depth, onCurrentPath: path.has(v.id) });
-    const kids = (children.get(v.id) ?? []).slice().sort(byIdOrder);
+    const kids = (children.get(v.id) ?? []).slice().sort(byIdDesc);
     for (const c of kids) walk(c, kids.length > 1 ? depth + 1 : depth);
+    out.push({ v, depth, onCurrentPath: path.has(v.id) });
   };
-  for (const r of roots.slice().sort(byIdOrder)) walk(r, 0);
+  for (const r of roots.slice().sort(byIdDesc)) walk(r, 0);
   return out;
 }
