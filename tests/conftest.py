@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+import coscience.cli as cli_mod
 import coscience.worker as worker_mod
 from coscience.frontmatter_io import serialize
 from coscience.substrate import Substrate
@@ -9,9 +10,16 @@ from coscience.substrate import Substrate
 
 @pytest.fixture(autouse=True)
 def _permissive_usage(monkeypatch):
-    """Default the usage gate to 'ok' so worker/dispatcher tests don't shell out
-    to the real usage script. Tests that exercise the gate pass usage_gate=... ."""
+    """Default the usage gate to 'ok' so worker/dispatcher/cli tests don't shell out
+    to the real usage script. Tests that exercise the gate pass usage_gate=... .
+
+    coscience.cli does `from coscience.worker import claude_usage_ok`, which binds
+    its own name in the cli module's namespace — patching worker_mod alone leaves
+    that binding pointing at the real function, so CLI-driven tests (e.g. the PM
+    loop) would still shell out for real. Patch both bindings so isolation actually
+    covers every caller, not just the one this module happens to import."""
     monkeypatch.setattr(worker_mod, "claude_usage_ok", lambda *a, **k: True)
+    monkeypatch.setattr(cli_mod, "claude_usage_ok", lambda *a, **k: True)
 
 
 class FakeAgent:
@@ -85,9 +93,11 @@ def agent():
     return FakeAgent()
 
 
-def write_raw_sprint(repo_root, sprint_id, status, goals, plan, body="notes"):
+def write_raw_sprint(repo_root, sprint_id, status, goals, plan, body="notes", program=None):
     """Write a sprint.md directly to disk (bypasses Substrate, for arrange steps)."""
     d = repo_root / "sprints" / sprint_id
     d.mkdir(parents=True, exist_ok=True)
     fm = {"status": status, "goals": goals, "plan": plan}
+    if program is not None:
+        fm["program"] = program
     (d / "sprint.md").write_text(serialize(fm, body))

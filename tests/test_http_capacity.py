@@ -35,3 +35,21 @@ def test_put_capacity_accepts_an_empty_pool(client):
     r = client.put("/api/capacity", json={"capacity": {}})
     assert r.status_code == 200
     assert r.json()["capacity"] == {}
+
+
+def test_ledger_reports_not_paused_by_default(client):
+    assert client.get("/api/ledger").json()["paused"] is False
+
+
+def test_put_pause_flips_the_state_and_the_ledger_reports_it(client):
+    assert client.put("/api/pause", json={"paused": True}).json()["paused"] is True
+    assert client.get("/api/ledger").json()["paused"] is True
+
+    assert client.put("/api/pause", json={"paused": False}).json()["paused"] is False
+    assert client.get("/api/ledger").json()["paused"] is False
+
+
+def test_put_pause_returns_the_full_ledger_status(client):
+    """The page re-renders from one payload, so pause must return what ledger returns."""
+    body = client.put("/api/pause", json={"paused": True}).json()
+    assert set(body) >= {"capacity", "used", "available", "leases", "paused"}

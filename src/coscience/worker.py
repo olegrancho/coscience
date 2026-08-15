@@ -11,6 +11,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 
 from coscience import artifacts, feedback_harvest, usage_meter
@@ -18,9 +19,9 @@ from coscience.executor import ExecutionContext
 from coscience.executor import is_running as _job_is_running
 from coscience.executor import process_token, terminate_detached as _terminate
 from coscience.models import BeatOutcome, Result, Sprint, SprintStatus, set_status
+from coscience.pause import is_paused
 from coscience.substrate import Substrate
 
-_USAGE_SCRIPT = os.path.expanduser("~/.claude/skills/usage/usage.py")
 # After this many real (non-usage) failures, a sprint is marked FAILED rather than
 # relaunched forever — so a deterministically-broken sprint can't burn usage.
 MAX_AGENT_FAILURES = 3
@@ -36,14 +37,16 @@ JOB_MAX_SECONDS = float(os.environ.get("COSCIENCE_JOB_MAX_SECONDS", 7 * 24 * 360
 _USAGE_LIMIT_RE = re.compile(r"(session|usage|rate) limit|hit your .*limit|limit ·", re.I)
 
 
-def _read_cost(sprint_dir) -> tuple:
-    """Best-effort (cost, tokens) from the agent's cost sidecar; (None, None) if
-    absent (e.g. an interrupted run, or the fake agent in tests)."""
+def _read_cost(sprint_dir) -> dict:
+    """Best-effort usage from the agent's cost sidecar; {} if absent (an interrupted
+    run, or the fake agent in tests). Returns the whole sidecar so the per-component
+    split and `turns` reach the ledger — the executor has written `turns` since it
+    was added, and this function used to drop it on the floor."""
     try:
         data = json.loads((sprint_dir / "agent.cost.json").read_text())
-        return data.get("cost"), data.get("tokens")
+        return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError, ValueError):
-        return None, None
+        return {}
 
 
 def _usage_ok_from_output(out: str, now: "datetime.datetime | None" = None,
@@ -68,15 +71,32 @@ def _usage_ok_from_output(out: str, now: "datetime.datetime | None" = None,
     return max(pcts, default=0.0) < threshold
 
 
-def claude_usage_ok(threshold: float = 100.0) -> bool:
-    """True if it's safe to launch a Claude agent — neither the 5-hour nor the
-    weekly usage window is exhausted. Fails open: if usage can't be read, returns
-    True (the worker still won't fabricate a result from a dead agent)."""
+# Usage is a fixed subscription window, not a bill: the scarce thing is the share
+# left for a human who wants a chat or a forced replan. Autonomous loops stand down
+# early and leave the top band for them; human-triggered paths keep the full 100.
+AUTONOMOUS_THRESHOLD = 80.0     # PM loop beats
+WORKER_THRESHOLD = 90.0         # worker agent launches
+
+
+def claude_usage_ok(threshold: float = 100.0, *, fail_open: bool = True,
+                    repo_root=None) -> bool:
+    """True if it's safe to launch a Claude agent at this threshold — neither the
+    5-hour nor the weekly window has passed it. `fail_open` decides what an
+    unreadable usage script means: True for human-triggered work (never block a
+    person on a missing dotfile), False for autonomous loops (an unmetered loop is
+    exactly what burns a window unattended).
+
+    `repo_root` enables the human pause check, and is tested FIRST: a paused platform
+    starts no new Claude session whatever the windows say, and polling usage.py to
+    learn that would be wasted work. None (the default) skips the check, for callers
+    that hold no substrate."""
+    if repo_root is not None and is_paused(repo_root):
+        return False
     try:
-        out = subprocess.run(["python3", _USAGE_SCRIPT],
+        out = subprocess.run([sys.executable, usage_meter.usage_script_path()],
                              capture_output=True, text=True, timeout=10).stdout
     except Exception:
-        return True
+        return fail_open
     return _usage_ok_from_output(out, threshold=threshold)
 
 
@@ -182,7 +202,9 @@ class Worker:
         return self.agent.is_running(self.substrate.load_progress(sprint_id).agent_token)
 
     def _usage_ok(self) -> bool:
-        return (self._usage_gate or claude_usage_ok)()
+        return (self._usage_gate or
+                (lambda: claude_usage_ok(WORKER_THRESHOLD, fail_open=False,
+                                         repo_root=self.substrate.repo_root)))()
 
     def _read_job_json(self, sprint_dir):
         """Read + normalize a declared detached job's job.json. Returns a clean dict
@@ -347,9 +369,11 @@ class Worker:
         progress.agent_token = ""
         # One Claude invocation just ended (clean, failed, or interrupted) — record it
         # with whatever cost/tokens the agent reported, so the dashboard can show spend.
-        cost, tokens = _read_cost(sprint_dir)
+        sidecar = _read_cost(sprint_dir)
         usage_meter.record_run(self.substrate.repo_root, "worker", sprint.id,
-                               cost=cost, tokens=tokens, model=sprint.model)
+                               cost=sidecar.get("cost"), tokens=sidecar.get("tokens"),
+                               turns=sidecar.get("turns"), usage=sidecar.get("usage"),
+                               model=sprint.model)
         if status == "interrupted" or (status == "failed" and _USAGE_LIMIT_RE.search(text or "")):
             # Transient: a kill/crash mid-run (resume from scratchpad) or a usage
             # limit (the usage gate holds relaunches). Don't count it; retry later.

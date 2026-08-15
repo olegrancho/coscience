@@ -42,6 +42,13 @@ export interface UsageWindow { pct: number; resets: string }
 export interface RunAgg {
   total: number; last_hour: number; last_day: number; last: number | null;
   cost: number; cost_day: number; tokens: number;
+  // Per-component split. `tokens` is their sum, but the components price very
+  // differently — a cache read is a tenth of fresh input, output five times it —
+  // so the total alone says nothing about spend. Rows recorded before the split
+  // existed contribute 0 here while still counting in `tokens`.
+  input_tokens: number; output_tokens: number;
+  cache_creation_input_tokens: number; cache_read_input_tokens: number;
+  thinking_tokens: number;
 }
 export interface Usage {
   budget: { windows: Record<string, UsageWindow>; live: boolean } | null;
@@ -71,6 +78,7 @@ export interface ResultRow { id: string; sprint: string; summary: string; progra
 export interface Ledger {
   capacity: Record<string, number>; used: Record<string, number>;
   available: Record<string, number>; leases: unknown[];
+  paused: boolean;
 }
 export interface GraphNode {
   id: string; kind: "idea" | "experiment"; stage: "idea" | "experiment" | "result"; label: string;
@@ -172,10 +180,10 @@ export const api = {
     `/api/programs/${pid}/artifacts/${aid}/versions/${vid}/raw/${name}`,
   replan: (id: string) =>
     fetch(`/api/programs/${id}/replan`, { method: "POST" }).then(
-      j<{ program: string; cycle: number; submitted: string[]; skipped?: boolean; busy?: boolean; throttled?: boolean }>),
+      j<{ program: string; cycle: number; submitted: string[]; skipped?: boolean; busy?: boolean; throttled?: boolean; backoff?: boolean; paused?: boolean }>),
   pmDirective: (id: string, mode: "compress" | "brainstorm") =>
     fetch(`/api/programs/${id}/ideas/${mode}`, { method: "POST" }).then(
-      j<{ program: string; cycle: number; submitted: string[]; skipped?: boolean; busy?: boolean; throttled?: boolean; ideas_added?: number; ideas_removed?: number; pool_size?: number }>),
+      j<{ program: string; cycle: number; submitted: string[]; skipped?: boolean; busy?: boolean; throttled?: boolean; backoff?: boolean; paused?: boolean; ideas_added?: number; ideas_removed?: number; pool_size?: number }>),
   setProgramWorkdir: (id: string, workdir: string) =>
     fetch(`/api/programs/${id}/workdir`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -309,6 +317,11 @@ export const api = {
     fetch("/api/capacity", {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ capacity }),
+    }).then(j<Ledger>),
+  setPause: (paused: boolean) =>
+    fetch("/api/pause", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paused }),
     }).then(j<Ledger>),
   getUsage: () => fetch("/api/usage").then(j<Usage>),
   listArtifacts: (pid: string) => fetch(`/api/programs/${pid}/artifacts`).then(j<ArtifactRow[]>),

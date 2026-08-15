@@ -300,6 +300,29 @@ function fmtUsd(n: number): string {
   return n < 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(n < 100 ? 1 : 0)}`;
 }
 
+/** Tokens as a per-component breakdown. The total on its own is not readable as
+ *  cost — a cache read bills at a tenth of fresh input and output at five times
+ *  it — so the tile's tooltip shows where the tokens actually went. */
+export function tokenTitle(agg: RunAgg): string {
+  const n = (v: number) => (v || 0).toLocaleString();
+  const split = (agg.input_tokens || 0) + (agg.output_tokens || 0)
+    + (agg.cache_creation_input_tokens || 0) + (agg.cache_read_input_tokens || 0);
+  const lines = [`${n(agg.tokens)} tokens total`];
+  if (split > 0) {
+    lines.push(
+      `  fresh input   ${n(agg.input_tokens)}`,
+      `  output        ${n(agg.output_tokens)}${agg.thinking_tokens ? ` (${n(agg.thinking_tokens)} thinking)` : ""}`,
+      `  cache write   ${n(agg.cache_creation_input_tokens)}`,
+      `  cache read    ${n(agg.cache_read_input_tokens)}`,
+    );
+    // Runs recorded before the split existed have no components, so say so
+    // rather than letting the rows silently not add up.
+    const unsplit = (agg.tokens || 0) - split;
+    if (unsplit > 0) lines.push(`  (${n(unsplit)} from runs recorded before the split)`);
+  }
+  return lines.join("\n");
+}
+
 function RunStat({ label, agg }: { label: string; agg: RunAgg }) {
   return (
     <div style={{ flex: 1 }}>
@@ -307,7 +330,7 @@ function RunStat({ label, agg }: { label: string; agg: RunAgg }) {
       <Text style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 600, lineHeight: 1.1 }}>{agg.total}</Text>
       <Text size="xs" c="dimmed">{agg.last_hour} in last hour</Text>
       {agg.cost > 0 && (
-        <Text size="xs" c="dimmed" title={`${agg.tokens.toLocaleString()} tokens total`}>
+        <Text size="xs" c="dimmed" title={tokenTitle(agg)}>
           {fmtUsd(agg.cost)} · {fmtUsd(agg.cost_day)} today
         </Text>
       )}

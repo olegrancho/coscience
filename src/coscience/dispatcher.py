@@ -8,6 +8,7 @@ from pathlib import Path
 
 from coscience.ledger import Ledger
 from coscience.models import BeatOutcome, SprintStatus, set_status
+from coscience.pause import is_paused
 from coscience.resources import ResourcePool, effective_requirement
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
@@ -35,6 +36,7 @@ class Dispatcher:
         self.substrate = substrate
         self.agent = agent
         self.policy = policy or SchedulerPolicy()
+        self._usage_gate = usage_gate
         self.worker = Worker(substrate, agent, usage_gate=usage_gate)
         cos = substrate.repo_root / ".coscience"
         self.ledger = Ledger(pool, cos / "leases.json")
@@ -72,8 +74,19 @@ class Dispatcher:
         # A sprint bound to artifacts is grantable only when none of its bound
         # artifacts is locked by another holder (the artifact is a capacity-1
         # resource). Filter those out before the pool scheduler runs.
+        # Pause and usage exhaustion both suppress new grants, letting in-flight
+        # work drain to completion via the beat step below.
+        # The exception is LIVENESS: re-adopt a sprint whose agent/job is still
+        # physically running but lost its lease (dispatcher outage past the TTL).
+        # Without re-adoption, reconcile below kills the live process — wasting
+        # the work it already did.
+        paused = is_paused(self.substrate.repo_root)
+        usage_ok = self._usage_gate() if self._usage_gate else True
+        blocked = paused or not usage_ok
         needs = [s for s in eligible if self.ledger.lease_for(s.id) is None
-                 and not artifacts.sprint_blocked(self.substrate, s)]
+                 and not artifacts.sprint_blocked(self.substrate, s)
+                 and (not blocked or self.worker.agent_running(s.id)
+                      or self.substrate.load_progress(s.id).job_token)]
         for sprint in self.policy.select_grants(needs, queue, self.ledger, now):
             eff = self.policy.effective_priority(sprint, queue.get(sprint.id, now), now)
             if self.ledger.acquire(sprint.id,
@@ -91,6 +104,18 @@ class Dispatcher:
                 if sprint.status in (SprintStatus.QUEUED, SprintStatus.HIBERNATED):
                     set_status(sprint, SprintStatus.EXECUTING)
                     self.substrate.save_sprint(sprint)
+
+        # --- refresh lease priorities ---
+        # Aging increments effective priority over time; the lease stores a snapshot
+        # from the last renew. Refresh it here so the yield step below compares
+        # current values, not stale ones from a previous cycle.
+        eligible_by_id = {s.id: s for s in eligible}
+        for lease in self.ledger.all_leases():
+            s = eligible_by_id.get(lease.sprint_id)
+            if s is not None:
+                eff = self.policy.effective_priority(s, queue.get(s.id, now), now)
+                if lease.priority != eff:
+                    lease.priority = eff
 
         # --- yield: hibernate a safe-point sprint to free a starved QUEUED candidate ---
         # Cooperative preemption: never hard-kill. Only a QUEUED candidate can
@@ -136,7 +161,8 @@ class Dispatcher:
                 continue
             outcome = self.worker.run_sprint_beat(sprint)
             report.beaten += 1
-            self.ledger.renew(lease.sprint_id, now, ttl)
+            eff = self.policy.effective_priority(sprint, queue.get(sprint.id, now), now)
+            self.ledger.renew(lease.sprint_id, now, ttl, priority=eff)
             if outcome == BeatOutcome.COMPLETED:
                 self.ledger.release(lease.sprint_id)
                 queue.pop(lease.sprint_id, None)

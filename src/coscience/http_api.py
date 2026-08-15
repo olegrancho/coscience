@@ -93,6 +93,10 @@ class CapacityUpdate(BaseModel):
     capacity: dict[str, float] = Field(default_factory=dict)
 
 
+class PauseUpdate(BaseModel):
+    paused: bool
+
+
 class VoteIn(BaseModel):
     by: str                       # opaque per-browser voter id
     value: int                    # +1 👍, -1 👎, 0 clear (toggling handled server-side)
@@ -672,6 +676,10 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.set_capacity(body.capacity)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.put("/pause")
+    def set_pause(body: PauseUpdate) -> dict:
+        return service.set_pause(body.paused)
 
     @api.get("/usage")
     def usage_stats() -> dict:

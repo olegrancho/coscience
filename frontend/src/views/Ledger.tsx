@@ -53,6 +53,16 @@ export default function Ledger() {
     timerRef.current = setTimeout(() => { void save(); }, SAVE_DEBOUNCE_MS);
   };
 
+  const togglePause = async () => {
+    setSaveError("");
+    try {
+      await api.setPause(!ledger.data?.paused);
+      qc.invalidateQueries({ queryKey: ["ledger"] });
+    } catch (e) {
+      setSaveError(String(e));
+    }
+  };
+
   if (ledger.isLoading) return <Loader color="machine" />;
   if (ledger.error || !ledger.data) return <EmptyState title="Couldn't load compute">Try again in a moment.</EmptyState>;
   const l = ledger.data;
@@ -60,10 +70,26 @@ export default function Ledger() {
 
   return (
     <Stack gap="lg">
-      <div>
-        <div className="eyebrow" style={{ marginBottom: 7 }}>resources</div>
-        <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: 0 }}>Compute</h1>
-      </div>
+      <Group justify="space-between" align="flex-end">
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 7 }}>resources</div>
+          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: 0 }}>Compute</h1>
+        </div>
+        <Group gap="sm">
+          {l.paused && (
+            <Text size="sm" c="dimmed">
+              {l.leases.length
+                ? `Paused — ${l.leases.length} still finishing`
+                : "Paused — nothing running"}
+            </Text>
+          )}
+          <Button size="xs" color={l.paused ? "green" : "red"}
+                  variant={l.paused ? "filled" : "default"}
+                  onClick={() => { void togglePause(); }}>
+            {l.paused ? "Resume" : "Pause"}
+          </Button>
+        </Group>
+      </Group>
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 16 }}>Claude usage</div>

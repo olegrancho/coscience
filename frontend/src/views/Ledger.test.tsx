@@ -9,7 +9,8 @@ vi.mock("../api", () => ({
   api: {
     getLedger: () => ledger(),
     getUsage: () => Promise.resolve(null),
-    setCapacity: vi.fn().mockResolvedValue({ capacity: {}, used: {}, available: {}, leases: [] }),
+    setCapacity: vi.fn().mockResolvedValue({ capacity: {}, used: {}, available: {}, leases: [], paused: false }),
+    setPause: vi.fn().mockResolvedValue({ capacity: {}, used: {}, available: {}, leases: [], paused: true }),
   },
 }));
 
@@ -37,7 +38,7 @@ function renderPage() {
 
 describe("Compute page", () => {
   it("warns that agents are unbounded when no worker cap is set", async () => {
-    ledger.mockResolvedValue({ capacity: { cpu: 16 }, used: { cpu: 2 }, available: { cpu: 14 }, leases: [] });
+    ledger.mockResolvedValue({ capacity: { cpu: 16 }, used: { cpu: 2 }, available: { cpu: 14 }, leases: [], paused: false });
     renderPage();
     await waitFor(() => expect(screen.getByText(/no worker cap/i)).toBeTruthy());
   });
@@ -45,7 +46,7 @@ describe("Compute page", () => {
   it("does not warn once a worker cap exists", async () => {
     ledger.mockResolvedValue({
       capacity: { cpu: 16, workers: 1 }, used: { cpu: 2, workers: 1 },
-      available: { cpu: 14, workers: 0 }, leases: [],
+      available: { cpu: 14, workers: 0 }, leases: [], paused: false,
     });
     renderPage();
     await waitFor(() => expect(screen.getByText(/capacity in use/i)).toBeTruthy());
@@ -54,22 +55,51 @@ describe("Compute page", () => {
 
   it("opens the edit modal", async () => {
     ledger.mockResolvedValue({
-      capacity: { cpu: 16, workers: 1 }, used: {}, available: {}, leases: [],
+      capacity: { cpu: 16, workers: 1 }, used: {}, available: {}, leases: [], paused: false,
     });
     renderPage();
     await waitFor(() => expect(screen.getByRole("button", { name: /edit capacity/i })).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /edit capacity/i }));
     await waitFor(() => expect(screen.getByLabelText("workers capacity")).toBeTruthy());
   });
+
+  it("offers Pause while the platform is running", async () => {
+    ledger.mockResolvedValue({ capacity: {}, used: {}, available: {}, leases: [], paused: false });
+    renderPage();
+    expect(await screen.findByRole("button", { name: /pause/i })).toBeTruthy();
+  });
+
+  it("pauses the platform when Pause is clicked", async () => {
+    ledger.mockResolvedValue({ capacity: {}, used: {}, available: {}, leases: [], paused: false });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /pause/i }));
+    await waitFor(() => expect(api.setPause).toHaveBeenCalledWith(true));
+  });
+
+  it("shows what is still finishing while paused", async () => {
+    ledger.mockResolvedValue({
+      capacity: {}, used: {}, available: {},
+      leases: [{ id: "l1", sprint_id: "p1-c0-a", amounts: { workers: 1 } }], paused: true,
+    });
+    renderPage();
+    expect(await screen.findByText(/1 still finishing/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /resume/i })).toBeTruthy();
+  });
+
+  it("says nothing is running once the drain completes", async () => {
+    ledger.mockResolvedValue({ capacity: {}, used: {}, available: {}, leases: [], paused: true });
+    renderPage();
+    expect(await screen.findByText(/nothing running/i)).toBeTruthy();
+  });
 });
 
 describe("Compute page steppers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(api.setCapacity).mockResolvedValue({ capacity: {}, used: {}, available: {}, leases: [] });
+    vi.mocked(api.setCapacity).mockResolvedValue({ capacity: {}, used: {}, available: {}, leases: [], paused: false });
     ledger.mockResolvedValue({
       capacity: { cpu: 16, workers: 1 }, used: { cpu: 2, workers: 0 },
-      available: { cpu: 14, workers: 1 }, leases: [],
+      available: { cpu: 14, workers: 1 }, leases: [], paused: false,
     });
   });
   afterEach(() => vi.useRealTimers());
@@ -118,7 +148,7 @@ describe("Compute page steppers", () => {
 
   it("can't take a resource below zero", async () => {
     ledger.mockResolvedValue({
-      capacity: { workers: 0 }, used: { workers: 0 }, available: { workers: 0 }, leases: [],
+      capacity: { workers: 0 }, used: { workers: 0 }, available: { workers: 0 }, leases: [], paused: false,
     });
     renderPage();
     await waitFor(() => expect(screen.getByLabelText("decrease workers")).toBeTruthy());

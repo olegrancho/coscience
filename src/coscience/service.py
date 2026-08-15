@@ -18,6 +18,7 @@ from coscience.artifacts import DESCRIPTION_FILE, FIGURE_DESCRIPTION_NOTE
 from coscience.ledger import Ledger
 from coscience.models import (DEFAULT_MODEL, Sprint, SprintStatus, Program, ProgramStatus,
                               Idea, ChatThread, set_status)
+from coscience.pause import is_paused
 from coscience.resources import ResourcePool, load_pool
 from coscience.substrate import Substrate
 
@@ -567,6 +568,22 @@ class Service:
         self.substrate.save_program(program)
         return {"id": program_id, "max_proposed": program.max_proposed}
 
+    def _paused_beat(self, program_id: str) -> dict:
+        """The skip result for a human-triggered PM beat refused by the global pause.
+        Shaped like pm_beat's own throttle skip, but flagged `paused` rather than
+        `throttled`: both stop the beat, only one is cleared by a usage reset. Told
+        apart here so the UI can say "Resume in Compute" instead of sending the human
+        off to wait for a reset that will change nothing."""
+        return {"program": program_id,
+                "cycle": self.substrate.load_pm_state(program_id).cycle,
+                "submitted": [], "proposed": [], "skipped": True, "paused": True}
+
+    def _pm_reasoner(self):
+        """A reasoner that records its transcript, same as the loop's. Human-triggered
+        beats cost exactly what a loop beat costs, so they leave the same trace."""
+        from coscience.pm_claude import ClaudeCodeReasoner
+        return ClaudeCodeReasoner(transcript_dir=self.substrate.repo_root / ".coscience")
+
     def replan(self, program_id: str) -> dict:
         """Run one PM cycle for this program right now (forced) so a human edit or
         comment is acted on without waiting for the loop tick. The per-program lock
@@ -575,10 +592,12 @@ class Service:
         if not (self.substrate.program_dir(program_id) / "program.md").is_file():
             raise NotFoundError(program_id)
         from coscience.pm_agent import pm_beat
-        from coscience.pm_claude import ClaudeCodeReasoner
         from coscience.worker import claude_usage_ok
-        return pm_beat(self.substrate, program_id, ClaudeCodeReasoner(),
-                       usage_ok=claude_usage_ok, force=True)
+        if is_paused(self.substrate.repo_root):
+            return self._paused_beat(program_id)
+        return pm_beat(self.substrate, program_id, self._pm_reasoner(),
+                       usage_ok=lambda: claude_usage_ok(
+                           repo_root=self.substrate.repo_root), force=True)
 
     def run_pm_directive(self, program_id: str, mode: str) -> dict:
         """Run one directed PM cycle now: 'compress' (merge/prune/re-rank the idea
@@ -589,10 +608,13 @@ class Service:
         if not (self.substrate.program_dir(program_id) / "program.md").is_file():
             raise NotFoundError(program_id)
         from coscience.pm_agent import pm_beat
-        from coscience.pm_claude import ClaudeCodeReasoner
         from coscience.worker import claude_usage_ok
-        return pm_beat(self.substrate, program_id, ClaudeCodeReasoner(),
-                       usage_ok=claude_usage_ok, force=True, directive=mode)
+        if is_paused(self.substrate.repo_root):
+            return self._paused_beat(program_id)
+        return pm_beat(self.substrate, program_id, self._pm_reasoner(),
+                       usage_ok=lambda: claude_usage_ok(
+                           repo_root=self.substrate.repo_root),
+                       force=True, directive=mode)
 
     def set_program_workdir(self, program_id: str, workdir: str) -> dict:
         """Set the project folder this program's sprint agents run in ("" = control
@@ -800,7 +822,16 @@ class Service:
         thread.messages.append({"role": "user", "text": message, "at": time.time(),
                                 "by": str(by or "")})
         from coscience.worker import claude_usage_ok
-        if launch is None and not claude_usage_ok():
+        # Pause first: it also fails the usage gate below, but a reset does not clear
+        # it — Resume does — so the human must be told which stop this is.
+        if launch is None and is_paused(self.substrate.repo_root):
+            thread.messages.append({"role": "pm", "at": time.time(),
+                "text": "_(Paused — Resume in Compute to keep talking.)_"})
+            thread.messages = thread.messages[-200:]
+            self.substrate.save_chat_thread(program_id, thread)
+            self.substrate.commit(f"program {program_id}: chat {thread_id} (paused)")
+            return self._chat_public(thread)
+        if launch is None and not claude_usage_ok(repo_root=self.substrate.repo_root):
             thread.messages.append({"role": "pm", "at": time.time(),
                 "text": "_(Claude usage is exhausted — please try again after the reset.)_"})
             thread.messages = thread.messages[-200:]
@@ -1419,11 +1450,13 @@ class Service:
 
     # --- ledger ---
     def ledger_status(self) -> dict:
+        from coscience.pause import is_paused
         ledger = self._ledger()
         return {
             "capacity": dict(self.pool.capacity),
             "used": ledger.used(),
             "available": ledger.available(),
+            "paused": is_paused(self.substrate.repo_root),
             "leases": [
                 {"id": l.id, "sprint_id": l.sprint_id, "amounts": l.amounts,
                  "granted_at": l.granted_at, "expires_at": l.expires_at,
@@ -1431,6 +1464,15 @@ class Service:
                 for l in ledger.all_leases()
             ],
         }
+
+    def set_pause(self, paused: bool) -> dict:
+        """Pause or resume the whole platform. Commits so the substrate history records
+        who stopped the machine and when, the way a capacity edit does. Returns fresh
+        ledger status so one round-trip re-renders the Compute page."""
+        from coscience.pause import set_paused
+        set_paused(self.substrate.repo_root, bool(paused))
+        self.substrate.commit("paused" if paused else "resumed")
+        return self.ledger_status()
 
     def set_capacity(self, capacity: dict) -> dict:
         """Replace the declared resource pool. Validates, writes

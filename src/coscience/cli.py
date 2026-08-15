@@ -10,12 +10,13 @@ from coscience.claude_executor import ClaudeAgent
 from coscience.dispatcher import CycleReport, Dispatcher
 from coscience.loop_status import LoopStatus
 from coscience.models import BeatOutcome, Program
+from coscience.pause import is_paused
 from coscience.pm_claude import ClaudeCodeReasoner
 from coscience.pm_runner import pm_run_once
 from coscience.resources import load_pool
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
-from coscience.worker import Worker, claude_usage_ok
+from coscience.worker import AUTONOMOUS_THRESHOLD, Worker, claude_usage_ok
 
 
 def run_once(repo_root: Path) -> BeatOutcome:
@@ -23,8 +24,10 @@ def run_once(repo_root: Path) -> BeatOutcome:
     return worker.run_one_beat()
 
 
-def _make_pm_reasoner():
-    return ClaudeCodeReasoner()
+def _make_pm_reasoner(substrate=None):
+    # Transcripts land in .coscience/, beside each program's pm lock.
+    return ClaudeCodeReasoner(
+        transcript_dir=(substrate.repo_root / ".coscience") if substrate else None)
 
 
 def pm_beat_line(summaries: list[dict], reasoned: int) -> str:
@@ -45,6 +48,10 @@ def pm_beat_line(summaries: list[dict], reasoned: int) -> str:
     missed = [k for s in summaries
               for k in list(s.get("release_skipped") or ()) + list(s.get("reopen_skipped") or ())]
     unbacked = [c for s in summaries for c in s.get("unbacked_claims") or ()]
+    # A backed-off program is stuck, not idle: it stopped calling the reasoner after
+    # repeated failures on unchanged input. Said as a part (not a fallback line) so a
+    # beat where other programs reasoned still shows it.
+    stood_down = [s["program"] for s in summaries if s.get("backoff")]
     if ids:
         parts.append(f"proposed {', '.join(ids)}")
     if released:
@@ -55,6 +62,10 @@ def pm_beat_line(summaries: list[dict], reasoned: int) -> str:
     if unbacked:
         parts.append("WARNING report claims it " + "; ".join(unbacked)
                      + " — no such action was submitted")
+    if stood_down:
+        parts.append(f"STOOD DOWN {', '.join(stood_down)} — repeated planner failures on "
+                     "unchanged input; see the failed (ok: false) rows in the run ledger, "
+                     "then Replan to retry")
     parts += errors
     if parts:
         return " · ".join(parts)
@@ -148,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     pmmode = pm.add_mutually_exclusive_group()
     pmmode.add_argument("--once", action="store_true")
     pmmode.add_argument("--loop", action="store_true")
-    pm.add_argument("--interval", type=float, default=5.0)
+    pm.add_argument("--interval", type=float, default=60.0)
     pm.add_argument("--max-rounds", type=int, default=None)
 
     args = parser.parse_args(argv)
@@ -206,7 +217,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "pm":
         substrate = Substrate(args.repo)
-        reasoner = _make_pm_reasoner()
+        if args.loop and is_paused(substrate.repo_root):
+            # Built lazily: constructing the reasoner is cheap, but a paused platform
+            # should be able to start its loop without touching Claude config at all.
+            reasoner = None
+        else:
+            reasoner = _make_pm_reasoner(substrate)
         if args.once or not args.loop:
             for summary in pm_run_once(substrate, reasoner):
                 print(f"{summary['program']}: cycle={summary['cycle']} "
@@ -214,7 +230,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         def _beat():
-            summaries = pm_run_once(substrate, reasoner, usage_ok=claude_usage_ok)
+            nonlocal reasoner
+            if is_paused(substrate.repo_root):
+                return "paused by human — Resume in Compute", {"proposed": 0}, 0
+            if reasoner is None:
+                reasoner = _make_pm_reasoner(substrate)
+            summaries = pm_run_once(substrate, reasoner,
+                                    usage_ok=lambda: claude_usage_ok(
+                                        AUTONOMOUS_THRESHOLD, fail_open=False,
+                                        repo_root=substrate.repo_root))
             ids = [sid for s in summaries for sid in s["submitted"]]
             reasoned = sum(0 if s.get("skipped") else 1 for s in summaries)
             # reasoned == Claude calls this beat (skipped cycles don't call Claude)

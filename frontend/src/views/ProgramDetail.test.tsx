@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { notifications } from "@mantine/notifications";
 import ProgramDetail from "./ProgramDetail";
 import { api } from "../api";
 
@@ -58,5 +59,47 @@ describe("general instructions", () => {
     fireEvent.click(screen.getByText("Save"));
 
     await waitFor(() => expect(save).toHaveBeenCalledWith("p", "Be terse."));
+  });
+});
+
+describe("replan", () => {
+  async function clickReplan(reply: Record<string, unknown>) {
+    mockProgram("");
+    vi.spyOn(api, "replan").mockResolvedValue(
+      { program: "p", cycle: 3, submitted: [], ...reply } as any);
+    const show = vi.spyOn(notifications, "show").mockImplementation(() => "" as any);
+    renderAt();
+    fireEvent.click(await screen.findByText("Replan now"));
+    await waitFor(() => expect(show).toHaveBeenCalled());
+    // Not .at(-1): tsconfig targets ES2020, and `npm run build` typechecks tests.
+    return show.mock.calls[show.mock.calls.length - 1][0] as { color?: string; message?: string };
+  }
+
+  it("warns when the planner stood down instead of claiming it re-planned", async () => {
+    // A backed-off beat never reached the reasoner. Reported like an idle one — teal,
+    // "Re-planned — no new proposals" — the human is told their escape hatch worked
+    // when nothing ran at all.
+    const n = await clickReplan({ skipped: true, backoff: true });
+    expect(n.color).toBe("yellow");
+    expect(String(n.message)).not.toMatch(/Re-planned/i);
+    expect(String(n.message)).toMatch(/failed/i);          // says what happened
+    expect(String(n.message)).toMatch(/runs\.jsonl/);      // ...and where to look
+  });
+
+  it("names the global pause instead of blaming an exhausted budget", async () => {
+    // Paused and throttled both stop the beat, but only a throttle clears itself at
+    // the usage reset. Telling a paused human to "wait for the reset" sends them off
+    // to wait for something that will never help — Resume is the only way out.
+    const n = await clickReplan({ skipped: true, paused: true });
+    expect(n.color).toBe("yellow");
+    expect(String(n.message)).toMatch(/paused/i);
+    expect(String(n.message)).toMatch(/resume/i);
+    expect(String(n.message)).not.toMatch(/reset/i);
+  });
+
+  it("still reports a healthy quiet cycle as success", async () => {
+    const n = await clickReplan({ skipped: false });
+    expect(n.color).toBe("teal");
+    expect(String(n.message)).toMatch(/Re-planned/i);
   });
 });

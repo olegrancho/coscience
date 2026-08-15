@@ -183,3 +183,43 @@ def test_agent_falls_back_to_control_repo_when_workdir_missing(substrate, tmp_pa
     agent = FakeAgent()
     ctx = Worker(substrate, agent)._build_context(substrate.load_sprint("p1-c0-x"))
     assert ctx.repo_root == substrate.repo_root
+
+
+def test_worker_records_the_token_split_and_turns(substrate, tmp_path):
+    """The worker is the platform's largest token consumer. _read_cost used to
+    return only (cost, tokens), dropping both the split and the `turns` the
+    executor had been writing all along."""
+    import json as _json
+    from coscience import usage_meter
+    from coscience.worker import _read_cost
+
+    sprint_dir = tmp_path / "sp1"
+    sprint_dir.mkdir(parents=True)
+    (sprint_dir / "agent.cost.json").write_text(_json.dumps({
+        "cost": 0.9, "tokens": 16650, "turns": 6, "duration_ms": 1234,
+        "usage": {"input_tokens": 2, "output_tokens": 5,
+                  "cache_creation_input_tokens": 8570,
+                  "cache_read_input_tokens": 8073, "thinking_tokens": 3,
+                  "tokens": 16650},
+    }))
+
+    sidecar = _read_cost(sprint_dir)
+    assert sidecar["turns"] == 6                     # was silently discarded before
+    usage_meter.record_run(substrate.repo_root, "worker", "sp1",
+                           cost=sidecar.get("cost"), tokens=sidecar.get("tokens"),
+                           turns=sidecar.get("turns"), usage=sidecar.get("usage"))
+
+    row = usage_meter.load_runs(substrate.repo_root)[0]
+    assert row["cache_read_input_tokens"] == 8073
+    assert row["turns"] == 6
+
+
+def test_read_cost_survives_a_missing_or_corrupt_sidecar(tmp_path):
+    from coscience.worker import _read_cost
+    d = tmp_path / "sp2"
+    d.mkdir(parents=True)
+    assert _read_cost(d) == {}                       # absent
+    (d / "agent.cost.json").write_text("{not json")
+    assert _read_cost(d) == {}                       # corrupt
+    (d / "agent.cost.json").write_text('"a string"')
+    assert _read_cost(d) == {}                       # valid JSON, wrong shape

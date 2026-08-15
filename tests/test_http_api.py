@@ -147,7 +147,7 @@ def test_usage_endpoint_shape(client):
 
 def test_ledger_status_shape(client):
     body = client.get("/api/ledger").json()
-    assert set(body) == {"capacity", "used", "available", "leases"}
+    assert set(body) == {"capacity", "used", "available", "leases", "paused"}
 
 
 def test_missing_sprint_is_404(client):

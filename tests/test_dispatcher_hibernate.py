@@ -135,3 +135,72 @@ def test_hibernated_does_not_preempt_others(substrate):
     disp.ledger.load()
     assert disp.ledger.lease_for("L") is not None       # L not yielded
     assert substrate.load_sprint("V").status == SprintStatus.HIBERNATED  # V still waits
+
+
+def test_same_priority_no_thrash_under_aging(substrate):
+    """Two sprints with equal base priority and queue time must never hibernate each
+    other, even after multiple aging ticks. The lease's priority must stay current.
+
+    Models the real failure: A is executing but its agent exited (usage limit) so it
+    sits yieldable (no agent_token, no job_token). B is QUEUED at the same base
+    priority. Without the fix, every aging tick (300s) makes B's effective priority
+    exceed A's stale lease priority, triggering a pointless hibernate→re-grant."""
+    substrate.save_sprint(Sprint(id="A", status=SprintStatus.EXECUTING, goals="g",
+                                 resources_required={"gpu": 1.0}, priority=1))
+    substrate.save_sprint(Sprint(id="B", status=SprintStatus.QUEUED, goals="g",
+                                 resources_required={"gpu": 1.0}, priority=1))
+    policy = SchedulerPolicy(aging_interval=300.0)
+    disp = Dispatcher(substrate, FakeAgent(), ResourcePool({"gpu": 1.0}), policy)
+    queue_time = 1000.0
+    disp._save_queue({"A": queue_time, "B": queue_time})
+    _lease(disp, "A", {"gpu": 1.0}, prio=1, now=queue_time)
+    # Block agent relaunch so A sits yieldable (empty agent_token) across cycles
+    disp.worker._usage_gate = lambda: False
+    for tick in range(1, 11):
+        t = queue_time + tick * 300.0
+        disp.run_one_cycle(now=t)
+    assert substrate.load_sprint("A").status == SprintStatus.EXECUTING
+    disp.ledger.load()
+    assert disp.ledger.lease_for("A") is not None
+
+
+def test_usage_blocked_skips_grants(substrate):
+    """When the usage gate says no, the grant step must not start new work —
+    identical to the pause guard. A QUEUED sprint stays queued."""
+    substrate.save_sprint(Sprint(id="S", status=SprintStatus.QUEUED, goals="g",
+                                 plan=["work"], resources_required={"gpu": 1.0}))
+    disp = Dispatcher(substrate, FakeAgent(), ResourcePool({"gpu": 1.0}),
+                      SchedulerPolicy(aging_interval=0.0),
+                      usage_gate=lambda: False)
+    report = disp.run_one_cycle(now=0.0)
+    assert report.granted == 0
+    disp.ledger.load()
+    assert disp.ledger.lease_for("S") is None
+    assert substrate.load_sprint("S").status == SprintStatus.QUEUED
+
+
+def test_usage_blocked_still_adopts_running_agent(substrate):
+    """Even when usage is blocked, a sprint whose agent is physically running must
+    be re-adopted (liveness), just like under pause — so the beat can collect its
+    result instead of killing it."""
+    agent = FakeAgent(linger=10**6, finished=False)
+    substrate.save_sprint(Sprint(id="S", status=SprintStatus.QUEUED, goals="g",
+                                 plan=["work"], resources_required={"gpu": 1.0}))
+    # First: grant + launch under permissive usage
+    disp = Dispatcher(substrate, agent, ResourcePool({"gpu": 1.0}),
+                      SchedulerPolicy(aging_interval=0.0),
+                      usage_gate=lambda: True)
+    disp.run_one_cycle(now=0.0)
+    assert substrate.load_sprint("S").status == SprintStatus.EXECUTING
+    token = substrate.load_progress("S").agent_token
+    assert agent.is_running(token)
+    # Expire the lease to simulate dispatcher outage
+    disp.ledger.load()
+    disp.ledger.expire(now=99999.0)
+    disp.ledger.save()
+    # Now usage is blocked — but the agent is still running
+    disp.worker._usage_gate = lambda: False
+    disp.run_one_cycle(now=100000.0)
+    disp.ledger.load()
+    assert disp.ledger.lease_for("S") is not None         # re-adopted
+    assert token not in agent.stopped                      # agent not killed

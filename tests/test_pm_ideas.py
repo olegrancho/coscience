@@ -1,3 +1,5 @@
+import time
+
 from coscience.models import Idea, Program, Sprint, SprintStatus
 from coscience.pm_agent import MAX_PROPOSED, gather_context, pm_beat
 from coscience.pm_reasoner import FakeReasoner, PMCycleOutput, ProposedSprint
@@ -169,12 +171,21 @@ def test_human_idea_retriggers_pm(substrate):
 def test_context_surfaces_failed_sprints(substrate):
     from coscience.models import ProgressState
     _prog(substrate)
+    before = time.time()
     substrate.save_sprint(Sprint(id="p1-f", status=SprintStatus.FAILED, goals="do x",
                                  plan=[], program="p1"))
+    after = time.time()
     substrate.save_progress(ProgressState(sprint_id="p1-f", failures=3,
                                           last_error="ImportError: no sympy"))
     ctx = gather_context(substrate, "p1")
-    assert ctx.failed == [{"id": "p1-f", "goals": "do x", "error": "ImportError: no sympy"}]
+    assert len(ctx.failed) == 1
+    failed = ctx.failed[0]
+    # save_sprint backfills an unset title from goals and seeds status_history
+    # with the real save time on first write, so title/finished_at aren't a
+    # bare "" / 0.0 here; check those structurally instead of a pinned value.
+    assert {k: failed[k] for k in ("id", "goals", "error", "title")} == {
+        "id": "p1-f", "goals": "do x", "error": "ImportError: no sympy", "title": "do x"}
+    assert before <= failed["finished_at"] <= after
 
 
 def test_failed_sprint_retriggers_pm(substrate):

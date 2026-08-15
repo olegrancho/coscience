@@ -19,6 +19,11 @@ from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coer
 # Humans can propose beyond it; this only gates the PM's own proposing/promoting.
 MAX_PROPOSED = 4
 
+# Attempts against one unchanged context before the PM stands down. Bounded, not
+# zero: a flaky call deserves a retry, a deterministic one does not deserve 720
+# per hour.
+FAILURE_BACKOFF = 3
+
 
 def program_cap(program) -> int:
     """How many sprints may await review for this program: its own setting, or the
@@ -155,6 +160,19 @@ def _triggers(last_signals: dict, new_signals: dict, forced: bool) -> list[str]:
     return changed or (["manual replan"] if forced else [])
 
 
+def _finished_at(sprint) -> float:
+    """When this sprint reached its terminal state. `set_status` stamps every
+    transition, so the last entry is the finish; 0.0 for records written before
+    status history existed, which sorts them oldest."""
+    hist = sprint.status_history or []
+    if not hist:
+        return 0.0
+    try:
+        return float(hist[-1].get("at") or 0.0)
+    except (AttributeError, TypeError, ValueError):
+        return 0.0
+
+
 def gather_context(substrate, program_id: str) -> PMContext:
     program = substrate.load_program(program_id)
     pm = substrate.load_pm_state(program_id)
@@ -181,21 +199,31 @@ def gather_context(substrate, program_id: str) -> PMContext:
                     "messages": [{"role": m["role"], "text": m["text"]} for m in th["messages"]],
                 })
         if s.status == SprintStatus.DONE:
-            result = ""
+            result = result_id = ""
             if s.results:
                 try:
                     result = substrate.load_result(s.results[0]).summary
+                    result_id = s.results[0]
                 except OSError:
                     result = ""
-            completed.append({"id": s.id, "goals": s.goals, "result": result})
+            completed.append({"id": s.id, "goals": s.goals, "result": result,
+                              # The id the prompt turns into a readable path for the
+                              # clipped excerpt. Not a fingerprint input (see
+                              # _context_payload, which reads id + result only).
+                              "result_id": result_id,
+                              "title": s.title, "finished_at": _finished_at(s)})
         elif s.status == SprintStatus.FAILED:
             err = substrate.load_progress(s.id).last_error
-            failed.append({"id": s.id, "goals": s.goals, "error": err})
+            failed.append({"id": s.id, "goals": s.goals, "error": err,
+                           "title": s.title, "finished_at": _finished_at(s)})
         elif s.status in (SprintStatus.PROPOSED, SprintStatus.APPROVED,
                           SprintStatus.QUEUED, SprintStatus.EXECUTING,
                           SprintStatus.HIBERNATED):
             open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals,
                                  "priority": s.priority})
+    # Oldest first, so "the most recent N" is expressible when the prompt is rendered.
+    completed.sort(key=lambda s: s["finished_at"])
+    failed.sort(key=lambda s: s["finished_at"])
     guidance_threads = substrate.load_guidance(program_id)
     # Standing guidance shown every cycle as background context (latest text per
     # thread, whether open or already addressed) plus the open threads the PM must
@@ -253,6 +281,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
         proposed_count=proposed_count, max_proposed=program_cap(program),
         model=program.pm_model,
         workdir=_resolve_workdir(substrate, program.workdir),
+        results_dir=str(substrate.repo_root / "results"),
         graph_lines=graph_lines,
         artifacts=artifact_dicts, artifact_feedback=artifact_feedback,
     )
@@ -528,14 +557,49 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             substrate.save_pm_state(pm)
             return {"program": program_id, "cycle": cycle,
                     "submitted": [], "proposed": [], "skipped": True, "throttled": True}
+        if (not force and fingerprint == pm.failed_fingerprint
+                and pm.consecutive_failures >= FAILURE_BACKOFF):
+            # Same context, already failed FAILURE_BACKOFF times — retrying spends a
+            # full agentic session for the same raise. Wait for something to change.
+            # `force` is exempt: the backoff exists to stop the LOOP spinning, and a
+            # human pressing Replan/Compress/Brainstorm is precisely the escape hatch
+            # from a stuck PM. Without this term the feature disables its own fix.
+            pm.last_run = time.time() if now is None else now
+            substrate.save_pm_state(pm)
+            return {"program": program_id, "cycle": cycle, "submitted": [],
+                    "proposed": [], "skipped": True, "backoff": True}
+        if force:
+            # A human asking for this beat is an explicit "try again": clear the count
+            # so they get a fresh run of FAILURE_BACKOFF attempts, not one retry that
+            # drops straight back behind the gate.
+            pm.consecutive_failures = 0
         # About to reason -> capture what changed since the last reasoned cycle.
         new_signals = context_signals(context)
         trigger_labels = _triggers(pm.last_signals, new_signals, force)
-        output = reasoner.run(context)                 # the ONE reasoner call
-        lc = getattr(reasoner, "last_cost", None) or {}
-        usage_meter.record_run(substrate.repo_root, "pm", program_id,
-                               cost=lc.get("cost"), tokens=lc.get("tokens"),
-                               model=context.model)
+        def _record(ok: bool) -> None:
+            lc = getattr(reasoner, "last_cost", None) or {}
+            usage_meter.record_run(substrate.repo_root, "pm", program_id,
+                                   cost=lc.get("cost"), tokens=lc.get("tokens"),
+                                   turns=lc.get("turns"), usage=lc.get("usage"),
+                                   model=context.model,
+                                   prompt_bytes=getattr(reasoner, "last_prompt_bytes", None),
+                                   ok=ok)
+        try:
+            output = reasoner.run(context)             # the ONE reasoner call
+        except Exception:
+            # The session ran and spent the window before it raised (a malformed-JSON
+            # parse is the common case). A call that leaves no row makes a retry loop
+            # invisible in the ledger — see Task 8.
+            _record(ok=False)
+            # Count it against THIS context: new information resets the counter, so a
+            # human approving something always gets a fresh attempt.
+            pm.consecutive_failures = (pm.consecutive_failures + 1
+                                       if fingerprint == pm.failed_fingerprint else 1)
+            pm.failed_fingerprint = fingerprint
+            pm.last_run = time.time() if now is None else now
+            substrate.save_pm_state(pm)
+            raise
+        _record(ok=True)
         write_staging(substrate, program_id, cycle, output, fingerprint, directive)  # COMMIT POINT
         staged = StagedCycle(cycle=cycle, output=output, fingerprint=fingerprint, directive=directive)
 
@@ -856,6 +920,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                      if actions["unbacked_claims"] else ""))
     if new_signals is not None:                        # we actually reasoned this beat
         pm.last_signals = new_signals
+        pm.consecutive_failures = 0
+        pm.failed_fingerprint = ""
         # Releases live here too, not just in the loop's log file: pm.md travels with
         # the substrate, so a dropped action stays evidence after the log rotates.
         pm.activations.append({

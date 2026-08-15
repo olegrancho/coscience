@@ -87,10 +87,12 @@ class Ledger:
             del self._leases[sprint_id]
             self.save()
 
-    def renew(self, sprint_id, now, ttl) -> None:
+    def renew(self, sprint_id, now, ttl, priority=None) -> None:
         lease = self._leases.get(sprint_id)
         if lease is not None:
             lease.expires_at = float(now) + float(ttl)
+            if priority is not None:
+                lease.priority = int(priority)
             self.save()
 
     def expire(self, now) -> list[Lease]:

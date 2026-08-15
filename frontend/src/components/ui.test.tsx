@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 
-import { Gauge, ZoomableImg } from "./ui";
+import { Gauge, ZoomableImg, tokenTitle } from "./ui";
 
 // jsdom has no matchMedia; MantineProvider's color-scheme effect needs it.
 beforeAll(() => {
@@ -97,5 +97,35 @@ describe("Gauge pending state", () => {
     const readout = screen.getByText("2 / 16");
     expect(readout.style.opacity).toBe("0.45");
     expect(readout.style.fontStyle).toBe("italic");
+  });
+});
+
+describe("tokenTitle", () => {
+  const base = {
+    total: 1, last_hour: 0, last_day: 0, last: null, cost: 1, cost_day: 1,
+    tokens: 16650, input_tokens: 2, output_tokens: 5,
+    cache_creation_input_tokens: 8570, cache_read_input_tokens: 8073,
+    thinking_tokens: 3,
+  };
+
+  it("breaks the total into components so it can be read as cost", () => {
+    const t = tokenTitle(base);
+    expect(t).toContain("16,650 tokens total");
+    expect(t).toContain("cache read    8,073");
+    expect(t).toContain("(3 thinking)");
+  });
+
+  it("flags tokens from rows recorded before the split existed", () => {
+    // 999 extra in the total with no matching components — a pre-split row.
+    const t = tokenTitle({ ...base, tokens: 16650 + 999 });
+    expect(t).toContain("999 from runs recorded before the split");
+  });
+
+  it("shows the total alone when no run has a split yet", () => {
+    const t = tokenTitle({
+      ...base, input_tokens: 0, output_tokens: 0,
+      cache_creation_input_tokens: 0, cache_read_input_tokens: 0, thinking_tokens: 0,
+    });
+    expect(t).toBe("16,650 tokens total");
   });
 });

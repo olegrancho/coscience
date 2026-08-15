@@ -1,3 +1,5 @@
+import time
+
 from coscience.models import (PMState, Program, Result, Sprint, SprintStatus)
 from coscience.pm_agent import gather_context
 
@@ -7,9 +9,11 @@ def test_gather_context_splits_open_and_completed(substrate):
     substrate.save_pm_state(PMState(program_id="p1", cycle=2, proposed_ids=["p1-c0-a"]))
     substrate.save_sprint(Sprint(id="p1-open", status=SprintStatus.APPROVED,
                                  goals="assay", plan=["do it"], program="p1"))
+    before = time.time()
     substrate.save_sprint(Sprint(id="p1-done", status=SprintStatus.DONE, goals="prior",
                                  plan=["do it"], program="p1",
                                  results=["p1-done-result"]))
+    after = time.time()
     substrate.save_result(Result(id="p1-done-result", sprint="p1-done", summary="found X"))
     substrate.save_sprint(Sprint(id="other", status=SprintStatus.PROPOSED, goals="elsewhere",
                                  plan=["do it"], program="p2"))
@@ -19,15 +23,57 @@ def test_gather_context_splits_open_and_completed(substrate):
     assert ctx.cycle == 2
     assert ctx.prior_proposals == ["p1-c0-a"]
     assert [s["id"] for s in ctx.open_sprints] == ["p1-open"]
-    assert ctx.completed == [{"id": "p1-done", "goals": "prior", "result": "found X"}]
+    # save_sprint backfills an unset title from goals and seeds status_history
+    # with the real save time on first write (see Substrate.save_sprint), so
+    # title/finished_at aren't the literal "" / 0.0 of a truly bare record —
+    # check those two structurally instead of pinning a wall-clock value.
+    assert len(ctx.completed) == 1
+    completed = ctx.completed[0]
+    assert {k: completed[k] for k in ("id", "goals", "result", "title")} == {
+        "id": "p1-done", "goals": "prior", "result": "found X", "title": "prior"}
+    assert before <= completed["finished_at"] <= after
 
 
 def test_gather_context_done_without_result(substrate):
     substrate.save_program(Program(id="p1", title="C", goals="g"))
+    before = time.time()
     substrate.save_sprint(Sprint(id="p1-d", status=SprintStatus.DONE, goals="d",
                                  plan=["do it"], program="p1"))
+    after = time.time()
     ctx = gather_context(substrate, "p1")
-    assert ctx.completed == [{"id": "p1-d", "goals": "d", "result": ""}]
+    assert len(ctx.completed) == 1
+    completed = ctx.completed[0]
+    assert {k: completed[k] for k in ("id", "goals", "result", "title")} == {
+        "id": "p1-d", "goals": "d", "result": "", "title": "d"}
+    assert before <= completed["finished_at"] <= after
+
+
+def test_completed_sprints_carry_title_and_sort_oldest_first(substrate):
+    substrate.save_program(Program(id="p1", title="C", goals="g"))
+    for sid, at in (("p1-late", 200.0), ("p1-early", 100.0)):
+        s = Sprint(id=sid, status=SprintStatus.DONE, goals="g", plan=["x"],
+                   program="p1", title=f"T-{sid}", results=[f"{sid}-r"])
+        s.status_history = [{"status": "done", "at": at, "by": "", "action": ""}]
+        substrate.save_sprint(s)
+        substrate.save_result(Result(id=f"{sid}-r", sprint=sid, summary="found X"))
+
+    ctx = gather_context(substrate, "p1")
+    assert [s["id"] for s in ctx.completed] == ["p1-early", "p1-late"]
+    assert ctx.completed[0]["title"] == "T-p1-early"
+    assert ctx.completed[1]["finished_at"] == 200.0
+
+
+def test_finished_at_handles_legacy_sprint_with_no_status_history(substrate):
+    # write_raw_sprint bypasses Substrate.save_sprint entirely, so no
+    # status_history seeding happens — this reproduces a record written before
+    # the field existed. load_sprint must not crash gather_context on it.
+    from tests.conftest import write_raw_sprint
+    substrate.save_program(Program(id="p1", title="C", goals="g"))
+    write_raw_sprint(substrate.repo_root, "p1-legacy", "done", "g", ["x"], program="p1")
+
+    ctx = gather_context(substrate, "p1")
+    assert [s["id"] for s in ctx.completed] == ["p1-legacy"]
+    assert ctx.completed[0]["finished_at"] == 0.0
 
 
 def test_gather_context_includes_human_guidance(tmp_path):

@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from pathlib import Path
 
+from coscience import usage_meter
 from coscience.models import DEFAULT_MODEL
 from coscience.pm_reasoner import (PMContext, PMCycleOutput, ProposedSprint, coerce_resources,
                                    render_instructions)
@@ -19,16 +21,67 @@ class PMReasonerError(Exception):
     """The reasoner produced no usable PMCycleOutput."""
 
 
+# The PM's session has file tools and runs in the program's workdir, so a full
+# result is one read away. Inlining every result and every original goal on every
+# beat is what made the prompt grow with the program: at ~8.9 KB per completed
+# sprint, a program's planner got more expensive the more work it finished.
+RECENT_HISTORY = 8      # completed/failed sprints shown with detail
+RESULT_CHARS = 800      # per-result / per-error excerpt cap
+GOAL_CHARS = 400        # per-history-entry goal excerpt cap
+PRIOR_SHOWN = 20        # prior proposal ids rendered; the full list stays in pm.md
+
+
+def _clip(text: str, limit: int, source: str = "") -> str:
+    """Excerpt `text`, naming where the full copy lives when we know. In production
+    every result summary is clipped, so the marker is the PM's only route back to the
+    rest of it: an unresolvable "read the file" is not an escape hatch."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    where = f" — full text: {source}" if source else ""
+    return f"{text[:limit].rstrip()}… [clipped; {len(text):,} chars{where}]"
+
+
+def _result_path(context: PMContext, item: dict) -> str:
+    """Absolute path of a completed sprint's result file, or "" if we can't resolve
+    one (a hand-built context in tests, or a sprint that recorded no result)."""
+    rid = str(item.get("result_id") or "")
+    return f"{context.results_dir}/{rid}.md" if context.results_dir and rid else ""
+
+
+def _history_block(items: list[dict], recent_fmt) -> str:
+    """Recent entries with detail, older ones as one line each. Older entries keep
+    their id and title rather than being dropped: the lineage graph and the
+    release_ids/reopen_ids instructions both tell the PM to copy ids EXACTLY, so an
+    id the prompt never shows is an action it can never take."""
+    if not items:
+        return "(none)"
+    split = max(0, len(items) - RECENT_HISTORY)
+    older, recent = items[:split], items[split:]
+    # Plain truncation, not _clip: on a 60-char label the "[clipped; N chars]"
+    # marker would be longer than the text it describes.
+    lines = [f"- {i['id']}: {(i.get('title') or i.get('goals', '')).strip()[:60]}"
+             for i in older]
+    if older:
+        lines.append(f"--- the {len(recent)} most recent, in detail ---")
+    lines += [recent_fmt(i) for i in recent]
+    return "\n".join(lines)
+
+
 def render_prompt(context: PMContext) -> str:
     def _lines(items, fmt):
         return "\n".join(fmt(i) for i in items) or "(none)"
 
     open_block = _lines(context.open_sprints,
                         lambda s: f"- {s['id']} [{s['status']}, priority {s.get('priority', 0)}]: {s['goals']}")
-    done_block = _lines(context.completed,
-                        lambda s: f"- {s['id']}: {s['goals']} -> result: {s['result']}")
-    failed_block = _lines(context.failed,
-                          lambda s: f"- {s['id']}: {s['goals']} -> FAILED: {s['error']}")
+    done_block = _history_block(
+        context.completed,
+        lambda s: (f"- {s['id']}: {_clip(s['goals'], GOAL_CHARS)}"
+                   f" -> result: {_clip(s['result'], RESULT_CHARS, _result_path(context, s))}"))
+    failed_block = _history_block(
+        context.failed,
+        lambda s: (f"- {s['id']}: {_clip(s['goals'], GOAL_CHARS)}"
+                   f" -> FAILED: {_clip(s['error'], RESULT_CHARS)}"))
     def _feedback_line(f):
         history = " | ".join(f"{m['role']}: {m['text']}" for m in f["messages"])
         return (f"- {f['sprint_id']} [{f['status']}, "
@@ -54,7 +107,12 @@ def render_prompt(context: PMContext) -> str:
         return f"- artifact [{f['artifact_id']}], thread {f['thread_id']}: {history}"
     artifact_feedback_block = _lines(context.artifact_feedback, _artifact_feedback_line)
 
-    prior_block = ", ".join(context.prior_proposals) or "(none)"
+    # pm.proposed_ids is append-only and never trimmed — it is the substrate's audit
+    # record and stays complete on disk. Only the rendering is windowed.
+    prior = list(context.prior_proposals)
+    prior_block = ", ".join(prior[-PRIOR_SHOWN:]) or "(none)"
+    if len(prior) > PRIOR_SHOWN:
+        prior_block += f" (+{len(prior) - PRIOR_SHOWN} earlier, omitted)"
     instructions_block = render_instructions(context.instructions)
     guidance_block = ""
     if context.human_guidance:
@@ -99,6 +157,12 @@ def render_prompt(context: PMContext) -> str:
 
     graph_block = _lines(context.graph_lines, lambda ln: f"- {ln}") if context.graph_lines else "(none yet)"
 
+    # The clip markers point at absolute paths under this directory. It sits in the
+    # substrate, which for a program with its own workdir is nowhere near the session's
+    # cwd — so the location has to be stated, not implied.
+    results_note = (f"{context.results_dir}/" if context.results_dir
+                    else "the control repo's results/ directory")
+
     return f"""You are the PM agent for a research program. You maintain two things:
 a small set of PROPOSED SPRINTS (concrete next experiments, which humans approve), and
 an IDEA POOL (short, vague candidate directions you grow and prune over time). You only
@@ -106,7 +170,14 @@ PROPOSE and curate; humans approve sprints.{directive_block}
 
 Your session runs in this program's working directory. If the goals refer to "this
 folder", "the data here", or "existing work", they mean your current working
-directory — inspect it there; do NOT go hunting up the filesystem tree.
+directory — inspect it there; do NOT go hunting up the filesystem tree for it.
+
+One directory outside it is yours to read — this program's sprint results, which live in
+{results_note}
+The result excerpts below are CLIPPED. When one is cut short and the detail decides
+something, read the full file at the exact path given in its clip marker. That directory
+is the only place to look outside your working directory; the rule above still holds
+everywhere else.
 
 PROGRAM GOALS:
 {context.goals}{instructions_block}{guidance_block}
@@ -380,19 +451,60 @@ def parse_response(text: str) -> PMCycleOutput:
     )
 
 
+def _ignore_feeds(dirpath: Path) -> None:
+    """Keep transcripts out of the substrate's history. The substrate commits with
+    `git add -A`, and unlike a sprint's agent.out (written once per sprint) a PM feed is
+    rewritten every beat — committing it would add a fresh ~150 KB blob per beat, on a
+    repo that already makes dozens of commits a day. Self-installing so a substrate on
+    any host gets it without a manual step."""
+    ignore = dirpath / ".gitignore"
+    existing = ignore.read_text() if ignore.is_file() else ""
+    if "*.out" not in existing.splitlines():
+        ignore.write_text((existing.rstrip("\n") + "\n" if existing else "") + "*.out\n")
+
+
+def _final_envelope(raw: str) -> dict | None:
+    """The result envelope from a `claude -p` stdout, whichever output format wrote it.
+
+    stream-json emits one JSON event per line and ends with the `result` event; plain
+    `json` emits that envelope alone. Both are found by taking the last object carrying
+    a `result` key, so this reads either. None if there is no such object (a crash, or
+    output that isn't JSON at all) — the caller falls back to the raw text."""
+    found = None
+    for line in (raw or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(ev, dict) and "result" in ev:
+            found = ev
+    return found
+
+
 class ClaudeCodeReasoner:
     """Reasoner backed by a headless Claude Code session. `invoke` is injectable
     for testing; the default shells out to the `claude` binary."""
 
-    def __init__(self, invoke=None, claude_bin: str = "claude"):
+    def __init__(self, invoke=None, claude_bin: str = "claude", transcript_dir=None):
         self.claude_bin = claude_bin
         self._invoke = invoke or self._default_invoke
         self.last_cost: dict | None = None     # {cost, tokens} of the most recent call
+        self.last_prompt_bytes: int | None = None   # size of the prompt that call sent
+        # Where to keep each program's last transcript. Both production callers pass
+        # one — the PM loop and the http service's human-triggered beats — so None
+        # means "no feed": tests, and any embedder that doesn't want the file.
+        self.transcript_dir = Path(transcript_dir) if transcript_dir else None
+        self._transcript_path: Path | None = None   # set per-run by run()
 
     def _default_invoke(self, prompt: str, model: str = "", cwd: str = "") -> str:
-        # --output-format json gives us the reply text plus cost/token usage in one
-        # envelope; we unwrap `result` and stash the cost for the dashboard.
-        cmd = [self.claude_bin, "-p", "--output-format", "json"]
+        # stream-json (not json) so stdout carries the per-turn events — tool calls and
+        # all — ahead of the same final envelope. `num_turns` alone said the PM took 12
+        # turns but never what it did in them, and turns are what drive PM cost.
+        # --verbose is mandatory: print mode rejects stream-json without it.
+        cmd = [self.claude_bin, "-p", "--output-format", "stream-json", "--verbose"]
         if model:
             cmd += ["--model", model]
         # Prompt goes on STDIN, never as an argv element: Linux caps a single argv
@@ -402,22 +514,46 @@ class ClaudeCodeReasoner:
         # tree, not whatever cwd the loop process happened to launch from.
         proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
                               cwd=cwd or None)
+        # Write the feed BEFORE the exit check: a crashed `claude` is exactly the run
+        # whose events you want to read, and raising first left it with no transcript.
+        self._write_transcript(proc.stdout or "")
         if proc.returncode != 0:
             raise PMReasonerError(
                 f"claude exited {proc.returncode}: {(proc.stderr or '')[:200]}")
-        try:
-            env = json.loads(proc.stdout)
-            usage = env.get("usage") or {}
-            self.last_cost = {"cost": env.get("total_cost_usd"),
-                              "tokens": sum(int(usage.get(k, 0) or 0) for k in (
-                                  "input_tokens", "output_tokens",
-                                  "cache_creation_input_tokens", "cache_read_input_tokens"))}
-            return str(env.get("result") or "")
-        except (json.JSONDecodeError, AttributeError):
+        env = _final_envelope(proc.stdout or "")
+        if env is None:
             return proc.stdout or ""
+        breakdown = usage_meter.token_breakdown(env.get("usage") or {})
+        self.last_cost = {"cost": env.get("total_cost_usd"),
+                          "turns": env.get("num_turns"),
+                          "tokens": breakdown.get("tokens"),
+                          "usage": breakdown}
+        return str(env.get("result") or "")
+
+    def _write_transcript(self, raw: str) -> None:
+        """Keep the run's event feed. Best-effort and overwriting: this is a debugging
+        window into the last beat per program, not an archive — the durable per-call
+        numbers already live in the run ledger."""
+        path = self._transcript_path
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _ignore_feeds(path.parent)
+            path.write_text(raw)
+        except OSError:
+            pass
 
     def run(self, context: PMContext) -> PMCycleOutput:
         prompt = render_prompt(context)
+        # Stamp size BEFORE invoking and clear the previous call's cost: a call that
+        # raises must report its own prompt and no cost at all, never the last good
+        # call's numbers.
+        self.last_prompt_bytes = len(prompt)
+        self.last_cost = None
+        # One transcript per program, beside that program's pm lock.
+        self._transcript_path = (self.transcript_dir / f"pm-{context.program_id}.out"
+                                 if self.transcript_dir else None)
         # Injected invokes (tests) may take fewer args; degrade prompt+model+cwd ->
         # prompt+model -> prompt so the seam stays easy to fake.
         try:
