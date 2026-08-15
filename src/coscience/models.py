@@ -146,6 +146,7 @@ class Artifact:
     versions: list[ArtifactVersion] = field(default_factory=list)
     threads: list[dict] = field(default_factory=list)  # feedback threads (target "pm")
     archived: bool = False               # whole-artifact discard (reversible)
+    tags: list[str] = field(default_factory=list)      # user-assigned labels for filtering
 
 
 @dataclass

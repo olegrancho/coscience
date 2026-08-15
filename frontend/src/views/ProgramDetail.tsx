@@ -398,20 +398,19 @@ export default function ProgramDetail() {
       </Card>
 
       <Card padding="lg" radius="md" style={cardStyle}>
-        <div className="eyebrow" style={{ marginBottom: 12 }}>artifacts · {artifacts.data?.length ?? 0}</div>
+        <Group justify="space-between" align="center" mb={12}>
+          <div className="eyebrow">artifacts · {artifacts.data?.length ?? 0}</div>
+          <Link to={`/programs/${id}/artifacts`} className="view" style={{ fontSize: 13 }}>open artifacts →</Link>
+        </Group>
         {!artifacts.data || artifacts.data.length === 0 ? (
           <Text size="sm" c="dimmed">No artifacts yet.</Text>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
             {artifacts.data.map((a) => (
-              // An artifact being edited in a chat lives there until Release, so go
-              // straight to it — the artifact page would only redirect anyway.
               <Link key={a.id} style={{ textDecoration: "none", color: "inherit" }}
                     to={liveChatId(a.lock)
                       ? `/programs/${id}/chat?c=${liveChatId(a.lock)}`
                       : `/programs/${id}/artifacts/${a.id}`}>
-                {/* The excerpt rides in the tooltip: a glance at a document's opening
-                    without spending card height on it, the way a figure spends none. */}
                 <Card withBorder padding="sm" radius="md" style={{ height: "100%" }}
                       title={a.excerpt?.trim() ? a.excerpt.replace(/^#+\s*/gm, "") : undefined}>
                   <Group justify="space-between" align="flex-start" wrap="nowrap" gap={6}>
@@ -427,6 +426,9 @@ export default function ProgramDetail() {
                       <Group gap={6} wrap="wrap">
                         <Badge size="xs" color="machine" variant="light">{a.kind}</Badge>
                         {a.archived && <Badge size="xs" color="gray" variant="light">archived</Badge>}
+                        {(a.tags ?? []).map((t) => (
+                          <Badge key={t} size="xs" color="grape" variant="light">{t}</Badge>
+                        ))}
                       </Group>
                       <Text size="xs" c="dimmed" mt={8} className="mono">
                         {a.current || "—"} · {a.version_count} version{a.version_count === 1 ? "" : "s"}

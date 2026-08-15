@@ -80,6 +80,10 @@ class ArtifactCommentIn(BaseModel):
     thread_id: str = ""
 
 
+class ArtifactTagsIn(BaseModel):
+    tags: list[str]
+
+
 class SprintPatch(BaseModel):
     goals: str | None = None
     plan: list[str] | None = None
@@ -525,6 +529,14 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
 
+    @api.get("/programs/{program_id}/artifacts/{aid}/versions/{vid}/files")
+    def list_artifact_version_files(program_id: str, aid: str, vid: str,
+                                    user: "auth.User | None" = Depends(current_user)) -> list[str]:
+        try:
+            return service._artifact_version_files(program_id, aid, vid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
+
     # {name:path}: a document artifact keeps its figures in a subdirectory, so a
     # version's file names are relative paths ("figures/fig1.png"). Without the
     # converter a nested name never matched and read as "file not found"; the guard
@@ -617,6 +629,22 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
                                  user: "auth.User | None" = Depends(current_user)) -> dict:
         try:
             return service.set_artifact_version_archived(program_id, aid, vid, body.archived)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
+
+    @api.get("/programs/{program_id}/artifact-tags")
+    def list_artifact_tags(program_id: str,
+                           user: "auth.User | None" = Depends(current_user)) -> list[str]:
+        try:
+            return service.list_artifact_tags(program_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.post("/programs/{program_id}/artifacts/{aid}/tags")
+    def set_artifact_tags(program_id: str, aid: str, body: ArtifactTagsIn,
+                          user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.set_artifact_tags(program_id, aid, body.tags)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
 

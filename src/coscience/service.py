@@ -1215,6 +1215,7 @@ class Service:
                 "id": a.id, "title": a.title, "kind": a.kind, "current": a.current,
                 "archived": a.archived, "lock": a.lock,
                 "version_count": sum(1 for v in a.versions if not v.archived),
+                "tags": list(a.tags),
                 # Enough for the overview to draw a thumbnail without a request per
                 # card: the file names (the caller picks the image) and, for text
                 # kinds, the opening of the document.
@@ -1290,7 +1291,7 @@ class Service:
         a = self.substrate.load_artifact(program_id, aid)
         return {
             "id": a.id, "program": program_id, "title": a.title, "kind": a.kind,
-            "current": a.current, "archived": a.archived, "lock": a.lock,
+            "current": a.current, "archived": a.archived, "lock": a.lock, "tags": list(a.tags),
             "versions": [
                 {"id": v.id, "parent": v.parent, "created_at": v.created_at,
                  "created_by": v.created_by, "archived": v.archived, "note": v.note}
@@ -1388,6 +1389,23 @@ class Service:
         artifacts.archive_version(self.substrate, program_id, aid, vid, archived)
         self.substrate.commit(f"artifact {program_id}/{aid}: version {vid} archived={archived}")
         return self.get_artifact(program_id, aid)
+
+    def set_artifact_tags(self, program_id: str, aid: str, tags: list[str]) -> dict:
+        self._require_program(program_id)
+        if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():
+            raise NotFoundError(aid)
+        a = self.substrate.load_artifact(program_id, aid)
+        a.tags = sorted(set(t.strip() for t in tags if t.strip()))
+        self.substrate.save_artifact(a)
+        self.substrate.commit(f"artifact {program_id}/{aid}: tags={a.tags}")
+        return self.get_artifact(program_id, aid)
+
+    def list_artifact_tags(self, program_id: str) -> list[str]:
+        self._require_program(program_id)
+        tags: set[str] = set()
+        for a in self.substrate.iter_artifacts(program_id, include_archived=True):
+            tags.update(a.tags)
+        return sorted(tags)
 
     def _load_artifact(self, program_id: str, aid: str):
         if not (self.substrate.artifact_dir(program_id, aid) / "meta.md").is_file():

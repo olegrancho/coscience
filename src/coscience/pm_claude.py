@@ -353,10 +353,10 @@ Run the program by curating ideas, not by piling on sprints:
   useful, release it, and releasing means the id is in release_ids, not a sentence in the
   report saying you released it.
 - ARTIFACTS are the program's deliverables — the durable output a reader actually wants
-  (reports, datasets, figures, pages). Curate them the way you curate sprints and ideas:
-  on your own initiative, not only when a human asks. If the program has produced
-  something worth keeping and it is not an artifact yet, make it one. Two routes, and
-  picking the right one matters:
+  (reports, datasets, figures, pages). Create artifacts ONLY when a human has explicitly
+  requested one — through feedback, an instruction, or an artifact thread. Do NOT create
+  artifacts on your own initiative; artifact creation should be deliberate, not automatic.
+  When a human does ask for an artifact, two routes, and picking the right one matters:
   * ADOPT (adopt_artifacts) — for output that ALREADY EXISTS. It lands immediately: no
     sprint, no human approval, no compute, and it does NOT touch the sprint cap. Use it
     to promote a finished file your working directory already holds (a report a completed
