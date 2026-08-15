@@ -324,7 +324,8 @@ export const api = {
       body: JSON.stringify({ paused }),
     }).then(j<Ledger>),
   getUsage: () => fetch("/api/usage").then(j<Usage>),
-  listArtifacts: (pid: string) => fetch(`/api/programs/${pid}/artifacts`).then(j<ArtifactRow[]>),
+  listArtifacts: (pid: string, includeArchived = false) =>
+    fetch(`/api/programs/${pid}/artifacts${includeArchived ? "?include_archived=true" : ""}`).then(j<ArtifactRow[]>),
   getArtifact: (pid: string, aid: string) =>
     fetch(`/api/programs/${pid}/artifacts/${aid}`).then(j<ArtifactDetailT>),
   readArtifactFile: (pid: string, aid: string, vid: string, name: string) =>

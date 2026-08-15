@@ -519,8 +519,8 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=404, detail=f"result not found: {result_id}")
 
     @api.get("/programs/{program_id}/artifacts")
-    def list_artifacts(program_id: str) -> list[dict]:
-        return service.list_artifacts(program_id)
+    def list_artifacts(program_id: str, include_archived: bool = False) -> list[dict]:
+        return service.list_artifacts(program_id, include_archived=include_archived)
 
     @api.get("/programs/{program_id}/artifacts/{aid}")
     def get_artifact(program_id: str, aid: str) -> dict:

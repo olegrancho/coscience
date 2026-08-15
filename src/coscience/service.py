@@ -1207,9 +1207,9 @@ class Service:
 
     _THUMB_CHARS = 240          # enough for an overview card, not a second copy of the doc
 
-    def list_artifacts(self, program_id: str) -> list[dict]:
+    def list_artifacts(self, program_id: str, include_archived: bool = False) -> list[dict]:
         out = []
-        for a in self.substrate.iter_artifacts(program_id):
+        for a in self.substrate.iter_artifacts(program_id, include_archived=include_archived):
             files = self._artifact_version_files(program_id, a.id, a.current) if a.current else []
             out.append({
                 "id": a.id, "title": a.title, "kind": a.kind, "current": a.current,

@@ -1,4 +1,4 @@
-import { Badge, Card, Group, Loader, Stack, Text, TextInput } from "@mantine/core";
+import { Badge, Button, Card, Group, Loader, Stack, Text, TextInput } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -26,7 +26,7 @@ function ArtifactCard({ pid, a }: { pid: string; a: ArtifactRow }) {
 
   return (
     <Link to={to} style={{ textDecoration: "none", color: "inherit" }}>
-      <Card withBorder padding="md" radius="md" style={{ height: "100%" }}>
+      <Card withBorder padding="md" radius="md" style={{ height: "100%", opacity: a.archived ? 0.55 : 1 }}>
         <Group justify="space-between" align="flex-start" wrap="nowrap" gap={8}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <Group gap={8} align="center" wrap="nowrap">
@@ -39,7 +39,7 @@ function ArtifactCard({ pid, a }: { pid: string; a: ArtifactRow }) {
             </Group>
             <Group gap={6} wrap="wrap" mt={6}>
               <Badge size="xs" color="machine" variant="light">{a.kind}</Badge>
-              {a.archived && <Badge size="xs" color="gray" variant="light">archived</Badge>}
+              {a.archived && <Badge size="xs" color="gray" variant="light">discarded</Badge>}
               {(a.tags ?? []).map((t) => (
                 <Badge key={t} size="xs" color="grape" variant="light">{t}</Badge>
               ))}
@@ -62,9 +62,15 @@ export default function ArtifactsView() {
   const { id = "" } = useParams();
   const [search, setSearch] = useState("");
   const [activeTags, setActiveTags] = useState<Set<string>>(new Set());
+  const [showDiscarded, setShowDiscarded] = useState(false);
 
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
-  const artifacts = useQuery({ queryKey: ["artifacts", id], queryFn: () => api.listArtifacts(id) });
+  const artifacts = useQuery({ queryKey: ["artifacts", id, false], queryFn: () => api.listArtifacts(id) });
+  const discarded = useQuery({
+    queryKey: ["artifacts", id, true],
+    queryFn: () => api.listArtifacts(id, true),
+    enabled: showDiscarded,
+  });
   const allTags = useQuery({ queryKey: ["artifact-tags", id], queryFn: () => api.listArtifactTags(id) });
 
   if (artifacts.isLoading) return <Loader color="machine" />;
@@ -80,12 +86,20 @@ export default function ArtifactsView() {
     });
   };
 
+  const activeIds = new Set(artifacts.data.map((a) => a.id));
+  const discardedOnly = showDiscarded
+    ? (discarded.data ?? []).filter((a) => !activeIds.has(a.id))
+    : [];
+
   const lc = search.toLowerCase();
-  const filtered = artifacts.data.filter((a) => {
+  const applyFilters = (list: ArtifactRow[]) => list.filter((a) => {
     if (search && !(a.title || a.id).toLowerCase().includes(lc)) return false;
     if (activeTags.size > 0 && !(a.tags ?? []).some((t) => activeTags.has(t))) return false;
     return true;
   });
+
+  const filtered = applyFilters(artifacts.data);
+  const filteredDiscarded = applyFilters(discardedOnly);
 
   const title = program.data?.title || id;
   const tags = allTags.data ?? [];
@@ -136,6 +150,20 @@ export default function ArtifactsView() {
           {filtered.map((a) => <ArtifactCard key={a.id} pid={id} a={a} />)}
         </Stack>
       )}
+
+      {showDiscarded && filteredDiscarded.length > 0 && (
+        <Stack gap={10}>
+          <div className="eyebrow">discarded</div>
+          {filteredDiscarded.map((a) => <ArtifactCard key={a.id} pid={id} a={a} />)}
+        </Stack>
+      )}
+
+      <Button variant="subtle" color="dimmed" size="xs"
+        style={{ alignSelf: "flex-start" }}
+        loading={showDiscarded && discarded.isLoading}
+        onClick={() => setShowDiscarded((v) => !v)}>
+        {showDiscarded ? "Hide discarded artifacts" : "Show discarded artifacts"}
+      </Button>
     </Stack>
   );
 }

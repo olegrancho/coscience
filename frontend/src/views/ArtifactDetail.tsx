@@ -142,16 +142,21 @@ function VersionRow(
         </Group>
       </button>
       <Group gap={4} wrap="nowrap">
-        {!isCurrent && (
+        {viewing && (
           isViewing ? (
             <Button size="xs" variant="subtle" color="signal" onClick={() => onView(null)}>
               Back
             </Button>
           ) : (
-            <Button size="xs" variant="subtle" onClick={() => onView(row.v.id)}>
+            <Button size="xs" variant="subtle" onClick={() => isCurrent ? onView(null) : onView(row.v.id)}>
               View
             </Button>
           )
+        )}
+        {!viewing && !isCurrent && (
+          <Button size="xs" variant="subtle" onClick={() => onView(row.v.id)}>
+            View
+          </Button>
         )}
         {!isCurrent && (
           <Button
