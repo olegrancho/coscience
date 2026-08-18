@@ -65,7 +65,7 @@ export default function Overview() {
   for (const s of allSprints) byState[s.status] = (byState[s.status] ?? 0) + 1;
   const activeP = progs.filter((p) => p.status === "active").length;
   const pausedP = progs.filter((p) => p.status === "paused").length;
-  const recent = (results.data ?? []).slice(-4).reverse();
+  const recent = [...(results.data ?? [])].sort((a, b) => (b.completed_at ?? 0) - (a.completed_at ?? 0)).slice(0, 4);
 
   const SCALE_HINT: Record<string, string> = { light: "light", moderate: "moderate", heavy: "heavy" };
 

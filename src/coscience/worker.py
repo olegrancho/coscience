@@ -50,13 +50,20 @@ def _read_cost(sprint_dir) -> dict:
 
 
 def _usage_ok_from_output(out: str, now: "datetime.datetime | None" = None,
-                          threshold: float = 100.0, max_cache_age: float = 900.0) -> bool:
+                          threshold: float = 100.0, weekly_threshold: float | None = None,
+                          max_cache_age: float = 900.0) -> bool:
     """Decide launch-safety from usage.py's line. Fails OPEN on a STALE cache: the
     script only serves cached data when its live fetch fails, and a cached reading
     reflects a window that may have RESET since — trusting its percentage would pin
     the pause past the reset (agents never respawning). If the cache is older than
     max_cache_age, ignore the percentage and allow launching (a dead-on-arrival
-    agent is cheaply detected and retried). Fresh/live readings are trusted."""
+    agent is cheaply detected and retried). Fresh/live readings are trusted.
+
+    `threshold` gates the 5-hour window. `weekly_threshold` (defaults to
+    `threshold` when None) gates the weekly window independently — agent launches
+    can tolerate higher weekly usage than the 5h window."""
+    if weekly_threshold is None:
+        weekly_threshold = threshold
     m = re.search(r"\[cached (\S+)\]", out)
     if m:
         now = now or datetime.datetime.now(datetime.timezone.utc)
@@ -67,8 +74,16 @@ def _usage_ok_from_output(out: str, now: "datetime.datetime | None" = None,
                 return True
         except (ValueError, TypeError):
             return True                                   # unparseable stamp -> don't pin
+    # Parse per-window percentages: "5h: 53% ... | week: 91% ..."
+    m5 = re.search(r"5h:\s*(\d+)%", out)
+    mw = re.search(r"week:\s*(\d+)%", out)
+    if m5 or mw:
+        pct_5h = float(m5.group(1)) if m5 else 0.0
+        pct_wk = float(mw.group(1)) if mw else 0.0
+        return pct_5h < threshold and pct_wk < weekly_threshold
+    # Fallback: unlabeled percentages — apply the stricter threshold to max.
     pcts = [float(x) for x in re.findall(r"(\d+)%", out)]
-    return max(pcts, default=0.0) < threshold
+    return max(pcts, default=0.0) < min(threshold, weekly_threshold)
 
 
 # Usage is a fixed subscription window, not a bill: the scarce thing is the share
@@ -76,15 +91,17 @@ def _usage_ok_from_output(out: str, now: "datetime.datetime | None" = None,
 # early and leave the top band for them; human-triggered paths keep the full 100.
 AUTONOMOUS_THRESHOLD = 80.0     # PM loop beats
 WORKER_THRESHOLD = 90.0         # worker agent launches
+WEEKLY_WORKER_THRESHOLD = 99.0  # weekly window is less scarce — don't block agents over it
 
 
-def claude_usage_ok(threshold: float = 100.0, *, fail_open: bool = True,
-                    repo_root=None) -> bool:
-    """True if it's safe to launch a Claude agent at this threshold — neither the
-    5-hour nor the weekly window has passed it. `fail_open` decides what an
-    unreadable usage script means: True for human-triggered work (never block a
-    person on a missing dotfile), False for autonomous loops (an unmetered loop is
-    exactly what burns a window unattended).
+def claude_usage_ok(threshold: float = 100.0, *, weekly_threshold: float | None = None,
+                    fail_open: bool = True, repo_root=None) -> bool:
+    """True if it's safe to launch a Claude agent at this threshold — the 5-hour
+    window hasn't passed `threshold` and the weekly window hasn't passed
+    `weekly_threshold`. `fail_open` decides what an unreadable usage script means:
+    True for human-triggered work (never block a person on a missing dotfile),
+    False for autonomous loops (an unmetered loop is exactly what burns a window
+    unattended).
 
     `repo_root` enables the human pause check, and is tested FIRST: a paused platform
     starts no new Claude session whatever the windows say, and polling usage.py to
@@ -97,7 +114,7 @@ def claude_usage_ok(threshold: float = 100.0, *, fail_open: bool = True,
                              capture_output=True, text=True, timeout=10).stdout
     except Exception:
         return fail_open
-    return _usage_ok_from_output(out, threshold=threshold)
+    return _usage_ok_from_output(out, threshold=threshold, weekly_threshold=weekly_threshold)
 
 
 class Worker:
@@ -203,7 +220,9 @@ class Worker:
 
     def _usage_ok(self) -> bool:
         return (self._usage_gate or
-                (lambda: claude_usage_ok(WORKER_THRESHOLD, fail_open=False,
+                (lambda: claude_usage_ok(WORKER_THRESHOLD,
+                                         weekly_threshold=WEEKLY_WORKER_THRESHOLD,
+                                         fail_open=False,
                                          repo_root=self.substrate.repo_root)))()
 
     def _read_job_json(self, sprint_dir):
