@@ -189,6 +189,11 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workdir }),
     }).then(j<{ id: string; workdir: string; exists: boolean }>),
+  setProgramGoals: (id: string, goals: string) =>
+    fetch(`/api/programs/${id}/goals`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ goals }),
+    }).then(j<Program>),
   setProgramInstructions: (id: string, text: string) =>
     fetch(`/api/programs/${id}/instructions`, {
       method: "POST", headers: { "Content-Type": "application/json" },

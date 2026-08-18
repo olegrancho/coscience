@@ -629,6 +629,17 @@ class Service:
         exists = bool(wd) and os.path.isdir(os.path.expanduser(wd))
         return {"id": program_id, "workdir": wd, "exists": exists}
 
+    def set_program_goals(self, program_id: str, goals: str) -> dict:
+        goals = str(goals or "").strip()
+        if not goals:
+            raise ValueError("goals is required")
+        self._require_program(program_id)
+        program = self.substrate.load_program(program_id)
+        program.goals = goals
+        self.substrate.save_program(program)
+        self.substrate.commit(f"program {program_id}: goals updated")
+        return self.get_program(program_id)
+
     def set_program_instructions(self, program_id: str, text: str) -> dict:
         """Replace this program's standing house rules for the PM. They land in every
         PM prompt from the next cycle on, and the edit itself wakes the PM (the

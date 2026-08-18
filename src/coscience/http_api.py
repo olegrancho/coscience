@@ -132,6 +132,10 @@ class ProgramInstructionsIn(BaseModel):
     text: str = ""                 # "" clears them
 
 
+class ProgramGoalsIn(BaseModel):
+    goals: str
+
+
 class DirCreateIn(BaseModel):
     parent: str
     name: str
@@ -804,6 +808,15 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.set_program_instructions(program_id, body.text)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.post("/programs/{program_id}/goals")
+    def set_program_goals(program_id: str, body: ProgramGoalsIn) -> dict:
+        try:
+            return service.set_program_goals(program_id, body.goals)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     @api.post("/programs/{program_id}/replan")
     def replan(program_id: str) -> dict:

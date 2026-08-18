@@ -15,13 +15,14 @@ interface Props {
 /** Every program setting in one dialog. The same settings stay editable inline on
  *  the program page — this is a second door to the same state, not a replacement. */
 export default function ProgramSettingsModal({ opened, onClose, program, onSaved }: Props) {
+  const [goals, setGoals] = useState("");
   const [model, setModel] = useState("");
   const [workdir, setWorkdir] = useState("");
   const [maxProposed, setMaxProposed] = useState<number | string>("");
   const [instructions, setInstructions] = useState("");
   const [saving, setSaving] = useState(false);
   const [browsing, setBrowsing] = useState(false);
-  const seeded = useRef({ model: "", workdir: "", maxProposed: 0, instructions: "" });
+  const seeded = useRef({ goals: "", model: "", workdir: "", maxProposed: 0, instructions: "" });
   const wasOpened = useRef(false);
 
   // Seed on the false->true open transition only. The program is refetched by a
@@ -29,12 +30,13 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
   // `program` in the deps) would silently discard whatever the user is mid-typing.
   useEffect(() => {
     if (opened && !wasOpened.current) {
+      setGoals(program.goals);
       setModel(program.pm_model);
       setWorkdir(program.workdir);
       setMaxProposed(program.max_proposed || "");
       setInstructions(program.instructions);
       seeded.current = {
-        model: program.pm_model, workdir: program.workdir,
+        goals: program.goals, model: program.pm_model, workdir: program.workdir,
         maxProposed: program.max_proposed, instructions: program.instructions,
       };
     }
@@ -55,6 +57,7 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
     setSaving(true);
     try {
       let workdirResult: { workdir: string; exists: boolean } | undefined;
+      if (goals.trim() !== was.goals) await api.setProgramGoals(program.id, goals.trim());
       if (model !== was.model) await api.setProgramModel(program.id, model);
       if (folder !== was.workdir) workdirResult = await api.setProgramWorkdir(program.id, folder);
       if (cap !== was.maxProposed) await api.setProgramMaxProposed(program.id, cap);
@@ -79,6 +82,16 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
   return (
     <Modal opened={opened} onClose={onClose} title="Program settings" size="lg">
       <Stack gap="md">
+        <Textarea
+          label="Goals"
+          aria-label="program goals"
+          description="What this program is trying to achieve."
+          autosize
+          minRows={2}
+          value={goals}
+          onChange={(e) => setGoals(e.currentTarget.value)}
+        />
+
         <Group gap={8} align="center">
           <ModelSelect value={model} onChange={setModel} label="planner model" />
         </Group>

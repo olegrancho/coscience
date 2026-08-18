@@ -310,8 +310,9 @@ export default function ProgramDetail() {
         // newest-first). Active statuses are always shown in full.
         const CAPPED = new Set(["done", "canceled"]);
         const CAP = 3;
-        const filtered = statusFilter === "all"
-          ? p.sprints : p.sprints.filter((s) => s.status === statusFilter);
+        const filtered = (statusFilter === "all"
+          ? p.sprints : p.sprints.filter((s) => s.status === statusFilter))
+          .slice().sort((a, b) => (b.last_status_at ?? 0) - (a.last_status_at ?? 0));
         const seen: Record<string, number> = {};
         const hidden = new Set<string>();
         if (!showAll) {

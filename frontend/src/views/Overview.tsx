@@ -54,6 +54,12 @@ export default function Overview() {
   const stalled = Object.entries(groups).filter(([pid]) => status[pid] && status[pid] !== "active");
   const waiting = active.reduce((n, [, list]) => n + list.length, 0);
 
+  const approvedGroups: Record<string, SprintRow[]> = {};
+  for (const s of allSprints.filter((s) => s.status === "approved")) {
+    (approvedGroups[programOf(s)] ??= []).push(s);
+  }
+  const approvedCount = Object.values(approvedGroups).reduce((n, l) => n + l.length, 0);
+
   const runningGroups: Record<string, SprintRow[]> = {};
   for (const s of allSprints.filter((s) => s.status === "executing")) {
     (runningGroups[programOf(s)] ??= []).push(s);
@@ -141,6 +147,34 @@ export default function Overview() {
         </div>
       )}
 
+      {approvedCount > 0 && (
+        <div style={{ marginTop: "var(--mantine-spacing-lg)" }}>
+          <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 0 4px" }}>
+            <span className="eyebrow" style={{ color: "var(--st-approved)", fontWeight: 600 }}>approved</span>
+            <Text className="mono" fw={600} style={{ color: "var(--st-approved)" }}>{approvedCount} {approvedCount === 1 ? "experiment" : "experiments"}</Text>
+          </div>
+          {Object.entries(approvedGroups).map(([pid, list]) => (
+            <div className="group" key={pid}>
+              <div className="group-head">
+                <span className="name">{title[pid] ?? pid}</span>
+                <span className="eyebrow">program</span>
+              </div>
+              <div className="group-body">
+                {list.map((s) => (
+                  <div key={s.id} onClick={() => nav(`/sprints/${s.id}`)}
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 13px", background: "var(--card)", border: "1px solid var(--hairline)", borderRadius: 10, cursor: "pointer" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <Text size="sm" truncate>{sprintTitle[s.id]}</Text>
+                    </div>
+                    <StatusBadge status="approved" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {runningCount > 0 && (
         <div style={{ marginTop: "var(--mantine-spacing-lg)" }}>
           <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 0 4px" }}>
@@ -182,6 +216,17 @@ export default function Overview() {
           <div className="eyebrow" style={{ marginBottom: 12 }}>experiments</div>
           <Text style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 30, fontWeight: 600, lineHeight: 1 }}>{allSprints.length}</Text>
           <div style={{ marginTop: 12 }}><StateBar counts={byState} /></div>
+          <Text size="xs" c="dimmed" mt={6}>
+            {[
+              ["done", "completed"],
+              ["approved", "approved"],
+              ["queued", "queued"],
+              ["executing", "running"],
+            ]
+              .filter(([k]) => byState[k])
+              .map(([k, label]) => `${byState[k]} ${label}`)
+              .join(" · ")}
+          </Text>
         </Card>
         <Card padding="lg" radius="md" style={{ border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" }}>
           <div className="eyebrow" style={{ marginBottom: 12 }}>compute</div>
