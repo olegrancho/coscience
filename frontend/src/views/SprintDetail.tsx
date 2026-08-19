@@ -1,7 +1,7 @@
 import { ActionIcon, Button, Card, Group, Loader, Menu, SegmentedControl, SimpleGrid, Stack, Text, Textarea, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
@@ -9,6 +9,7 @@ import { FeedbackThread } from "../components/FeedbackThread";
 import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
 import { AbsTime, BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, ZoomableImg, isImageName, voterId } from "../components/ui";
+import { markSeen } from "../sprintSeen";
 import SprintEditModal from "../components/SprintEditModal";
 import { useMe, useIsMine, UserChip, OTHER_SHADE } from "../auth";
 
@@ -189,6 +190,8 @@ export default function SprintDetail() {
   const prog = sprint.data?.program ?? programOf(id);
   const program = useQuery({ queryKey: ["program", prog], queryFn: () => api.getProgram(prog), enabled: !!prog });
   const refresh = () => qc.invalidateQueries({ queryKey: ["sprint", id] });
+
+  useEffect(() => { markSeen(id); }, [id]);
 
   if (sprint.isLoading) return <Loader color="machine" />;
   if (sprint.error || !sprint.data) {

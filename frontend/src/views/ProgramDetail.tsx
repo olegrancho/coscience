@@ -1,7 +1,7 @@
 import { ActionIcon, Badge, Button, Card, Group, Loader, Stack, Text, Textarea, TextInput, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { type Components } from "react-markdown";
 import Md from "../components/Md";
@@ -13,6 +13,7 @@ import ProposeSprintModal from "../components/ProposeSprintModal";
 import ProgramSettingsModal from "../components/ProgramSettingsModal";
 import LineageCard from "../components/LineageCard";
 import type { ArtifactRow } from "../api";
+import { isUnseen, seedIfNew } from "../sprintSeen";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
@@ -59,6 +60,10 @@ export default function ProgramDetail() {
     qc.invalidateQueries({ queryKey: ["ideas", id] });
     qc.invalidateQueries({ queryKey: ["sprints"] });
   };
+
+  useEffect(() => {
+    if (program.data) seedIfNew(program.data.sprints);
+  }, [program.data]);
 
   if (program.isLoading) return <Loader color="machine" />;
   if (program.error || !program.data) {
@@ -349,6 +354,7 @@ export default function ProgramDetail() {
               <Stack gap={2}>
                 {shown.map((s) => (
                   <div key={s.id}
+                    className={isUnseen(s.id, s.last_status_at) ? "sprint-unseen" : undefined}
                     style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 6px", borderBottom: "1px solid var(--hairline)" }}>
                     <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
                       <Link to={`/sprints/${s.id}`} style={{ minWidth: 0, textDecoration: "none", color: "inherit" }}>

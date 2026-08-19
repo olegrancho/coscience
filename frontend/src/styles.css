@@ -314,7 +314,19 @@ a { color: inherit; }
   outline-offset: 2px;
 }
 
+/* ── unseen sprint: status changed since the user last viewed it ── */
+.sprint-unseen {
+  background: color-mix(in srgb, var(--machine) 10%, var(--card));
+  border-left: 3px solid var(--machine);
+  margin-left: -3px;
+  animation: unseen-pulse 2s ease-in-out 3;
+}
+@keyframes unseen-pulse {
+  50% { background: color-mix(in srgb, var(--machine) 20%, var(--card)); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .heartbeat::after { animation: none; }
+  .sprint-unseen { animation: none; }
   * { scroll-behavior: auto !important; }
 }
