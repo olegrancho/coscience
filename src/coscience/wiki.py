@@ -8,6 +8,8 @@ single-writer property is what makes the agent's merge-first behaviour safe."""
 from __future__ import annotations
 
 import os
+import subprocess
+from pathlib import Path
 from typing import Callable
 
 from coscience import wiki_store
@@ -127,10 +129,109 @@ def _lint_report(substrate, program) -> str:
 
 
 def _dirty_paths(substrate) -> list[str]:
-    """Task 10 implements the containment check; a stub keeps Task 9 runnable."""
-    return []
+    """Repo-relative paths git reports as changed. Best-effort: a substrate with
+    no git repo yields [], which disables the containment check rather than
+    blocking every run."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(substrate.repo_root), "status", "--porcelain"],
+            capture_output=True, text=True, check=False, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    paths = []
+    for line in out.splitlines():
+        entry = line[3:].strip().strip('"')
+        if " -> " in entry:                      # a rename: take the destination
+            entry = entry.split(" -> ", 1)[1]
+        if entry:
+            paths.append(entry)
+    return paths
+
+
+def _escaped(substrate, program_id: str, before: list[str], after: list[str]) -> list[str]:
+    """Paths that became dirty during the run and lie outside the program's wiki.
+
+    Runs use --dangerously-skip-permissions, so cwd is a convention rather than a
+    sandbox. We detect rather than revert: reverting would risk destroying a
+    concurrent sprint's legitimate work, and a wiki run is never worth that."""
+    allowed = (f"programs/{program_id}/wiki/", f"programs/{program_id}/.wiki/")
+    new = [p for p in after if p not in set(before)]
+    return sorted(p for p in new if not p.startswith(allowed))
 
 
 def _collect(substrate, program, now, agent, state, run) -> str:
-    """Task 10 implements this."""
-    return "wiki: running"
+    run_id, kind = run.get("id", ""), run.get("kind", "ingest")
+    run_dir = wiki_store.run_dir(substrate, program.id, run_id)
+    if agent.is_running(run.get("token", "")):
+        return "wiki: running"
+
+    status, report = agent.collect(run_dir)
+    if status == "running":
+        # The process is gone but no exit code was written: the shell was killed
+        # between the two halves of the launch command. One grace window covers a
+        # slow filesystem; past it the run is dead, and without this deadline the
+        # program's wiki would wedge here silently forever.
+        if now - float(run.get("started_at") or 0.0) < collect_grace():
+            return "wiki: collecting"
+        status = "failed"
+
+    batch = list(run.get("batch") or [])
+    escaped: list[str] = []
+    if status == "ok":
+        escaped = _escaped(substrate, program.id,
+                           list(run.get("dirty_before") or []), _dirty_paths(substrate))
+
+    state["run"] = None
+    state["last_run"] = {
+        "id": run_id, "kind": kind, "status": status, "at": now,
+        "pages_created": len(report.get("pages_created") or []),
+        "pages_updated": len(report.get("pages_updated") or []),
+        "notes": str(report.get("notes") or ""),
+        "escaped": escaped,
+    }
+
+    if status == "ok" and escaped:
+        # The batch is deliberately NOT recorded: an agent that wrote outside its
+        # bundle may equally have written the wrong thing inside it.
+        state["last_run"]["status"] = "escaped"
+        substrate.commit(f"wiki {program.id}: {kind} {run_id} wrote outside the bundle")
+        return f"wiki: {kind} ESCAPED — batch not recorded"
+
+    line = f"wiki: {kind} {status}"
+    if status == "ok":
+        objects = {o.oid: o for o in wiki_store.program_objects(substrate, program.id)}
+        for oid in batch:
+            obj = objects.get(oid)
+            state["ingested"][oid] = {
+                "hash": wiki_store.object_hash(obj) if obj else "",
+                "at": now, "run": run_id}
+        if kind == "ingest":
+            state["ingests_since_lint"] = state.get("ingests_since_lint", 0) + 1
+        else:
+            state["ingests_since_lint"] = 0
+            _file_lint_report(substrate, program.id, run_dir, now)
+        state["failures"] = 0
+    else:
+        state["failures"] = state.get("failures", 0) + 1
+        if state["failures"] >= max_failures() and batch:
+            quarantined = list(state.get("quarantined") or [])
+            quarantined += [oid for oid in batch if oid not in quarantined]
+            state["quarantined"] = quarantined
+            state["failures"] = 0
+            line = f"wiki: {kind} quarantined {len(batch)}"
+
+    substrate.commit(f"wiki {program.id}: {kind} {run_id} {status}")
+    return line
+
+
+def _file_lint_report(substrate, program_id: str, run_dir: Path, now: float) -> None:
+    """Move the agent's lint summary into .wiki/lint/<date>.md."""
+    from datetime import datetime, timezone
+    from coscience import wiki_agent
+    text = wiki_agent.read_lint_report(run_dir)
+    if not text.strip():
+        return
+    day = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%d")
+    d = wiki_store.state_dir(substrate, program_id) / "lint"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{day}.md").write_text(text)

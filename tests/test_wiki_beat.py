@@ -12,7 +12,7 @@ class FakeWikiAgent:
     def __init__(self):
         self.launches = []
         self.alive = True
-        self.exit_code = 0
+        self.report = {}
 
     def launch(self, *, kind, program, bundle, run_dir, objects=None, report="",
                model=""):
@@ -25,7 +25,8 @@ class FakeWikiAgent:
         return self.alive
 
     def collect(self, run_dir):
-        return ("ok" if self.exit_code == 0 else "failed"), {}
+        from coscience import wiki_agent
+        return wiki_agent.WikiAgent().collect(run_dir)
 
 
 @pytest.fixture
