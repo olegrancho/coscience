@@ -177,7 +177,16 @@ def ensure_bundle(substrate, program_id: str) -> Path:
 
 
 def page_paths(substrate, program_id: str) -> list[str]:
-    """Bundle-relative paths of every page, sorted. Reserved files are excluded."""
+    """Bundle-relative paths of every page, sorted.
+
+    Reserved names (`wiki_okf.RESERVED`) are reserved at the bundle ROOT —
+    `index.md`, `log.md`, `CLAUDE.md`, `QUESTIONS.md` directly under the
+    bundle — and this walk never visits the root, only the PAGE_DIRS
+    subdirectories. So a stray file using one of those names inside
+    `concepts/`, `entities/`, `syntheses/` or `sources/` is not filtered
+    here: per spec §4's layout there is no legitimate non-root `index.md`,
+    and that anomaly is exactly what `okf/index-frontmatter` exists to
+    surface, which it can only do if the page reaches the linter."""
     bundle = bundle_dir(substrate, program_id)
     out: list[str] = []
     for d in PAGE_DIRS:
@@ -185,8 +194,7 @@ def page_paths(substrate, program_id: str) -> list[str]:
         if not sub.is_dir():
             continue
         for f in sorted(sub.glob("*.md")):
-            if f.name not in wiki_okf.RESERVED:
-                out.append(f"{d}/{f.name}")
+            out.append(f"{d}/{f.name}")
     return out
 
 

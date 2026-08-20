@@ -64,9 +64,11 @@ def _okf_rules(pages: list[wiki_okf.Page]) -> list[Finding]:
 def _page_rules(pages: list[wiki_okf.Page], index_body: str,
                 now: float | None) -> list[Finding]:
     out = []
-    linked = set(wiki_okf.body_links(index_body))
-    for p in pages:
-        linked.update(wiki_okf.body_links(p.body))
+    index_linked = _linked_targets(index_body)
+    # Per-page, so a page's own outbound links can be excluded when testing
+    # that same page — otherwise a page whose only "inbound" link is a
+    # self-link would wrongly count as not-orphaned.
+    page_linked = {p.path: _linked_targets(p.body) for p in pages}
     by_slug: dict[str, list[str]] = {}
     titles: dict[str, str] = {}
 
@@ -77,7 +79,11 @@ def _page_rules(pages: list[wiki_okf.Page], index_body: str,
         stale = _staleness(p, now)
         if stale:
             out.append(Finding("page/stale", "warn", p.path, stale))
-        if not _is_linked(p.path, linked):
+        inbound = set(index_linked)
+        for other_path, targets in page_linked.items():
+            if other_path != p.path:
+                inbound.update(targets)
+        if not _is_linked(p, inbound):
             out.append(Finding("page/orphan", "info", p.path,
                                "no inbound links and absent from index.md"))
         by_slug.setdefault(p.slug, []).append(p.path)
@@ -100,11 +106,24 @@ def _page_rules(pages: list[wiki_okf.Page], index_body: str,
     return out
 
 
-def _is_linked(path: str, linked: set[str]) -> bool:
-    """Links are written bundle-absolute (/concepts/a.md) but may appear
-    relative; accept either rather than crying orphan on a working link."""
-    return any(target.lstrip("/").endswith(path) or target.endswith(path)
-               for target in linked)
+def _linked_targets(body: str) -> set[str]:
+    """Every link target Approach C treats as first-class link substrate:
+    plain markdown links AND `[[wikilinks]]`. A rule that only sees one half
+    of the link surface reports pages orphaned that are perfectly linked."""
+    return set(wiki_okf.body_links(body)) | set(wiki_okf.wikilinks(body))
+
+
+def _is_linked(page: wiki_okf.Page, linked: set[str]) -> bool:
+    """Markdown links are written bundle-absolute (/concepts/a.md) but may
+    appear relative — accept either. Wikilinks are written bare ([[slug]]),
+    so also accept an exact slug match. Whichever form actually appears,
+    don't cry orphan on a working link."""
+    for target in linked:
+        if target.lstrip("/").endswith(page.path) or target.endswith(page.path):
+            return True
+        if target == page.slug:
+            return True
+    return False
 
 
 def _norm(text: str) -> str:
