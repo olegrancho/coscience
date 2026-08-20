@@ -43,6 +43,8 @@ def lint(pages: list[wiki_okf.Page], *, index_body: str = "",
     out += _page_rules(pages, index_body, now)
     out += _link_rules(pages)
     out += _relation_rules(pages)
+    out += _source_rules(pages, objects)
+    out += _trust_rules(pages, previous)
     out.sort(key=lambda f: (_RANK.get(f.severity, 9), f.path, f.rule))
     return out
 
@@ -341,3 +343,82 @@ def _title(pages: list[wiki_okf.Page], path: str) -> str:
         if p.path == path:
             return p.title or p.slug
     return path.rsplit("/", 1)[-1][:-3]
+
+
+HUMAN_NOTES = "Human notes"
+
+
+def _source_rules(pages: list[wiki_okf.Page],
+                  objects: dict[str, str] | None) -> list[Finding]:
+    out = []
+    source_titles = {_norm(p.title): p.path for p in pages if p.type == "Source"}
+    for p in pages:
+        if p.type == "Source" and objects is not None:
+            oid = str(p.extra.get("origin", ""))
+            declared = str(p.extra.get("origin_hash", ""))
+            if not oid:
+                continue
+            current = objects.get(oid)
+            if current is None:
+                out.append(Finding("src/missing", "error", p.path,
+                                   f"origin object `{oid}` no longer exists"))
+            elif declared and declared != current:
+                out.append(Finding("src/hash-drift", "error", p.path,
+                                   f"`{oid}` changed since ingest "
+                                   f"({declared} -> {current})"))
+        elif p.type in ("Concept", "Entity"):
+            # The reference implementation's most common failure: the article
+            # itself becomes a concept, and the wiki fills with pages named after
+            # their sources instead of after ideas.
+            other = source_titles.get(_norm(p.title))
+            if other:
+                out.append(Finding("src/is-concept", "error", p.path,
+                                   f"title matches the source page {other} — a source "
+                                   f"title is never a concept"))
+    return out
+
+
+def _trust_rules(pages: list[wiki_okf.Page],
+                 previous: dict[str, str] | None) -> list[Finding]:
+    out = []
+    for p in pages:
+        if p.status == "stable" and not p.verified:
+            out.append(Finding("trust/unverified-stable", "info", p.path,
+                               "status is stable but nothing has verified it"))
+        if previous is None:
+            continue
+        before = previous.get(p.path)
+        if before is None:
+            continue
+        had = wiki_okf.Page(path=p.path, body=before).has_section(HUMAN_NOTES)
+        if had and not p.has_section(HUMAN_NOTES):
+            out.append(Finding("human-notes/removed", "error", p.path,
+                               "the protected `# Human notes` section was removed"))
+    return out
+
+
+def run_lint(substrate, program_id: str, *, now: float | None = None,
+             fix: bool = False) -> tuple[list[Finding], int]:
+    """Lint a real bundle. The only function here that touches the filesystem;
+    everything above it is pure so the rules can be tested without a substrate.
+
+    With `fix=True` the mechanical fixes are applied and written back first, so
+    the findings returned are what is actually left for a human or an agent."""
+    from coscience import wiki_store
+    pages = wiki_store.iter_pages(substrate, program_id)
+    fixed_count = 0
+    if fix:
+        changed, _ = autofix(pages)
+        for page in changed:
+            wiki_store.write_page(substrate, program_id, page)
+        fixed_count = len(changed)
+    objects = {o.oid: wiki_store.object_hash(o)
+               for o in wiki_store.program_objects(substrate, program_id)}
+    try:
+        index_body = (wiki_store.bundle_dir(substrate, program_id) / "index.md").read_text()
+    except OSError:
+        index_body = ""
+    findings = lint(pages, index_body=index_body, objects=objects,
+                    previous=wiki_store.previous_bodies(substrate, program_id),
+                    now=now)
+    return findings, fixed_count

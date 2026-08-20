@@ -349,6 +349,27 @@ def save_state(substrate, program_id: str, state: dict) -> None:
     (d / "state.json").write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
 
 
+def previous_bodies(substrate, program_id: str) -> dict[str, str]:
+    """Each page's body at git HEAD, keyed by bundle-relative path.
+
+    This is what makes the protected `# Human notes` section enforceable: the
+    only way to know a section was removed is to look at what was there before.
+    Best-effort — no git, no history, no finding."""
+    import subprocess
+    prefix = bundle_dir(substrate, program_id).relative_to(substrate.repo_root).as_posix() + "/"
+    out: dict[str, str] = {}
+    for rel in page_paths(substrate, program_id):
+        try:
+            text = subprocess.run(
+                ["git", "-C", str(substrate.repo_root), "show", f"HEAD:{prefix}{rel}"],
+                capture_output=True, text=True, check=False, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            return out
+        if text.returncode == 0:
+            out[rel] = wiki_okf.parse_page(rel, text.stdout).body
+    return out
+
+
 @contextmanager
 def state_guard(substrate, program_id: str):
     """Yield the program's wiki state under an exclusive repo-level flock, saving

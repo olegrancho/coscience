@@ -101,7 +101,6 @@ def beat(substrate, program, now: float, agent, *,
         run_id = _next_run_id(state)
         run_dir = wiki_store.run_dir(substrate, program.id, run_id)
         bundle = wiki_store.bundle_dir(substrate, program.id)
-        dirty_before = _dirty_paths(substrate)
 
         if due_for_lint:
             kind, batch, objects, report = "lint", [], None, _lint_report(substrate, program)
@@ -110,6 +109,13 @@ def beat(substrate, program, now: float, agent, *,
             chosen = pending[:wiki_batch()]
             objects = [(o, wiki_store.object_hash(o)) for o in chosen]
             batch = [o.oid for o in chosen]
+
+        # Snapshotted here, AFTER _lint_report ran (which now writes autofixed
+        # pages to the bundle via run_lint(fix=True)), not before it. dirty_before
+        # is the collect half's "state of the world before the agent started";
+        # taking it earlier would predate autofix's own writes and attribute them
+        # to the agent's run instead of to the fix step that produced them.
+        dirty_before = _dirty_paths(substrate)
 
         token = agent.launch(kind=kind, program=program, bundle=bundle,
                              run_dir=run_dir, objects=objects, report=report,
@@ -124,8 +130,11 @@ def beat(substrate, program, now: float, agent, *,
 
 
 def _lint_report(substrate, program) -> str:
-    """The machine lint report handed to a lint run. Task 12 replaces this stub."""
-    return ""
+    """The machine report a lint run is handed. The deterministic fixes are
+    applied here, before the agent starts, so its turn goes on judgement calls."""
+    from coscience import wiki_lint
+    findings, _fixed = wiki_lint.run_lint(substrate, program.id, fix=True)
+    return wiki_lint.render_report(findings)
 
 
 def _dirty_paths(substrate) -> list[str]:
