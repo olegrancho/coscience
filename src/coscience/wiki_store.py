@@ -7,7 +7,10 @@ nothing to strip. Everything here touches the substrate filesystem; the thinking
 lives in the pure modules (wiki_okf, wiki_lint, wiki_prompts)."""
 from __future__ import annotations
 
+import fcntl
 import hashlib
+import json
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -311,3 +314,47 @@ def pending_objects(substrate, program_id: str, ingested: dict[str, dict],
         if known != current:
             out.append(obj)
     return out
+
+
+DEFAULT_STATE: dict = {"ingested": {}, "ingests_since_lint": 0, "run": None,
+                       "last_run": None, "failures": 0, "quarantined": []}
+
+
+def load_state(substrate, program_id: str) -> dict:
+    """The program's wiki state, defaults filled in. Never raises: a corrupt
+    state file must not wedge the beat — worst case we re-ingest."""
+    state = {k: (v.copy() if isinstance(v, (dict, list)) else v)
+             for k, v in DEFAULT_STATE.items()}
+    f = state_dir(substrate, program_id) / "state.json"
+    try:
+        loaded = json.loads(f.read_text())
+    except (OSError, ValueError):
+        return state
+    if isinstance(loaded, dict):
+        state.update(loaded)
+    return state
+
+
+def save_state(substrate, program_id: str, state: dict) -> None:
+    d = state_dir(substrate, program_id)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "state.json").write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
+
+
+@contextmanager
+def state_guard(substrate, program_id: str):
+    """Yield the program's wiki state under an exclusive repo-level flock, saving
+    it on a clean exit. The dispatcher and the HTTP process both mutate this, so
+    the lock is the same shape as artifacts._lock_guard — repo-wide rather than
+    per-program, because the contention is negligible and one lock is one thing
+    to reason about."""
+    lockdir = substrate.repo_root / ".coscience"
+    lockdir.mkdir(parents=True, exist_ok=True)
+    with open(lockdir / "wiki.lock", "w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            state = load_state(substrate, program_id)
+            yield state
+            save_state(substrate, program_id, state)
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
