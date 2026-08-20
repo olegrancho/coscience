@@ -5,7 +5,7 @@ import argparse
 import time
 from pathlib import Path
 
-from coscience import artifacts
+from coscience import artifacts, wiki, wiki_lint, wiki_store
 from coscience.claude_executor import ClaudeAgent
 from coscience.dispatcher import CycleReport, Dispatcher
 from coscience.loop_status import LoopStatus
@@ -16,6 +16,7 @@ from coscience.pm_runner import pm_run_once
 from coscience.resources import load_pool
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
+from coscience.wiki_agent import WikiAgent
 from coscience.worker import AUTONOMOUS_THRESHOLD, WEEKLY_WORKER_THRESHOLD, Worker, claude_usage_ok
 
 
@@ -162,6 +163,17 @@ def main(argv: list[str] | None = None) -> int:
     pm.add_argument("--interval", type=float, default=60.0)
     pm.add_argument("--max-rounds", type=int, default=None)
 
+    wk = sub.add_parser("wiki", help="run the program wiki: ingest, lint, status")
+    wk.add_argument("--repo", required=True, type=Path)
+    wk.add_argument("--program", default="", help="limit to one program id")
+    wkmode = wk.add_mutually_exclusive_group()
+    wkmode.add_argument("--once", action="store_true", help="run one beat per program")
+    wkmode.add_argument("--lint", action="store_true",
+                        help="run the deterministic lint and print the report")
+    wkmode.add_argument("--status", action="store_true")
+    wk.add_argument("--fix", action="store_true",
+                    help="with --lint: apply the mechanical fixes")
+
     args = parser.parse_args(argv)
 
     if args.command == "program":
@@ -252,6 +264,44 @@ def main(argv: list[str] | None = None) -> int:
             return pm_beat_line(summaries, reasoned), {"proposed": len(ids)}, reasoned
         _status_loop(LoopStatus("PM", uses_claude=True), _beat,
                      args.interval, args.max_rounds)
+        return 0
+
+    if args.command == "wiki":
+        substrate = Substrate(args.repo)
+        programs = [p for p in substrate.iter_programs()
+                    if not args.program or p.id == args.program]
+
+        if args.status:
+            for program in programs:
+                state = wiki_store.load_state(substrate, program.id)
+                pending = wiki_store.pending_objects(
+                    substrate, program.id, state.get("ingested") or {},
+                    set(state.get("quarantined") or []))
+                run = state.get("run") or {}
+                print(f"{program.id}: pending {len(pending)} · "
+                      f"ingested {len(state.get('ingested') or {})} · "
+                      f"since lint {state.get('ingests_since_lint', 0)} · "
+                      f"quarantined {len(state.get('quarantined') or [])} · "
+                      f"{'running ' + run.get('kind', '') if run else 'idle'}", flush=True)
+            return 0
+
+        if args.lint:
+            worst = 0
+            for program in programs:
+                findings, fixed = wiki_lint.run_lint(substrate, program.id, fix=args.fix)
+                print(f"## {program.id} — fixed {fixed}", flush=True)
+                print(wiki_lint.render_report(findings), flush=True)
+                worst = max(worst, wiki_lint.counts(findings)["error"])
+            if args.fix:
+                substrate.commit("wiki lint: mechanical fixes")
+            return 1 if worst else 0
+
+        agent = WikiAgent()
+        now = time.time()
+        for program in programs:
+            line = wiki.beat(substrate, program, now, agent)
+            if line:
+                print(f"{program.id}: {line}", flush=True)
         return 0
 
     parser.error("unknown command")  # raises SystemExit
