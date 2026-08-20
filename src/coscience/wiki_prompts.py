@@ -1,0 +1,190 @@
+"""Instruction documents for wiki runs. Pure — no IO, no substrate access.
+
+The run is unattended, so everything the agent needs must be in the document:
+the schema, the frozen vocabulary, the rules that bite, the absolute paths of the
+objects to read, and their precomputed hashes. The bundle's own CLAUDE.md loads
+automatically (cwd is the bundle), so this document carries the task, not the
+schema — except where a rule is important enough to say twice."""
+from __future__ import annotations
+
+from pathlib import Path
+
+from coscience.wiki_store import WikiObject
+
+_PROTOCOL = """## Protocol — four passes, each written out before the next begins
+
+1. **Structure map.** Read each object end to end. Write, into
+   `{scratchpad}`, a map of its sections and what each establishes. Do not
+   extract yet.
+2. **Claim-level extraction.** For each object, list every distinct claim,
+   mechanism, parameter, method, named thing and negative result, each with the
+   section it came from. Over-extract: a concept mentioned once is still worth a
+   page; a concept never written down is knowledge lost.
+3. **Relationship triples.** Turn the extraction into `(source, relation,
+   target)` triples using the frozen vocabulary only. Each triple carries a
+   confidence and the source id supporting it.
+4. **Cross-wiki contradiction scan.** Read the existing pages your new material
+   touches. Where the new material contradicts them, record a `contradicts`
+   relation and write a `# Contradictions` section on the page that asserts it.
+   Never silently overwrite the older claim.
+
+Only after all four passes do you write pages.
+"""
+
+_RULES = """## Rules that bite
+
+- **Merge first.** Before creating a page, search `concepts/`, `entities/` and
+  `syntheses/` for an existing page covering the same idea — check titles AND
+  `aliases`. Extend the existing page and add an alias. Near-duplicates are the
+  main way a wiki like this rots.
+- **A source title is never a concept.** "Sprint p3-c14 result" is a source
+  page. The concepts are what it established.
+- **Preserve layered insight.** When you extend a page, keep what is there and
+  add to it. Do not compress an existing page to make room.
+- **Attribute per claim** with markdown footnotes (`[^id]`) tied to an id in the
+  page's `sources` list.
+- **The containment invariant:** every typed relation in `relations` must also be
+  linked from the body as an ordinary markdown link. The frontmatter is a typed
+  overlay on the prose, never a substitute for it.
+- **`# Human notes` is protected.** If a page has that section, reproduce it byte
+  for byte. It is a human's correction and outranks anything you would write.
+"""
+
+_PROHIBITIONS = """## Prohibitions
+
+- Do not write anywhere outside `{bundle}` (and this run's directory,
+  `{run_dir}`). Everything else in the repository belongs to other systems.
+- Do not compute or invent content hashes. The `origin_hash` values are given to
+  you above; copy them exactly. A hash you compute yourself cannot detect drift.
+- Do not start background tasks, long-running processes or anything that would
+  outlive this turn. If the batch is too large to finish, do fewer objects well
+  and say so in the report.
+- Do not delete or empty any page. Propose merges in `report.json`; a human
+  decides.
+- Do not write a `verified:` entry. Trust is recorded by the platform when a
+  human marks a page verified.
+"""
+
+_HOUSEKEEPING = """## Before you finish
+
+1. Update `index.md` so every page you created is reachable from it.
+2. Prepend one line per object to `log.md` (newest first): the date, the object
+   id, and what it added.
+3. Append any genuinely open question to `QUESTIONS.md` under `## Open`.
+4. Write `{run_dir}/report.json`:
+
+```json
+{{"pages_created": ["concepts/a.md"], "pages_updated": ["concepts/b.md"],
+  "objects": ["result:r1"], "notes": "one or two sentences"}}
+```
+"""
+
+
+def _object_block(objects: list[tuple[WikiObject, str]]) -> str:
+    lines = []
+    for obj, digest in objects:
+        paths = "\n".join(f"  - read: `{p}`" for p in obj.paths)
+        lines.append(
+            f"### `{obj.oid}` — {obj.title}\n"
+            f"{paths}\n"
+            f"  - source page to write: `{obj.slug}`\n"
+            f"  - `resource:` value for its frontmatter: `{obj.resource}`\n"
+            f"  - `origin_hash:` value for its frontmatter: `{digest}`\n"
+            f"  - `origin:` value for its frontmatter: `{obj.oid}`\n")
+    return "\n".join(lines)
+
+
+def render_ingest(program, bundle: Path, objects: list[tuple[WikiObject, str]],
+                  run_dir: Path) -> str:
+    """The full ingest instruction document, written to the run directory."""
+    scratchpad = run_dir / "scratchpad.md"
+    return f"""# Wiki ingest run
+
+You are the wiki maintainer for the research program **{program.title}**
+(`{program.id}`). You are running unattended: no one will answer a question, so
+make the best decision you can and record the uncertainty on the page.
+
+Program goals:
+
+{_indent(program.goals)}
+
+The wiki bundle is `{bundle}` — your working directory. Its `CLAUDE.md` states
+the page schema and the frozen relation vocabulary; both are binding. Read it
+first.
+
+## Your task
+
+Ingest the {len(objects)} object(s) below into the wiki. For each one: write its
+grounding page under `sources/` at the slug given, then create or extend the
+concept, entity and synthesis pages it establishes.
+
+A `sources/` page is a pointer plus a summary — it must carry
+`graph_excluded: true` and the sections `# Summary`, `# Section map`,
+`# Notable insights`, `# Concepts extracted`. It never carries the knowledge
+itself; the concept pages do.
+
+## The batch
+
+{_object_block(objects)}
+{_PROTOCOL.format(scratchpad=scratchpad)}
+{_RULES}
+{_HOUSEKEEPING.format(run_dir=run_dir)}
+{_PROHIBITIONS.format(bundle=bundle, run_dir=run_dir)}
+"""
+
+
+def render_lint(program, bundle: Path, report: str, run_dir: Path) -> str:
+    """The lint instruction document: the machine report plus the judgement calls
+    a script cannot make."""
+    return f"""# Wiki lint run
+
+You are the wiki maintainer for **{program.title}** (`{program.id}`), running
+unattended in `{bundle}`. Its `CLAUDE.md` is binding.
+
+The mechanical fixes have already been applied. What follows is what a script
+cannot decide.
+
+## Machine lint report
+
+```
+{report}
+```
+
+## Your task, in order
+
+1. **Fill missing sources.** A relation or claim with no attribution is the worst
+   defect here. Trace it back to a `sources/` page and attribute it, or weaken
+   the claim until it is honest.
+2. **Resolve contradictions.** Where two pages disagree, do not pick a winner
+   silently: record a `contradicts` relation both prose and frontmatter agree on,
+   and write the disagreement into `# Contradictions` on both pages.
+3. **Refresh drifted sources.** A `src/hash-drift` finding means the raw object
+   changed after ingest. Re-read it and update its source page; leave the
+   `origin_hash` exactly as the report gives it.
+4. **Propose merges for near-duplicates.** Do not merge destructively — write the
+   proposal into `report.json` under `"merges"` and add an alias so the pages are
+   at least findable as one idea.
+5. **Fix stubs and orphans.** A stub either grows or is folded into a fuller page.
+   An orphan gets linked from `index.md` or from the page it belongs under.
+
+{_RULES}
+{_HOUSEKEEPING.format(run_dir=run_dir)}
+Write your own summary of what you changed to `{run_dir}/lint-report.md`; the
+platform files it under `.wiki/lint/`. Never delete a page, and never edit
+`# Human notes`.
+
+{_PROHIBITIONS.format(bundle=bundle, run_dir=run_dir)}
+"""
+
+
+def kickoff(kind: str, run_dir: Path) -> str:
+    """The short `-p` prompt. The real instructions are a file, so a long document
+    never has to survive shell quoting."""
+    return (f"Read {run_dir / 'instructions.md'} and carry out the wiki {kind} run "
+            f"it describes, working only inside your current directory and that run "
+            f"directory. Follow it exactly, including the report it asks you to "
+            f"write at the end.")
+
+
+def _indent(text: str, prefix: str = "> ") -> str:
+    return "\n".join(prefix + line for line in (text or "").strip().splitlines())
