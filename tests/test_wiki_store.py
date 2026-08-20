@@ -1,4 +1,5 @@
-from coscience import wiki_okf, wiki_store
+from coscience import frontmatter_io, wiki_okf, wiki_store
+from coscience.models import Program
 
 
 def test_ensure_bundle_creates_the_okf_skeleton(wiki_bundle):
@@ -71,3 +72,17 @@ def test_bundle_claude_md_states_the_containment_invariant(wiki_bundle):
     assert "relations" in text
     for rel in ("requires", "contradicts", "causally_precedes"):
         assert rel in text
+
+
+def test_ensure_bundle_handles_a_title_with_a_colon(substrate):
+    # A colon in the title breaks hand-templated YAML (`title: <value>` with an
+    # unquoted embedded `:` is a YAML syntax error) — index.md must go through
+    # the repo's serializer instead. Regression for the review finding on the
+    # first pass of this task.
+    title = "Abiogenesis: template replication"
+    substrate.save_program(Program(id="p2", title=title, goals="goals"))
+    wiki_store.ensure_bundle(substrate, "p2")
+    text = (wiki_store.bundle_dir(substrate, "p2") / "index.md").read_text()
+    fm, _ = frontmatter_io.parse(text)
+    assert fm["title"] == f"{title} — wiki"
+    assert fm["okf_version"] == "0.2"

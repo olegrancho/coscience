@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from coscience import wiki_okf
+from coscience.frontmatter_io import serialize as _serialize_frontmatter
 
 PAGE_DIRS = ("concepts", "entities", "syntheses", "sources")
 
@@ -96,14 +97,7 @@ lint error.
 8. **Never write outside this directory.**
 """
 
-_INDEX_MD = """---
-type: Index
-title: {title}
-okf_version: "0.2"
-description: Knowledge compiled from this program's sprint results and artifacts.
----
-
-# {title}
+_INDEX_BODY = """# {title}
 
 This wiki is compiled from the program's results and artifacts. Pages are grouped
 below as they are written.
@@ -114,6 +108,21 @@ below as they are written.
 
 ## Syntheses
 """
+
+
+def _index_md(title: str) -> str:
+    """Build index.md through the repo's YAML serializer, not a hand-templated
+    string — a title containing a colon or a leading YAML-significant character
+    (#, -, ?, *, &, !, %, @, backtick) would otherwise produce unparseable
+    frontmatter."""
+    fm = {
+        "type": "Index",
+        "title": title,
+        "okf_version": "0.2",
+        "description": "Knowledge compiled from this program's sprint results and artifacts.",
+    }
+    return _serialize_frontmatter(fm, _INDEX_BODY.format(title=title))
+
 
 _LOG_MD = """# Log
 
@@ -152,7 +161,7 @@ def ensure_bundle(substrate, program_id: str) -> Path:
         title = substrate.load_program(program_id).title or program_id
     except (OSError, ValueError):
         title = program_id
-    for name, text in (("index.md", _INDEX_MD.format(title=f"{title} — wiki")),
+    for name, text in (("index.md", _index_md(f"{title} — wiki")),
                        ("log.md", _LOG_MD),
                        ("QUESTIONS.md", _QUESTIONS_MD),
                        ("CLAUDE.md", BUNDLE_CLAUDE_MD)):
