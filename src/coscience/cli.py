@@ -202,13 +202,18 @@ def main(argv: list[str] | None = None) -> int:
             r = dispatch_once(args.repo)
             print(f"granted={r.granted} hibernated={r.hibernated} beaten={r.beaten} "
                   f"completed={r.completed} waiting={r.waiting}", flush=True)
+            for line in r.wiki:
+                print(line, flush=True)
             return 0
 
         def _beat():
             r = dispatch_once(args.repo)
             # a beaten sprint launches/advances its agent -> a Claude run that cycle
             # waiting is a current snapshot (shown live), not a per-cycle event to sum
-            return (f"granted {r.granted} · completed {r.completed} · waiting {r.waiting}",
+            line = f"granted {r.granted} · completed {r.completed} · waiting {r.waiting}"
+            if r.wiki:
+                line += " · " + " · ".join(r.wiki)
+            return (line,
                     {"granted": r.granted, "completed": r.completed, "hibernated": r.hibernated},
                     r.beaten)
         _status_loop(LoopStatus("dispatch", uses_claude=True),

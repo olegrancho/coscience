@@ -3,18 +3,18 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from coscience.ledger import Ledger
-from coscience.models import BeatOutcome, SprintStatus, set_status
+from coscience.models import BeatOutcome, ProgramStatus, SprintStatus, set_status
 from coscience.pause import is_paused
 from coscience.resources import ResourcePool, effective_requirement
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
 from coscience.worker import Worker
 
-from coscience import artifacts
+from coscience import artifacts, wiki
 
 _ELIGIBLE = (SprintStatus.QUEUED, SprintStatus.EXECUTING, SprintStatus.HIBERNATED)
 
@@ -27,12 +27,13 @@ class CycleReport:
     completed: int = 0
     waiting: int = 0
     reconciled: int = 0
+    wiki: list[str] = field(default_factory=list)   # non-empty wiki beat lines this cycle
 
 
 class Dispatcher:
     def __init__(self, substrate: Substrate, agent,
                  pool: ResourcePool, policy: SchedulerPolicy | None = None,
-                 usage_gate=None):
+                 usage_gate=None, wiki_agent=None):
         self.substrate = substrate
         self.agent = agent
         self.policy = policy or SchedulerPolicy()
@@ -41,6 +42,7 @@ class Dispatcher:
         cos = substrate.repo_root / ".coscience"
         self.ledger = Ledger(pool, cos / "leases.json")
         self._queue_path = cos / "queue.json"
+        self._wiki_agent = wiki_agent      # None -> built lazily on first use
 
     def _load_queue(self) -> dict[str, float]:
         if self._queue_path.is_file():
@@ -177,11 +179,28 @@ class Dispatcher:
         for program in self.substrate.iter_programs():
             reaped += len(artifacts.reap_stale_chat_locks(
                 self.substrate, program.id, now, holder_busy=self._chat_busy(program.id)))
+            if program.status == ProgramStatus.ACTIVE:
+                line = self._wiki_beat(program, now)
+                if line:
+                    report.wiki.append(line)
 
         self._save_queue(queue)
-        if report.granted or report.completed or report.hibernated or report.reconciled or reaped:
+        if (report.granted or report.completed or report.hibernated
+                or report.reconciled or reaped or report.wiki):
             self.substrate.commit("dispatch cycle")
         return report
+
+    def _wiki_beat(self, program, now: float) -> str:
+        """Wiki maintenance is the lowest-priority thing this loop does, so it is
+        also the thing least allowed to break it: a wiki failure is reported as a
+        line, never raised into sprint supervision."""
+        try:
+            if self._wiki_agent is None:
+                from coscience.wiki_agent import WikiAgent
+                self._wiki_agent = WikiAgent()
+            return wiki.beat(self.substrate, program, now, self._wiki_agent)
+        except Exception as exc:
+            return f"wiki: error — {exc}"[:200]
 
     def _chat_busy(self, program_id: str):
         """Predicate for the reaper: a lock holder id 'chat:<tid>' is 'busy' (protect
