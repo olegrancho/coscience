@@ -7,6 +7,8 @@ nothing to strip. Everything here touches the substrate filesystem; the thinking
 lives in the pure modules (wiki_okf, wiki_lint, wiki_prompts)."""
 from __future__ import annotations
 
+import hashlib
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from coscience import wiki_okf
@@ -209,3 +211,103 @@ def write_page(substrate, program_id: str, page: wiki_okf.Page) -> Path:
 
 def is_empty(substrate, program_id: str) -> bool:
     return not page_paths(substrate, program_id)
+
+
+@dataclass
+class WikiObject:
+    """One ingestable raw object: a sprint result or an artifact version."""
+    oid: str
+    kind: str
+    title: str
+    at: float = 0.0
+    paths: list[Path] = field(default_factory=list)
+    resource: str = ""
+    slug: str = ""
+
+
+def hash_file(path: Path) -> str:
+    h = hashlib.sha256()
+    try:
+        h.update(path.read_bytes())
+    except OSError:
+        return ""
+    return f"sha256:{h.hexdigest()}"
+
+
+def hash_dir(path: Path) -> str:
+    """Digest of a directory: sha256 over the sorted (relpath, file-sha256) list.
+    Deterministic across machines; insensitive to mtime and to walk order."""
+    if not path.is_dir():
+        return ""
+    entries = []
+    for f in sorted(p for p in path.rglob("*") if p.is_file()):
+        rel = f.relative_to(path).as_posix()
+        entries.append(f"{rel}\0{hash_file(f)}")
+    h = hashlib.sha256("\n".join(entries).encode())
+    return f"sha256:{h.hexdigest()}"
+
+
+def object_hash(obj: WikiObject) -> str:
+    """"" when the object's bytes are gone — the caller reads that as src/missing."""
+    if obj.kind == "result":
+        return hash_file(obj.paths[0]) if obj.paths else ""
+    return hash_dir(obj.paths[0]) if obj.paths else ""
+
+
+def program_objects(substrate, program_id: str) -> list[WikiObject]:
+    """Every ingestable object belonging to this program, oldest first.
+
+    Results resolve to a program through their sprint; a result whose sprint is
+    missing or belongs elsewhere is skipped rather than guessed at. Artifacts
+    contribute their CURRENT version only, so a figure revised five times leaves
+    one page trail instead of five near-identical source pages."""
+    out: list[WikiObject] = []
+    for result in substrate.iter_results():
+        try:
+            sprint = substrate.load_sprint(result.sprint)
+        except Exception:
+            continue
+        if sprint.program != program_id:
+            continue
+        out.append(WikiObject(
+            oid=f"result:{result.id}", kind="result",
+            title=(sprint.title or sprint.goals or result.id).strip()[:120],
+            at=float(result.completed_at or 0.0),
+            paths=[substrate.repo_root / "results" / f"{result.id}.md"],
+            resource=f"/results/{result.id}.md",
+            slug=f"sources/result-{result.id}.md"))
+    for art in substrate.iter_artifacts(program_id):
+        vid = art.current
+        if not vid:
+            continue
+        version = next((v for v in art.versions if v.id == vid), None)
+        if version is None or version.archived:
+            continue
+        out.append(WikiObject(
+            oid=f"artifact:{art.id}@{vid}", kind="artifact",
+            title=(art.title or art.id).strip()[:120],
+            at=float(version.created_at or 0.0),
+            paths=[substrate.artifact_dir(program_id, art.id) / vid],
+            resource=f"/programs/{program_id}/artifacts/{art.id}/{vid}",
+            slug=f"sources/artifact-{art.id}-{vid}.md"))
+    out.sort(key=lambda o: (o.at, o.oid))
+    return out
+
+
+def pending_objects(substrate, program_id: str, ingested: dict[str, dict],
+                    quarantined: set[str] | None = None) -> list[WikiObject]:
+    """Objects needing ingest, oldest first: never ingested, or ingested under a
+    hash that no longer matches. One code path covers both, which is why drift
+    can never go unnoticed."""
+    skip = quarantined or set()
+    out = []
+    for obj in program_objects(substrate, program_id):
+        if obj.oid in skip:
+            continue
+        known = (ingested.get(obj.oid) or {}).get("hash", "")
+        current = object_hash(obj)
+        if not current:
+            continue                       # the bytes are gone; lint reports src/missing
+        if known != current:
+            out.append(obj)
+    return out
