@@ -3628,10 +3628,13 @@ def _relation_rules(pages: list[wiki_okf.Page]) -> list[Finding]:
                 out.append(Finding("rel/no-link", "error", p.path,
                                    f"relation `{r.type}` -> `{r.target}` is not linked "
                                    f"from the body"))
-            if not r.source or (source_ids and r.source not in source_ids):
+            if not r.source:
                 out.append(Finding("rel/no-source", "error", p.path,
-                                   f"relation `{r.type}` -> `{r.target}` names no known "
-                                   f"source id"))
+                                   f"relation `{r.type}` -> `{r.target}` names no source"))
+            elif r.source not in source_ids:
+                out.append(Finding("rel/no-source", "error", p.path,
+                                   f"relation `{r.type}` -> `{r.target}` names unknown "
+                                   f"source id `{r.source}`"))
             if r.confidence and r.confidence not in wiki_okf.CONFIDENCE:
                 out.append(Finding("rel/unknown-type", "error", p.path,
                                    f"confidence `{r.confidence}` is not low|med|high"))

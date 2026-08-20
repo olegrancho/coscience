@@ -152,3 +152,45 @@ def test_autofix_wikilink_target_ordering():
     assert "# Related" not in changed[0].body
     # No rel/no-link should be reported after autofix
     assert "rel/no-link" not in {f.rule for f in wiki_lint.lint(changed + [b])}
+
+
+def test_relation_with_no_sources_block_is_an_error():
+    # Regression: when a page declares no sources at all (empty sources list),
+    # a relation with any source id should still error. An empty sources block
+    # is not a license to cite; it is evidence the citation is bogus.
+    findings = wiki_lint.lint([_page(
+        "concepts/a.md", body="see [b](/concepts/b.md) " + "x" * 400,
+        relations=[{"type": "requires", "target": "/concepts/b.md", "source": "c1"}])])
+    assert "rel/no-source" in _rules(findings)
+
+
+def test_autofix_dedupes_duplicate_wikilinks():
+    # When the same wikilink appears twice in a body, autofix should replace
+    # both occurrences but report the fix only once.
+    a = _page("concepts/a.md", body="[[target]] and [[target]] again " + "x" * 350)
+    b = _page("concepts/target.md")
+    changed, fixed = wiki_lint.autofix([a, b])
+    assert [p.path for p in changed] == ["concepts/a.md"]
+    # Both occurrences should be rewritten
+    assert changed[0].body.count("[target](/concepts/target.md)") == 2
+    assert "[[target]]" not in changed[0].body
+    # Should report exactly one link/wikilink finding
+    wikilink_findings = [f for f in fixed if f.rule == "link/wikilink"]
+    assert len(wikilink_findings) == 1
+
+
+def test_autofix_related_section_append_is_idempotent():
+    # A page fixed via the relation-containment append (# Related) must,
+    # on a second autofix pass, produce no further changes and no findings.
+    a = _page("concepts/a.md", body="# Definition\n\n" + "x" * 400,
+              relations=[{"type": "requires", "target": "/concepts/b.md", "source": "c1"}])
+    b = _page("concepts/b.md", title="B")
+    # First pass: appends # Related
+    once, fixed_once = wiki_lint.autofix([a, b])
+    assert [p.path for p in once] == ["concepts/a.md"]
+    assert "# Related" in once[0].body
+    assert len(fixed_once) > 0
+    # Second pass: no changes, no findings
+    twice, fixed_twice = wiki_lint.autofix(once + [b])
+    assert twice == []
+    assert fixed_twice == []
