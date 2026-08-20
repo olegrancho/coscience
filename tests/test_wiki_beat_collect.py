@@ -126,7 +126,60 @@ def test_failed_lint_run_still_owes_a_lint(substrate, monkeypatch):
     (agent.launches[0]["run_dir"] / "agent.exit").write_text("1\n")
     agent.alive = False
     assert wiki.beat(substrate, p, 200.0, agent) == "wiki: lint failed"
-    assert wiki_store.load_state(substrate, "p1")["ingests_since_lint"] == 3
+    state = wiki_store.load_state(substrate, "p1")
+    assert state["ingests_since_lint"] == 3
+    assert state["failures"] == 1
+
+
+def test_lint_failures_reset_the_shared_counter_so_a_fresh_ingest_gets_its_own_chances(
+        substrate, monkeypatch):
+    """A lint run's batch is always []. Before the fix the failure-counter reset
+    lived inside `if failures >= max_failures() and batch:`, so a run of lint
+    failures alone could push `failures` past threshold and leave it there
+    forever (batch is empty, so the reset never fires) — meaning the very next
+    ingest batch's FIRST-EVER failure would immediately inherit that debt and
+    get quarantined. This drives two real failed lint beats (crossing the
+    threshold via lint alone) through wiki.beat(), then a real ingest beat that
+    fails once, and asserts that first ingest failure is judged on its own,
+    not pre-loaded by lint's history."""
+    monkeypatch.setenv("COSCIENCE_WIKI_MAX_FAILURES", "2")
+    monkeypatch.setenv("COSCIENCE_WIKI_LINT_EVERY", "1")
+    from coscience import wiki_okf
+    agent = FakeWikiAgent()
+    p = _seed(substrate, n=1)
+    wiki_store.ensure_bundle(substrate, "p1")
+    wiki_store.write_page(substrate, "p1", wiki_okf.Page(
+        path="concepts/a.md", type="Concept", title="A", body="x"))
+    with wiki_store.state_guard(substrate, "p1") as state:
+        state["ingests_since_lint"] = 3
+
+    # Two real, consecutive failed lint runs: failures goes 0 -> 1 -> (crosses
+    # threshold=2) -> reset to 0, even though batch is [] both times.
+    for t_launch, t_collect in [(100.0, 200.0), (300.0, 400.0)]:
+        wiki.beat(substrate, p, t_launch, agent)
+        assert agent.launches[-1]["kind"] == "lint"
+        (agent.launches[-1]["run_dir"] / "agent.exit").write_text("1\n")
+        agent.alive = False
+        line = wiki.beat(substrate, p, t_collect, agent)
+        assert line == "wiki: lint failed"
+        agent.alive = True
+    assert wiki_store.load_state(substrate, "p1")["failures"] == 0
+
+    # Clear the lint debt so the next launch picks the pending ingest object
+    # instead of lint again (due_for_lint otherwise takes priority forever).
+    with wiki_store.state_guard(substrate, "p1") as state:
+        state["ingests_since_lint"] = 0
+
+    # The ingest batch's own first-ever failure must NOT be quarantined.
+    wiki.beat(substrate, p, 500.0, agent)
+    assert agent.launches[-1]["kind"] == "ingest"
+    (agent.launches[-1]["run_dir"] / "agent.exit").write_text("3\n")
+    agent.alive = False
+    line = wiki.beat(substrate, p, 600.0, agent)
+    assert line == "wiki: ingest failed"
+    state = wiki_store.load_state(substrate, "p1")
+    assert state["quarantined"] == []
+    assert state["failures"] == 1
 
 
 def test_report_counts_land_in_last_run(substrate):

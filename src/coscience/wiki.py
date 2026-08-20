@@ -213,12 +213,13 @@ def _collect(substrate, program, now, agent, state, run) -> str:
         state["failures"] = 0
     else:
         state["failures"] = state.get("failures", 0) + 1
-        if state["failures"] >= max_failures() and batch:
-            quarantined = list(state.get("quarantined") or [])
-            quarantined += [oid for oid in batch if oid not in quarantined]
-            state["quarantined"] = quarantined
+        if state["failures"] >= max_failures():
             state["failures"] = 0
-            line = f"wiki: {kind} quarantined {len(batch)}"
+            if batch:
+                quarantined = list(state.get("quarantined") or [])
+                quarantined += [oid for oid in batch if oid not in quarantined]
+                state["quarantined"] = quarantined
+                line = f"wiki: {kind} quarantined {len(batch)}"
 
     substrate.commit(f"wiki {program.id}: {kind} {run_id} {status}")
     return line

@@ -460,7 +460,11 @@ if state.run is not None:                       # a run is in flight
     else:
         failures += 1
         if failures >= WIKI_MAX_FAILURES (3):
-            quarantine state.run.batch; failures = 0
+            failures = 0                    # unconditional: a lint run's batch is
+                                             # always [], so gating the reset on a
+                                             # non-empty batch lets lint failures push
+                                             # this past threshold and never come back
+            if state.run.batch: quarantine state.run.batch
     state.run = None; substrate.commit(...)
     return f"wiki: {kind} {status}"
 
