@@ -11,7 +11,7 @@ import json
 import shlex
 from pathlib import Path
 
-from coscience import usage_meter
+from coscience import agent_stream, usage_meter
 from coscience.artifacts import FIGURE_DESCRIPTION_NOTE
 from coscience.executor import (ExecutionContext, is_running, launch_detached,
                                 terminate_detached)
@@ -280,30 +280,19 @@ class ClaudeAgent:
         message text and write a cost sidecar. If no such event is present (e.g. a
         usage-limit message instead of a stream), return the raw text unchanged so
         the worker's limit detection still fires."""
-        result = None
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line.startswith("{"):
-                continue
-            try:
-                ev = json.loads(line)
-            except (json.JSONDecodeError, ValueError):
-                continue
-            if isinstance(ev, dict) and ev.get("type") == "result" and "result" in ev:
-                result = ev                              # keep the last one
+        result = agent_stream.parse_stream(raw)
         if result is None:
             return raw
-        usage = result.get("usage") or {}
-        breakdown = usage_meter.token_breakdown(usage)
-        sidecar = {"cost": result.get("total_cost_usd"),
+        breakdown = usage_meter.token_breakdown(result.usage)
+        sidecar = {"cost": result.cost,
                    "tokens": breakdown.get("tokens"),
                    "usage": breakdown,
-                   "turns": result.get("num_turns"), "duration_ms": result.get("duration_ms")}
+                   "turns": result.turns, "duration_ms": result.duration_ms}
         try:
             (sprint_dir / "agent.cost.json").write_text(json.dumps(sidecar))
         except OSError:
             pass
-        return str(result.get("result") or "")
+        return result.text
 
 
 def read_activity(sprint_dir: Path, fresh_within: float = 90.0,

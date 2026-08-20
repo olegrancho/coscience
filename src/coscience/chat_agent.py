@@ -8,11 +8,11 @@ stream into turn.out, collected lazily when turn.exit appears — mirroring the
 sprint worker rather than blocking the HTTP request."""
 from __future__ import annotations
 
-import json
 import os
 import shlex
 from pathlib import Path
 
+from coscience import agent_stream
 from coscience.executor import launch_detached
 from coscience.pm_reasoner import render_instructions
 
@@ -150,18 +150,8 @@ def collect_turn(thread_dir: Path) -> tuple[str, str, str]:
         code = int((exitf.read_text().strip() or "1"))
     except (ValueError, OSError):
         code = 1
-    result = None
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            ev = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        if isinstance(ev, dict) and ev.get("type") == "result":
-            result = ev
+    result = agent_stream.parse_stream(raw, require_text=False)
     status = "ok" if code == 0 else "failed"
     if result is None:
         return (raw or "(no output)"), "", status
-    return str(result.get("result") or ""), str(result.get("session_id") or ""), status
+    return result.text, result.session_id, status
