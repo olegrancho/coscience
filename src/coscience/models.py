@@ -202,10 +202,14 @@ class Program:
     pm_model: str = ""                 # Claude model for this program's PM reasoner; "" resolves to DEFAULT_MODEL
     workdir: str = ""                  # project folder this program's agents run in; "" = control repo
     max_proposed: int = 0              # cap on sprints awaiting review; 0 = use the global default
+    wiki_model: str = ""               # Claude model for this program's wiki runs; "" resolves to DEFAULT_MODEL
+    wiki_enabled: bool = True          # False opts the program out of wiki ingest entirely
 
     def __post_init__(self) -> None:
         if not self.pm_model:
             self.pm_model = DEFAULT_MODEL
+        if not self.wiki_model:
+            self.wiki_model = DEFAULT_MODEL
 
 
 @dataclass

@@ -299,6 +299,8 @@ class Substrate:
             pm_model=str(fm.get("pm_model", "")),
             workdir=str(fm.get("workdir", "")),
             max_proposed=int(fm.get("max_proposed", 0)),
+            wiki_model=str(fm.get("wiki_model", "")),
+            wiki_enabled=bool(fm.get("wiki_enabled", True)),
         )
 
     def save_program(self, program: Program) -> None:
@@ -309,6 +311,11 @@ class Substrate:
             fm["workdir"] = program.workdir
         if program.max_proposed:
             fm["max_proposed"] = program.max_proposed
+        if program.wiki_model:
+            fm["wiki_model"] = program.wiki_model
+        if not program.wiki_enabled:
+            # written only when opting out, so existing program.md files are untouched
+            fm["wiki_enabled"] = False
         d = self.program_dir(program.id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "program.md").write_text(serialize(fm, program.goals.strip() + "\n"))
