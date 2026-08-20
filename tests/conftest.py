@@ -101,3 +101,13 @@ def write_raw_sprint(repo_root, sprint_id, status, goals, plan, body="notes", pr
     if program is not None:
         fm["program"] = program
     (d / "sprint.md").write_text(serialize(fm, body))
+
+
+@pytest.fixture
+def wiki_bundle(substrate):
+    """A program with an initialised, empty wiki bundle. Returns (substrate, program_id)."""
+    from coscience import wiki_store
+    from coscience.models import Program
+    substrate.save_program(Program(id="p1", title="P1", goals="goals"))
+    wiki_store.ensure_bundle(substrate, "p1")
+    return substrate, "p1"
