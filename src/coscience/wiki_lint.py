@@ -41,6 +41,8 @@ def lint(pages: list[wiki_okf.Page], *, index_body: str = "",
     out: list[Finding] = []
     out += _okf_rules(pages)
     out += _page_rules(pages, index_body, now)
+    out += _link_rules(pages)
+    out += _relation_rules(pages)
     out.sort(key=lambda f: (_RANK.get(f.severity, 9), f.path, f.rule))
     return out
 
@@ -186,3 +188,153 @@ def render_report(findings: list[Finding]) -> str:
         lines += [f"- `{f.path}`: {f.message}" for f in items]
         lines.append("")
     return "\n".join(lines)
+
+
+# Spec §9 also marks `okf/index-frontmatter` auto-fixable. Its fix is to strip a
+# page's frontmatter entirely, which needs a raw-write path write_page does not
+# have — and stripping frontmatter mechanically is how you lose content. It is
+# reported and left to the agent's lint run instead.
+AUTOFIXABLE = frozenset({"link/wikilink", "rel/no-link"})
+
+# Directional relations that must stay acyclic. `contradicts` is symmetric in
+# meaning and stored on one side only, so a mutual pair is correct, not a cycle.
+_ACYCLIC = ("replaces", "causally_precedes")
+
+
+def _known_paths(pages: list[wiki_okf.Page]) -> set[str]:
+    return {p.path for p in pages}
+
+
+def _resolve(target: str) -> str:
+    """A link target as a bundle-relative page path, or "" if it is not one."""
+    target = (target or "").split("#", 1)[0].strip()
+    if not target or "://" in target or target.startswith("mailto:"):
+        return ""
+    return target.lstrip("/")
+
+
+def _link_rules(pages: list[wiki_okf.Page]) -> list[Finding]:
+    known = _known_paths(pages)
+    out = []
+    for p in pages:
+        for slug in wiki_okf.wikilinks(p.body):
+            out.append(Finding("link/wikilink", "warn", p.path,
+                               f"`[[{slug}]]` should be a markdown link"))
+        for target in wiki_okf.body_links(p.body):
+            rel = _resolve(target)
+            # OKF requires consumers to tolerate broken links, and in a living
+            # wiki a broken link often marks knowledge not yet written. Report,
+            # never fail.
+            if rel and rel not in known:
+                out.append(Finding("link/broken", "warn", p.path,
+                                   f"link target `{target}` does not exist"))
+    return out
+
+
+def _relation_rules(pages: list[wiki_okf.Page]) -> list[Finding]:
+    known = _known_paths(pages)
+    out = []
+    edges: dict[str, set[str]] = {}
+    for p in pages:
+        body_targets = {_resolve(t) for t in wiki_okf.body_links(p.body)}
+        source_ids = set(p.sources_by_id())
+        for r in p.relations:
+            if r.type not in wiki_okf.RELATION_TYPES:
+                out.append(Finding("rel/unknown-type", "error", p.path,
+                                   f"relation type `{r.type}` is outside the frozen "
+                                   f"vocabulary"))
+            rel = _resolve(r.target)
+            if rel and rel not in body_targets:
+                out.append(Finding("rel/no-link", "error", p.path,
+                                   f"relation `{r.type}` -> `{r.target}` is not linked "
+                                   f"from the body"))
+            if not r.source or (source_ids and r.source not in source_ids):
+                out.append(Finding("rel/no-source", "error", p.path,
+                                   f"relation `{r.type}` -> `{r.target}` names no known "
+                                   f"source id"))
+            if r.confidence and r.confidence not in wiki_okf.CONFIDENCE:
+                out.append(Finding("rel/unknown-type", "error", p.path,
+                                   f"confidence `{r.confidence}` is not low|med|high"))
+            if rel and rel not in known:
+                out.append(Finding("rel/dangling", "warn", p.path,
+                                   f"relation target `{r.target}` does not exist"))
+            if r.type in _ACYCLIC and rel:
+                edges.setdefault(p.path, set()).add(rel)
+    for path in sorted(_cycle_nodes(edges)):
+        out.append(Finding("rel/cycle", "info", path,
+                           "part of a cycle in `replaces` / `causally_precedes`"))
+    return out
+
+
+def _cycle_nodes(edges: dict[str, set[str]]) -> set[str]:
+    """Nodes on at least one directed cycle. Iterative DFS with a colour map —
+    the graph is small, but a recursive walk on an adversarial bundle is not
+    worth the risk."""
+    on_cycle: set[str] = set()
+    colour: dict[str, int] = {}
+    for start in list(edges):
+        if colour.get(start):
+            continue
+        stack = [(start, iter(sorted(edges.get(start, ()))))]
+        path = [start]
+        colour[start] = 1
+        while stack:
+            node, children = stack[-1]
+            nxt = next(children, None)
+            if nxt is None:
+                colour[node] = 2
+                stack.pop()
+                path.pop()
+                continue
+            state = colour.get(nxt, 0)
+            if state == 1:
+                on_cycle.update(path[path.index(nxt):])
+            elif state == 0:
+                colour[nxt] = 1
+                path.append(nxt)
+                stack.append((nxt, iter(sorted(edges.get(nxt, ())))))
+    return on_cycle
+
+
+def autofix(pages: list[wiki_okf.Page]) -> tuple[list[wiki_okf.Page], list[Finding]]:
+    """Apply the deterministic fixes, returning only the pages that changed.
+
+    These run before an agent lint run so the agent's turn is spent on judgement
+    calls rather than on mechanical edits it would do worse and slower."""
+    by_slug = {p.slug: p.path for p in pages}
+    changed: list[wiki_okf.Page] = []
+    fixed: list[Finding] = []
+    for p in pages:
+        body = p.body
+        for slug in wiki_okf.wikilinks(body):
+            target = by_slug.get(slug)
+            if not target:
+                continue                     # nothing to point at; leave it for the agent
+            body = body.replace(f"[[{slug}]]", f"[{slug}](/{target})")
+            fixed.append(Finding("link/wikilink", "warn", p.path,
+                                 f"rewrote `[[{slug}]]` as a markdown link"))
+        body_targets = {_resolve(t) for t in wiki_okf.body_links(body)}
+        missing = []
+        for r in p.relations:
+            rel = _resolve(r.target)
+            if rel and rel not in body_targets and rel not in missing:
+                missing.append(rel)
+        if missing:
+            lines = [f"- `{r.type}` [{_title(pages, rel)}](/{rel})"
+                     for r, rel in ((r, _resolve(r.target)) for r in p.relations)
+                     if rel in missing]
+            body = body.rstrip("\n") + "\n\n# Related\n\n" + "\n".join(dict.fromkeys(lines)) + "\n"
+            for rel in missing:
+                fixed.append(Finding("rel/no-link", "error", p.path,
+                                     f"linked `{rel}` from the body to satisfy containment"))
+        if body != p.body:
+            p.body = body
+            changed.append(p)
+    return changed, fixed
+
+
+def _title(pages: list[wiki_okf.Page], path: str) -> str:
+    for p in pages:
+        if p.path == path:
+            return p.title or p.slug
+    return path.rsplit("/", 1)[-1][:-3]
