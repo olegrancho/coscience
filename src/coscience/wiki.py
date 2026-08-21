@@ -168,6 +168,44 @@ def _escaped(substrate, program_id: str, before: list[str], after: list[str]) ->
     return sorted(p for p in new if not p.startswith(allowed))
 
 
+def _count_failure(state: dict, batch: list[str]) -> bool:
+    """Count one failed or escaped run against the shared threshold. True when
+    that pushed the batch into quarantine.
+
+    One counter covers both kinds deliberately: the threshold exists so that a
+    batch which keeps going wrong stops being retried, and it is equally wrong
+    whether the agent exited non-zero or wrote somewhere it should not have."""
+    state["failures"] = state.get("failures", 0) + 1
+    if state["failures"] < max_failures():
+        return False
+    state["failures"] = 0
+    if not batch:
+        return False
+    quarantined = list(state.get("quarantined") or [])
+    quarantined += [oid for oid in batch if oid not in quarantined]
+    state["quarantined"] = quarantined
+    return True
+
+
+def _reconciled(batch: list[str], report: dict) -> list[str]:
+    """The objects a run is allowed to mark ingested: dispatched AND reported as
+    covered.
+
+    `batch` is what the platform handed out; the prompt tells the agent to do
+    fewer objects well and say which in `report.json`. Trusting `batch` alone
+    marks the honestly-skipped ones done, and they never come back through
+    pending_objects() — a silent, permanent hole. An absent or malformed
+    `objects` field falls back to the whole batch, because spec §8.6 keeps a run
+    with no report at all an `ok` run with unknown counts."""
+    claimed = report.get("objects")
+    if not isinstance(claimed, list):
+        return list(batch)
+    # Non-string entries are tolerated, not raised on; an oid the agent invented
+    # is ignored, since it does not get to widen its own mandate.
+    covered = {o for o in claimed if isinstance(o, str)}
+    return [oid for oid in batch if oid in covered]
+
+
 def _collect(substrate, program, now, agent, state, run) -> str:
     run_id, kind = run.get("id", ""), run.get("kind", "ingest")
     run_dir = wiki_store.run_dir(substrate, program.id, run_id)
@@ -201,15 +239,18 @@ def _collect(substrate, program, now, agent, state, run) -> str:
 
     if status == "ok" and escaped:
         # The batch is deliberately NOT recorded: an agent that wrote outside its
-        # bundle may equally have written the wrong thing inside it.
+        # bundle may equally have written the wrong thing inside it. It does count
+        # against the failure threshold, though — otherwise a batch that escapes
+        # deterministically is relaunched every eligible beat, forever.
         state["last_run"]["status"] = "escaped"
+        _count_failure(state, batch)
         substrate.commit(f"wiki {program.id}: {kind} {run_id} wrote outside the bundle")
         return f"wiki: {kind} ESCAPED — batch not recorded"
 
     line = f"wiki: {kind} {status}"
     if status == "ok":
         objects = {o.oid: o for o in wiki_store.program_objects(substrate, program.id)}
-        for oid in batch:
+        for oid in _reconciled(batch, report):
             obj = objects.get(oid)
             state["ingested"][oid] = {
                 "hash": wiki_store.object_hash(obj) if obj else "",
@@ -220,15 +261,8 @@ def _collect(substrate, program, now, agent, state, run) -> str:
             state["ingests_since_lint"] = 0
             _file_lint_report(substrate, program.id, run_dir, now)
         state["failures"] = 0
-    else:
-        state["failures"] = state.get("failures", 0) + 1
-        if state["failures"] >= max_failures():
-            state["failures"] = 0
-            if batch:
-                quarantined = list(state.get("quarantined") or [])
-                quarantined += [oid for oid in batch if oid not in quarantined]
-                state["quarantined"] = quarantined
-                line = f"wiki: {kind} quarantined {len(batch)}"
+    elif _count_failure(state, batch):
+        line = f"wiki: {kind} quarantined {len(batch)}"
 
     substrate.commit(f"wiki {program.id}: {kind} {run_id} {status}")
     return line

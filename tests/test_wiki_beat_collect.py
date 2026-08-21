@@ -213,3 +213,109 @@ def test_writes_outside_the_bundle_block_recording(substrate, monkeypatch):
     state = wiki_store.load_state(substrate, "p1")
     assert state["ingested"] == {}
     assert state["last_run"]["escaped"] == ["sprints/s0/sprint.md"]
+    # An escape counts against the shared threshold like any other bad run;
+    # without that the batch stays pending and relaunches forever.
+    assert state["failures"] == 1
+
+
+def _escape_cycle(substrate, p, agent, dirty, t):
+    """Launch a run, then collect it as an escape. Returns the collect line.
+
+    `dirty` is emptied for the launch beat and filled for the collect beat, since
+    the guard compares the two snapshots — a path dirty in both is not an escape.
+    """
+    dirty["paths"] = []
+    wiki.beat(substrate, p, t, agent)
+    (agent.launches[-1]["run_dir"] / "agent.exit").write_text("0\n")
+    agent.alive = False
+    dirty["paths"] = ["sprints/s0/sprint.md", "programs/p1/wiki/index.md"]
+    return wiki.beat(substrate, p, t + 1.0, agent)
+
+
+def test_consecutive_escapes_keep_counting(substrate, monkeypatch):
+    agent = FakeWikiAgent()
+    p = _seed(substrate)
+    dirty = {"paths": []}
+    monkeypatch.setattr(wiki, "_dirty_paths", lambda s: list(dirty["paths"]))
+    _escape_cycle(substrate, p, agent, dirty, 100.0)
+    assert wiki_store.load_state(substrate, "p1")["failures"] == 1
+    _escape_cycle(substrate, p, agent, dirty, 200.0)
+    assert wiki_store.load_state(substrate, "p1")["failures"] == 2
+
+
+def test_escapes_quarantine_the_batch_at_the_threshold(substrate, monkeypatch):
+    monkeypatch.setenv("COSCIENCE_WIKI_MAX_FAILURES", "2")
+    agent = FakeWikiAgent()
+    p = _seed(substrate)
+    dirty = {"paths": []}
+    monkeypatch.setattr(wiki, "_dirty_paths", lambda s: list(dirty["paths"]))
+    _escape_cycle(substrate, p, agent, dirty, 100.0)
+    line = _escape_cycle(substrate, p, agent, dirty, 200.0)
+    assert line == "wiki: ingest ESCAPED — batch not recorded"
+    state = wiki_store.load_state(substrate, "p1")
+    assert state["quarantined"] == ["result:r0"]
+    assert state["failures"] == 0
+    assert state["ingested"] == {}
+
+
+def _collect_with_report(substrate, p, agent, report_text, n=4):
+    """One ok run over `n` objects whose report.json is `report_text` (or None)."""
+    wiki.beat(substrate, p, 100.0, agent)
+    run_dir = agent.launches[0]["run_dir"]
+    (run_dir / "agent.exit").write_text("0\n")
+    if report_text is not None:
+        (run_dir / "report.json").write_text(report_text)
+    agent.alive = False
+    return wiki.beat(substrate, p, 200.0, agent)
+
+
+def test_only_the_objects_the_report_covers_are_ingested(substrate):
+    agent = FakeWikiAgent()
+    p = _seed(substrate, n=4)
+    line = _collect_with_report(
+        substrate, p, agent, '{"objects": ["result:r0", "result:r2"]}')
+    assert line == "wiki: ingest ok"
+    state = wiki_store.load_state(substrate, "p1")
+    assert sorted(state["ingested"]) == ["result:r0", "result:r2"]
+    # The two the agent honestly skipped must come back round.
+    pending = wiki_store.pending_objects(substrate, "p1", state["ingested"])
+    assert sorted(o.oid for o in pending) == ["result:r1", "result:r3"]
+
+
+def test_a_report_without_an_objects_key_still_ingests_the_whole_batch(substrate):
+    # Spec 8.6: a missing or partial report leaves the run ok with unknown counts.
+    agent = FakeWikiAgent()
+    p = _seed(substrate, n=4)
+    _collect_with_report(substrate, p, agent, '{"pages_created": ["concepts/a.md"]}')
+    state = wiki_store.load_state(substrate, "p1")
+    assert len(state["ingested"]) == 4
+    assert wiki_store.pending_objects(substrate, "p1", state["ingested"]) == []
+
+
+def test_the_report_cannot_ingest_objects_that_were_never_dispatched(substrate):
+    agent = FakeWikiAgent()
+    p = _seed(substrate, n=4)
+    _collect_with_report(
+        substrate, p, agent,
+        '{"objects": ["result:r1", "result:nope", "sprint:s9", 17]}')
+    state = wiki_store.load_state(substrate, "p1")
+    assert sorted(state["ingested"]) == ["result:r1"]
+
+
+def test_a_non_list_objects_field_falls_back_to_the_whole_batch(substrate):
+    agent = FakeWikiAgent()
+    p = _seed(substrate, n=4)
+    _collect_with_report(substrate, p, agent, '{"objects": "result:r0"}')
+    assert len(wiki_store.load_state(substrate, "p1")["ingested"]) == 4
+
+
+def test_an_empty_objects_list_ingests_nothing_and_is_still_ok(substrate):
+    agent = FakeWikiAgent()
+    p = _seed(substrate, n=4)
+    line = _collect_with_report(substrate, p, agent, '{"objects": []}')
+    assert line == "wiki: ingest ok"
+    state = wiki_store.load_state(substrate, "p1")
+    assert state["ingested"] == {}
+    # Honest "I covered nothing" is not an error; fix 1 bounds the stuck cases.
+    assert state["failures"] == 0
+    assert len(wiki_store.pending_objects(substrate, "p1", state["ingested"])) == 4
