@@ -5,8 +5,11 @@ machine or another.
 **Branch:** `feat/program-wiki`
 **Design:** `docs/superpowers/specs/2026-08-20-program-wiki-design.md` — the
 authoritative *what and why*. This file is the *where we are and how to work*.
-**Last updated:** 2026-08-20 · by: Claude Opus 5 (Avatar) · state: design written,
-no code yet
+**Last updated:** 2026-08-20 · by: Claude Opus 5 (Avatar) · state: phase 1
+implemented and reviewed on `feat/program-wiki` (HEAD `bd9622f`, 1029 tests
+green); 3 Important review findings open; not merged, not deployed, and the live
+end-to-end run not yet performed.
+**Start here if you are picking this up:** `docs/knowledge/NEXT.md`
 
 > **Keep this file current.** It is the only handoff surface. Before you stop —
 > finished, blocked, or out of context — update §2 (status), §7 (decision log) and
@@ -42,16 +45,22 @@ Update this table as you go. One row per phase from the design's §15.
 | Phase | What | Status |
 |---|---|---|
 | — | Research (Karpathy llm-wiki, OKF v0.2, the `_tmp_wiki` reference impl) | **done** |
-| — | Design spec | **done**, awaiting user review |
-| — | Implementation plan (`superpowers:writing-plans`) | **not started** — blocked on user approving the spec |
-| 1 | Store & ingest — `wiki_store`, `wiki_okf`, `wiki_prompts`, `wiki_agent`, `wiki.beat`, `agent_stream` extraction, `wiki_lint` as CLI, `coscience wiki --once` | not started |
+| — | Design spec | **done**, approved |
+| — | Implementation plan (`superpowers:writing-plans`) | **done** — `docs/superpowers/plans/2026-08-20-program-wiki-phase-1.md` |
+| 1 | Store & ingest — `wiki_store`, `wiki_okf`, `wiki_prompts`, `wiki_agent`, `wiki.beat`, `agent_stream` extraction, `wiki_lint` as CLI, `coscience wiki --once` | **code complete, not signed off** — all 15 tasks implemented and reviewed (21 commits, HEAD `bd9622f`, 1029 tests green). **Open:** 3 Important findings from the whole-branch review (`docs/knowledge/phase-1-record/open-fix-brief.md`), then the live end-to-end run, which has never been performed |
 | 2 | Browse — endpoints, `WikiView`, curation actions, provenance chips *(**first milestone** ends here)* | not started |
 | 3 | Lint runs — agent lint mode, cadence, report UI, quarantine retry | not started |
 | 4 | Graph — `wiki_graph`, `d3-force`, `WikiGraphView`, provenance backlinks | not started |
 | 5 | Ask & research — wiki chat, research runs, `QUESTIONS.md`, MCP tools | not started |
 
-**Nothing has been implemented.** The only changes on this branch are these two
-documents. Uncommitted files in the working tree (`frontend/src/styles.css`,
+**Phase 1's code is written; phase 1 is not done.** The definition of done is a
+real program's results producing a linted bundle that opens as an Obsidian vault,
+and **no live agent run has ever been performed** — it spends the human's Claude
+quota and needs their explicit go-ahead. Land the three open fixes first. The full
+record (decision log, review, deferred items, fix brief) is in
+`docs/knowledge/phase-1-record/`; the running order is `docs/knowledge/NEXT.md`.
+
+Uncommitted files in the working tree (`frontend/src/styles.css`,
 `ProgramDetail.tsx`, `SprintDetail.tsx`, `PageToc.tsx`, `frontend/.coscience/`,
 `docs/_tmp_wiki/`) are **someone else's in-flight work carried over from `main`.
 Do not commit them.** Stage explicit paths; never `git add -A`.
