@@ -88,9 +88,59 @@ constraining the agent's tools. Both are real changes to the agent seam and were
 ruled out of this fix wave deliberately; they belong in their own task with their
 own review.
 
+## Scoped re-review of this diff
+
+Re-reviewed against the three findings. Both fixes do what they were ruled to do;
+two things came out of it.
+
+### Found and fixed — `objects` was authoritative but undefined
+
+Fix 2 turned `report.json`'s `objects` from a decorative field into the one that
+decides what gets marked ingested. The prompt never defined it: the agent's only
+clue was the example `"objects": ["result:r1"]` in the `_HOUSEKEEPING` schema
+block. While the field was ignored, that ambiguity cost nothing. Once it is
+load-bearing it defeats the fix in either direction — an agent listing page paths
+there marks nothing ingested and the batch is relaunched forever; one listing
+every oid it was handed regardless of what it finished restores exactly the silent
+under-ingestion Fix 2 exists to prevent.
+
+**`src/coscience/wiki_prompts.py:85`** now states what the field means: the ids
+from this run's batch that were actually covered, exactly as given, only the ones
+finished, omissions come back in a later run, no invented ids, no page paths.
+**Test:** `tests/test_wiki_prompts.py:54`
+`test_ingest_prompt_defines_what_objects_means`.
+
+This goes slightly beyond the brief, which scoped the prompt work to Fix 3's
+prohibition. Doing it anyway: Fix 2 does not work without it, since it is the one
+input the fix now trusts.
+
+### Found, deliberately not fixed — an `ok` run that covers nothing is unbounded
+
+An `ok` run whose `objects` does not intersect the batch ingests nothing, sets
+`state["failures"] = 0`, and leaves the whole batch pending. The next eligible
+beat relaunches it. Nothing bounds that loop: Fix 1's counter only sees `failed`
+and `escaped` runs, and the brief ruled explicitly that the honest "I covered
+nothing" report must not route to the failure counter.
+
+That ruling is right for the case it describes — an agent that ran out of room and
+said so should get another turn. It is wrong for a *systematic* mismatch, where
+every run reports zero coverage for the same structural reason (an oid format the
+agent renders differently, a batch it cannot parse). Then the program burns one
+agent run per eligible beat, forever, and the only visible symptom is
+`pages_created: 0` repeating in `last_run`.
+
+The prompt clarification above removes the likeliest cause rather than the loop
+itself. A real bound needs something the brief did not authorise — a
+consecutive-zero-coverage counter, distinct from `failures` so it cannot quarantine
+a batch that is merely slow. Recommended as its own small task, not smuggled in
+here.
+
 ## Deviations
 
-One, minor and deliberate: on the escaped path the returned line stays exactly
+Two. The first is the prompt clarification described above.
+
+The second is minor and deliberate: on the escaped path the returned line stays
+exactly
 `wiki: {kind} ESCAPED — batch not recorded` **even when that escape triggered
 quarantine**, because the brief said to preserve the existing return string and
 the dispatcher and CLI both match on it. The failed path still switches to

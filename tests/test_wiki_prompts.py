@@ -51,6 +51,17 @@ def test_ingest_prompt_states_the_prohibitions():
     assert "QUESTIONS.md" in text
 
 
+def test_ingest_prompt_defines_what_objects_means():
+    # _collect trusts this field to decide what is marked ingested, so the prompt
+    # has to say it means "the ids from this batch you finished" and nothing else.
+    text = wiki_prompts.render_ingest(PROGRAM, BUNDLE, OBJECTS, RUN)
+    # Each phrase has to sit on one line of the prompt; these substrings must not
+    # straddle a wrap, or the assertion fails on formatting rather than meaning.
+    assert "`objects` is the list of object ids" in text
+    assert "only the ones you finished" in text
+    assert "never put page paths in `objects`" in text
+
+
 def test_ingest_prompt_carries_the_four_pass_protocol():
     text = wiki_prompts.render_ingest(PROGRAM, BUNDLE, OBJECTS, RUN)
     for pass_name in ("structure map", "claim", "relationship", "contradiction"):

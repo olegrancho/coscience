@@ -81,6 +81,12 @@ _HOUSEKEEPING = """## Before you finish
 {{"pages_created": ["concepts/a.md"], "pages_updated": ["concepts/b.md"],
   "objects": ["result:r1"], "notes": "one or two sentences"}}
 ```
+
+   `objects` is the list of object ids from this run's batch that you actually
+   covered: exactly as given above, and only the ones you finished. Anything you
+   leave out comes back to you in a later run, so leaving one out is the honest
+   way to do fewer objects well.
+   Never list an id you were not given, and never put page paths in `objects`.
 """
 
 
