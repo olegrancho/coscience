@@ -54,6 +54,10 @@ _PROHIBITIONS = """## Prohibitions
 
 - Do not write anywhere outside `{bundle}` (and this run's directory,
   `{run_dir}`). Everything else in the repository belongs to other systems.
+- Do not run `git commit`, `git add`, `git stash`, `git checkout`, `git reset` or
+  anything else that changes the repository's git state. The platform commits your
+  work for you when the run is collected. A run that commits its own changes hides
+  them from the checks that read the working tree.
 - Do not compute or invent content hashes. The `origin_hash` values are given to
   you above; copy them exactly. A hash you compute yourself cannot detect drift.
 - Do not start background tasks, long-running processes or anything that would

@@ -40,6 +40,10 @@ def test_ingest_prompt_paths_are_absolute():
 def test_ingest_prompt_states_the_prohibitions():
     text = wiki_prompts.render_ingest(PROGRAM, BUNDLE, OBJECTS, RUN)
     assert "do not compute" in text.lower()
+    # The escape guard diffs the working tree, so a run that commits its own
+    # writes makes them invisible to it.
+    for forbidden in ("git commit", "git add", "git stash", "git checkout", "git reset"):
+        assert forbidden in text
     assert str(BUNDLE) in text
     assert "# Human notes" in text
     assert "report.json" in text
