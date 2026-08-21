@@ -5,10 +5,11 @@ machine or another.
 **Branch:** `feat/program-wiki`
 **Design:** `docs/superpowers/specs/2026-08-20-program-wiki-design.md` — the
 authoritative *what and why*. This file is the *where we are and how to work*.
-**Last updated:** 2026-08-20 · by: Claude Opus 5 (Avatar) · state: phase 1
-implemented and reviewed on `feat/program-wiki` (HEAD `bd9622f`, 1029 tests
-green); 3 Important review findings open; not merged, not deployed, and the live
-end-to-end run not yet performed.
+**Last updated:** 2026-08-21 · by: Claude Opus 5 (RBS-138384 → aish-sandbox dev)
+· state: phase 1 **done** on `feat/program-wiki` (HEAD `4840531`, 1037 tests
+green). All 3 Important review findings fixed; the live end-to-end run has been
+performed and verified, including the Obsidian vault check. Still **not merged
+and not deployed** — both need the human's explicit go-ahead.
 **Start here if you are picking this up:** `docs/knowledge/NEXT.md`
 
 > **Keep this file current.** It is the only handoff surface. Before you stop —
@@ -47,18 +48,74 @@ Update this table as you go. One row per phase from the design's §15.
 | — | Research (Karpathy llm-wiki, OKF v0.2, the `_tmp_wiki` reference impl) | **done** |
 | — | Design spec | **done**, approved |
 | — | Implementation plan (`superpowers:writing-plans`) | **done** — `docs/superpowers/plans/2026-08-20-program-wiki-phase-1.md` |
-| 1 | Store & ingest — `wiki_store`, `wiki_okf`, `wiki_prompts`, `wiki_agent`, `wiki.beat`, `agent_stream` extraction, `wiki_lint` as CLI, `coscience wiki --once` | **code complete, not signed off** — all 15 tasks implemented and reviewed (21 commits, HEAD `bd9622f`, 1029 tests green). **Open:** 3 Important findings from the whole-branch review (`docs/knowledge/phase-1-record/open-fix-brief.md`), then the live end-to-end run, which has never been performed |
-| 2 | Browse — endpoints, `WikiView`, curation actions, provenance chips *(**first milestone** ends here)* | not started |
+| 1 | Store & ingest — `wiki_store`, `wiki_okf`, `wiki_prompts`, `wiki_agent`, `wiki.beat`, `agent_stream` extraction, `wiki_lint` as CLI, `coscience wiki --once` | **done** — 25 commits, HEAD `4840531`, 1037 tests green. All 3 review findings fixed (`final-fix-report.md`); live end-to-end run performed 2026-08-21 and verified, Obsidian vault included. **Not merged, not deployed.** Three defects the live run exposed are open — see below |
+| 2 | Browse — endpoints, `WikiView`, curation actions, provenance chips *(**first milestone** ends here)* | **next** |
 | 3 | Lint runs — agent lint mode, cadence, report UI, quarantine retry | not started |
 | 4 | Graph — `wiki_graph`, `d3-force`, `WikiGraphView`, provenance backlinks | not started |
 | 5 | Ask & research — wiki chat, research runs, `QUESTIONS.md`, MCP tools | not started |
 
-**Phase 1's code is written; phase 1 is not done.** The definition of done is a
-real program's results producing a linted bundle that opens as an Obsidian vault,
-and **no live agent run has ever been performed** — it spends the human's Claude
-quota and needs their explicit go-ahead. Land the three open fixes first. The full
-record (decision log, review, deferred items, fix brief) is in
+**Phase 1 is done, and the definition of done was met by a real run.** The full
+record (decision log, review, deferred items, fix brief, fix report) is in
 `docs/knowledge/phase-1-record/`; the running order is `docs/knowledge/NEXT.md`.
+
+### What the first live run actually did (2026-08-21)
+
+`coscience wiki --repo <scratch> --program authtest --once`, on a scratch copy of
+the dev substrate, model `claude-sonnet-5`, ~6 minutes, exit 0.
+
+- 4 of 5 pending objects dispatched (batch size 4): 3 results + one artifact
+  version. **18 pages created**, 3 updated — 4 `sources/`, 10 `concepts/`, 4
+  `entities/`.
+- Page quality was better than expected: real definitions, `# Evidence` bullets
+  with footnote citations back to the source oid, `# Contradictions` and
+  `# Open questions` filled in honestly, correct OKF frontmatter with typed
+  relations and `aliases`.
+- The agent volunteered an entity for an artifact **not** in its batch
+  (`how-artifacts-work`), said so in `notes`, and filed it in `QUESTIONS.md` for a
+  later run to ingest properly. That is the behaviour the prompt asks for.
+- `report.json`'s `objects` listed exactly the 4 dispatched oids in exact format,
+  so reconciliation ingested 4 and left the 5th pending. `escaped: []`,
+  `failures: 0`, `quarantined: []`.
+- Lint: **5 errors → 0** after `--lint --fix` (all 5 `rel/no-link`). 19 warnings
+  and 4 info remain, none of them blocking.
+- The bundle opens as an Obsidian vault and the links resolve, confirmed by hand.
+
+**Calibration for the next phase:** batch size 4 was right — one run produced 18
+coherent pages without thrashing. Sonnet was sufficient; there is no evidence yet
+that Opus is needed for ingest. The run cost ~6 minutes of wall clock, so the
+dispatch cadence does not need to allow for long ingests.
+
+### Three defects the live run exposed — all open
+
+1. **The wikilink autofix never fires on what agents actually write.**
+   `wiki_lint.autofix` (`wiki_lint.py:314-318`) resolves `[[x]]` through
+   `by_slug = {p.slug: p.path}` — a *bare slug* lookup. The agent wrote
+   `[[concepts/session-based-attribution]]`, a *path*, so the lookup misses,
+   `continue` fires, and the link is left alone. All 19 wikilinks in the run were
+   skipped this way. §7's row claiming lint "mechanically rewrites `[[slug]]` when
+   an agent slips" is **wrong as implemented** for the form a real agent produces.
+   Fix is small: accept a path as well as a slug. Not attempted yet.
+2. **The agent wrote into `# Human notes`.** That section is declared protected —
+   reproduce byte for byte, it outranks agent prose. The agent put its footnote
+   definitions there (`[^c13]: sources[c13] — …`). Harmless on a new page with no
+   human content, but every later run must now preserve the agent's own footnote
+   as though a human wrote it, and the human-notes lint rule did not flag it.
+   Either the prompt must name a different home for footnote definitions, or the
+   rule must catch an agent writing into that section on a page it just created.
+3. **`substrate.commit()` is repo-wide.** `substrate.py:549` runs `git add -A`,
+   so `.coscience/wiki.lock` was swept into the wiki's own commit. Pre-existing
+   platform behaviour, not introduced by the wiki, but it makes the plan's "nothing
+   outside `programs/<pid>/` changed" weaker than stated: a wiki run does not
+   *write* elsewhere, but its commit *records* whatever else happened to be dirty.
+   On a substrate with concurrent sprint work, unrelated changes land under a
+   message reading `wiki …`. Path-scoped commits are the fix and are a platform
+   change, not a wiki one.
+
+Two smaller notes, neither a defect. The mechanical fix writes body links
+bundle-absolute (`/concepts/x.md`); Obsidian resolves those, but GitHub and VS Code
+preview will not — the bundle is portable to Obsidian, not to every renderer.
+And `.wiki/state.json` is written *after* `substrate.commit()`, so a run's state
+update always lands in the *following* commit rather than its own.
 
 Uncommitted files in the working tree (`frontend/src/styles.css`,
 `ProgramDetail.tsx`, `SprintDetail.tsx`, `PageToc.tsx`, `frontend/.coscience/`,
@@ -172,7 +229,8 @@ you believe a decision is wrong, say so to the user and add a row here.
 | OKF v0.2 as the on-disk format | Standardizes the same pattern we converged on; makes the bundle portable; and this project already intended it (`substrate.py`'s docstring, `initial_specs.md:26`, the 2026-06-23 platform design). |
 | Typed `relations` as an OKF extension, not a fork | OKF declines to define a relation taxonomy and requires consumers to tolerate unknown keys. Documented in the bundle's `CLAUDE.md`. |
 | Approach C: links as substrate, typed relations as overlay, lint enforcing containment | Untyped links can't answer "what contradicts X". Typed frontmatter alone drifts from the prose. The containment invariant (`rel/no-link`) is what stops the drift. |
-| Markdown links, not `[[wikilinks]]` | OKF mandates them, Obsidian resolves and graphs them anyway, so it costs nothing. Lint mechanically rewrites `[[slug]]` when an agent slips. |
+| Markdown links, not `[[wikilinks]]` | OKF mandates them, Obsidian resolves and graphs them anyway, so it costs nothing. Lint mechanically rewrites `[[slug]]` when an agent slips. **The decision stands; the implementation does not deliver it** — the rewrite only matches a bare slug, and the first live run showed agents write `[[dir/slug]]`, so all 19 were skipped. See §2. |
+| Mechanical fixes write body links bundle-absolute (`/concepts/x.md`) | Verified against Obsidian on 2026-08-21: it resolves them. Keeps one form everywhere instead of computing a per-page relative prefix. Cost, accepted knowingly: GitHub and VS Code preview do not resolve them, so the bundle is portable to Obsidian rather than to every markdown renderer. |
 | Sources are pointed at, never copied | `results/` and artifact versions already are the immutable git-versioned raw layer. Copying creates a second truth. |
 | `.wiki/` is a **sibling** of `wiki/`, not a child | Keeps the bundle a clean portable OKF directory — copy `wiki/` anywhere with nothing to strip. |
 | Source-page slugs assigned by the platform, not the agent | So the platform can find an object's page without searching. Same reason `origin_hash` is precomputed and handed to the agent — a hash the agent invents cannot detect drift. |

@@ -6,11 +6,47 @@ anything; it takes two minutes and will save you from re-deriving decisions that
 are already made and recorded.
 
 **Written:** 2026-08-20, by the instance that executed phase 1.
-**Branch:** `feat/program-wiki`, HEAD `bd9622f`. Not pushed, not merged, not deployed.
+**Updated:** 2026-08-21 — Steps 1, 2 and 3 below are **done**. Read §0 first;
+the rest of this file is kept for its reasoning, not as a to-do list.
+**Branch:** `feat/program-wiki`, HEAD `4840531`. Pushed to `rancho` (backup only),
+**not merged, not deployed.**
 
 ---
 
-## 1. State in one paragraph
+## 0. Where this actually stands (2026-08-21)
+
+Phase 1 is **done**. 25 commits above `71c2aba`, suite green at **1037 tests**.
+
+- **Step 1 done.** All three Important findings fixed — `fce6a48` (escaped runs
+  count against the failure threshold; `report.json`'s `objects` reconciled against
+  the dispatched batch) and `60a4c1d` (the agent is forbidden from changing git
+  state). The scoped re-review then found that Fix 2 had made `objects`
+  authoritative while the prompt never defined it; `4840531` fixes that. Full
+  write-up with `file:line` and the residual risks:
+  `phase-1-record/final-fix-report.md`.
+- **Step 2 done.** Live end-to-end run performed and verified on 2026-08-21
+  against a scratch copy of the dev substrate. 18 pages, lint 5 errors → 0 after
+  `--fix`, opens as an Obsidian vault with links resolving. What it produced and
+  what it revealed is recorded in `docs/knowledge-charter.md` §2.
+- **Step 3 done.** The charter's status table and header are current.
+- **Step 4 — merge and deploy — is the only step left, and both halves need the
+  human's explicit go-ahead.**
+
+**Three defects the live run exposed are open**, all recorded in the charter's §2
+with `file:line`: the wikilink autofix never matches what agents actually write
+(`wiki_lint.py:314-318` looks up a bare slug, agents write `[[dir/slug]]`); the
+agent wrote into the protected `# Human notes` section and lint did not flag it;
+and `substrate.commit()` is repo-wide (`substrate.py:549` does `git add -A`), so a
+wiki run's commit records whatever else was dirty. None blocks the merge; all
+three want deciding before phase 2 builds a UI on top.
+
+Also worth one line on `main` eventually: `pyproject.toml:10` pins `mcp>=1.2`, and
+`mcp` 2.0.0 removed `mcp.server.fastmcp`, so a fresh install of that extra breaks
+collection on three test files.
+
+---
+
+## 1. State when this file was first written (2026-08-20, historical)
 
 All 15 tasks of the phase-1 implementation plan are **implemented, committed and
 individually reviewed**. 21 commits on `feat/program-wiki` above `71c2aba`, 32
