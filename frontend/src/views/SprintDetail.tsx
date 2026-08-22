@@ -1,7 +1,7 @@
 import { ActionIcon, Button, Card, Group, Loader, Menu, SegmentedControl, SimpleGrid, Stack, Text, Textarea, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
@@ -10,6 +10,7 @@ import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
 import { AbsTime, BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, ZoomableImg, isImageName, voterId } from "../components/ui";
 import { markSeen } from "../sprintSeen";
+import PageToc, { type TocEntry } from "../components/PageToc";
 import SprintEditModal from "../components/SprintEditModal";
 import { useMe, useIsMine, UserChip, OTHER_SHADE } from "../auth";
 
@@ -193,6 +194,22 @@ export default function SprintDetail() {
 
   useEffect(() => { markSeen(id); }, [id]);
 
+  const tocEntries = useMemo<TocEntry[]>(() => {
+    const d = sprint.data;
+    if (!d) return [];
+    return [
+      ...(d.title && d.goals && d.goals !== d.title ? [{ id: "sec-goals", label: "Goals" }] : []),
+      ...(d.rationale ? [{ id: "sec-rationale", label: "Rationale" }] : []),
+      ...(d.status === "failed" ? [{ id: "sec-failed", label: "Failed" }] : []),
+      { id: "sec-feedback", label: "Feedback" },
+      ...(d.results.length > 0 ? [{ id: "sec-results", label: "Results" }] : []),
+      ...(d.artifacts_bound?.length > 0 || d.artifacts_create?.length > 0 ? [{ id: "sec-artifacts", label: "Artifacts" }] : []),
+      { id: "sec-docs", label: "Working docs" },
+      { id: "sec-glance", label: "At a glance" },
+      ...(d.plan.length > 0 ? [{ id: "sec-plan", label: "Plan" }] : []),
+    ];
+  }, [sprint.data]);
+
   if (sprint.isLoading) return <Loader color="machine" />;
   if (sprint.error || !sprint.data) {
     return <EmptyState title="Experiment not found">Nothing here at “{id}”. It may have been removed.</EmptyState>;
@@ -304,6 +321,7 @@ export default function SprintDetail() {
 
   return (
     <Stack gap="lg">
+      <PageToc entries={tocEntries} />
       <div>
         <BackLink to={`/programs/${prog}`}>{progTitle}</BackLink>
         <Group justify="space-between" align="flex-start" wrap="nowrap">
@@ -423,21 +441,21 @@ export default function SprintDetail() {
       </div>
 
       {s.title && s.goals && s.goals !== s.title && (
-        <Card padding="lg" radius="md" style={cardStyle}>
+        <Card id="sec-goals" padding="lg" radius="md" style={cardStyle}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>what this experiment does</div>
           <div className="report-leaf"><Md>{s.goals}</Md></div>
         </Card>
       )}
 
       {s.rationale && (
-        <Card padding="lg" radius="md" style={cardStyle}>
+        <Card id="sec-rationale" padding="lg" radius="md" style={cardStyle}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>why the AI proposed this</div>
           <div className="report-leaf"><Md>{s.rationale}</Md></div>
         </Card>
       )}
 
       {s.status === "failed" && (
-        <Card padding="lg" radius="md" style={{ border: "1px solid var(--signal-line)", background: "var(--signal-weak)" }}>
+        <Card id="sec-failed" padding="lg" radius="md" style={{ border: "1px solid var(--signal-line)", background: "var(--signal-weak)" }}>
           <div className="eyebrow" style={{ marginBottom: 8, color: "var(--signal)" }}>this experiment failed</div>
           <Text size="sm" mb={s.error ? 8 : 0}>The research agent gave up after repeated errors. The AI sees this and will rethink the approach.</Text>
           {s.error && (
@@ -447,7 +465,7 @@ export default function SprintDetail() {
         </Card>
       )}
 
-      <Card padding="lg" radius="md" style={cardStyle}>
+      <Card id="sec-feedback" padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 10 }}>your feedback{s.threads.length ? ` · ${s.threads.length}` : ""}</div>
         <Stack gap={16}>
           {pmThreads.length > 0 && (
@@ -493,7 +511,7 @@ export default function SprintDetail() {
       </Card>
 
       {s.results.length > 0 && (
-        <Card padding="lg" radius="md" style={cardStyle}>
+        <Card id="sec-results" padding="lg" radius="md" style={cardStyle}>
           <div className="eyebrow" style={{ marginBottom: 12 }}>
             {s.results.length > 1 ? `results · ${s.results.length}` : "what the experiment found"}
           </div>
@@ -504,7 +522,7 @@ export default function SprintDetail() {
       )}
 
       {(s.artifacts_bound?.length > 0 || s.artifacts_create?.length > 0) && (
-        <Card padding="lg" radius="md" style={cardStyle}>
+        <Card id="sec-artifacts" padding="lg" radius="md" style={cardStyle}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>artifacts</div>
           <Stack gap={6}>
             {s.artifacts_bound?.map((aid) => (
@@ -522,9 +540,9 @@ export default function SprintDetail() {
         </Card>
       )}
 
-      <WorkingDocs sprintId={s.id} live={s.agent_running} />
+      <div id="sec-docs"><WorkingDocs sprintId={s.id} live={s.agent_running} /></div>
 
-      <SimpleGrid cols={{ base: 1, sm: 2 }}>
+      <SimpleGrid id="sec-glance" cols={{ base: 1, sm: 2 }}>
         <Card padding="lg" radius="md" style={cardStyle}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>at a glance</div>
           <Stack gap={7}>
@@ -553,7 +571,7 @@ export default function SprintDetail() {
       </SimpleGrid>
 
       {s.plan.length > 0 && (
-        <Card padding="lg" radius="md" style={cardStyle}>
+        <Card id="sec-plan" padding="lg" radius="md" style={cardStyle}>
           <div className="eyebrow" style={{ marginBottom: 4 }}>suggested approach · {s.plan.length} {s.plan.length === 1 ? "step" : "steps"}</div>
           <Text size="xs" c="dimmed" mb="md">High-level guidance for the research agent — it plans and carries out the actual work itself.</Text>
           <Stack gap={11}>
