@@ -4,3 +4,11 @@ __pycache__/
 *.egg-info/
 .venv/
 local_setup*.md
+
+# Reference implementation the wiki design ports from: a nested git clone,
+# kept locally and deliberately never committed (see docs/knowledge-charter.md).
+docs/_tmp_wiki/
+
+# Runtime state written when a platform process is pointed at frontend/ by
+# mistake. Harmless, not ours to track.
+frontend/.coscience/
