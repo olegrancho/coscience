@@ -32,13 +32,20 @@ Phase 1 is **done**. 25 commits above `71c2aba`, suite green at **1037 tests**.
 - **Step 4 — merge and deploy — is the only step left, and both halves need the
   human's explicit go-ahead.**
 
-**Three defects the live run exposed are open**, all recorded in the charter's §2
-with `file:line`: the wikilink autofix never matches what agents actually write
-(`wiki_lint.py:314-318` looks up a bare slug, agents write `[[dir/slug]]`); the
-agent wrote into the protected `# Human notes` section and lint did not flag it;
-and `substrate.commit()` is repo-wide (`substrate.py:549` does `git add -A`), so a
-wiki run's commit records whatever else was dirty. None blocks the merge; all
-three want deciding before phase 2 builds a UI on top.
+**The live run exposed three defects; one is fixed, two are open.** All are
+recorded in the charter's §2.
+
+- *Fixed:* the wikilink autofix matched only a bare slug while agents write
+  `[[dir/slug]]`, so all 19 were skipped and `--fix` reported success having
+  changed nothing. `wiki_lint._wikilink_index` now accepts slug, path, and path
+  without `.md`; re-verified on the run's own bundle, 19 warnings → 0.
+- *Open:* the agent wrote into the protected `# Human notes` section and lint did
+  not flag it.
+- *Open:* `substrate.commit()` is repo-wide (`substrate.py:549` does `git add -A`),
+  so a wiki run's commit records whatever else happened to be dirty.
+
+Neither open item blocks the merge, but both want deciding before phase 2 builds a
+UI on top.
 
 Also worth one line on `main` eventually: `pyproject.toml:10` pins `mcp>=1.2`, and
 `mcp` 2.0.0 removed `mcp.server.fastmcp`, so a fresh install of that extra breaks

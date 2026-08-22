@@ -85,16 +85,18 @@ coherent pages without thrashing. Sonnet was sufficient; there is no evidence ye
 that Opus is needed for ingest. The run cost ~6 minutes of wall clock, so the
 dispatch cadence does not need to allow for long ingests.
 
-### Three defects the live run exposed — all open
+### Three defects the live run exposed — one fixed, two open
 
-1. **The wikilink autofix never fires on what agents actually write.**
-   `wiki_lint.autofix` (`wiki_lint.py:314-318`) resolves `[[x]]` through
-   `by_slug = {p.slug: p.path}` — a *bare slug* lookup. The agent wrote
-   `[[concepts/session-based-attribution]]`, a *path*, so the lookup misses,
-   `continue` fires, and the link is left alone. All 19 wikilinks in the run were
-   skipped this way. §7's row claiming lint "mechanically rewrites `[[slug]]` when
-   an agent slips" is **wrong as implemented** for the form a real agent produces.
-   Fix is small: accept a path as well as a slug. Not attempted yet.
+1. **The wikilink autofix never fired on what agents actually write — FIXED.**
+   `wiki_lint.autofix` resolved `[[x]]` through `by_slug = {p.slug: p.path}`, a
+   *bare slug* lookup. The agent wrote `[[concepts/session-based-attribution]]`, a
+   *path*, so the lookup missed, `continue` fired, and the link was left alone —
+   all 19 wikilinks in the run were skipped, and a `--fix` pass reported success
+   while changing nothing. `wiki_lint._wikilink_index` now maps the bare slug, the
+   bundle path, and the path without `.md`; callers strip a leading `/` and a
+   trailing `.md` first. Verified on the run's own bundle: **19 warnings → 0**,
+   4 pages rewritten. Rewrites are labelled with the target's slug, deliberately,
+   rather than echoing a whole path at the reader.
 2. **The agent wrote into `# Human notes`.** That section is declared protected —
    reproduce byte for byte, it outranks agent prose. The agent put its footnote
    definitions there (`[^c13]: sources[c13] — …`). Harmless on a new page with no
@@ -229,7 +231,7 @@ you believe a decision is wrong, say so to the user and add a row here.
 | OKF v0.2 as the on-disk format | Standardizes the same pattern we converged on; makes the bundle portable; and this project already intended it (`substrate.py`'s docstring, `initial_specs.md:26`, the 2026-06-23 platform design). |
 | Typed `relations` as an OKF extension, not a fork | OKF declines to define a relation taxonomy and requires consumers to tolerate unknown keys. Documented in the bundle's `CLAUDE.md`. |
 | Approach C: links as substrate, typed relations as overlay, lint enforcing containment | Untyped links can't answer "what contradicts X". Typed frontmatter alone drifts from the prose. The containment invariant (`rel/no-link`) is what stops the drift. |
-| Markdown links, not `[[wikilinks]]` | OKF mandates them, Obsidian resolves and graphs them anyway, so it costs nothing. Lint mechanically rewrites `[[slug]]` when an agent slips. **The decision stands; the implementation does not deliver it** — the rewrite only matches a bare slug, and the first live run showed agents write `[[dir/slug]]`, so all 19 were skipped. See §2. |
+| Markdown links, not `[[wikilinks]]` | OKF mandates them, Obsidian resolves and graphs them anyway, so it costs nothing. Lint mechanically rewrites a wikilink whether the agent wrote a bare slug or a bundle path — the path form was unhandled until the first live run produced 19 of them. Padded (`[[ slug ]]`) is still warned and not rewritten: `wiki_okf.wikilinks` strips before the literal `str.replace` can match, the same naive-parsing limitation documented for code fences. |
 | Mechanical fixes write body links bundle-absolute (`/concepts/x.md`) | Verified against Obsidian on 2026-08-21: it resolves them. Keeps one form everywhere instead of computing a per-page relative prefix. Cost, accepted knowingly: GitHub and VS Code preview do not resolve them, so the bundle is portable to Obsidian rather than to every markdown renderer. |
 | Sources are pointed at, never copied | `results/` and artifact versions already are the immutable git-versioned raw layer. Copying creates a second truth. |
 | `.wiki/` is a **sibling** of `wiki/`, not a child | Keeps the bundle a clean portable OKF directory — copy `wiki/` anywhere with nothing to strip. |
