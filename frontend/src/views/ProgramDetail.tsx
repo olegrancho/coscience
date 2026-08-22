@@ -1,7 +1,7 @@
 import { ActionIcon, Badge, Button, Card, Group, Loader, Stack, Text, Textarea, TextInput, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { type Components } from "react-markdown";
 import Md from "../components/Md";
@@ -14,6 +14,7 @@ import ProgramSettingsModal from "../components/ProgramSettingsModal";
 import LineageCard from "../components/LineageCard";
 import type { ArtifactRow } from "../api";
 import { isUnseen, seedIfNew } from "../sprintSeen";
+import PageToc, { type TocEntry } from "../components/PageToc";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
@@ -63,6 +64,21 @@ export default function ProgramDetail() {
 
   useEffect(() => {
     if (program.data) seedIfNew(program.data.sprints);
+  }, [program.data]);
+
+  const tocEntries = useMemo<TocEntry[]>(() => {
+    const d = program.data;
+    if (!d) return [];
+    return [
+      { id: "sec-report", label: "Report" },
+      ...(d.activations?.length > 0 ? [{ id: "sec-activity", label: "PM activity" }] : []),
+      { id: "sec-instructions", label: "Instructions" },
+      { id: "sec-guidance", label: "Guidance" },
+      { id: "sec-experiments", label: "Experiments" },
+      { id: "sec-ideas", label: "Ideas" },
+      { id: "sec-artifacts", label: "Artifacts" },
+      { id: "sec-lineage", label: "Lineage" },
+    ];
   }, [program.data]);
 
   if (program.isLoading) return <Loader color="machine" />;
@@ -158,6 +174,7 @@ export default function ProgramDetail() {
 
   return (
     <Stack gap="lg">
+      <PageToc entries={tocEntries} />
       <div>
         <BackLink to="/programs">Programs</BackLink>
         <Group justify="space-between" align="flex-start" wrap="nowrap">
@@ -224,14 +241,14 @@ export default function ProgramDetail() {
 
       {p.goals && <Text c="dimmed" style={{ maxWidth: 680 }}>{p.goals}</Text>}
 
-      <Card padding="lg" radius="md" style={cardStyle}>
+      <Card id="sec-report" padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 12 }}>the AI's status report</div>
         {p.report ? <div className="report-leaf"><Md components={reportComponents}>{p.report}</Md></div>
           : <Text size="sm" c="dimmed">No report yet — the AI writes one each planning cycle.</Text>}
       </Card>
 
       {p.activations?.length > 0 && (
-        <Card padding="lg" radius="md" style={cardStyle}>
+        <Card id="sec-activity" padding="lg" radius="md" style={cardStyle}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>PM activity — when it planned and why</div>
           <Stack gap={7}>
             {(pmExpanded ? p.activations.slice(0, 12) : p.activations.slice(0, 3)).map((a, i) => (
@@ -256,7 +273,7 @@ export default function ProgramDetail() {
         </Card>
       )}
 
-      <Card padding="lg" radius="md" style={cardStyle}>
+      <Card id="sec-instructions" padding="lg" radius="md" style={cardStyle}>
         <Group justify="space-between" align="baseline" mb={4} wrap="nowrap">
           <div className="eyebrow">general instructions</div>
           {draft === null && (
@@ -288,7 +305,7 @@ export default function ProgramDetail() {
         )}
       </Card>
 
-      <Card padding="lg" radius="md" style={cardStyle}>
+      <Card id="sec-guidance" padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 4 }}>your guidance to the AI</div>
         <Text size="xs" c="dimmed" mb="sm">Standing direction the AI weighs every cycle and replies to — mark a thread complete once it's handled.</Text>
         <Stack gap={8}>
@@ -333,7 +350,7 @@ export default function ProgramDetail() {
         }, {});
         const order = ["proposed", "approved", "queued", "executing", "parked", "failed", "done", "canceled"];
         return (
-          <Card padding="lg" radius="md" style={cardStyle}>
+          <Card id="sec-experiments" padding="lg" radius="md" style={cardStyle}>
             <Group justify="space-between" align="center" mb={12} wrap="nowrap">
               <div className="eyebrow">experiments · {p.sprints.length}</div>
               <select className="mono" value={statusFilter}
@@ -387,7 +404,7 @@ export default function ProgramDetail() {
         );
       })()}
 
-      <Card padding="lg" radius="md" style={cardStyle}>
+      <Card id="sec-ideas" padding="lg" radius="md" style={cardStyle}>
         <Group justify="space-between" align="center" mb={ideas.data?.summary.trim() ? 10 : 0}>
           <div className="eyebrow">ideas · {ideas.data?.ideas.length ?? 0}</div>
           <Link to={`/programs/${id}/ideas`} className="view" style={{ fontSize: 13 }}>open ideas →</Link>
@@ -404,7 +421,7 @@ export default function ProgramDetail() {
           : <Text size="sm" c="dimmed">A pool of candidate directions the AI grows, prunes, and promotes into experiments.</Text>}
       </Card>
 
-      <Card padding="lg" radius="md" style={cardStyle}>
+      <Card id="sec-artifacts" padding="lg" radius="md" style={cardStyle}>
         <Group justify="space-between" align="center" mb={12}>
           <div className="eyebrow">artifacts · {artifacts.data?.length ?? 0}</div>
           <Link to={`/programs/${id}/artifacts`} className="view" style={{ fontSize: 13 }}>open artifacts →</Link>
@@ -450,7 +467,7 @@ export default function ProgramDetail() {
         )}
       </Card>
 
-      <LineageCard programId={id} />
+      <div id="sec-lineage"><LineageCard programId={id} /></div>
 
       <ProposeSprintModal programId={id} opened={proposing} onClose={() => setProposing(false)} onDone={refresh} />
     </Stack>
