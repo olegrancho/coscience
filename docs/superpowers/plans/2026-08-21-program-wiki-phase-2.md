@@ -27,7 +27,8 @@ Every task's requirements implicitly include this section.
 - **Containment.** `{slug}` is a path segment and a traversal primitive. Every slug→path resolution must be containment-checked against the bundle root *after* symlink resolution, in the style of `Service._guarded_file` (`service.py:1327-1336`): resolve, then `is_relative_to`, then raise `NotFoundError`. Never string-compare.
 - **Trust is derived, never stored.** No `verified` key → `unverified`; verified only by non-`human:` actors → `machine-confirmed`; any `human:` actor → `human-reviewed`. `status` is the orthogonal lifecycle axis (`draft|stable|deprecated`).
 - **`# Human notes` is protected.** It is written only through its dedicated endpoint. Nothing else in this plan may rewrite it.
-- **Never `git add -A`.** These paths are someone else's uncommitted work carried over from `main` and must never enter a commit: `frontend/src/styles.css`, `frontend/src/views/ProgramDetail.tsx`, `frontend/src/views/SprintDetail.tsx`, `frontend/src/components/PageToc.tsx`, `frontend/.coscience/`, `docs/_tmp_wiki/`. Stage explicit paths, always.
+- **Stage explicit paths, never `git add -A`.** The carried-over frontend work this plan originally had to avoid (`styles.css`, `ProgramDetail.tsx`, `SprintDetail.tsx`, `PageToc.tsx`) **landed on `main` as `ee062d2` on 2026-08-21**, so there is no longer anything untouchable in the tree — but the habit stands, because a substrate or a stray runtime file wandering into a commit is how this branch's history gets muddied.
+- **Follow the dashboard's component conventions.** Every existing view is built from Mantine (`Card`, `Stack`, `Group`, `Text`, `Button`, `TextInput`, `Select`, `Textarea`) with `cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" }`, an `.eyebrow` label per card, and `<Loader color="machine" />` while loading. A raw-HTML view would be the only one in the app. Component tests must wrap in `MantineProvider` and stub `window.matchMedia` / `window.ResizeObserver`, exactly as `ProgramDetail.test.tsx:10-18` does — Mantine touches both and jsdom has neither.
 - **Never commit or push without the human's explicit approval.** Each task's commit step means "prepare and ask", not "push".
 - **Do not touch the graph.** `/wiki/graph`, `wiki_graph.py` and `WikiGraphView` are phase 4. `POST /wiki/run {kind: lint}` exists here as an endpoint, but agent lint *mode* is phase 3.
 
@@ -41,11 +42,17 @@ These five are deliberate. Each is a place a literal reading of §11–§12 woul
 
 **D2 — A new pure module `wiki_read.py`, rather than growing `service.py`.** `service.py` is already 1544 lines. §12's module table lists the phase-1 and phase-4 modules and is silent on the read side; putting the shaping logic in a pure module keeps it unit-testable without a substrate, which is exactly what §12's testing strategy asks for.
 
-**D3 — Wiki styles live in a new `frontend/src/wiki.css`, not in `styles.css`.** `styles.css` carries someone else's uncommitted edits. Touching it would make a wiki commit impossible to stage cleanly.
+**D3 — WITHDRAWN.** This slot previously argued for a separate `frontend/src/wiki.css`, because `styles.css` carried uncommitted work. That work landed in `ee062d2`, so the reason is gone — and the repo's convention is one stylesheet (`ee062d2` itself put `.page-toc` in `styles.css`). Wiki styles go in `frontend/src/styles.css`, appended in the same commented-section idiom the file already uses. No new CSS file.
 
-**D4 — The outline is built in `wikiPage.ts`, not by reusing `PageToc.tsx`.** §11.2 says the right pane reuses `PageToc.tsx`. That file is **untracked** — it is part of the carried-over in-flight work this branch must not commit. Depending on it would make phase 2 unbuildable from a clean checkout. §12 already specifies `frontend/src/components/wikiPage.ts` as a pure, tested module; the outline belongs there. If `PageToc.tsx` later lands on `main`, swapping the renderer is a small follow-up.
+**D4 — The outline is rendered in the right pane, not by reusing `PageToc.tsx`.** §11.2 names `PageToc.tsx` for the right pane. Now that the component is real and readable (`ee062d2`), it turns out to be the wrong fit — and for a better reason than the original "it is untracked":
 
-**D5 — The `ProgramDetail` link is the last task and is BLOCKED.** §11.2 requires an "open wiki →" link on `ProgramDetail`. `ProgramDetail.tsx` carries someone else's uncommitted changes, so the change cannot be committed without either including their work or coordinating. Task 15 is written and ready but must not be executed until the human says how to handle that file.
+- It is `position: fixed` in the **left** gutter (`styles.css`: `left: calc(232px + 16px)`) and portals to `document.body`. The wiki's left column is already the page tree, so mounting it would put two navigations in the same gutter, one on top of the other.
+- It hides itself under 1500px wide (`@media (max-width: 1500px) { display: none }`), so on a laptop the wiki's outline would silently vanish while the rest of the right pane stayed.
+- Its scroll-spy observes elements by DOM id, and markdown-rendered headings have no ids — `Md.tsx` does not add them. Wiring it up would mean also overriding heading renderers to inject ids.
+
+So the outline stays an in-flow list in the right pane, next to backlinks and relations, which is what §11.2 actually describes the pane as containing. `wikiPage.outline()` remains the parser — nothing else in the codebase extracts headings from markdown, and `PageToc` takes pre-built entries rather than deriving them. **If you later want the wiki to have a gutter ToC like the other pages, `outline()` already returns `{id, label}`-shaped data that feeds `PageToc` directly** — that is a small follow-up, not a rewrite.
+
+**D5 — RESOLVED, Task 15 is unblocked.** This previously blocked Task 15 because `ProgramDetail.tsx` carried uncommitted work. `ee062d2` committed it, so the "open wiki →" link is now an ordinary edit to a clean file. Task 15 executes normally.
 
 ---
 
@@ -58,10 +65,10 @@ These five are deliberate. Each is a place a literal reading of §11–§12 woul
 | `src/coscience/http_api.py` | 12 endpoints on the gated `api` router, delegating to `Service`, translating `NotFoundError` → 404 and `ValueError` → 400. |
 | `frontend/src/api.ts` | Wiki types and client methods. |
 | `frontend/src/components/wikiPage.ts` | **NEW, pure.** Internal-link rewriting for client-side routing, heading outline extraction, provenance chip hrefs. |
-| `frontend/src/views/WikiView.tsx` | **NEW.** The three-pane browse view. |
-| `frontend/src/wiki.css` | **NEW.** Styles for the view (see D3). |
+| `frontend/src/views/WikiView.tsx` | **NEW.** The three-pane browse view, built from Mantine like every other view. |
+| `frontend/src/styles.css` | Appended `.wiki-*` section (see D3). |
 | `frontend/src/App.tsx` | The `/programs/:id/wiki` route. |
-| `frontend/src/views/ProgramDetail.tsx` | The "open wiki →" link (Task 15, **blocked**, see D5). |
+| `frontend/src/views/ProgramDetail.tsx` | The "open wiki →" link (Task 15). |
 
 Tests: `tests/test_wiki_read.py`, `tests/test_wiki_read_page.py`, `tests/test_wiki_read_search.py`, `tests/test_service_wiki_read.py`, `tests/test_service_wiki_curate.py`, `tests/test_service_wiki_runs.py`, `tests/test_http_wiki_read.py`, `tests/test_http_wiki_write.py`, `frontend/src/components/wikiPage.test.ts`, `frontend/src/views/WikiView.test.tsx`.
 
@@ -1858,7 +1865,7 @@ git commit -m "feat(wiki): wikiPage.ts — internal link routing and heading out
 
 **Files:**
 - Create: `frontend/src/views/WikiView.tsx`
-- Create: `frontend/src/wiki.css`
+- Modify: `frontend/src/styles.css` (append a `.wiki-*` section)
 - Test: `frontend/src/views/WikiView.test.tsx`
 
 **Interfaces:**
@@ -1871,6 +1878,7 @@ Header: counts by type, trust breakdown, pending count, last run and outcome, li
 
 ```tsx
 // frontend/src/views/WikiView.test.tsx
+import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -1896,17 +1904,29 @@ const rows = [
     trust: "unverified", stale_after: "", tags: [] },
 ];
 
+// Mantine reads matchMedia and ResizeObserver; jsdom has neither. Same stubs as
+// ProgramDetail.test.tsx:10-18 — without them the provider throws on mount.
+beforeEach(() => {
+  window.matchMedia = window.matchMedia || ((q: string) => ({
+    matches: false, media: q, onchange: null, addListener: () => {}, removeListener: () => {},
+    addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
+  })) as never;
+  window.ResizeObserver = window.ResizeObserver || (class {
+    observe() {} unobserve() {} disconnect() {}
+  } as never);
+});
+
 function mount(path = "/programs/p1/wiki") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={qc}>
+    <QueryClientProvider client={qc}><MantineProvider>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/programs/:id/wiki" element={<WikiView />} />
           <Route path="/programs/:id/wiki/*" element={<WikiView />} />
         </Routes>
       </MemoryRouter>
-    </QueryClientProvider>,
+    </MantineProvider></QueryClientProvider>,
   );
 }
 
@@ -1978,65 +1998,52 @@ Expected: FAIL — cannot resolve `./WikiView`
 
 - [ ] **Step 3: Write minimal implementation**
 
-First `frontend/src/wiki.css`. Colours go through the existing CSS custom properties rather than literals so the view follows the dashboard's theme (`theme.ts`); if a variable below does not exist in `styles.css`, substitute the nearest one that does rather than hardcoding a hex.
+First append to `frontend/src/styles.css`, following the `/* ── name ─── */` section idiom the file already uses (see the `.page-toc` and `.sprint-unseen` sections). Use the file's existing custom properties — `--hairline`, `--ink-faint`, `--ink-muted`, `--paper-2`, `--machine`, `--machine-weak`, `--signal`, `--signal-weak` — never raw hex; grep the top of `styles.css` for the full set before adding a colour.
 
 ```css
-/* Wiki browse view. Kept out of styles.css deliberately — see the plan's D3. */
-.wiki { display: flex; flex-direction: column; gap: 12px; }
-.wiki-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.wiki-stats, .wiki-actions, .wiki-provenance, .wiki-meta {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
-}
-.wiki-chip {
-  font-size: 12px; padding: 1px 7px; border-radius: 10px;
-  border: 1px solid var(--border, #ccc); white-space: nowrap;
-}
-.wiki-warn {
-  width: 100%; display: flex; align-items: center; gap: 8px;
-  padding: 6px 10px; border-radius: 6px;
-  border: 1px solid var(--warn, #c90); font-size: 13px;
-}
-
-/* Three panes: tree, page, side. Collapses to one column on a narrow screen so
-   the centre pane stays readable. */
+/* ── wiki browse: three panes, trust dots, section chips ────────── */
 .wiki-panes { display: grid; grid-template-columns: 240px minmax(0, 1fr) 260px; gap: 16px; }
 @media (max-width: 1100px) { .wiki-panes { grid-template-columns: 1fr; } }
 
-.wiki-tree input { width: 100%; margin-bottom: 8px; }
-.wiki-tree h3, .wiki-side h3 {
+.wiki-tree h4, .wiki-side h4 {
   font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
-  opacity: .7; margin: 12px 0 4px;
+  color: var(--ink-faint); margin: 12px 0 4px; font-weight: 500;
 }
 .wiki-tree ul, .wiki-side ul { list-style: none; margin: 0; padding: 0; }
 .wiki-tree li, .wiki-side li {
   display: flex; align-items: center; gap: 6px; padding: 1px 0; font-size: 13px;
 }
-.wiki-excerpt { font-size: 12px; opacity: .7; }
+.wiki-excerpt { font-size: 12px; color: var(--ink-faint); }
 
-/* Trust is derived, so the dot is the only place the tier is visible at a glance. */
+/* Trust is derived, never stored, so this dot is the only place a page's tier is
+   visible at a glance. Unverified is deliberately hollow rather than grey: absent
+   evidence should read as absent, not as a dimmer kind of confirmation. */
 .wiki-dot {
   width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
-  border: 1px solid var(--border, #ccc);
+  border: 1px solid var(--hairline);
 }
 .wiki-dot--unverified { background: transparent; }
-.wiki-dot--machine-confirmed { background: var(--muted, #888); }
-.wiki-dot--human-reviewed { background: var(--ok, #2a7); border-color: var(--ok, #2a7); }
-.wiki-stale { color: var(--warn, #c90); cursor: help; }
+.wiki-dot--machine-confirmed { background: var(--ink-faint); }
+.wiki-dot--human-reviewed { background: var(--machine); border-color: var(--machine); }
+.wiki-stale { color: var(--signal); cursor: help; }
 
-.wiki-page { min-width: 0; }              /* so long code blocks scroll, not stretch */
+/* min-width: 0 so a long code block inside the page scrolls instead of forcing
+   the whole grid wider than the viewport. */
+.wiki-page { min-width: 0; }
 .wiki-page pre, .wiki-page table { overflow-x: auto; max-width: 100%; }
-.wiki-side textarea { width: 100%; }
-.wiki-side section { margin-bottom: 14px; }
 ```
 
-Then `WikiView.tsx` with the header and left pane:
+Then `WikiView.tsx`. Built from Mantine like every other view, reusing `cardStyle`, the `.eyebrow` label idiom and `<Loader color="machine" />`:
 
 ```tsx
+import { Badge, Button, Card, Group, Loader, Stack, Text, TextInput } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type WikiPageRow } from "../api";
-import "../wiki.css";
+import { BackLink, EmptyState } from "../components/ui";
+
+const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
 const TYPE_ORDER = ["Concept", "Entity", "Synthesis", "Source", "Question"];
 const GROUP_LABEL: Record<string, string> = {
@@ -2077,63 +2084,80 @@ export default function WikiView() {
     .filter(([, rows]) => rows.length > 0);
   const extra = (pages.data ?? []).filter((p) => !TYPE_ORDER.includes(p.type));
 
+  if (summary.isLoading) return <Loader color="machine" />;
+  if (summary.error) {
+    return <EmptyState title="No wiki here">Nothing at “{id}”.</EmptyState>;
+  }
+
   return (
-    <div className="wiki">
-      <header className="wiki-header">
-        <h1>Wiki</h1>
-        {s && (
-          <div className="wiki-stats">
-            {TYPE_ORDER.filter((t) => s.counts[t]).map((t) => (
-              <span key={t} className="wiki-chip">{t} {s.counts[t]}</span>
-            ))}
-            <span className="wiki-chip">{s.pending} pending</span>
-            <span className="wiki-chip" title="lint">
-              lint {s.lint.error ?? 0}E / {s.lint.warn ?? 0}W
-            </span>
-            {s.last_run && (
-              <span className="wiki-chip">
-                last: {s.last_run.kind} {s.last_run.status}
-              </span>
-            )}
-            {s.run && <span className="wiki-chip">running…</span>}
-          </div>
-        )}
-        <div className="wiki-actions">
-          <button onClick={() => run.mutate("ingest")} disabled={!!s?.run}>
-            Ingest now
-          </button>
-          <button onClick={() => run.mutate("lint")} disabled={!!s?.run}>
-            Lint now
-          </button>
-        </div>
-        {!!s?.quarantined.length && (
-          <div className="wiki-warn">
-            {s.quarantined.length} object(s) quarantined
-            <button onClick={() => unquarantine.mutate()}>Retry quarantined</button>
-          </div>
-        )}
-      </header>
+    <Stack gap="lg">
+      <div>
+        <BackLink to={`/programs/${id}`}>Program</BackLink>
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <Text fw={600} size="xl">Wiki</Text>
+          <Group gap={8}>
+            <Button size="xs" variant="default" onClick={() => run.mutate("ingest")}
+                    disabled={!!s?.run}>Ingest now</Button>
+            <Button size="xs" variant="default" onClick={() => run.mutate("lint")}
+                    disabled={!!s?.run}>Lint now</Button>
+          </Group>
+        </Group>
+      </div>
+
+      {s && (
+        <Group gap={6} wrap="wrap">
+          {TYPE_ORDER.filter((t) => s.counts[t]).map((t) => (
+            <Badge key={t} variant="light" color="gray">{t} {s.counts[t]}</Badge>
+          ))}
+          <Badge variant="light" color="gray">{s.pending} pending</Badge>
+          <Badge variant="light" color="gray" title="lint">
+            lint {s.lint.error ?? 0}E / {s.lint.warn ?? 0}W
+          </Badge>
+          {s.last_run && (
+            <Badge variant="light" color="gray">
+              last: {s.last_run.kind} {s.last_run.status}
+            </Badge>
+          )}
+          {s.run && <Badge variant="light" color="machine">running…</Badge>}
+        </Group>
+      )}
+
+      {!!s?.quarantined.length && (
+        <Card padding="md" radius="md"
+              style={{ border: "1px solid var(--signal-line)",
+                       background: "var(--signal-weak)" }}>
+          <Group justify="space-between" wrap="nowrap">
+            <Text size="sm">
+              {s.quarantined.length} object(s) quarantined — they stopped being retried
+              after repeated failures.
+            </Text>
+            <Button size="xs" variant="default" onClick={() => unquarantine.mutate()}>
+              Retry quarantined
+            </Button>
+          </Group>
+        </Card>
+      )}
 
       <div className="wiki-panes">
         <nav className="wiki-tree">
-          <input placeholder="Search the wiki" value={q}
-                 onChange={(e) => setQ(e.target.value)} />
+          <TextInput size="xs" placeholder="Search the wiki" value={q} mb={8}
+                     onChange={(e) => setQ(e.currentTarget.value)} />
           {q.trim() ? (
             <ul>
               {(hits.data ?? []).map((h) => (
-                <li key={h.path}>
+                <li key={h.path} style={{ flexDirection: "column", alignItems: "start" }}>
                   <Link to={`/programs/${id}/wiki/${h.path.replace(/\.md$/, "")}`}>
                     {h.title}
                   </Link>
-                  <div className="wiki-excerpt">{h.excerpt}</div>
+                  <span className="wiki-excerpt">{h.excerpt}</span>
                 </li>
               ))}
             </ul>
           ) : (
             [...grouped, ...(extra.length ? [["Other", extra] as const] : [])]
               .map(([type, rows]) => (
-                <section key={type}>
-                  <h3>{GROUP_LABEL[type] ?? type}</h3>
+                <div key={type}>
+                  <h4>{GROUP_LABEL[type] ?? type}</h4>
                   <ul>
                     {rows.map((p) => (
                       <li key={p.path}>
@@ -2146,14 +2170,14 @@ export default function WikiView() {
                       </li>
                     ))}
                   </ul>
-                </section>
+                </div>
               ))
           )}
         </nav>
         <main className="wiki-page" />
         <aside className="wiki-side" />
       </div>
-    </div>
+    </Stack>
   );
 }
 ```
@@ -2166,7 +2190,7 @@ Expected: PASS (6 tests)
 - [ ] **Step 5: Commit** (ask for approval first)
 
 ```bash
-git add frontend/src/views/WikiView.tsx frontend/src/views/WikiView.test.tsx frontend/src/wiki.css
+git add frontend/src/views/WikiView.tsx frontend/src/views/WikiView.test.tsx frontend/src/styles.css
 git commit -m "feat(wiki): WikiView header and type-grouped page tree"
 ```
 
@@ -2175,7 +2199,7 @@ git commit -m "feat(wiki): WikiView header and type-grouped page tree"
 ### Task 13: `WikiView` centre pane — rendered page and provenance chips
 
 **Files:**
-- Modify: `frontend/src/views/WikiView.tsx`, `frontend/src/wiki.css`
+- Modify: `frontend/src/views/WikiView.tsx`, `frontend/src/styles.css`
 - Test: `frontend/src/views/WikiView.test.tsx` (extend)
 
 **Interfaces:**
@@ -2274,43 +2298,63 @@ and the centre pane:
 
 ```tsx
         <main className="wiki-page">
-          {!slug && s && <Md>{s.index_md}</Md>}
+          {!slug && s && (
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <div className="eyebrow" style={{ marginBottom: 12 }}>index</div>
+              <div className="report-leaf"><Md>{s.index_md}</Md></div>
+            </Card>
+          )}
           {slug && page.data && (
-            <>
-              <h2>{page.data.title}</h2>
-              <div className="wiki-meta">
+            <Card padding="lg" radius="md" style={cardStyle}>
+              <Text component="h2" fw={600} size="lg" mb={6}>{page.data.title}</Text>
+              <Group gap={6} mb="sm" wrap="wrap">
                 <span className={`wiki-dot wiki-dot--${page.data.trust}`}
                       title={page.data.trust} />
-                <span>{page.data.type}</span>
-                {page.data.status && <span>{page.data.status}</span>}
+                <Text size="xs" c="dimmed">{page.data.type}</Text>
+                {page.data.status && (
+                  <Badge size="xs" variant="light" color="gray">{page.data.status}</Badge>
+                )}
                 {page.data.tags.map((t) => (
-                  <span key={t} className="wiki-chip">{t}</span>
+                  <Badge key={t} size="xs" variant="light" color="gray">{t}</Badge>
                 ))}
-              </div>
+              </Group>
+
               {page.data.sources.length > 0 && (
-                <div className="wiki-provenance">
-                  {page.data.sources.map((src) => (
-                    src.href
-                      ? <Link key={src.id} className="wiki-chip" to={src.href}>
-                          {src.id}: {src.title || src.resource}
-                        </Link>
-                      : <span key={src.id} className="wiki-chip" title={src.resource}>
-                          {src.id}: {src.title || src.resource}
-                        </span>
-                  ))}
-                </div>
+                <>
+                  <div className="eyebrow" style={{ marginBottom: 6 }}>cited from</div>
+                  <Group gap={6} mb="md" wrap="wrap">
+                    {page.data.sources.map((src) => (
+                      // An unroutable source is shown as plain text, never a dead
+                      // link: a page citing something we cannot route to is still
+                      // citing it, and hiding it would read as "no source".
+                      src.href
+                        ? <Badge key={src.id} size="sm" variant="light" color="machine"
+                                 component={Link} to={src.href}
+                                 style={{ cursor: "pointer" }}>
+                            {src.id}: {src.title || src.resource}
+                          </Badge>
+                        : <Badge key={src.id} size="sm" variant="light" color="gray"
+                                 title={src.resource}>
+                            {src.id}: {src.title || src.resource}
+                          </Badge>
+                    ))}
+                  </Group>
+                </>
               )}
-              <Md components={{
-                // An internal link must route inside the app; letting the browser
-                // follow /concepts/b.md would leave the dashboard entirely.
-                a: ({ href, children, ...rest }) => (
-                  isInternalLink(String(href ?? ""))
-                    ? <Link to={wikiHref(id, String(href))}>{children}</Link>
-                    : <a href={String(href ?? "")} target="_blank"
-                         rel="noreferrer" {...rest}>{children}</a>
-                ),
-              }}>{page.data.body}</Md>
-            </>
+
+              <div className="report-leaf">
+                <Md components={{
+                  // An internal link must route inside the app; letting the browser
+                  // follow /concepts/b.md would leave the dashboard entirely.
+                  a: ({ href, children, ...rest }) => (
+                    isInternalLink(String(href ?? ""))
+                      ? <Link to={wikiHref(id, String(href))}>{children}</Link>
+                      : <a href={String(href ?? "")} target="_blank"
+                           rel="noreferrer" {...rest}>{children}</a>
+                  ),
+                }}>{page.data.body}</Md>
+              </div>
+            </Card>
           )}
         </main>
 ```
@@ -2323,7 +2367,7 @@ Expected: PASS (12 tests total)
 - [ ] **Step 5: Commit** (ask for approval first)
 
 ```bash
-git add frontend/src/views/WikiView.tsx frontend/src/views/WikiView.test.tsx frontend/src/wiki.css
+git add frontend/src/views/WikiView.tsx frontend/src/views/WikiView.test.tsx frontend/src/styles.css
 git commit -m "feat(wiki): WikiView centre pane — routed links and provenance chips"
 ```
 
@@ -2332,7 +2376,7 @@ git commit -m "feat(wiki): WikiView centre pane — routed links and provenance 
 ### Task 14: `WikiView` right pane — outline, backlinks, relations, trust panel
 
 **Files:**
-- Modify: `frontend/src/views/WikiView.tsx`, `frontend/src/wiki.css`
+- Modify: `frontend/src/views/WikiView.tsx`, `frontend/src/styles.css`
 - Test: `frontend/src/views/WikiView.test.tsx` (extend)
 
 **Interfaces:**
@@ -2446,9 +2490,9 @@ import { outline } from "../components/wikiPage";
 ```tsx
         <aside className="wiki-side">
           {slug && page.data && (
-            <>
-              <section>
-                <h3>Outline</h3>
+            <Stack gap="md">
+              <div>
+                <h4>Outline</h4>
                 <ul>
                   {outline(page.data.body).map((h) => (
                     <li key={h.id} style={{ marginLeft: (h.level - 1) * 12 }}>
@@ -2456,60 +2500,78 @@ import { outline } from "../components/wikiPage";
                     </li>
                   ))}
                 </ul>
-              </section>
+              </div>
 
-              <section>
-                <h3>Relations</h3>
+              <div>
+                <h4>Relations</h4>
                 <ul>
                   {page.data.relations.map((r, i) => (
                     <li key={`${r.type}-${r.target}-${i}`}>
-                      <code>{r.type}</code>{" "}
+                      <code className="mono" style={{ fontSize: 11 }}>{r.type}</code>{" "}
                       {r.exists
                         ? <Link to={wikiHref(id, r.target)}>{r.title || r.target}</Link>
-                        : <span title="missing target">{r.target} (missing)</span>}
+                        : <Text component="span" size="xs" c="dimmed"
+                                title="missing target">{r.target} (missing)</Text>}
                     </li>
                   ))}
                 </ul>
-              </section>
+              </div>
 
-              <section>
-                <h3>Backlinks</h3>
+              <div>
+                <h4>Backlinks</h4>
                 <ul>
                   {page.data.backlinks.map((b) => (
                     <li key={b.path}>
                       <Link to={wikiHref(id, b.path)}>{b.title}</Link>
-                      {b.typed.length > 0 && <span> ({b.typed.join(", ")})</span>}
+                      {b.typed.length > 0 && (
+                        <Text component="span" size="xs" c="dimmed">
+                          ({b.typed.join(", ")})
+                        </Text>
+                      )}
                     </li>
                   ))}
                 </ul>
-              </section>
+              </div>
 
-              <section>
-                <h3>Trust</h3>
-                <div>
+              <Card padding="md" radius="md" style={cardStyle}>
+                <div className="eyebrow" style={{ marginBottom: 8 }}>trust</div>
+                <Group gap={6} mb={8}>
                   <span className={`wiki-dot wiki-dot--${page.data.trust}`} />
-                  {page.data.trust}
-                </div>
-                <button onClick={() => verify.mutate()}>Mark verified</button>
-                <label htmlFor="wiki-status">Status</label>
-                <select id="wiki-status" value={page.data.status || "draft"}
-                        onChange={(e) => setStatus.mutate(e.target.value)}>
+                  <Text size="sm">{page.data.trust}</Text>
+                </Group>
+                <Button size="xs" variant="default" mb={10}
+                        onClick={() => verify.mutate()}>Mark verified</Button>
+
+                {/* A raw select on purpose: ProgramDetail's status filter uses the
+                    same idiom, and Mantine's Select is not a native <select>. */}
+                <label htmlFor="wiki-status" className="eyebrow"
+                       style={{ display: "block", marginBottom: 4 }}>status</label>
+                <select id="wiki-status" className="mono"
+                        value={page.data.status || "draft"}
+                        onChange={(e) => setStatus.mutate(e.currentTarget.value)}>
                   <option value="draft">draft</option>
                   <option value="stable">stable</option>
                   <option value="deprecated">deprecated</option>
                 </select>
-                <label htmlFor="wiki-notes">Human notes</label>
-                <textarea id="wiki-notes" rows={6}
+
+                <label htmlFor="wiki-notes" className="eyebrow"
+                       style={{ display: "block", margin: "10px 0 4px" }}>
+                  human notes
+                </label>
+                <Textarea id="wiki-notes" autosize minRows={4} mb={8}
                           value={notes ?? page.data.human_notes}
-                          onChange={(e) => setNotes(e.target.value)} />
-                <button onClick={() => saveNotes.mutate(notes ?? page.data.human_notes)}>
+                          onChange={(e) => setNotes(e.currentTarget.value)} />
+                <Button size="xs" variant="default"
+                        onClick={() => saveNotes.mutate(notes ?? page.data.human_notes)}>
                   Save notes
-                </button>
-              </section>
-            </>
+                </Button>
+              </Card>
+            </Stack>
           )}
         </aside>
 ```
+
+Add `Textarea` to the Mantine import from Task 12. The `<label htmlFor="wiki-notes">` above pairs with the `id`, which is what makes `getByLabelText(/human notes/i)` find the field — Mantine's own `label` prop would work too, but the explicit pairing keeps the `.eyebrow` styling consistent with the status label beside it.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -2524,22 +2586,25 @@ Expected: PASS, no type errors
 - [ ] **Step 6: Commit** (ask for approval first)
 
 ```bash
-git add frontend/src/views/WikiView.tsx frontend/src/views/WikiView.test.tsx frontend/src/wiki.css
+git add frontend/src/views/WikiView.tsx frontend/src/views/WikiView.test.tsx frontend/src/styles.css
 git commit -m "feat(wiki): WikiView right pane — outline, relations, backlinks, curation"
 ```
 
 ---
 
-### Task 15: Routes, and the `ProgramDetail` link — **BLOCKED, do not execute**
+### Task 15: Routes, and the `ProgramDetail` link
 
 **Files:**
 - Modify: `frontend/src/App.tsx`
-- Modify: `frontend/src/views/ProgramDetail.tsx` ← **carries someone else's uncommitted work**
+- Modify: `frontend/src/views/ProgramDetail.tsx`
+- Test: `frontend/src/views/ProgramDetail.test.tsx` (extend)
 
 **Interfaces:**
 - Consumes: `WikiView` (Tasks 12–14), `api.getWikiSummary` for the badge count.
 
-**Why this is blocked (D5).** `ProgramDetail.tsx` is on the do-not-commit list at the top of this plan. Editing it means a wiki commit either drags in someone else's in-flight changes or has to be staged by hunk, which `git add -A` rules out and interactive staging cannot do in this environment. **Ask the human before running any step here.** The `App.tsx` half is safe and can be split out and executed on its own if they prefer.
+Previously blocked because `ProgramDetail.tsx` held uncommitted work; `ee062d2` committed it, so this is now an ordinary edit (see D5).
+
+Note this task adds a **fifth** `api` call to `ProgramDetail`, which already fetches program, guidance, ideas and artifacts. Every existing test in `ProgramDetail.test.tsx` mocks exactly those four in `mockProgram`, so an unmocked fifth query would surface as a react-query error in tests that have nothing to do with the wiki. Step 2 adds the mock to the shared helper, not to one test.
 
 - [ ] **Step 1: Add the routes to `App.tsx`**
 
@@ -2550,49 +2615,83 @@ git commit -m "feat(wiki): WikiView right pane — outline, relations, backlinks
 
 with `import WikiView from "./views/WikiView";` beside the other view imports. Both routes are needed: the bare path renders `index.md`, the splat renders a page.
 
-- [ ] **Step 2: Write the failing test for the link**
+- [ ] **Step 2: Add the wiki mock to the shared helper**
+
+In `frontend/src/views/ProgramDetail.test.tsx`, extend `mockProgram` (the helper at the top, which already mocks `getProgram`, `listGuidance`, `listIdeas` and `listArtifacts`) with one more line, so every existing test keeps passing once the view gains a fifth query:
+
+```tsx
+  vi.spyOn(api, "getWikiSummary").mockResolvedValue({ pending: 0 } as any);
+```
+
+- [ ] **Step 3: Write the failing test**
+
+The file's harness renders at `/programs/p` with program id `"p"` — not `"p1"` — via `mockProgram(instructions)` then `renderAt()`. Match it:
 
 ```tsx
 // append to frontend/src/views/ProgramDetail.test.tsx
-it("links to the wiki with the pending count as a badge", async () => {
-  vi.spyOn(api, "getWikiSummary").mockResolvedValue({ pending: 4 } as never);
-  // mount ProgramDetail exactly as the neighbouring tests in this file do
-  const link = await screen.findByRole("link", { name: /open wiki/i });
-  expect(link.getAttribute("href")).toBe("/programs/p1/wiki");
-  expect(screen.getByText("4")).toBeTruthy();
+describe("wiki link", () => {
+  it("links to the wiki and badges the pending count", async () => {
+    mockProgram("");
+    vi.spyOn(api, "getWikiSummary").mockResolvedValue({ pending: 4 } as any);
+    renderAt();
+    const link = await screen.findByRole("link", { name: /open wiki/i });
+    expect(link.getAttribute("href")).toBe("/programs/p/wiki");
+    expect(screen.getByText("4")).toBeTruthy();
+  });
+
+  it("shows no badge when nothing is pending", async () => {
+    mockProgram("");
+    vi.spyOn(api, "getWikiSummary").mockResolvedValue({ pending: 0 } as any);
+    renderAt();
+    await screen.findByRole("link", { name: /open wiki/i });
+    expect(screen.queryByText("0")).toBeNull();
+  });
 });
 ```
 
-- [ ] **Step 3: Run it to verify it fails**
+- [ ] **Step 4: Run it to verify it fails**
 
 Run: `cd frontend && npx vitest run src/views/ProgramDetail.test.tsx`
-Expected: FAIL — no such link
+Expected: FAIL — no link matching `/open wiki/i`
 
-- [ ] **Step 4: Add the link beside the ideas and artifacts links**
+- [ ] **Step 5: Add the query and the link**
+
+Beside the other `useQuery` calls in `ProgramDetail`:
 
 ```tsx
-<Link to={`/programs/${id}/wiki`}>
-  open wiki →{wiki.data?.pending ? <span className="badge">{wiki.data.pending}</span> : null}
-</Link>
+  const wiki = useQuery({ queryKey: ["wiki", id], queryFn: () => api.getWikiSummary(id) });
 ```
 
-- [ ] **Step 5: Run the frontend suite**
+and in the artifacts card's header row, matching the existing "open ideas →" / "open artifacts →" idiom:
 
-Run: `cd frontend && npm test`
-Expected: PASS
+```tsx
+          <Link to={`/programs/${id}/wiki`} className="view" style={{ fontSize: 13 }}>
+            open wiki →{wiki.data?.pending
+              ? <Badge size="xs" variant="light" color="machine" ml={6}>
+                  {wiki.data.pending}
+                </Badge>
+              : null}
+          </Link>
+```
 
-- [ ] **Step 6: Build, to prove the bundle compiles**
+`Badge` is already imported in this file. The count is deliberately hidden at zero — a badge reading "0" is noise, and the point of the badge is to say there is uningested work.
+
+- [ ] **Step 6: Run the whole frontend suite**
+
+Run: `cd frontend && npm test && npx tsc --noEmit`
+Expected: PASS, no type errors. Watch for regressions in the *other* `ProgramDetail` tests: if any fail with a react-query error, Step 2's mock is missing from the shared helper.
+
+- [ ] **Step 7: Build, to prove the bundle compiles**
 
 Run: `cd frontend && npm run build`
 Expected: success. A deploy always rebuilds (`CLAUDE.md` rule 1), so a broken build here would show as a false version-drift banner.
 
-- [ ] **Step 7: Commit** (ask for approval first — and settle the `ProgramDetail.tsx` question)
+- [ ] **Step 8: Commit** (ask for approval first)
 
 ```bash
-git add frontend/src/App.tsx
-git commit -m "feat(wiki): route /programs/:id/wiki to WikiView"
-# ProgramDetail.tsx staged only once the human has said how to handle its
-# carried-over changes.
+git add frontend/src/App.tsx frontend/src/views/ProgramDetail.tsx \
+        frontend/src/views/ProgramDetail.test.tsx
+git commit -m "feat(wiki): route the wiki view and link it from the program page"
 ```
 
 ---
@@ -2612,6 +2711,6 @@ Agent lint mode, the lint cadence going live, the lint report UI and quarantine 
 
 ## Open questions for the human
 
-1. **`ProgramDetail.tsx`** — Task 15. Wait for their in-flight work to land, or coordinate?
+1. ~~**`ProgramDetail.tsx`** — Task 15.~~ **Resolved 2026-08-21:** the carried-over frontend work was fixed and committed to `main` as `ee062d2`, so Task 15 is unblocked and D3/D4/D5 were rewritten accordingly. `main` was then merged into this branch as `fe0c125`, so every task below edits `ProgramDetail.tsx`, `SprintDetail.tsx` and `styles.css` at their current revisions and `PageToc.tsx` is present on the branch. Nothing here works against a stale tree.
 2. **The two open phase-1 defects** (agent writing into `# Human notes`; `substrate.commit()` being repo-wide) both touch phase 2's surface: the notes editor writes the section an agent has been seen to overwrite, and every curation action commits. Neither blocks this plan, but a decision before Task 5 would be better than after.
 3. **`POST /wiki/run` and authentication.** The endpoint spends Claude quota, and `verify` is the only route in this plan that reads the session user. If forcing a run should require an authenticated user, say so and Task 9 gains a `Depends(current_user)` guard.
