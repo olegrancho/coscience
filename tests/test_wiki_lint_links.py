@@ -1,3 +1,5 @@
+import pytest
+
 from coscience import wiki_lint, wiki_okf
 
 
@@ -94,8 +96,55 @@ def test_autofix_rewrites_wikilinks_into_markdown_links():
     assert "link/wikilink" in {f.rule for f in fixed}
 
 
+def test_autofix_rewrites_a_path_form_wikilink():
+    # What the first live ingest run actually wrote, for all 19 of its wikilinks.
+    # A slug-only index missed every one and --fix silently did nothing.
+    a = _page("concepts/a.md", body="see [[concepts/hydrolysis-rate]] " + "x" * 400)
+    b = _page("concepts/hydrolysis-rate.md")
+    changed, fixed = wiki_lint.autofix([a, b])
+    assert [p.path for p in changed] == ["concepts/a.md"]
+    assert "[hydrolysis-rate](/concepts/hydrolysis-rate.md)" in changed[0].body
+    assert "[[" not in changed[0].body
+    assert "link/wikilink" in {f.rule for f in fixed}
+
+
+@pytest.mark.parametrize("written", [
+    "concepts/hydrolysis-rate.md",            # path with the extension
+    "/concepts/hydrolysis-rate",              # bundle-absolute
+    "/concepts/hydrolysis-rate.md",           # both
+])
+def test_autofix_accepts_every_shape_of_path_wikilink(written):
+    a = _page("concepts/a.md", body=f"see [[{written}]] " + "x" * 400)
+    b = _page("concepts/hydrolysis-rate.md")
+    changed, _ = wiki_lint.autofix([a, b])
+    assert "[hydrolysis-rate](/concepts/hydrolysis-rate.md)" in changed[0].body
+    assert "[[" not in changed[0].body
+
+
+def test_a_rewritten_wikilink_is_labelled_with_the_slug_not_the_title():
+    # Deliberate: the bare-slug form is what the agent typed, and echoing a whole
+    # path back at the reader is worse than a slug. Titles live in the page.
+    a = _page("concepts/a.md", body="see [[concepts/b]] " + "x" * 400)
+    b = _page("concepts/b.md", title="A Long Human Title")
+    changed, _ = wiki_lint.autofix([a, b])
+    assert "[b](/concepts/b.md)" in changed[0].body
+
+
+def test_a_rewritten_path_wikilink_clears_its_own_warning():
+    a = _page("concepts/a.md", body="see [[concepts/b]] " + "x" * 400)
+    b = _page("concepts/b.md", title="B")
+    changed, _ = wiki_lint.autofix([a, b])
+    assert "link/wikilink" not in _rules(wiki_lint.lint(changed + [b]))
+
+
 def test_autofix_leaves_a_wikilink_with_no_target_page_alone():
     a = _page("concepts/a.md", body="see [[nowhere]] " + "x" * 400)
+    changed, _ = wiki_lint.autofix([a])
+    assert changed == []
+
+
+def test_autofix_leaves_a_path_wikilink_with_no_target_page_alone():
+    a = _page("concepts/a.md", body="see [[concepts/nowhere]] " + "x" * 400)
     changed, _ = wiki_lint.autofix([a])
     assert changed == []
 

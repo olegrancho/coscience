@@ -301,21 +301,40 @@ def _cycle_nodes(edges: dict[str, set[str]]) -> set[str]:
     return on_cycle
 
 
+def _wikilink_index(pages: list[wiki_okf.Page]) -> dict[str, wiki_okf.Page]:
+    """Every string an agent might plausibly put inside `[[...]]`, mapped to the
+    page it means: the bare slug, the bundle path, and the path without `.md`.
+
+    The first live ingest run wrote `[[concepts/session-based-attribution]]` for
+    all 19 of its wikilinks. A slug-only index missed every one of them, so the
+    rewrite silently did nothing and the warnings survived a `--fix` pass. Callers
+    strip a leading `/` and a trailing `.md` before looking a target up here."""
+    index: dict[str, wiki_okf.Page] = {}
+    for p in pages:
+        index.setdefault(p.path.removesuffix(".md"), p)
+    for p in pages:
+        index.setdefault(p.slug, p)
+    return index
+
+
 def autofix(pages: list[wiki_okf.Page]) -> tuple[list[wiki_okf.Page], list[Finding]]:
     """Apply the deterministic fixes, returning only the pages that changed.
 
     These run before an agent lint run so the agent's turn is spent on judgement
     calls rather than on mechanical edits it would do worse and slower."""
-    by_slug = {p.slug: p.path for p in pages}
+    by_ref = _wikilink_index(pages)
     changed: list[wiki_okf.Page] = []
     fixed: list[Finding] = []
     for p in pages:
         body = p.body
         for slug in dict.fromkeys(wiki_okf.wikilinks(body)):
-            target = by_slug.get(slug)
+            target = by_ref.get(slug.strip().lstrip("/").removesuffix(".md"))
             if not target:
                 continue                     # nothing to point at; leave it for the agent
-            body = body.replace(f"[[{slug}]]", f"[{slug}](/{target})")
+            # Labelled with the target's slug, not its title: for a bare-slug
+            # wikilink that is exactly what the agent wrote, and for a path-form
+            # one it beats echoing the whole path back at the reader.
+            body = body.replace(f"[[{slug}]]", f"[{target.slug}](/{target.path})")
             fixed.append(Finding("link/wikilink", "warn", p.path,
                                  f"rewrote `[[{slug}]]` as a markdown link"))
         body_targets = {_resolve(t) for t in wiki_okf.body_links(body)}
