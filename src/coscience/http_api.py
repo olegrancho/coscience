@@ -84,6 +84,18 @@ class ArtifactTagsIn(BaseModel):
     tags: list[str]
 
 
+class WikiRunIn(BaseModel):
+    kind: str = "ingest"
+
+
+class WikiStatusIn(BaseModel):
+    status: str
+
+
+class WikiNotesIn(BaseModel):
+    text: str
+
+
 class SprintPatch(BaseModel):
     goals: str | None = None
     plan: list[str] | None = None
@@ -635,6 +647,85 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.set_artifact_version_archived(program_id, aid, vid, body.archived)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"artifact not found: {aid}")
+
+    # --- wiki (phase 2) ------------------------------------------------------
+    # {slug:path}: a page's address is its bundle path without .md
+    # ("concepts/auth-gate"), because a bare filename stem collides across type
+    # directories. Service.wiki_page_path is what makes the converter safe.
+
+    @api.get("/programs/{program_id}/wiki")
+    def wiki_summary(program_id: str) -> dict:
+        return service.wiki_summary(program_id)
+
+    @api.get("/programs/{program_id}/wiki/pages")
+    def list_wiki_pages(program_id: str) -> list[dict]:
+        return service.list_wiki_pages(program_id)
+
+    @api.get("/programs/{program_id}/wiki/search")
+    def search_wiki(program_id: str, q: str = "", limit: int = 50) -> list[dict]:
+        return service.search_wiki(program_id, q, limit=limit)
+
+    @api.get("/programs/{program_id}/wiki/log")
+    def wiki_log(program_id: str) -> dict:
+        return {"text": service.wiki_log(program_id)}
+
+    @api.get("/programs/{program_id}/wiki/lint")
+    def wiki_lint_report(program_id: str) -> dict:
+        return service.wiki_lint_report(program_id)
+
+    # Registered last of the wiki GETs: a literal path like /wiki/pages must not
+    # be swallowed by the {slug:path} pattern.
+    @api.get("/programs/{program_id}/wiki/pages/{slug:path}")
+    def get_wiki_page(program_id: str, slug: str) -> dict:
+        try:
+            return service.get_wiki_page(program_id, slug)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"page not found: {slug}")
+
+    @api.post("/programs/{program_id}/wiki/run")
+    def run_wiki(program_id: str, body: WikiRunIn) -> dict:
+        try:
+            return service.run_wiki(program_id, body.kind)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @api.post("/programs/{program_id}/wiki/unquarantine")
+    def unquarantine_wiki(program_id: str) -> dict:
+        return service.unquarantine_wiki(program_id)
+
+    @api.post("/programs/{program_id}/wiki/pages/{slug:path}/verify")
+    def verify_wiki_page(program_id: str, slug: str,
+                         user: "auth.User | None" = Depends(current_user)) -> dict:
+        # The actor is built here, never accepted from the client: a request must
+        # not be able to claim a human review was done by someone else.
+        actor = f"human:{user.username}" if user else "human:anonymous"
+        try:
+            return service.verify_wiki_page(program_id, slug, by=actor)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"page not found: {slug}")
+
+    @api.post("/programs/{program_id}/wiki/status/{slug:path}")
+    def set_wiki_page_status(program_id: str, slug: str, body: WikiStatusIn) -> dict:
+        try:
+            return service.set_wiki_page_status(program_id, slug, body.status)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"page not found: {slug}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @api.post("/programs/{program_id}/wiki/notes/{slug:path}")
+    def set_wiki_human_notes(program_id: str, slug: str, body: WikiNotesIn) -> dict:
+        try:
+            return service.set_wiki_human_notes(program_id, slug, body.text)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"page not found: {slug}")
+
+    @api.delete("/programs/{program_id}/wiki/pages/{slug:path}")
+    def delete_wiki_page(program_id: str, slug: str) -> dict:
+        try:
+            return service.delete_wiki_page(program_id, slug)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"page not found: {slug}")
 
     @api.get("/programs/{program_id}/artifact-tags")
     def list_artifact_tags(program_id: str,
