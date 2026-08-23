@@ -1542,3 +1542,205 @@ class Service:
             tmp.unlink(missing_ok=True)
         self.substrate.commit("capacity updated")
         return self.ledger_status()
+
+    # --- wiki (phase 2: read) -------------------------------------------------
+
+    def wiki_page_path(self, program_id: str, slug: str) -> Path:
+        """Guarded path to one bundle page. `slug` is the bundle-relative path
+        without `.md` (`concepts/auth-gate`).
+
+        A slug arrives from a URL segment, so it is a traversal primitive: resolve
+        first, then prove containment, exactly as _guarded_file does for artifact
+        versions. Symlink resolution happens before the check, which is why this
+        cannot be a string comparison."""
+        from coscience import wiki_store
+        try:
+            root = wiki_store.bundle_dir(self.substrate, program_id).resolve()
+            path = (root / f"{slug}.md").resolve()
+        except (ValueError, OSError):
+            raise NotFoundError(slug)
+        if not path.is_file() or not path.is_relative_to(root):
+            raise NotFoundError(slug)
+        return path
+
+    def _wiki_pages(self, program_id: str):
+        from coscience import wiki_store
+        return wiki_store.iter_pages(self.substrate, program_id)
+
+    def wiki_summary(self, program_id: str) -> dict:
+        from coscience import wiki_read, wiki_store
+        pages = self._wiki_pages(program_id)
+        state = wiki_store.load_state(self.substrate, program_id)
+        pending = len(wiki_store.pending_objects(
+            self.substrate, program_id, state.get("ingested") or {},
+            set(state.get("quarantined") or [])))
+        counts = self.wiki_lint_report(program_id)["counts"]
+        try:
+            index_md = (wiki_store.bundle_dir(self.substrate, program_id)
+                        / "index.md").read_text()
+        except OSError:
+            index_md = ""
+        return wiki_read.summary(pages, state, pending, counts, index_md)
+
+    def list_wiki_pages(self, program_id: str) -> list[dict]:
+        from coscience import wiki_read
+        return [{"path": p.path, "slug": p.slug, "type": p.type,
+                 "title": p.title or p.slug, "status": p.status,
+                 "trust": wiki_read.trust_tier(p), "stale_after": p.stale_after,
+                 "tags": list(p.tags)}
+                for p in sorted(self._wiki_pages(program_id), key=lambda p: p.path)]
+
+    def get_wiki_page(self, program_id: str, slug: str) -> dict:
+        from coscience import wiki_read, wiki_store
+        self.wiki_page_path(program_id, slug)          # guard before reading
+        page = wiki_store.read_page(self.substrate, program_id, f"{slug}.md")
+        if page is None:
+            raise NotFoundError(slug)
+        return wiki_read.page_detail(page, self._wiki_pages(program_id))
+
+    def search_wiki(self, program_id: str, q: str, limit: int = 50) -> list[dict]:
+        from coscience import wiki_read
+        return wiki_read.search(self._wiki_pages(program_id), q, limit=limit)
+
+    def wiki_log(self, program_id: str) -> str:
+        from coscience import wiki_store
+        try:
+            return (wiki_store.bundle_dir(self.substrate, program_id)
+                    / "log.md").read_text()
+        except OSError:
+            return ""
+
+    def wiki_lint_report(self, program_id: str) -> dict:
+        """Live findings, never autofixed. `fix=True` here would mean a GET
+        mutated the bundle."""
+        from coscience import wiki_lint
+        findings, _ = wiki_lint.run_lint(self.substrate, program_id, fix=False)
+        counts: dict[str, int] = {}
+        for f in findings:
+            counts[f.severity] = counts.get(f.severity, 0) + 1
+        return {"counts": counts,
+                "findings": [{"rule": f.rule, "severity": f.severity,
+                              "path": f.path, "message": f.message} for f in findings]}
+
+    # --- wiki (phase 2: curation) --------------------------------------------
+
+    _WIKI_STATUSES = ("draft", "stable", "deprecated")
+
+    def _load_wiki_page(self, program_id: str, slug: str):
+        from coscience import wiki_store
+        self.wiki_page_path(program_id, slug)
+        page = wiki_store.read_page(self.substrate, program_id, f"{slug}.md")
+        if page is None:
+            raise NotFoundError(slug)
+        return page
+
+    def _save_wiki_page(self, program_id: str, page, message: str) -> dict:
+        from coscience import wiki_read, wiki_store
+        wiki_store.write_page(self.substrate, program_id, page)
+        self.substrate.commit(message)
+        return wiki_read.page_detail(page, self._wiki_pages(program_id))
+
+    def verify_wiki_page(self, program_id: str, slug: str, by: str,
+                         now: float | None = None) -> dict:
+        """Append one OKF `verified` entry. Appends rather than replaces: the trust
+        tier is derived from the whole list, and who checked a page previously is
+        part of its record."""
+        page = self._load_wiki_page(program_id, slug)
+        page.verified = list(page.verified or []) + [
+            {"by": by, "at": float(now if now is not None else time.time())}]
+        return self._save_wiki_page(program_id, page,
+                                    f"wiki {program_id}: verified {slug} by {by}")
+
+    def set_wiki_page_status(self, program_id: str, slug: str, status: str) -> dict:
+        if status not in self._WIKI_STATUSES:
+            raise ValueError(f"status must be one of {self._WIKI_STATUSES}: {status}")
+        page = self._load_wiki_page(program_id, slug)
+        page.status = status
+        return self._save_wiki_page(program_id, page,
+                                    f"wiki {program_id}: {slug} status {status}")
+
+    def run_wiki(self, program_id: str, kind: str = "ingest", agent=None) -> dict:
+        """Force one wiki beat now.
+
+        The usage gate is forced open: a human pressing the button is a stronger
+        signal than the gate, which exists to stop *unattended* loops burning a
+        window. `kind="lint"` pushes ingests_since_lint to the threshold and lets
+        beat() decide, rather than adding a second definition of what a run is."""
+        from coscience import wiki, wiki_store
+        if kind not in ("ingest", "lint"):
+            raise ValueError(f"kind must be ingest or lint: {kind}")
+        program = self.substrate.load_program(program_id)
+        if kind == "lint":
+            with wiki_store.state_guard(self.substrate, program_id) as state:
+                state["ingests_since_lint"] = max(int(state.get("ingests_since_lint", 0)),
+                                                  wiki.lint_every())
+        real = agent if agent is not None else self._wiki_agent()
+        line = wiki.beat(self.substrate, program, time.time(), real,
+                         usage_gate=lambda: True)
+        return {"line": line or "wiki: nothing to do"}
+
+    def _wiki_agent(self):
+        from coscience import wiki_agent
+        return wiki_agent.WikiAgent()
+
+    def unquarantine_wiki(self, program_id: str) -> dict:
+        """Clear the quarantine list so the objects become pending again. Their
+        ingested entries are untouched — pending_objects re-derives from hashes."""
+        from coscience import wiki_store
+        with wiki_store.state_guard(self.substrate, program_id) as state:
+            cleared = list(state.get("quarantined") or [])
+            state["quarantined"] = []
+        if cleared:
+            self.substrate.commit(f"wiki {program_id}: unquarantined {len(cleared)}")
+        return {"cleared": cleared}
+
+    def delete_wiki_page(self, program_id: str, slug: str) -> dict:
+        """Delete a page and drop every typed relation pointing at it.
+
+        Body links are deliberately left dangling: a broken link a reader can see
+        is honest, while a dangling typed relation silently breaks the containment
+        invariant rel/no-link exists to enforce."""
+        from coscience import wiki_store
+        path = self.wiki_page_path(program_id, slug)
+        rel = f"{slug}.md"
+        dropped = []
+        for other in self._wiki_pages(program_id):
+            if other.path == rel:
+                continue
+            keep = [r for r in other.relations
+                    if (r.target or "").split("#", 1)[0].strip().lstrip("/") != rel]
+            if len(keep) != len(other.relations):
+                dropped += [{"path": other.path, "type": r.type}
+                            for r in other.relations if r not in keep]
+                other.relations = keep
+                wiki_store.write_page(self.substrate, program_id, other)
+        path.unlink()
+        self.substrate.commit(f"wiki {program_id}: deleted {rel}")
+        return {"deleted": rel, "relations_dropped": dropped}
+
+    def set_wiki_human_notes(self, program_id: str, slug: str, text: str) -> dict:
+        """Replace the protected `# Human notes` section, and nothing else.
+
+        This is the only writer of that section (spec 6.2) — agents must never
+        touch it, which is why it has an endpoint of its own instead of free-form
+        page editing."""
+        page = self._load_wiki_page(program_id, slug)
+        page.body = _replace_section(page.body, "Human notes", text)
+        return self._save_wiki_page(program_id, page,
+                                    f"wiki {program_id}: human notes on {slug}")
+
+
+def _replace_section(body: str, heading: str, text: str) -> str:
+    """Swap the body text under `# <heading>`, appending the section if absent.
+
+    Mirrors wiki_okf.Page.section's view of a section — from its heading to the
+    next `# ` — so a read after a write returns exactly what was written."""
+    import re
+    marks = [(m.group(1), m.start(), m.end())
+             for m in re.finditer(r"(?m)^# +(.+?)\s*$", body)]
+    block = f"# {heading}\n\n{text.strip()}\n"
+    for i, (name, start, _end) in enumerate(marks):
+        if name.strip().lower() == heading.strip().lower():
+            stop = marks[i + 1][1] if i + 1 < len(marks) else len(body)
+            return body[:start] + block + ("\n" + body[stop:] if stop < len(body) else "")
+    return body.rstrip("\n") + "\n\n" + block
