@@ -114,3 +114,37 @@ describe("MODEL_OPTIONS", () => {
     expect(new Set(values).size).toBe(values.length);
   });
 });
+
+describe("wiki api", () => {
+  it("fetches a summary", async () => {
+    const f = mockFetch(200, { counts: { Concept: 1 } });
+    const out = await api.getWikiSummary("p1");
+    expect(f).toHaveBeenCalledWith("/api/programs/p1/wiki");
+    expect(out.counts.Concept).toBe(1);
+  });
+
+  it("keeps the slash in a page slug so the path route matches", async () => {
+    const f = mockFetch(200, { path: "concepts/a.md" });
+    await api.getWikiPage("p1", "concepts/a");
+    expect(f).toHaveBeenCalledWith("/api/programs/p1/wiki/pages/concepts/a");
+  });
+
+  it("encodes each slug segment without eating the separator", async () => {
+    const f = mockFetch(200, {});
+    await api.getWikiPage("p1", "concepts/a b");
+    expect(f).toHaveBeenCalledWith("/api/programs/p1/wiki/pages/concepts/a%20b");
+  });
+
+  it("posts a status change to the status route", async () => {
+    const f = mockFetch(200, { status: "stable" });
+    await api.setWikiPageStatus("p1", "concepts/a", "stable");
+    expect(f.mock.calls[0][0]).toBe("/api/programs/p1/wiki/status/concepts/a");
+    expect(f.mock.calls[0][1]).toMatchObject({ method: "POST" });
+  });
+
+  it("encodes the search query", async () => {
+    const f = mockFetch(200, []);
+    await api.searchWiki("p1", "compute lease");
+    expect(f).toHaveBeenCalledWith("/api/programs/p1/wiki/search?q=compute%20lease");
+  });
+});

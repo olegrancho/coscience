@@ -55,6 +55,7 @@ export default function ProgramDetail() {
   const guidance = useQuery({ queryKey: ["guidance", id], queryFn: () => api.listGuidance(id) });
   const ideas = useQuery({ queryKey: ["ideas", id], queryFn: () => api.listIdeas(id) });
   const artifacts = useQuery({ queryKey: ["artifacts", id], queryFn: () => api.listArtifacts(id) });
+  const wiki = useQuery({ queryKey: ["wiki", id], queryFn: () => api.getWikiSummary(id) });
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["program", id] });
     qc.invalidateQueries({ queryKey: ["guidance", id] });
@@ -77,6 +78,7 @@ export default function ProgramDetail() {
       { id: "sec-experiments", label: "Experiments" },
       { id: "sec-ideas", label: "Ideas" },
       { id: "sec-artifacts", label: "Artifacts" },
+      { id: "sec-wiki", label: "Wiki" },
       { id: "sec-lineage", label: "Lineage" },
     ];
   }, [program.data]);
@@ -465,6 +467,24 @@ export default function ProgramDetail() {
             ))}
           </div>
         )}
+      </Card>
+
+      <Card id="sec-wiki" padding="lg" radius="md" style={cardStyle}>
+        <Group justify="space-between" align="center">
+          <div className="eyebrow">
+            wiki · {wiki.data?.pages ?? 0}
+          </div>
+          <Link to={`/programs/${id}/wiki`} className="view" style={{ fontSize: 13 }}>
+            open wiki →
+            {wiki.data?.pending
+              ? <Badge size="xs" variant="light" color="machine" ml={6}>{wiki.data.pending}</Badge>
+              : null}
+          </Link>
+        </Group>
+        <Text size="sm" c="dimmed" mt={6}>
+          Concepts and entities compiled from this program's results and artifacts,
+          with every claim cited back to the object it came from.
+        </Text>
       </Card>
 
       <div id="sec-lineage"><LineageCard programId={id} /></div>

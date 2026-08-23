@@ -105,6 +105,54 @@ export interface DirListing {
   path: string | null; parent: string | null; roots: DirRoot[]; entries: DirEntry[];
 }
 
+export type WikiTrust = "unverified" | "machine-confirmed" | "human-reviewed";
+export interface WikiSummary {
+  counts: Record<string, number>;
+  trust: Record<WikiTrust, number>;
+  pages: number; pending: number; quarantined: string[];
+  run: { id: string; kind: string } | null;
+  last_run: { id: string; kind: string; status: string; at: number;
+              pages_created: number; pages_updated: number; notes: string;
+              escaped: string[] } | null;
+  ingests_since_lint: number;
+  lint: Record<string, number>;
+  index_md: string;
+}
+export interface WikiPageRow {
+  path: string; slug: string; type: string; title: string;
+  status: string; trust: WikiTrust; stale_after: string; tags: string[];
+}
+export interface WikiRelation {
+  type: string; target: string; title: string; exists: boolean;
+  confidence: string; source: string;
+}
+export interface WikiBacklink { path: string; title: string; type: string; typed: string[] }
+export interface WikiSource {
+  id: string; kind: "result" | "sprint" | "artifact" | "unknown";
+  href: string; resource: string; title: string;
+}
+export interface WikiPage extends WikiPageRow {
+  description: string; aliases: string[]; body: string; human_notes: string;
+  verified: { by: string; at: number }[];
+  relations: WikiRelation[]; backlinks: WikiBacklink[]; sources: WikiSource[];
+}
+export interface WikiHit {
+  path: string; title: string; type: string; trust: WikiTrust;
+  score: number; excerpt: string;
+}
+export interface WikiLintFinding {
+  rule: string; severity: string; path: string; message: string;
+}
+export interface WikiLintReport {
+  counts: Record<string, number>; findings: WikiLintFinding[];
+}
+
+/** A page address is a path ("concepts/auth-gate"), so each segment is encoded
+ *  on its own — encodeURIComponent on the whole slug would turn the separator
+ *  into %2F and the route would never match. */
+const slugPath = (slug: string) =>
+  slug.split("/").map(encodeURIComponent).join("/");
+
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.status === 204 ? (undefined as T) : ((await r.json()) as T);
@@ -376,4 +424,41 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tags }),
     }).then(j<ArtifactDetailT>),
+
+  getWikiSummary: (id: string) =>
+    fetch(`/api/programs/${id}/wiki`).then(j<WikiSummary>),
+  listWikiPages: (id: string) =>
+    fetch(`/api/programs/${id}/wiki/pages`).then(j<WikiPageRow[]>),
+  getWikiPage: (id: string, slug: string) =>
+    fetch(`/api/programs/${id}/wiki/pages/${slugPath(slug)}`).then(j<WikiPage>),
+  searchWiki: (id: string, q: string) =>
+    fetch(`/api/programs/${id}/wiki/search?q=${encodeURIComponent(q)}`).then(j<WikiHit[]>),
+  getWikiLog: (id: string) =>
+    fetch(`/api/programs/${id}/wiki/log`).then(j<{ text: string }>),
+  getWikiLint: (id: string) =>
+    fetch(`/api/programs/${id}/wiki/lint`).then(j<WikiLintReport>),
+  runWiki: (id: string, kind: "ingest" | "lint") =>
+    fetch(`/api/programs/${id}/wiki/run`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind }),
+    }).then(j<{ line: string }>),
+  unquarantineWiki: (id: string) =>
+    fetch(`/api/programs/${id}/wiki/unquarantine`, { method: "POST" })
+      .then(j<{ cleared: string[] }>),
+  verifyWikiPage: (id: string, slug: string) =>
+    fetch(`/api/programs/${id}/wiki/pages/${slugPath(slug)}/verify`, { method: "POST" })
+      .then(j<WikiPage>),
+  setWikiPageStatus: (id: string, slug: string, status: string) =>
+    fetch(`/api/programs/${id}/wiki/status/${slugPath(slug)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    }).then(j<WikiPage>),
+  setWikiHumanNotes: (id: string, slug: string, text: string) =>
+    fetch(`/api/programs/${id}/wiki/notes/${slugPath(slug)}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }).then(j<WikiPage>),
+  deleteWikiPage: (id: string, slug: string) =>
+    fetch(`/api/programs/${id}/wiki/pages/${slugPath(slug)}`, { method: "DELETE" })
+      .then(j<{ deleted: string; relations_dropped: unknown[] }>),
 };

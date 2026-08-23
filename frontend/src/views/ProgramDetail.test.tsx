@@ -26,6 +26,7 @@ function mockProgram(instructions: string) {
   vi.spyOn(api, "listGuidance").mockResolvedValue([]);
   vi.spyOn(api, "listIdeas").mockResolvedValue({ summary: "", ideas: [] } as any);
   vi.spyOn(api, "listArtifacts").mockResolvedValue([]);
+  vi.spyOn(api, "getWikiSummary").mockResolvedValue({ pending: 0, pages: 0 } as any);
 }
 
 function renderAt() {
@@ -101,5 +102,26 @@ describe("replan", () => {
     const n = await clickReplan({ skipped: false });
     expect(n.color).toBe("teal");
     expect(String(n.message)).toMatch(/Re-planned/i);
+  });
+});
+
+describe("wiki link", () => {
+  it("links to the wiki and badges the pending count", async () => {
+    mockProgram("");
+    vi.spyOn(api, "getWikiSummary").mockResolvedValue({ pending: 4, pages: 18 } as any);
+    renderAt();
+    const link = await screen.findByRole("link", { name: /open wiki/i });
+    expect(link.getAttribute("href")).toBe("/programs/p/wiki");
+    // Scoped to the link: the page renders plenty of other zeros and counts, so a
+    // global getByText("4") would pass or fail for unrelated reasons.
+    expect(link.textContent).toMatch(/4/);
+  });
+
+  it("shows no badge when nothing is pending", async () => {
+    mockProgram("");
+    vi.spyOn(api, "getWikiSummary").mockResolvedValue({ pending: 0, pages: 3 } as any);
+    renderAt();
+    const link = await screen.findByRole("link", { name: /open wiki/i });
+    expect(link.textContent).not.toMatch(/\d/);
   });
 });

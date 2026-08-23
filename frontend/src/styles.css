@@ -362,3 +362,34 @@ a { color: inherit; }
   .sprint-unseen { animation: none; }
   * { scroll-behavior: auto !important; }
 }
+
+/* ── wiki browse: three panes, trust dots, section lists ─────────── */
+.wiki-panes { display: grid; grid-template-columns: 240px minmax(0, 1fr) 260px; gap: 16px; }
+@media (max-width: 1100px) { .wiki-panes { grid-template-columns: 1fr; } }
+
+.wiki-tree h4, .wiki-side h4 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--ink-faint); margin: 12px 0 4px; font-weight: 500;
+}
+.wiki-tree ul, .wiki-side ul { list-style: none; margin: 0; padding: 0; }
+.wiki-tree li, .wiki-side li {
+  display: flex; align-items: center; gap: 6px; padding: 1px 0; font-size: 13px;
+}
+.wiki-excerpt { font-size: 12px; color: var(--ink-faint); }
+
+/* Trust is derived, never stored, so this dot is the only place a page's tier is
+   visible at a glance. Unverified is deliberately hollow rather than grey: absent
+   evidence should read as absent, not as a dimmer kind of confirmation. */
+.wiki-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+  border: 1px solid var(--hairline-strong);
+}
+.wiki-dot--unverified { background: transparent; }
+.wiki-dot--machine-confirmed { background: var(--ink-faint); }
+.wiki-dot--human-reviewed { background: var(--machine); border-color: var(--machine); }
+.wiki-stale { color: var(--signal); cursor: help; }
+
+/* min-width: 0 so a long code block inside the page scrolls instead of forcing
+   the whole grid wider than the viewport. */
+.wiki-page { min-width: 0; }
+.wiki-page pre, .wiki-page table { overflow-x: auto; max-width: 100%; }

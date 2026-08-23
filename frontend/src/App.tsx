@@ -13,6 +13,7 @@ import ChatView from "./views/ChatView";
 import SprintDetail from "./views/SprintDetail";
 import ResultDetail from "./views/ResultDetail";
 import ArtifactDetail from "./views/ArtifactDetail";
+import WikiView from "./views/WikiView";
 import ArtifactsView from "./views/ArtifactsView";
 import Ledger from "./views/Ledger";
 
@@ -215,6 +216,8 @@ export default function App() {
               <Route path="/results/:id" element={<ResultDetail />} />
               <Route path="/programs/:id/artifacts" element={<ArtifactsView />} />
               <Route path="/programs/:id/artifacts/:aid" element={<ArtifactDetail />} />
+              <Route path="/programs/:id/wiki" element={<WikiView />} />
+              <Route path="/programs/:id/wiki/*" element={<WikiView />} />
               <Route path="/ledger" element={<Ledger />} />
             </Routes>
           </div>
