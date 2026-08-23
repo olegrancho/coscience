@@ -28,6 +28,7 @@ Every task's requirements implicitly include this section.
 - **Trust is derived, never stored.** No `verified` key → `unverified`; verified only by non-`human:` actors → `machine-confirmed`; any `human:` actor → `human-reviewed`. `status` is the orthogonal lifecycle axis (`draft|stable|deprecated`).
 - **`# Human notes` is protected.** It is written only through its dedicated endpoint. Nothing else in this plan may rewrite it.
 - **Stage explicit paths, never `git add -A`.** The carried-over frontend work this plan originally had to avoid (`styles.css`, `ProgramDetail.tsx`, `SprintDetail.tsx`, `PageToc.tsx`) **landed on `main` as `ee062d2` on 2026-08-21**, so there is no longer anything untouchable in the tree — but the habit stands, because a substrate or a stray runtime file wandering into a commit is how this branch's history gets muddied.
+- **`@testing-library/user-event` is NOT a dependency.** `frontend/package.json` has only `@testing-library/react` and `vitest`; every existing test drives interaction with `fireEvent` (`CapacityModal.test.tsx:50`). Use `fireEvent.click` / `fireEvent.change`. Note `fireEvent.change` sets a value in one event rather than keystroke by keystroke, so a search box receives the whole query at once and needs no `clear` before a re-type.
 - **Follow the dashboard's component conventions.** Every existing view is built from Mantine (`Card`, `Stack`, `Group`, `Text`, `Button`, `TextInput`, `Select`, `Textarea`) with `cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" }`, an `.eyebrow` label per card, and `<Loader color="machine" />` while loading. A raw-HTML view would be the only one in the app. Component tests must wrap in `MantineProvider` and stub `window.matchMedia` / `window.ResizeObserver`, exactly as `ProgramDetail.test.tsx:10-18` does — Mantine touches both and jsdom has neither.
 - **Never commit or push without the human's explicit approval.** Each task's commit step means "prepare and ask", not "push".
 - **Do not touch the graph.** `/wiki/graph`, `wiki_graph.py` and `WikiGraphView` are phase 4. `POST /wiki/run {kind: lint}` exists here as an endpoint, but agent lint *mode* is phase 3.
@@ -447,10 +448,21 @@ def test_an_alias_hit_is_found_and_ranks_between_title_and_body():
 
 
 def test_search_is_case_insensitive_and_returns_an_excerpt_around_the_hit():
-    p = _page("concepts/a.md", title="A", body="x" * 60 + " HYDROLYSIS matters " + "y" * 60)
+    # Filler on both sides has to exceed the excerpt window (±80), or the window
+    # covers the whole body and there is nothing to truncate. The first draft of
+    # this test used 60 and failed for that reason, not because search was wrong.
+    p = _page("concepts/a.md", title="A",
+              body="x" * 200 + " HYDROLYSIS matters " + "y" * 200)
     hit = wiki_read.search([p], "hydrolysis")[0]
     assert "HYDROLYSIS" in hit["excerpt"]
     assert len(hit["excerpt"]) < len(p.body)
+    assert hit["excerpt"].startswith("…") and hit["excerpt"].endswith("…")
+
+
+def test_a_short_body_is_excerpted_whole_without_ellipses():
+    p = _page("concepts/a.md", title="A", body="a lease is held while awake")
+    hit = wiki_read.search([p], "lease")[0]
+    assert hit["excerpt"] == "a lease is held while awake"
 
 
 def test_a_query_matching_nothing_returns_nothing():
@@ -1880,8 +1892,7 @@ Header: counts by type, trust breakdown, pending count, last run and outcome, li
 // frontend/src/views/WikiView.test.tsx
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import WikiView from "./WikiView";
@@ -1965,7 +1976,7 @@ describe("WikiView header and tree", () => {
   it("triggers an ingest run from the header button", async () => {
     const run = vi.spyOn(api, "runWiki").mockResolvedValue({ line: "ok" } as never);
     mount();
-    await userEvent.click(await screen.findByRole("button", { name: /ingest now/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /ingest now/i }));
     await waitFor(() => expect(run).toHaveBeenCalledWith("p1", "ingest"));
   });
 
@@ -1985,7 +1996,8 @@ describe("WikiView header and tree", () => {
       [{ path: "concepts/a.md", title: "Alpha", type: "Concept",
          trust: "unverified", score: 3, excerpt: "…lease…" }] as never);
     mount();
-    await userEvent.type(await screen.findByPlaceholderText(/search/i), "lease");
+    fireEvent.change(await screen.findByPlaceholderText(/search/i),
+                     { target: { value: "lease" } });
     await waitFor(() => expect(search).toHaveBeenCalledWith("p1", "lease"));
   });
 });
@@ -2236,7 +2248,9 @@ describe("WikiView centre pane", () => {
   it("renders the page title and body", async () => {
     mount("/programs/p1/wiki/concepts/a");
     expect(await screen.findByRole("heading", { name: "Alpha" })).toBeTruthy();
-    expect(screen.getByText(/Definition/)).toBeTruthy();
+    // By role, not by text: the right pane's outline also renders the word
+    // "Definition" as a link, so a bare text query matches two elements.
+    expect(screen.getByRole("heading", { name: "Definition" })).toBeTruthy();
   });
 
   it("rewrites an internal body link to a client-side wiki route", async () => {
@@ -2432,7 +2446,7 @@ describe("WikiView right pane", () => {
     const verify = vi.spyOn(api, "verifyWikiPage")
       .mockResolvedValue({ ...page, trust: "human-reviewed" } as never);
     mount("/programs/p1/wiki/concepts/a");
-    await userEvent.click(await screen.findByRole("button", { name: /mark verified/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /mark verified/i }));
     await waitFor(() => expect(verify).toHaveBeenCalledWith("p1", "concepts/a"));
   });
 
@@ -2440,8 +2454,8 @@ describe("WikiView right pane", () => {
     const setStatus = vi.spyOn(api, "setWikiPageStatus")
       .mockResolvedValue({ ...page, status: "stable" } as never);
     mount("/programs/p1/wiki/concepts/a");
-    await userEvent.selectOptions(
-      await screen.findByLabelText(/status/i), "stable");
+    fireEvent.change(await screen.findByLabelText(/status/i),
+                     { target: { value: "stable" } });
     await waitFor(() =>
       expect(setStatus).toHaveBeenCalledWith("p1", "concepts/a", "stable"));
   });
@@ -2451,9 +2465,8 @@ describe("WikiView right pane", () => {
       .mockResolvedValue({ ...page, human_notes: "new note" } as never);
     mount("/programs/p1/wiki/concepts/a");
     const box = await screen.findByLabelText(/human notes/i);
-    await userEvent.clear(box);
-    await userEvent.type(box, "new note");
-    await userEvent.click(screen.getByRole("button", { name: /save notes/i }));
+    fireEvent.change(box, { target: { value: "new note" } });
+    fireEvent.click(screen.getByRole("button", { name: /save notes/i }));
     await waitFor(() =>
       expect(save).toHaveBeenCalledWith("p1", "concepts/a", "new note"));
   });
@@ -2636,15 +2649,17 @@ describe("wiki link", () => {
     renderAt();
     const link = await screen.findByRole("link", { name: /open wiki/i });
     expect(link.getAttribute("href")).toBe("/programs/p/wiki");
-    expect(screen.getByText("4")).toBeTruthy();
+    // Scoped to the link: the page renders plenty of other zeros and counts, so a
+    // global getByText("4") would pass or fail for unrelated reasons.
+    expect(link.textContent).toMatch(/4/);
   });
 
   it("shows no badge when nothing is pending", async () => {
     mockProgram("");
     vi.spyOn(api, "getWikiSummary").mockResolvedValue({ pending: 0 } as any);
     renderAt();
-    await screen.findByRole("link", { name: /open wiki/i });
-    expect(screen.queryByText("0")).toBeNull();
+    const link = await screen.findByRole("link", { name: /open wiki/i });
+    expect(link.textContent).not.toMatch(/\d/);
   });
 });
 ```
@@ -2714,3 +2729,83 @@ Agent lint mode, the lint cadence going live, the lint report UI and quarantine 
 1. ~~**`ProgramDetail.tsx`** — Task 15.~~ **Resolved 2026-08-21:** the carried-over frontend work was fixed and committed to `main` as `ee062d2`, so Task 15 is unblocked and D3/D4/D5 were rewritten accordingly. `main` was then merged into this branch as `fe0c125`, so every task below edits `ProgramDetail.tsx`, `SprintDetail.tsx` and `styles.css` at their current revisions and `PageToc.tsx` is present on the branch. Nothing here works against a stale tree.
 2. **The two open phase-1 defects** (agent writing into `# Human notes`; `substrate.commit()` being repo-wide) both touch phase 2's surface: the notes editor writes the section an agent has been seen to overwrite, and every curation action commits. Neither blocks this plan, but a decision before Task 5 would be better than after.
 3. **`POST /wiki/run` and authentication.** The endpoint spends Claude quota, and `verify` is the only route in this plan that reads the session user. If forcing a run should require an authenticated user, say so and Task 9 gains a `Depends(current_user)` guard.
+
+---
+
+## Execution record — 2026-08-21
+
+All 15 tasks implemented. **Backend 1107 passed** (1044 before this plan, +63),
+**frontend 147 passed** (110 before, +37), `tsc --noEmit` clean, `vite build`
+clean. Nothing in phase 1's suite was edited to accommodate phase 2.
+
+Verified per layer: `wiki_read` 21, `Service` 28, HTTP 15, `api.ts` + `wikiPage.ts`
+30, `WikiView` 19, `ProgramDetail` 7 (5 pre-existing + 2 new).
+
+### Where the plan was wrong, and what it cost
+
+Four defects, all in the plan's *test* code rather than its implementation code.
+Each is fixed above, in place, so this file no longer teaches the mistake.
+
+1. **`@testing-library/user-event` is not a dependency of this project.** The plan
+   imported it; `package.json` has only `@testing-library/react` and `vitest`, and
+   every existing test uses `fireEvent`. Installing it was not an option either —
+   `frontend/node_modules` is Avatar's Linux install arriving over Syncthing, so
+   `npm install` here would have replaced its platform binaries. This is now a
+   Global Constraint. The behavioural difference matters: `userEvent.type` fires
+   per keystroke, so a search box would receive `l`, `le`, `lea`… while
+   `fireEvent.change` delivers the whole query once.
+2. **An excerpt test whose body was shorter than the excerpt window.** ±80 chars
+   around a hit in a 140-char body covers the whole body, so "the excerpt is
+   shorter than the body" could never hold. The implementation was right.
+3. **`getByText(/Definition/)` matched two elements** once the outline pane renders
+   beside the body — the markdown `<h1>` and the outline link. Fixed by querying
+   the heading role.
+4. **`queryByText("0")` matched an unrelated `<span class="mono">`** on
+   `ProgramDetail`, which renders many counts. Both badge assertions now scope to
+   the wiki link's own `textContent`.
+
+The pattern in 2–4 is one mistake: assertions that were true of the behaviour but
+ambiguous about *where* they looked. In a three-pane view inside a page full of
+counts, a global text query is a coin flip. Prefer role-scoped or element-scoped
+queries.
+
+### Deviations from the plan as written
+
+- **Tasks 12–14 were executed as one unit** with a single combined test file.
+  Each WSL test run costs 80–200s, so six red/green cycles would have spent ~10
+  minutes of wall clock for no extra safety. Still red-then-green, in two runs.
+- **The `ProgramDetail` wiki link became its own card**, not a link in the
+  artifacts card's header row as Task 15 described. A wiki link inside a card
+  labelled "artifacts" reads wrong; §11.2 says "beside ideas and artifacts", and
+  those each own a card with their own `open X →` link. The new card carries the
+  pending count as a badge and one line saying what the wiki is.
+- **`{ id: "sec-wiki", label: "Wiki" }` was added to `ProgramDetail`'s ToC
+  entries.** `PageToc` builds its nav from that hardcoded list, so a new `sec-*`
+  card absent from the list is a section the nav silently omits.
+
+### Environment note for whoever picks this up
+
+This was executed with the sandbox unavailable — its disk hit 100%. The suites ran
+in **WSL Ubuntu** against `/mnt/d`, with two setup quirks worth knowing: the distro
+has no `python3-venv`/`ensurepip` and `sudo` needs a password, so pip was
+bootstrapped with `get-pip.py`; and Node was unpacked to `~/opt/node` and invoked
+as `node node_modules/vitest/vitest.mjs`, because `node_modules/.bin` symlinks do
+not survive Syncthing. `mcp` is pinned `<2` there for the same reason as on the
+sandbox — `pyproject.toml:10` allows 2.0.0, which removed `mcp.server.fastmcp`.
+
+**Watch the line endings.** `.gitattributes` is `* text=auto eol=lf` specifically
+to stop CRLF churn across synced machines. Python's `write_text` on Windows emits
+`\r\n`, which git normalises at commit but Syncthing propagates *before* any
+commit — so 8 files were briefly CRLF in the working tree. Use heredocs or an
+editor tool, not `pathlib.write_text`, when editing from Windows.
+
+## Still open
+
+- The two phase-1 defects remain (an agent wrote into the protected
+  `# Human notes`; `substrate.commit()` is repo-wide via `git add -A`). The notes
+  editor built here writes that exact section, and every curation action commits.
+- `POST /wiki/run` still has no auth guard. `verify` is the only route reading the
+  session user. It spends Claude quota, so if forcing a run should require a
+  logged-in user, add `Depends(current_user)`.
+- Nothing here has been exercised against a real bundle in a browser. The suite
+  proves the wiring; it does not prove the view is pleasant to read.
