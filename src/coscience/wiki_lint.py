@@ -45,6 +45,7 @@ def lint(pages: list[wiki_okf.Page], *, index_body: str = "",
     out += _relation_rules(pages)
     out += _source_rules(pages, objects)
     out += _trust_rules(pages, previous)
+    out += _human_notes_rules(pages)
     out.sort(key=lambda f: (_RANK.get(f.severity, 9), f.path, f.rule))
     return out
 
@@ -365,6 +366,7 @@ def _title(pages: list[wiki_okf.Page], path: str) -> str:
 
 
 HUMAN_NOTES = "Human notes"
+_FOOTNOTE_DEF = re.compile(r"^\[\^[^\]]+\]:")
 
 
 def _source_rules(pages: list[wiki_okf.Page],
@@ -413,6 +415,33 @@ def _trust_rules(pages: list[wiki_okf.Page],
         if had and not p.has_section(HUMAN_NOTES):
             out.append(Finding("human-notes/removed", "error", p.path,
                                "the protected `# Human notes` section was removed"))
+        was_empty = not wiki_okf.Page(path=p.path, body=before).section(HUMAN_NOTES).strip()
+        if was_empty and p.section(HUMAN_NOTES).strip():
+            out.append(Finding("human-notes/machine-written", "error", p.path,
+                               "content appeared under the protected `# Human notes`"))
+    return out
+
+
+def _human_notes_rules(pages: list[wiki_okf.Page]) -> list[Finding]:
+    """Footnote definitions inside the protected section.
+
+    Markdown convention puts `[^id]: ...` at the end of the document and the page
+    template ends with `# Human notes`, so the agent's attributions land in the one
+    section it may not write in. The reader then offers them to a human as if they
+    were notes, and saving over them destroys the page's attributions. Unlike
+    `human-notes/machine-written` this needs no previous revision, so it also finds
+    the pages already written that way."""
+    out = []
+    for p in pages:
+        notes = p.section(HUMAN_NOTES)
+        if not notes.strip():
+            continue
+        bad = [ln for ln in notes.splitlines() if _FOOTNOTE_DEF.match(ln.strip())]
+        if bad:
+            out.append(Finding(
+                "human-notes/footnote-definition", "error", p.path,
+                f"{len(bad)} footnote definition(s) inside the protected "
+                f"`# Human notes` — move them to `# References`"))
     return out
 
 

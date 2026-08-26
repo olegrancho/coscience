@@ -61,8 +61,13 @@ aliases: [takeoff threshold]
 # Evidence
 # Contradictions
 # Open questions
-# Human notes
+# References        <- footnote definitions ([^c14]: ...) go here
+# Human notes       <- always last, always yours to leave empty
 ```
+
+`# Human notes` is the human's section. Never write under it — not prose, and not
+footnote definitions, which markdown convention would otherwise put at the end of
+the file and therefore inside it.
 
 `type` is the only required field. Never invent a `verified:` entry — trust is
 recorded by the platform when a human marks a page verified, never by you.

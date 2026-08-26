@@ -132,3 +132,30 @@ def test_previous_bodies_empty_without_git(substrate):
     wiki_store.write_page(substrate, "p9", wiki_okf.Page(
         path="concepts/a.md", type="Concept", title="A", body="x" * 400))
     assert wiki_store.previous_bodies(substrate, "p9") == {}
+
+
+def test_footnote_definitions_in_human_notes_are_an_error():
+    # The observed failure: markdown puts `[^id]: ...` last, the template ends with
+    # `# Human notes`, so attributions land in the protected section. 12 of 15 pages
+    # on the first real bundle had this.
+    p = wiki_okf.Page(path="concepts/a.md", type="Concept", title="A",
+                      body="# Definition\n\nx[^c1]\n\n# Human notes\n\n"
+                           "[^c1]: sources/result-r7.md\n")
+    rules = [f.rule for f in wiki_lint.lint([p])]
+    assert "human-notes/footnote-definition" in rules
+
+
+def test_a_genuine_human_note_is_not_flagged():
+    p = wiki_okf.Page(path="concepts/a.md", type="Concept", title="A",
+                      body="# Definition\n\nx\n\n# Human notes\n\nRe-check at 40 C.\n")
+    rules = [f.rule for f in wiki_lint.lint([p])]
+    assert "human-notes/footnote-definition" not in rules
+
+
+def test_content_appearing_under_human_notes_is_flagged_against_the_previous_body():
+    before = "# Definition\n\nx\n\n# Human notes\n\n"
+    after = wiki_okf.Page(path="concepts/a.md", type="Concept", title="A",
+                          body="# Definition\n\nx\n\n# Human notes\n\nthe agent wrote this\n")
+    rules = [f.rule for f in wiki_lint.lint([after],
+                                            previous={"concepts/a.md": before})]
+    assert "human-notes/machine-written" in rules

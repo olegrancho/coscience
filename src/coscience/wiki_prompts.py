@@ -42,12 +42,48 @@ _RULES = """## Rules that bite
 - **Preserve layered insight.** When you extend a page, keep what is there and
   add to it. Do not compress an existing page to make room.
 - **Attribute per claim** with markdown footnotes (`[^id]`) tied to an id in the
-  page's `sources` list.
+  page's `sources` list. Put the footnote *definitions* (`[^id]: ...`) in their own
+  `# References` section immediately **before** `# Human notes`, never at the end of
+  the file. Markdown convention puts them last, and last is inside the one section
+  you may not write in — where they show up in the human's notes box instead.
 - **The containment invariant:** every typed relation in `relations` must also be
   linked from the body as an ordinary markdown link. The frontmatter is a typed
   overlay on the prose, never a substitute for it.
 - **`# Human notes` is protected.** If a page has that section, reproduce it byte
-  for byte. It is a human's correction and outranks anything you would write.
+  for byte. It is a human's correction and outranks anything you would write. If a
+  page has no such section, end the page with an empty one — empty, and yours to
+  leave empty. Nothing you write ever goes under that heading.
+"""
+
+_VOICE = """## How a page must read
+
+Passes 1-3 produce compressed extraction notes. Those are your working material,
+not your output. A page that reads like the notes has failed even when every fact
+on it is correct — the wiki exists so someone who was not in the sprint can learn
+from it later, and dense shorthand is exactly what stops that.
+
+- **Open with a definition a newcomer can use.** The first sentence of
+  `# Definition` says what the thing *is*, in plain language, without depending on
+  any other page. "Hydrolysis is the rate at which the backbone breaks down — the
+  loss term that replication has to outrun." Not "The loss term opposing template
+  replication under the kinetic model."
+- **The page must stand alone.** Assume the reader has not read the result it came
+  from and does not know this program's shorthand. Anything a reader needs in order
+  to understand the first paragraph belongs on the page, not behind a link.
+- **Expand every term on first use**, then use it freely: "optimal growth
+  temperature (OGT)", "melting temperature (Tm) — the temperature at which half
+  the protein population is unfolded". An acronym that appears undefined is a
+  defect, not a style choice.
+- **Say what a number means, not just what it is.** "Spearman rho = 0.42" tells a
+  newcomer nothing. "Spearman rho = 0.42 — moderate rank agreement, where 1.0 is a
+  perfect ordering and 0 is chance" tells them whether to care.
+- **Write sentences, not telegraphy.** Two readable sentences beat one clause-laden
+  40-word sentence. Break a long chain of qualifications into separate sentences.
+- **Lead each section with its point.** Put the finding first and the caveats
+  after, so the page is useful when skimmed.
+
+Length is not the enemy — density is. Prefer the version a competent scientist
+from a neighbouring field could read once and understand.
 """
 
 _PROHIBITIONS = """## Prohibitions
@@ -138,6 +174,7 @@ itself; the concept pages do.
 {_object_block(objects)}
 {_PROTOCOL.format(scratchpad=scratchpad)}
 {_RULES}
+{_VOICE}
 {_HOUSEKEEPING.format(run_dir=run_dir)}
 {_PROHIBITIONS.format(bundle=bundle, run_dir=run_dir)}
 """
@@ -178,6 +215,7 @@ cannot decide.
    An orphan gets linked from `index.md` or from the page it belongs under.
 
 {_RULES}
+{_VOICE}
 {_HOUSEKEEPING.format(run_dir=run_dir)}
 Write your own summary of what you changed to `{run_dir}/lint-report.md`; the
 platform files it under `.wiki/lint/`. Never delete a page, and never edit
