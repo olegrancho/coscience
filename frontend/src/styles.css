@@ -364,17 +364,80 @@ a { color: inherit; }
 }
 
 /* ── wiki browse: three panes, trust dots, section lists ─────────── */
-.wiki-panes { display: grid; grid-template-columns: 240px minmax(0, 1fr) 260px; gap: 16px; }
-@media (max-width: 1100px) { .wiki-panes { grid-template-columns: 1fr; } }
+/* The reading column is what the widths are chosen around, not what is left over
+   from them. On the 1360px canvas the wiki route gets (App.tsx), 260 + 320 of
+   rails and two 24px gaps leave ~730px for the page — about 72 characters at the
+   body size. The old 240/260 rails inside the 980px shell left 448px, which is
+   why prose, tables and code blocks all read as cramped. */
+.wiki-panes {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 320px;
+  grid-template-areas: "tree page side";
+  gap: 24px;
+  align-items: start;
+}
+.wiki-tree { grid-area: tree; }
+.wiki-page { grid-area: page; }
+.wiki-side { grid-area: side; }
+
+/* Both rails hold position while the page scrolls. A three-pane browser whose
+   tree scrolls out of reach is just a long document with decoration: the tree is
+   how you move between pages, and the outline is only useful beside the prose it
+   indexes. 52px header + 26px canvas padding = 78px of chrome above them. */
+.wiki-tree, .wiki-side {
+  position: sticky;
+  top: 26px;
+  max-height: calc(100vh - 78px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+/* Send the rail below the page before the reading column starts paying for it:
+   three columns at 1280 would leave the page under 500px, which is the problem
+   this whole block exists to fix. The tree spans both rows and stays put. */
+@media (max-width: 1280px) {
+  .wiki-panes {
+    grid-template-columns: 260px minmax(0, 1fr);
+    grid-template-areas: "tree page" "tree side";
+  }
+  .wiki-side { position: static; max-height: none; overflow: visible; }
+}
+@media (max-width: 860px) {
+  .wiki-panes {
+    grid-template-columns: 1fr;
+    grid-template-areas: "tree" "page" "side";
+  }
+  .wiki-tree { position: static; max-height: none; overflow: visible; }
+}
 
 .wiki-tree h4, .wiki-side h4 {
   font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
   color: var(--ink-faint); margin: 12px 0 4px; font-weight: 500;
 }
-.wiki-tree ul, .wiki-side ul { list-style: none; margin: 0; padding: 0; }
-.wiki-tree li, .wiki-side li {
-  display: flex; align-items: center; gap: 6px; padding: 1px 0; font-size: 13px;
+/* The rail scrolls its own content, so a group heading that scrolls away leaves
+   you reading a list with no idea which group it belongs to. */
+.wiki-tree h4 {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--paper); margin: 0; padding: 10px 0 4px;
 }
+.wiki-group {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit;
+}
+.wiki-group:hover { color: var(--ink-muted); }
+.wiki-caret { font-size: 9px; width: 8px; flex: 0 0 auto; }
+.wiki-group-count { margin-left: auto; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.wiki-tree ul, .wiki-side ul { list-style: none; margin: 0; padding: 0; }
+/* flex-start, not center: a wrapped two-line title would otherwise float its trust
+   dot down beside the second line, reading as a bullet for the wrong row. The
+   .32em nudge sits it on the first line's centre. */
+.wiki-tree li, .wiki-side li {
+  display: flex; align-items: flex-start; gap: 7px; padding: 3px 0;
+  font-size: 13px; line-height: 1.45;
+}
+.wiki-tree li > .wiki-dot { margin-top: .32em; }
 .wiki-excerpt { font-size: 12px; color: var(--ink-faint); }
 
 /* Trust is derived, never stored, so this dot is the only place a page's tier is
@@ -393,3 +456,27 @@ a { color: inherit; }
    the whole grid wider than the viewport. */
 .wiki-page { min-width: 0; }
 .wiki-page pre, .wiki-page table { overflow-x: auto; max-width: 100%; }
+
+/* Inside the page card the leaf would be a frame within a frame: the card already
+   carries the border and the shadow. The leaf keeps its paper, its serif and its
+   rule, and gives up the border. */
+.wiki-page .report-leaf { border: none; border-left: 3px solid var(--report-rule); }
+
+/* Every OKF page is built from the same five section names — Definition, Evidence,
+   Contradictions, Open questions, Human notes — written as `# ` headings. They are
+   a fixed schema, not a narrative, so they are set as section labels rather than as
+   titles: at h1 size they rendered larger than the page title itself and each page
+   opened with the word "Definition" shouting over its own subject. */
+.wiki-page .report-leaf h1 {
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .08em;
+  color: var(--ink-faint);
+  margin: 26px 0 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--signal-line);
+}
+.wiki-page .report-leaf h1:first-child { margin-top: 0; }
+/* h2/h3 are the agent's own subheadings inside a section, so they stay prose. */
+.wiki-page .report-leaf h2 { font-size: 19px; margin: 20px 0 6px; }
+.wiki-page .report-leaf h3 { font-size: 16px; margin: 16px 0 4px; }

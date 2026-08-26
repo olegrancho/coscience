@@ -15,6 +15,10 @@ export function wikiHref(programId: string, target: string): string {
   const raw = (target || "").trim();
   if (!isInternalLink(raw)) return raw;
   const [pathPart, anchor] = raw.split("#", 2);
+  // A bare `#anchor` addresses the page you are already on — GFM footnote markers
+  // and their back-references are exactly this shape. Rebuilding a route from the
+  // empty path sent every footnote click to the wiki index instead.
+  if (!pathPart) return raw;
   const clean = pathPart.replace(/^\//, "").replace(/\.md$/, "");
   const base = `/programs/${programId}/wiki/${clean}`;
   return anchor ? `${base}#${anchor}` : base;

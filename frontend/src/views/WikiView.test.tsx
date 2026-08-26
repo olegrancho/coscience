@@ -25,6 +25,7 @@ const summary = {
   last_run: { id: "r0001", kind: "ingest", status: "ok", at: 1, pages_created: 18,
               pages_updated: 3, notes: "", escaped: [] },
   ingests_since_lint: 1, lint: { error: 0, warn: 2 }, index_md: "# Index",
+  wiki_model: "claude-sonnet-5", wiki_enabled: true,
 };
 
 const rows = [
@@ -70,10 +71,41 @@ describe("WikiView header and tree", () => {
     expect(screen.getByRole("heading", { name: /Entities/i })).toBeTruthy();
   });
 
+  it("offers the wiki model in the header and posts a change", async () => {
+    // Separate from the planner model on purpose: writing pages and planning
+    // experiments are different jobs.
+    const set = vi.spyOn(api, "setProgramWikiModel").mockResolvedValue({} as never);
+    mount();
+    const select = await screen.findByLabelText("wiki model") as HTMLSelectElement;
+    expect(select.value).toBe("claude-sonnet-5");
+    fireEvent.change(select, { target: { value: "claude-opus-5" } });
+    await waitFor(() => expect(set).toHaveBeenCalledWith("p1", "claude-opus-5"));
+  });
+
+  it("locks the model picker while a run is in flight", async () => {
+    vi.spyOn(api, "getWikiSummary")
+      .mockResolvedValue({ ...summary, run: { id: "r2", kind: "ingest" } } as never);
+    mount();
+    const select = await screen.findByLabelText("wiki model") as HTMLSelectElement;
+    expect(select.disabled).toBe(true);
+  });
+
   it("marks a stale page", async () => {
     mount();
     await screen.findByText("Beta");
     expect(screen.getByTitle(/stale/i)).toBeTruthy();
+  });
+
+  it("rewrites an index link to a client-side wiki route", async () => {
+    // index.md is almost entirely links and it is the pane you land on, so a raw
+    // <Md> here sent the browser to /concepts/a.md — off the dashboard, onto a
+    // route the app does not serve. The body pane had this; the index did not.
+    vi.spyOn(api, "getWikiSummary").mockResolvedValue({
+      ...summary, index_md: "# Index\n\n- [Composition baseline](/concepts/a.md)\n",
+    } as never);
+    mount();
+    const link = await screen.findByRole("link", { name: "Composition baseline" });
+    expect(link.getAttribute("href")).toBe("/programs/p1/wiki/concepts/a");
   });
 
   it("triggers an ingest run from the header button", async () => {

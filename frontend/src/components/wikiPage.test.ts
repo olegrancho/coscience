@@ -20,6 +20,13 @@ describe("wikiHref", () => {
   it("leaves an external link alone", () => {
     expect(wikiHref("p1", "https://example.org/x")).toBe("https://example.org/x");
   });
+
+  it("leaves a same-page anchor alone", () => {
+    // GFM renders every footnote marker as `#user-content-fn-<id>`. Treating the
+    // empty path as "the bundle root" turned each one into a trip to the index.
+    expect(wikiHref("p1", "#user-content-fn-c1")).toBe("#user-content-fn-c1");
+    expect(wikiHref("p1", "#evidence")).toBe("#evidence");
+  });
 });
 
 describe("isInternalLink", () => {

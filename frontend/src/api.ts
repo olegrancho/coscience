@@ -5,6 +5,8 @@ export interface SprintRef { id: string; status: string; goals: string; title: s
 export interface PMActivation { at: number; cycle: number; triggers: string[]; submitted: string[]; forced: boolean }
 export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
+  wiki_model: string;     // model for this program's wiki runs; separate from pm_model
+  wiki_enabled: boolean;  // false opts the program out of wiki ingest entirely
   instructions: string;   // standing house rules, in every PM prompt
   max_proposed: number;   // cap on sprints awaiting review; 0 = platform default
   activations: PMActivation[]; last_run: number | null;
@@ -116,6 +118,8 @@ export interface WikiSummary {
               escaped: string[] } | null;
   ingests_since_lint: number;
   lint: Record<string, number>;
+  wiki_model: string;     // model this program's wiki runs use
+  wiki_enabled: boolean;  // false = the beat skips this program entirely
   index_md: string;
 }
 export interface WikiPageRow {
@@ -191,6 +195,16 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model }),
     }).then(j<{ id: string; pm_model: string }>),
+  setProgramWikiModel: (id: string, model: string) =>
+    fetch(`/api/programs/${id}/wiki-model`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    }).then(j<{ id: string; wiki_model: string }>),
+  setProgramWikiEnabled: (id: string, enabled: boolean) =>
+    fetch(`/api/programs/${id}/wiki-enabled`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }).then(j<{ id: string; wiki_enabled: boolean }>),
   listChats: (id: string) => fetch(`/api/programs/${id}/chats`).then(j<ChatThreadSummary[]>),
   createChat: (id: string, title = "", artifacts?: string[]) =>
     fetch(`/api/programs/${id}/chats`, {

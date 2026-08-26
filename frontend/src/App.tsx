@@ -165,9 +165,16 @@ function UserMenu() {
   );
 }
 
+// 980px is the right measure for the document views — a result, a sprint, a
+// program read top to bottom. The wiki is the one view that is a browser rather
+// than a document: two rails plus a reading column do not fit in 980, and inside
+// it the page collapses to ~448px. See .wiki-panes for where 1360 comes from.
+const WIDE_ROUTE = /^\/programs\/[^/]+\/wiki(\/|$)/;
+
 export default function App() {
   const { pathname } = useLocation();
   const active = activeSection(pathname);
+  const canvas = WIDE_ROUTE.test(pathname) ? 1360 : 980;
   return (
     <AppShell header={{ height: 52 }} navbar={{ width: 232, breakpoint: "sm" }} padding={0}>
       <AppShell.Header style={{ background: "var(--card)", borderBottom: "1px solid var(--hairline)" }}>
@@ -205,7 +212,7 @@ export default function App() {
 
       <AppShell.Main>
         <div className="app-canvas" style={{ minHeight: "calc(100vh - 52px)", padding: "26px 30px" }}>
-          <div style={{ maxWidth: 980, margin: "0 auto" }}>
+          <div style={{ maxWidth: canvas, margin: "0 auto" }}>
             <Routes>
               <Route path="/" element={<Overview />} />
               <Route path="/programs" element={<Programs />} />

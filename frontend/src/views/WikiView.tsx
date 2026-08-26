@@ -1,15 +1,18 @@
 import { Badge, Button, Card, Group, Loader, Stack, Text, Textarea, TextInput } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import type { Components } from "react-markdown";
 import { Link, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { isInternalLink, outline, wikiHref } from "../components/wikiPage";
-import { BackLink, EmptyState } from "../components/ui";
+import { BackLink, EmptyState, ModelSelect } from "../components/ui";
 import { api, type WikiPageRow } from "../api";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
 const TYPE_ORDER = ["Concept", "Entity", "Synthesis", "Source", "Question"];
+// Above this many pages the tree stops being scannable and the groups start shut.
+const COLLAPSE_ABOVE = 40;
 const GROUP_LABEL: Record<string, string> = {
   Concept: "Concepts", Entity: "Entities", Synthesis: "Syntheses",
   Source: "Sources", Question: "Questions",
@@ -48,6 +51,11 @@ export default function WikiView() {
 
   const run = useMutation({ mutationFn: (kind: "ingest" | "lint") => api.runWiki(id, kind),
                             onSuccess: invalidate });
+  // Saves on change, no Save button — same idiom as the page `status` select in the
+  // curation panel. There is nothing to batch it with here.
+  const setWikiModel = useMutation({
+    mutationFn: (model: string) => api.setProgramWikiModel(id, model),
+    onSuccess: invalidate });
   const unquarantine = useMutation({ mutationFn: () => api.unquarantineWiki(id),
                                      onSuccess: invalidate });
   const verify = useMutation({ mutationFn: () => api.verifyWikiPage(id, slug),
@@ -58,6 +66,39 @@ export default function WikiView() {
   const saveNotes = useMutation({
     mutationFn: (text: string) => api.setWikiHumanNotes(id, slug, text),
     onSuccess: () => { setNotes(null); refreshPage(); } });
+
+  // Every pane that renders bundle markdown needs this, not just the page body:
+  // an internal link left to the browser sends it to /concepts/x.md, a route the
+  // app does not serve, and the dashboard is gone. index.md is nothing but links,
+  // and it is the wiki's landing view — it was the one pane rendering raw <Md>.
+  const mdComponents: Components = useMemo(() => ({
+    a: ({ href, children, ...rest }) => {
+      const h = String(href ?? "");
+      // A same-page anchor stays a plain <a>: the browser jumps natively, whereas
+      // a router <Link> would push a navigation and not scroll at all. Footnote
+      // markers and their back-references are all of this shape.
+      if (h.startsWith("#")) return <a href={h} {...rest}>{children}</a>;
+      return isInternalLink(h)
+        ? <Link to={wikiHref(id, h)}>{children}</Link>
+        : <a href={h} target="_blank" rel="noreferrer" {...rest}>{children}</a>;
+    },
+  }), [id]);
+
+  // A flat list is fine at a dozen pages and useless at a few hundred: 140 concepts
+  // push entities and sources past the fold, so the only way to reach them is the
+  // search box. Below the threshold nothing collapses — a wiki you can see whole
+  // should stay whole. Above it, groups start shut except the one you are reading
+  // from, and the counts tell you what is behind each.
+  const [shut, setShut] = useState<Record<string, boolean>>({});
+  const total = (pages.data ?? []).length;
+  const currentType = (pages.data ?? [])
+    .find((p) => p.path.replace(/\.md$/, "") === slug)?.type ?? "";
+  const isGroupOpen = (type: string) =>
+    shut[type] === undefined
+      ? total <= COLLAPSE_ABOVE || type === currentType
+      : !shut[type];
+  const toggleGroup = (type: string) =>
+    setShut((prev) => ({ ...prev, [type]: isGroupOpen(type) }));
 
   const s = summary.data;
   const grouped = TYPE_ORDER
@@ -76,7 +117,14 @@ export default function WikiView() {
         <BackLink to={`/programs/${id}`}>Program</BackLink>
         <Group justify="space-between" align="flex-start" wrap="nowrap">
           <Text fw={600} size="xl">Wiki</Text>
-          <Group gap={8}>
+          <Group gap={10} wrap="nowrap">
+            {/* The model that writes these pages belongs next to the button that
+                sets it writing, not only behind program settings. */}
+            {s && (
+              <ModelSelect value={s.wiki_model} label="wiki model"
+                           disabled={!!s.run || setWikiModel.isPending}
+                           onChange={(m) => setWikiModel.mutate(m)} />
+            )}
             <Button size="xs" variant="default" onClick={() => run.mutate("ingest")}
                     disabled={!!s?.run}>Ingest now</Button>
             <Button size="xs" variant="default" onClick={() => run.mutate("lint")}
@@ -136,23 +184,38 @@ export default function WikiView() {
             </ul>
           ) : (
             [...grouped, ...(extra.length ? [["Other", extra] as const] : [])]
-              .map(([type, rows]) => (
-                <div key={type}>
-                  <h4>{GROUP_LABEL[type] ?? type}</h4>
-                  <ul>
-                    {rows.map((p) => (
-                      <li key={p.path}>
-                        <span className={`wiki-dot wiki-dot--${p.trust}`}
-                              title={p.trust} />
-                        <Link to={`/programs/${id}/wiki/${p.path.replace(/\.md$/, "")}`}>
-                          {p.title}
-                        </Link>
-                        {isStale(p) && <span className="wiki-stale" title="stale">⚠</span>}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))
+              .map(([type, rows]) => {
+                const open = isGroupOpen(type);
+                return (
+                  <div key={type}>
+                    <h4>
+                      <button type="button" className="wiki-group"
+                              aria-expanded={open}
+                              onClick={() => toggleGroup(type)}>
+                        <span className="wiki-caret" aria-hidden="true">
+                          {open ? "▾" : "▸"}
+                        </span>
+                        {GROUP_LABEL[type] ?? type}
+                        <span className="wiki-group-count">{rows.length}</span>
+                      </button>
+                    </h4>
+                    {open && (
+                      <ul>
+                        {rows.map((p) => (
+                          <li key={p.path}>
+                            <span className={`wiki-dot wiki-dot--${p.trust}`}
+                                  title={p.trust} />
+                            <Link to={`/programs/${id}/wiki/${p.path.replace(/\.md$/, "")}`}>
+                              {p.title}
+                            </Link>
+                            {isStale(p) && <span className="wiki-stale" title="stale">⚠</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })
           )}
         </nav>
 
@@ -160,12 +223,19 @@ export default function WikiView() {
           {!slug && s && (
             <Card padding="lg" radius="md" style={cardStyle}>
               <div className="eyebrow" style={{ marginBottom: 12 }}>index</div>
-              <div className="report-leaf"><Md>{s.index_md}</Md></div>
+              <div className="report-leaf">
+                <Md components={mdComponents}>{s.index_md}</Md>
+              </div>
             </Card>
           )}
           {slug && page.data && (
             <Card padding="lg" radius="md" style={cardStyle}>
-              <Text component="h2" fw={600} size="lg" mb={6}>{page.data.title}</Text>
+              {/* The page's own subject has to outrank the schema's section names
+                  below it; at size="lg" it lost to every "# Definition". */}
+              <Text component="h2" fw={600} mb={8}
+                    style={{ fontSize: 24, lineHeight: 1.25, letterSpacing: "-.01em" }}>
+                {page.data.title}
+              </Text>
               <Group gap={6} mb="sm" wrap="wrap">
                 <span className={`wiki-dot wiki-dot--${page.data.trust}`}
                       title={page.data.trust} />
@@ -202,16 +272,7 @@ export default function WikiView() {
               )}
 
               <div className="report-leaf">
-                <Md components={{
-                  // An internal link must route inside the app; letting the browser
-                  // follow /concepts/b.md would leave the dashboard entirely.
-                  a: ({ href, children, ...rest }) => (
-                    isInternalLink(String(href ?? ""))
-                      ? <Link to={wikiHref(id, String(href))}>{children}</Link>
-                      : <a href={String(href ?? "")} target="_blank"
-                           rel="noreferrer" {...rest}>{children}</a>
-                  ),
-                }}>{page.data.body}</Md>
+                <Md components={mdComponents}>{page.data.body}</Md>
               </div>
             </Card>
           )}

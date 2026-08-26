@@ -1,4 +1,4 @@
-import { ActionIcon, Button, Group, Modal, NumberInput, Stack, Textarea, TextInput, Tooltip } from "@mantine/core";
+import { ActionIcon, Button, Checkbox, Group, Modal, NumberInput, Stack, Text, Textarea, TextInput, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useRef, useState } from "react";
 import { api, type Program } from "../api";
@@ -17,12 +17,15 @@ interface Props {
 export default function ProgramSettingsModal({ opened, onClose, program, onSaved }: Props) {
   const [goals, setGoals] = useState("");
   const [model, setModel] = useState("");
+  const [wikiModel, setWikiModel] = useState("");
+  const [wikiEnabled, setWikiEnabled] = useState(true);
   const [workdir, setWorkdir] = useState("");
   const [maxProposed, setMaxProposed] = useState<number | string>("");
   const [instructions, setInstructions] = useState("");
   const [saving, setSaving] = useState(false);
   const [browsing, setBrowsing] = useState(false);
-  const seeded = useRef({ goals: "", model: "", workdir: "", maxProposed: 0, instructions: "" });
+  const seeded = useRef({ goals: "", model: "", wikiModel: "", wikiEnabled: true,
+                          workdir: "", maxProposed: 0, instructions: "" });
   const wasOpened = useRef(false);
 
   // Seed on the false->true open transition only. The program is refetched by a
@@ -32,11 +35,14 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
     if (opened && !wasOpened.current) {
       setGoals(program.goals);
       setModel(program.pm_model);
+      setWikiModel(program.wiki_model);
+      setWikiEnabled(program.wiki_enabled);
       setWorkdir(program.workdir);
       setMaxProposed(program.max_proposed || "");
       setInstructions(program.instructions);
       seeded.current = {
         goals: program.goals, model: program.pm_model, workdir: program.workdir,
+        wikiModel: program.wiki_model, wikiEnabled: program.wiki_enabled,
         maxProposed: program.max_proposed, instructions: program.instructions,
       };
     }
@@ -59,6 +65,10 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
       let workdirResult: { workdir: string; exists: boolean } | undefined;
       if (goals.trim() !== was.goals) await api.setProgramGoals(program.id, goals.trim());
       if (model !== was.model) await api.setProgramModel(program.id, model);
+      if (wikiModel !== was.wikiModel) await api.setProgramWikiModel(program.id, wikiModel);
+      if (wikiEnabled !== was.wikiEnabled) {
+        await api.setProgramWikiEnabled(program.id, wikiEnabled);
+      }
       if (folder !== was.workdir) workdirResult = await api.setProgramWorkdir(program.id, folder);
       if (cap !== was.maxProposed) await api.setProgramMaxProposed(program.id, cap);
       if (instructions !== was.instructions) await api.setProgramInstructions(program.id, instructions);
@@ -92,9 +102,31 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
           onChange={(e) => setGoals(e.currentTarget.value)}
         />
 
-        <Group gap={8} align="center">
-          <ModelSelect value={model} onChange={setModel} label="planner model" />
-        </Group>
+        {/* Two jobs, two models. The planner reasons over the program's state to
+            propose experiments; the wiki reads finished results and writes prose
+            about them. They reward different models, so they get separate dials
+            rather than one "the model for this program". */}
+        <Stack gap={6}>
+          <Group gap={8} align="center">
+            <ModelSelect value={model} onChange={setModel} label="planner model" />
+          </Group>
+          <Group gap={8} align="center">
+            <ModelSelect value={wikiModel} onChange={setWikiModel} label="wiki model"
+                         disabled={!wikiEnabled} />
+            <Checkbox
+              size="xs"
+              label="build a wiki for this program"
+              aria-label="wiki enabled"
+              checked={wikiEnabled}
+              onChange={(e) => setWikiEnabled(e.currentTarget.checked)}
+            />
+          </Group>
+          <Text size="xs" c="dimmed">
+            The planner proposes experiments; the wiki reads finished results and
+            writes them up. Unchecking stops wiki runs for this program entirely —
+            no ingest is launched and no quota is spent on it.
+          </Text>
+        </Stack>
 
         <TextInput
           label="Project folder"

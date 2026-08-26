@@ -6,6 +6,8 @@ import { MantineProvider } from "@mantine/core";
 vi.mock("../api", () => ({
   api: {
     setProgramModel: vi.fn().mockResolvedValue({}),
+    setProgramWikiModel: vi.fn().mockResolvedValue({}),
+    setProgramWikiEnabled: vi.fn().mockResolvedValue({}),
     setProgramWorkdir: vi.fn().mockResolvedValue({ id: "p1", workdir: "/tmp/proj2", exists: true }),
     setProgramMaxProposed: vi.fn().mockResolvedValue({}),
     setProgramInstructions: vi.fn().mockResolvedValue({}),
@@ -37,6 +39,7 @@ beforeAll(() => {
 const program = {
   id: "p1", title: "A", status: "active", goals: "x",
   report: "", cycle: 0, sprints: [], pm_model: "claude-opus-5",
+  wiki_model: "claude-sonnet-5", wiki_enabled: true,
   workdir: "/tmp/proj", instructions: "be careful", max_proposed: 6,
   activations: [], last_run: null,
 };
@@ -80,7 +83,40 @@ describe("ProgramSettingsModal", () => {
     expect(api.setProgramWorkdir).not.toHaveBeenCalled();
     expect(api.setProgramInstructions).not.toHaveBeenCalled();
     expect(api.setProgramModel).not.toHaveBeenCalled();
+    expect(api.setProgramWikiModel).not.toHaveBeenCalled();
+    expect(api.setProgramWikiEnabled).not.toHaveBeenCalled();
     expect(onSaved).toHaveBeenCalled();
+  });
+
+  it("seeds the wiki model separately from the planner model", () => {
+    renderModal();
+    expect((screen.getByLabelText("planner model") as HTMLSelectElement).value)
+      .toBe("claude-opus-5");
+    expect((screen.getByLabelText("wiki model") as HTMLSelectElement).value)
+      .toBe("claude-sonnet-5");
+  });
+
+  it("posts the wiki model without touching the planner model", async () => {
+    renderModal();
+    fireEvent.change(screen.getByLabelText("wiki model"),
+                     { target: { value: "claude-opus-5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(api.setProgramWikiModel).toHaveBeenCalledWith("p1", "claude-opus-5"));
+    expect(api.setProgramModel).not.toHaveBeenCalled();
+  });
+
+  it("unchecking the wiki opts the program out", async () => {
+    renderModal();
+    fireEvent.click(screen.getByLabelText("wiki enabled"));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(api.setProgramWikiEnabled).toHaveBeenCalledWith("p1", false));
+  });
+
+  it("seeds an opted-out program with the box clear", () => {
+    renderModal({ wiki_enabled: false });
+    expect((screen.getByLabelText("wiki enabled") as HTMLInputElement).checked).toBe(false);
   });
 
   it("clearing the cap posts zero", async () => {
