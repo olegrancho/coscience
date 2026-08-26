@@ -68,3 +68,20 @@ def test_a_blank_search_returns_an_empty_list(substrate):
     _seed(substrate)
     assert _client(substrate).get(
         "/api/programs/p1/wiki/search", params={"q": ""}).json() == []
+
+
+def test_the_summary_endpoint_serves_the_program_wiki_model(substrate):
+    substrate.save_program(Program(id="p1", title="P1", goals="g",
+                                   wiki_model="claude-opus-5"))
+    wiki_store.ensure_bundle(substrate, "p1")
+    body = _client(substrate).get("/api/programs/p1/wiki").json()
+    assert body["wiki_model"] == "claude-opus-5"
+    assert body["wiki_enabled"] is True
+
+
+def test_changing_the_wiki_model_shows_up_in_the_next_summary(substrate):
+    _seed(substrate)
+    c = _client(substrate)
+    assert c.get("/api/programs/p1/wiki").json()["wiki_model"] != "claude-opus-5"
+    c.post("/api/programs/p1/wiki-model", json={"model": "claude-opus-5"})
+    assert c.get("/api/programs/p1/wiki").json()["wiki_model"] == "claude-opus-5"

@@ -6,7 +6,10 @@ substrate on disk. Bundle IO lives in wiki_store; writes live in Service.
 """
 from __future__ import annotations
 
+import re
+
 from coscience import wiki_okf
+from coscience.frontmatter_io import parse as _parse_frontmatter
 
 TIERS = ("unverified", "machine-confirmed", "human-reviewed")
 
@@ -69,9 +72,16 @@ def _norm_target(target: str) -> str:
     return (target or "").split("#", 1)[0].strip().lstrip("/")
 
 
-def provenance_ref(source_id: str, resource: str) -> dict:
+def provenance_ref(source_id: str, resource: str, program_id: str = "") -> dict:
     """A source's `resource` as a dashboard link. Sources are pointers into the
     platform (spec 5) — this is the payoff for building the wiki inside it.
+
+    Two spellings reach here and both must route. A page may name the platform
+    object directly (`/results/r7.md`), or it may name the bundle's own source
+    page (`/sources/result-r7.md`) — which is the form the bundle's CLAUDE.md
+    template actually shows the agent, and therefore the form every real ingest
+    has produced. Routing only the first spelling left every chip on every page
+    unclickable while looking exactly like a page that cited nothing.
 
     Anything unrecognised is reported as `unknown` with an empty href rather than
     dropped: a page citing something we cannot route to is still citing it, and
@@ -85,10 +95,33 @@ def provenance_ref(source_id: str, resource: str) -> dict:
         kind, href = "sprint", f"/sprints/{parts[1]}"
     elif parts[0] == "programs" and len(parts) >= 4 and parts[2] == "artifacts":
         kind, href = "artifact", f"/programs/{parts[1]}/artifacts/{parts[3]}"
+    elif parts[0] == "sources" and len(parts) >= 2:
+        # wiki_store.program_objects names these pages: `sources/result-<rid>.md`
+        # and `sources/artifact-<aid>-<vid>.md`. Reverse exactly that spelling.
+        stem = parts[1].removesuffix(".md")
+        if stem.startswith("result-"):
+            kind, href = "result", f"/results/{stem[len('result-'):]}"
+        elif stem.startswith("artifact-") and program_id and "-" in stem:
+            aid = stem[len("artifact-"):].rsplit("-", 1)[0]
+            if aid:
+                kind, href = "artifact", f"/programs/{program_id}/artifacts/{aid}"
     return {"id": source_id, "kind": kind, "href": href, "resource": r}
 
 
-def page_detail(page: wiki_okf.Page, pages: list[wiki_okf.Page]) -> dict:
+# Footnote definitions (`[^id]: ...`) conventionally sit at the end of a document,
+# and the page template ends with `# Human notes` — so the agent's attributions
+# land inside the one section it is forbidden to write in. Until the prompt and
+# lint stop that at the source, do not hand them to the curation box as if a human
+# had typed them: saving over them would silently destroy the page's attributions.
+_FOOTNOTE_DEF = re.compile(r"^\[\^[^\]]+\]:.*$", re.MULTILINE)
+
+
+def human_notes(page: wiki_okf.Page) -> str:
+    return _FOOTNOTE_DEF.sub("", page.section("Human notes")).strip()
+
+
+def page_detail(page: wiki_okf.Page, pages: list[wiki_okf.Page],
+                program_id: str = "") -> dict:
     known = {p.path: p for p in pages}
     relations = []
     for r in page.relations:
@@ -123,15 +156,16 @@ def page_detail(page: wiki_okf.Page, pages: list[wiki_okf.Page]) -> dict:
         "status": page.status, "tags": list(page.tags), "aliases": list(page.aliases),
         "trust": trust_tier(page), "verified": [dict(v) for v in (page.verified or [])],
         "stale_after": page.stale_after, "body": page.body,
-        "human_notes": page.section("Human notes"),
+        "human_notes": human_notes(page),
         "relations": relations, "backlinks": backlinks,
-        "sources": [provenance_ref(s.id, s.resource) | {"title": s.title}
+        "sources": [provenance_ref(s.id, s.resource, program_id) | {"title": s.title}
                     for s in page.sources],
     }
 
 
 def summary(pages: list[wiki_okf.Page], state: dict, pending: int,
-            lint_counts: dict, index_md: str) -> dict:
+            lint_counts: dict, index_md: str, *,
+            wiki_model: str = "", wiki_enabled: bool = True) -> dict:
     counts: dict[str, int] = {}
     trust = dict.fromkeys(TIERS, 0)
     for p in pages:
@@ -147,5 +181,13 @@ def summary(pages: list[wiki_okf.Page], state: dict, pending: int,
         "last_run": state.get("last_run") or None,
         "ingests_since_lint": int(state.get("ingests_since_lint", 0) or 0),
         "lint": dict(lint_counts or {}),
-        "index_md": index_md,
+        "wiki_model": wiki_model,
+        "wiki_enabled": bool(wiki_enabled),
+        # Body only. index.md carries OKF frontmatter like every other page, and
+        # the browse UI renders this string as markdown: the opening `---` becomes
+        # a rule and the YAML lines become a paragraph closed by the second `---`
+        # as a setext heading, so the wiki's landing pane opened with "type: Index
+        # title: ... okf_version: '0.2'" set as a heading. Nothing renders
+        # frontmatter, so nothing should be handed it.
+        "index_md": _parse_frontmatter(index_md or "")[1],
     }

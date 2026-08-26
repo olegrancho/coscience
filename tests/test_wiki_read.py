@@ -25,6 +25,23 @@ def test_summary_counts_by_type_and_by_trust():
     assert out["index_md"] == "# I"
 
 
+def test_summary_strips_the_index_frontmatter():
+    # ensure_bundle writes index.md with OKF frontmatter, and the browse UI renders
+    # this string as markdown — so handing the YAML through puts "type: Index
+    # title: ..." on screen as a heading above the actual index.
+    raw = ("---\ntype: Index\ntitle: P — wiki\nokf_version: '0.2'\n---\n\n"
+           "# P — wiki\n\n- [a](/concepts/a.md)\n")
+    out = wiki_read.summary([], state={}, pending=0, lint_counts={}, index_md=raw)
+    assert out["index_md"] == "# P — wiki\n\n- [a](/concepts/a.md)\n"
+    assert "okf_version" not in out["index_md"]
+
+
+def test_summary_leaves_an_index_without_frontmatter_alone():
+    out = wiki_read.summary([], state={}, pending=0, lint_counts={},
+                            index_md="# Just a heading\n")
+    assert out["index_md"] == "# Just a heading\n"
+
+
 def test_summary_carries_run_state_through_verbatim():
     state = {"last_run": {"id": "r0001", "status": "ok"}, "run": {"id": "r0002"},
              "ingests_since_lint": 2, "quarantined": ["result:r9"]}
@@ -48,3 +65,18 @@ def test_summary_tolerates_an_unknown_page_type():
     # OKF requires consumers to tolerate types we did not specify.
     out = wiki_read.summary([_page("x/y.md", type="Protocol")], {}, 0, {}, "")
     assert out["counts"] == {"Protocol": 1}
+
+
+def test_summary_carries_the_wiki_model_and_enabled_flag():
+    # The browse view is where you judge how the pages read, so it is where the
+    # model that wrote them is changeable — it has to arrive with the summary.
+    out = wiki_read.summary([], state={}, pending=0, lint_counts={}, index_md="",
+                            wiki_model="claude-opus-5", wiki_enabled=False)
+    assert out["wiki_model"] == "claude-opus-5"
+    assert out["wiki_enabled"] is False
+
+
+def test_summary_defaults_the_wiki_settings_when_not_given():
+    out = wiki_read.summary([], state={}, pending=0, lint_counts={}, index_md="")
+    assert out["wiki_model"] == ""
+    assert out["wiki_enabled"] is True

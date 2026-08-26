@@ -525,6 +525,7 @@ class Service:
         return {
             "id": p.id, "title": p.title, "status": p.status.value, "goals": p.goals,
             "pm_model": p.pm_model, "workdir": p.workdir,
+            "wiki_model": p.wiki_model, "wiki_enabled": p.wiki_enabled,
             "max_proposed": p.max_proposed,
             "instructions": self.substrate.load_instructions(program_id),
             "report": self.substrate.load_report(program_id),
@@ -554,6 +555,30 @@ class Service:
         program.pm_model = str(model or DEFAULT_MODEL)
         self.substrate.save_program(program)
         return {"id": program_id, "pm_model": program.pm_model}
+
+    def set_program_wiki_model(self, program_id: str, model: str) -> dict:
+        """Set the Claude model this program's wiki runs use ("" = DEFAULT_MODEL).
+
+        Deliberately separate from `pm_model`: planning is a reasoning job over the
+        program's state, wiki ingest is a reading-and-writing job over its results,
+        and the model that is best value for one is not the model that is best value
+        for the other."""
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        program = self.substrate.load_program(program_id)
+        program.wiki_model = str(model or DEFAULT_MODEL)
+        self.substrate.save_program(program)
+        return {"id": program_id, "wiki_model": program.wiki_model}
+
+    def set_program_wiki_enabled(self, program_id: str, enabled: bool) -> dict:
+        """Opt a program in or out of wiki ingest entirely. False makes the wiki
+        beat skip it, so no run is ever launched and no quota is spent on it."""
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        program = self.substrate.load_program(program_id)
+        program.wiki_enabled = bool(enabled)
+        self.substrate.save_program(program)
+        return {"id": program_id, "wiki_enabled": program.wiki_enabled}
 
     def set_program_max_proposed(self, program_id: str, n: int) -> dict:
         """Cap how many sprints may await review for this program. 0 clears the
@@ -1580,7 +1605,16 @@ class Service:
                         / "index.md").read_text()
         except OSError:
             index_md = ""
-        return wiki_read.summary(pages, state, pending, counts, index_md)
+        # The wiki's own settings ride along with its summary: the browse view is
+        # where you are looking when you form an opinion about how the pages read,
+        # so it is where the model that wrote them should be changeable.
+        try:
+            program = self.substrate.load_program(program_id)
+            model, enabled = program.wiki_model, program.wiki_enabled
+        except (OSError, ValueError):
+            model, enabled = "", True
+        return wiki_read.summary(pages, state, pending, counts, index_md,
+                                 wiki_model=model, wiki_enabled=enabled)
 
     def list_wiki_pages(self, program_id: str) -> list[dict]:
         from coscience import wiki_read
@@ -1596,7 +1630,7 @@ class Service:
         page = wiki_store.read_page(self.substrate, program_id, f"{slug}.md")
         if page is None:
             raise NotFoundError(slug)
-        return wiki_read.page_detail(page, self._wiki_pages(program_id))
+        return wiki_read.page_detail(page, self._wiki_pages(program_id), program_id)
 
     def search_wiki(self, program_id: str, q: str, limit: int = 50) -> list[dict]:
         from coscience import wiki_read
@@ -1638,7 +1672,7 @@ class Service:
         from coscience import wiki_read, wiki_store
         wiki_store.write_page(self.substrate, program_id, page)
         self.substrate.commit(message)
-        return wiki_read.page_detail(page, self._wiki_pages(program_id))
+        return wiki_read.page_detail(page, self._wiki_pages(program_id), program_id)
 
     def verify_wiki_page(self, program_id: str, slug: str, by: str,
                          now: float | None = None) -> dict:

@@ -132,6 +132,10 @@ class ProgramModelIn(BaseModel):
     model: str = ""
 
 
+class ProgramWikiEnabledIn(BaseModel):
+    enabled: bool = True
+
+
 class ProgramWorkdirIn(BaseModel):
     workdir: str = ""
 
@@ -874,6 +878,20 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def set_program_model(program_id: str, body: ProgramModelIn) -> dict:
         try:
             return service.set_program_model(program_id, body.model)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.post("/programs/{program_id}/wiki-model")
+    def set_program_wiki_model(program_id: str, body: ProgramModelIn) -> dict:
+        try:
+            return service.set_program_wiki_model(program_id, body.model)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.post("/programs/{program_id}/wiki-enabled")
+    def set_program_wiki_enabled(program_id: str, body: ProgramWikiEnabledIn) -> dict:
+        try:
+            return service.set_program_wiki_enabled(program_id, body.enabled)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
 

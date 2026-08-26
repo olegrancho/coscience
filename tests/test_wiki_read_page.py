@@ -68,6 +68,53 @@ def test_sources_become_provenance_refs_by_kind():
     assert refs["c2"]["href"] == "/programs/p1/artifacts/fig"
 
 
+def test_a_bundle_source_page_routes_to_the_platform_object():
+    # `/sources/result-<id>.md` is the spelling the bundle's CLAUDE.md template
+    # shows the agent, so it is what every real ingest writes. Before this, every
+    # chip on every page came back unknown/unclickable.
+    a = _page("concepts/a.md")
+    a.sources = [wiki_okf.Source(id="c1", resource="/sources/result-wt-r2.md",
+                                 title="wt2"),
+                 wiki_okf.Source(id="c2", resource="/sources/artifact-fig1-v2.md",
+                                 title="fig1 v2")]
+    out = wiki_read.page_detail(a, [a], "p1")
+    refs = {s["id"]: s for s in out["sources"]}
+    assert refs["c1"]["kind"] == "result" and refs["c1"]["href"] == "/results/wt-r2"
+    assert refs["c2"]["kind"] == "artifact"
+    assert refs["c2"]["href"] == "/programs/p1/artifacts/fig1"
+
+
+def test_a_bundle_artifact_source_stays_unknown_without_a_program_id():
+    # The artifact route needs the program; emitting /programs//artifacts/x would
+    # be a dead link dressed up as a live one.
+    a = _page("concepts/a.md")
+    a.sources = [wiki_okf.Source(id="c1", resource="/sources/artifact-fig1-v2.md")]
+    out = wiki_read.page_detail(a, [a])
+    assert out["sources"][0]["kind"] == "unknown"
+    assert out["sources"][0]["href"] == ""
+
+
+def test_footnote_definitions_are_kept_out_of_the_human_notes_box():
+    # The agent puts `[^c1]: ...` at the end of the document, which is inside the
+    # protected section. Handing that to the curation textarea invites a human to
+    # save over the page's own attributions.
+    a = _page("concepts/a.md",
+              body="# Definition\n\nd[^c1]\n\n# Human notes\n\n"
+                   "[^c1]: sources/result-r7.md\n")
+    out = wiki_read.page_detail(a, [a])
+    assert out["human_notes"] == ""
+    # The body is untouched — the footnote must still resolve when rendered.
+    assert "[^c1]: sources/result-r7.md" in out["body"]
+
+
+def test_a_real_human_note_survives_alongside_a_footnote_definition():
+    a = _page("concepts/a.md",
+              body="# Definition\n\nd[^c1]\n\n# Human notes\n\nCheck the 45 C bound.\n\n"
+                   "[^c1]: sources/result-r7.md\n")
+    out = wiki_read.page_detail(a, [a])
+    assert out["human_notes"] == "Check the 45 C bound."
+
+
 def test_an_unrecognised_resource_is_marked_unknown_not_dropped():
     a = _page("concepts/a.md")
     a.sources = [wiki_okf.Source(id="c1", resource="https://example.org/x", title="x")]
