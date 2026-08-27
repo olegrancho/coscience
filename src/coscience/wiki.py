@@ -232,13 +232,21 @@ def _proposals(report: dict) -> list[tuple[str, str, str]]:
 
 
 def _next_merge_id(state: dict) -> str:
-    n = 0
+    """Monotonic high-water mark, not max() over the CURRENTLY PENDING queue
+    (contrast _next_run_id, which is high-water for exactly this reason): a
+    proposal's id must never be reused once it leaves the queue, or a stale
+    browser tab still showing the old card can Accept a different pair a
+    later run happened to queue under the same id — on a destructive
+    operation (spec 9.1)."""
+    n = int(state.get("merge_seq") or 0)
     for p in (state.get("merge_proposals") or []):
         try:
             n = max(n, int(str(p.get("id", "m0")).lstrip("m")))
         except ValueError:
             pass
-    return f"m{n + 1:04d}"
+    n += 1
+    state["merge_seq"] = n
+    return f"m{n:04d}"
 
 
 def _names_a_source(substrate, program_id: str, winner: str, loser: str) -> bool:
@@ -247,9 +255,16 @@ def _names_a_source(substrate, program_id: str, winner: str, loser: str) -> bool
     it by `resource`/`origin_hash`; merging two would make `src/hash-drift`
     and `src/missing` meaningless. Reads the bundle directly (cheap: two
     files) rather than reaching for new IO machinery; never opens a state
-    guard — this runs inside `beat`'s own flock."""
+    guard — this runs inside `beat`'s own flock.
+
+    Normalises the same way `merge_wiki_pages` does: an agent's proposal can
+    spell a path with or without `.md` (`_proposals` tolerates either), and
+    `wiki_store.read_page` needs the literal bundle-relative filename. Reading
+    the raw path only closed this for the `.md` spelling — exactly the sloppy
+    one `_proposals` was written to tolerate stayed open under `propose`."""
+    from coscience.service import _strip_md
     for path in (winner, loser):
-        page = wiki_store.read_page(substrate, program_id, path)
+        page = wiki_store.read_page(substrate, program_id, f"{_strip_md(path)}.md")
         if page is not None and page.type == "Source":
             return True
     return False
@@ -269,7 +284,7 @@ def _handle_merges(substrate, program, state, report, run_id, now) -> list[dict]
     already refused it) AND a pair already sitting in `merge_proposals`
     (already queued) — without the second check, every lint run in `propose`
     mode would append a fresh duplicate proposal for the same two pages."""
-    from coscience.service import Service
+    from coscience.service import NotFoundError, Service
     refused = {tuple(sorted(p)) for p in (state.get("merges_refused") or [])
                if isinstance(p, list) and len(p) == 2}
     queued = {tuple(sorted([p.get("winner", ""), p.get("loser", "")]))
@@ -293,7 +308,14 @@ def _handle_merges(substrate, program, state, report, run_id, now) -> list[dict]
         service = service or Service(substrate.repo_root)
         try:
             out = service.merge_wiki_pages(program.id, winner, loser)
-        except Exception:                  # NotFoundError, ValueError, or a bad path
+        except (NotFoundError, ValueError):
+            # A judgement that this merge was wrong (a page moved/vanished, or
+            # the pair resolves to itself/a Source page) — mirrors
+            # accept_wiki_merge's split. Anything else (an OSError, a
+            # CalledProcessError from a concurrent git lock) is not a verdict
+            # that the merge was wrong, and must not blacklist the pair —
+            # propagate and let the beat's own catch-all report it, so the
+            # pair is retried instead of quarantined forever.
             state.setdefault("merges_refused", []).append(pair)
             refused.add(tuple(pair))
             continue

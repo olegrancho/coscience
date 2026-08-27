@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
 from coscience import wiki, wiki_okf, wiki_store
 from coscience.models import Program
+from coscience.service import Service
 from tests.test_wiki_beat import FakeWikiAgent
 
 
@@ -35,6 +38,25 @@ def _finish(substrate, program, agent, report):
 _MERGE = {"pages_created": [], "pages_updated": [], "objects": [],
           "merges": [{"winner": "concepts/a.md", "loser": "concepts/b.md",
                       "why": "same idea"}]}
+
+
+def test_a_non_judgement_error_does_not_blacklist_the_pair(substrate, monkeypatch):
+    """F4: _handle_merges caught bare Exception, so a routine transient failure
+    (substrate.commit's `git add -A` hitting a concurrent .git/index.lock —
+    the PM loop, another beat, a human running `git status`) permanently
+    blacklisted a pair that was never actually judged wrong. Only
+    NotFoundError/ValueError are a verdict that the merge was wrong — mirrors
+    Service.accept_wiki_merge's split. Anything else must propagate, not
+    refuse, so the pair can be retried."""
+    program = _bundle(substrate, "auto")
+
+    def _boom(self, program_id, winner, loser):
+        raise OSError("index.lock")
+
+    monkeypatch.setattr(Service, "merge_wiki_pages", _boom)
+    with pytest.raises(OSError):
+        wiki._handle_merges(substrate, program, {}, _MERGE, "r0001", 1.0)
+    assert wiki_store.load_state(substrate, "p1").get("merges_refused") in (None, [])
 
 
 def test_auto_applies_the_merge_at_collect(substrate):
@@ -98,6 +120,34 @@ def test_a_pair_already_queued_is_not_re_proposed(substrate):
          "why": "x", "run": "r0000", "at": 0.0}]
 
 
+def test_a_merge_id_is_never_reused_once_its_proposal_is_accepted(substrate):
+    """F6: _next_merge_id took max() over the CURRENTLY PENDING queue, so an id
+    is free again the moment its proposal leaves it. A stale browser tab still
+    showing the old m0001 card must not be able to Accept a different pair
+    that a later run happens to queue under the same id (spec 9.1 — merge
+    apply is destructive)."""
+    program = _bundle(substrate, "propose")
+    _finish(substrate, program, FakeWikiAgent(), _MERGE)
+    first = wiki_store.load_state(substrate, "p1")["merge_proposals"]
+    assert first[0]["id"] == "m0001"
+    # The only proposal is accepted (leaves the pending queue)...
+    Service(substrate.repo_root).accept_wiki_merge("p1", "m0001")
+    # ...then a second run queues an unrelated pair. Its id must not be m0001
+    # again now that the queue is empty.
+    wiki_store.write_page(substrate, "p1", wiki_okf.Page(
+        path="concepts/c.md", type="Concept", title="C", body="# Definition\n\nc" * 100))
+    wiki_store.write_page(substrate, "p1", wiki_okf.Page(
+        path="concepts/d.md", type="Concept", title="D", body="# Definition\n\nd" * 100))
+    second_merge = {"pages_created": [], "pages_updated": [], "objects": [],
+                    "merges": [{"winner": "concepts/c.md", "loser": "concepts/d.md",
+                                "why": "same idea"}]}
+    with wiki_store.state_guard(substrate, "p1") as state:
+        state["ingests_since_lint"] = wiki.lint_every()
+    _finish(substrate, program, FakeWikiAgent(), second_merge)
+    second = wiki_store.load_state(substrate, "p1")["merge_proposals"]
+    assert second[0]["id"] != "m0001"
+
+
 def test_a_malformed_merges_entry_is_ignored_not_raised(substrate):
     """An exit-0 run is done. A bad report is a bad page, never a crashed beat."""
     program = _bundle(substrate, "auto")
@@ -133,6 +183,24 @@ def test_a_source_page_is_refused_under_propose_not_queued(substrate):
     assert state["merge_proposals"] == []
     refused = state["merges_refused"]
     assert ["concepts/a.md", "sources/result-r1.md"] in [sorted(p) for p in refused]
+
+
+def test_a_source_page_named_without_the_md_suffix_is_refused_under_propose(substrate):
+    """F3: merge_wiki_pages accepts both "sources/result-r1" and
+    "sources/result-r1.md" (via _strip_md), but _names_a_source only read the
+    literal path the agent wrote. A sloppy spelling from the agent must be
+    refused under `propose` too, not queued as a choice that can never be
+    accepted (spec 9.1: 'refused under both policies')."""
+    program = _bundle(substrate, "propose")
+    wiki_store.write_page(substrate, "p1", wiki_okf.Page(
+        path="sources/result-r1.md", type="Source", title="r1"))
+    _finish(substrate, program, FakeWikiAgent(),
+            {"merges": [{"winner": "concepts/a.md", "loser": "sources/result-r1",
+                         "why": "no"}]})
+    state = wiki_store.load_state(substrate, "p1")
+    assert state["merge_proposals"] == []
+    refused = state["merges_refused"]
+    assert ["concepts/a.md", "sources/result-r1"] in [sorted(p) for p in refused]
 
 
 def test_a_source_page_is_refused_under_auto(substrate):
