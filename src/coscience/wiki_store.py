@@ -337,7 +337,8 @@ def pending_objects(substrate, program_id: str, ingested: dict[str, dict],
 
 
 DEFAULT_STATE: dict = {"ingested": {}, "ingests_since_lint": 0, "run": None,
-                       "last_run": None, "failures": 0, "quarantined": []}
+                       "last_run": None, "failures": 0, "quarantined": [],
+                       "merge_proposals": [], "merges_refused": [], "runs": []}
 
 
 def load_state(substrate, program_id: str) -> dict:

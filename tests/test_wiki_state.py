@@ -7,7 +7,8 @@ def test_load_state_defaults_when_absent(wiki_bundle):
     substrate, pid = wiki_bundle
     state = wiki_store.load_state(substrate, pid)
     assert state == {"ingested": {}, "ingests_since_lint": 0, "run": None,
-                     "last_run": None, "failures": 0, "quarantined": []}
+                     "last_run": None, "failures": 0, "quarantined": [],
+                     "merge_proposals": [], "merges_refused": [], "runs": []}
 
 
 def test_save_then_load_round_trips(wiki_bundle):

@@ -301,6 +301,7 @@ class Substrate:
             max_proposed=int(fm.get("max_proposed", 0)),
             wiki_model=str(fm.get("wiki_model", "")),
             wiki_enabled=bool(fm.get("wiki_enabled", True)),
+            wiki_merge=str(fm.get("wiki_merge", "auto")),
         )
 
     def save_program(self, program: Program) -> None:
@@ -316,6 +317,10 @@ class Substrate:
         if not program.wiki_enabled:
             # written only when opting out, so existing program.md files are untouched
             fm["wiki_enabled"] = False
+        if program.wiki_merge != "auto":
+            # written only on the non-default policy, so existing program.md files
+            # are untouched
+            fm["wiki_merge"] = program.wiki_merge
         d = self.program_dir(program.id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "program.md").write_text(serialize(fm, program.goals.strip() + "\n"))

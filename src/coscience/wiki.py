@@ -18,6 +18,7 @@ from coscience.pause import is_paused
 from coscience.worker import WEEKLY_WORKER_THRESHOLD, claude_usage_ok
 
 WIKI_THRESHOLD = 70.0
+RUNS_KEPT = 50
 
 
 def _env_int(name: str, default: int) -> int:
@@ -213,6 +214,71 @@ def _reconciled(batch: list[str], report: dict) -> list[str]:
     return [oid for oid in batch if oid in covered]
 
 
+def _pair(winner: str, loser: str) -> list[str]:
+    return sorted([winner, loser])
+
+
+def _proposals(report: dict) -> list[tuple[str, str, str]]:
+    """(winner, loser, why) from a report, tolerating anything. An exit-0 run is
+    done; a malformed report is a bad page, never a crashed beat."""
+    out = []
+    for entry in (report.get("merges") or []):
+        if not isinstance(entry, dict):
+            continue
+        winner, loser = str(entry.get("winner") or ""), str(entry.get("loser") or "")
+        if winner and loser:
+            out.append((winner, loser, str(entry.get("why") or "")))
+    return out
+
+
+def _next_merge_id(state: dict) -> str:
+    n = 0
+    for p in (state.get("merge_proposals") or []):
+        try:
+            n = max(n, int(str(p.get("id", "m0")).lstrip("m")))
+        except ValueError:
+            pass
+    return f"m{n + 1:04d}"
+
+
+def _handle_merges(substrate, program, state, report, run_id, now) -> list[list[str]]:
+    """Apply or queue what the agent proposed. Returns the pairs actually merged.
+
+    Which of the two happens is the ONLY difference between the policies —
+    the agent's instructions and prohibitions are identical either way (spec 9.1).
+
+    Skips a pair already in `merges_refused` (a human said no) AND a pair
+    already sitting in `merge_proposals` (already queued) — without the
+    second check, every lint run in `propose` mode would append a fresh
+    duplicate proposal for the same two pages."""
+    from coscience.service import Service
+    refused = {tuple(sorted(p)) for p in (state.get("merges_refused") or [])
+               if isinstance(p, list) and len(p) == 2}
+    queued = {tuple(sorted([p.get("winner", ""), p.get("loser", "")]))
+              for p in (state.get("merge_proposals") or []) if isinstance(p, dict)}
+    merged: list[list[str]] = []
+    service = None
+    for winner, loser, why in _proposals(report):
+        pair = _pair(winner, loser)
+        if tuple(pair) in refused or tuple(pair) in queued:
+            continue                       # a human already said no, or it's already queued
+        if getattr(program, "wiki_merge", "auto") != "auto":
+            state.setdefault("merge_proposals", []).append(
+                {"id": _next_merge_id(state), "winner": winner, "loser": loser,
+                 "why": why, "run": run_id, "at": now})
+            queued.add(tuple(pair))        # do not queue the same pair twice
+            continue
+        service = service or Service(substrate.repo_root)
+        try:
+            service.merge_wiki_pages(program.id, winner, loser)
+        except Exception:                  # NotFoundError, ValueError, or a bad path
+            state.setdefault("merges_refused", []).append(pair)
+            refused.add(tuple(pair))
+            continue
+        merged.append([loser, winner])
+    return merged
+
+
 def _collect(substrate, program, now, agent, state, run) -> str:
     run_id, kind = run.get("id", ""), run.get("kind", "ingest")
     run_dir = wiki_store.run_dir(substrate, program.id, run_id)
@@ -231,6 +297,7 @@ def _collect(substrate, program, now, agent, state, run) -> str:
 
     batch = list(run.get("batch") or [])
     escaped: list[str] = []
+    merged: list[list[str]] = []
     if status == "ok":
         escaped = _escaped(substrate, program.id,
                            list(run.get("dirty_before") or []), _dirty_paths(substrate))
@@ -251,6 +318,12 @@ def _collect(substrate, program, now, agent, state, run) -> str:
         # deterministically is relaunched every eligible beat, forever.
         state["last_run"]["status"] = "escaped"
         _count_failure(state, batch)
+        state["runs"] = ([{"id": run_id, "kind": kind,
+                          "status": state["last_run"]["status"], "at": now,
+                          "pages_created": state["last_run"]["pages_created"],
+                          "pages_updated": state["last_run"]["pages_updated"],
+                          "merged": merged}]
+                         + list(state.get("runs") or []))[:RUNS_KEPT]
         substrate.commit(f"wiki {program.id}: {kind} {run_id} wrote outside the bundle")
         return f"wiki: {kind} ESCAPED — batch not recorded"
 
@@ -268,9 +341,16 @@ def _collect(substrate, program, now, agent, state, run) -> str:
             state["ingests_since_lint"] = 0
             _file_lint_report(substrate, program.id, run_dir, now)
         state["failures"] = 0
+        merged = _handle_merges(substrate, program, state, report, run_id, now)
     elif _count_failure(state, batch):
         line = f"wiki: {kind} quarantined {len(batch)}"
 
+    state["runs"] = ([{"id": run_id, "kind": kind, "status": state["last_run"]["status"],
+                       "at": now,
+                       "pages_created": state["last_run"]["pages_created"],
+                       "pages_updated": state["last_run"]["pages_updated"],
+                       "merged": merged}]
+                     + list(state.get("runs") or []))[:RUNS_KEPT]
     substrate.commit(f"wiki {program.id}: {kind} {run_id} {status}")
     return line
 

@@ -204,6 +204,7 @@ class Program:
     max_proposed: int = 0              # cap on sprints awaiting review; 0 = use the global default
     wiki_model: str = ""               # Claude model for this program's wiki runs; "" resolves to DEFAULT_MODEL
     wiki_enabled: bool = True          # False opts the program out of wiki ingest entirely
+    wiki_merge: str = "auto"           # auto = merge duplicates unattended; propose = queue for a human
 
     def __post_init__(self) -> None:
         if not self.pm_model:
