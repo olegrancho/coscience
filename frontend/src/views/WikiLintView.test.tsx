@@ -193,6 +193,20 @@ describe("WikiLintView findings", () => {
   });
 
   it("puts errors before warnings", async () => {
+    // Insertion order AND count both favor the warn group here (2 vs 1, and
+    // listed first) — the opposite of the shared `findings` fixture above,
+    // deliberately. A comparator that dropped the severity term — sorting by
+    // count descending, preserving insertion order, or not sorting at all —
+    // would put page/stub first. Only severity-primary ordering passes.
+    vi.spyOn(api, "getWikiLint").mockResolvedValue({
+      counts: { error: 1, warn: 2 },
+      reports: [],
+      findings: [
+        { rule: "page/stub", severity: "warn", path: "concepts/c.md", message: "too short" },
+        { rule: "page/stub", severity: "warn", path: "concepts/d.md", message: "too short" },
+        { rule: "rel/no-source", severity: "error", path: "concepts/a.md", message: "no source" },
+      ],
+    } as never);
     mount();
     const groups = await screen.findAllByTestId(/^finding-group-/);
     expect(groups[0].getAttribute("data-testid")).toContain("rel/no-source");
