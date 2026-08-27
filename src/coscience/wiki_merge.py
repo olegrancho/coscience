@@ -59,6 +59,14 @@ def _set_section(body: str, heading: str, text: str) -> str:
     return (body.rstrip("\n") + "\n\n" + block) if body.strip() else block
 
 
+def _preamble(body: str) -> str:
+    """Text before the loser's first `# ` heading — the whole body when there
+    is no heading at all, which is exactly the common shape of a stub page,
+    the usual merge loser."""
+    m = re.search(r"(?m)^# +", body)
+    return body[:m.start()].strip() if m else body.strip()
+
+
 def _merge_bodies(winner: wiki_okf.Page, loser: wiki_okf.Page) -> str:
     """Stack the loser's sections under the winner's matching headings.
 
@@ -74,6 +82,16 @@ def _merge_bodies(winner: wiki_okf.Page, loser: wiki_okf.Page) -> str:
             continue
         existing = winner.section(heading) if winner.has_section(heading) else ""
         body = _set_section(body, heading, f"{existing}\n\n{text}".strip())
+    preamble = _preamble(loser.body)
+    if preamble:
+        # Nothing before a loser's first heading has a name to stack under —
+        # the schema's own first section (spec §6) is `# Definition`, so that
+        # is where it lands rather than being silently discarded. Read against
+        # `body` (already carrying any headings folded in above), not the
+        # original `winner`, or this step would clobber what the loop just did.
+        current = wiki_okf.Page(path=winner.path, body=body)
+        existing = current.section("Definition") if current.has_section("Definition") else ""
+        body = _set_section(body, "Definition", f"{existing}\n\n{preamble}".strip())
     return body
 
 
@@ -114,7 +132,13 @@ def plan(winner: wiki_okf.Page, loser: wiki_okf.Page,
     merged.tags = list(winner.tags)
     merged.generated = dict(winner.generated)
 
-    merged.body = _merge_notes(_merge_bodies(winner, loser), winner, loser)
+    body = _merge_notes(_merge_bodies(winner, loser), winner, loser)
+    # Spec 9.1's body-links row is unconditional: every markdown link and
+    # wikilink to the loser is rewritten to the winner, including ones the
+    # winner itself already carried — the merged page IS the winner now, so a
+    # link it held to the loser must not survive as a dead link (and, worse,
+    # a dead wikilink that link/wikilink would later autofix into one).
+    merged.body = _relink(body, loser, winner)
     merged.verified = []
 
     rels = [r for r in (list(winner.relations) + list(loser.relations))

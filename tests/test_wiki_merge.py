@@ -26,6 +26,27 @@ def test_a_section_only_the_loser_has_is_carried_over():
     assert "- b1" in out.winner.section("Evidence")
 
 
+def test_a_loser_with_no_heading_at_all_is_not_discarded():
+    """F2: a stub page — the usual merge loser — is the most likely to have no
+    `# ` heading at all. Its entire body must survive the merge, not vanish
+    in the same commit that deletes it."""
+    winner = _page("concepts/a.md", "A", "# Definition\n\nA.\n")
+    loser = _page("concepts/b.md", "B", "B is a stub with no headings at all.\n")
+    out = wiki_merge.plan(winner, loser, [])
+    assert "B is a stub with no headings at all." in out.winner.body
+
+
+def test_a_losers_preamble_before_the_first_heading_is_carried_over():
+    """F2: text before the loser's first `# ` heading is not under any of the
+    headings _merge_bodies walks, so it was silently dropped."""
+    winner = _page("concepts/a.md", "A", "# Definition\n\nA.\n")
+    loser = _page("concepts/b.md", "B",
+                  "An intro sentence about B, before any heading.\n\n"
+                  "# Definition\n\nB.\n")
+    out = wiki_merge.plan(winner, loser, [])
+    assert "An intro sentence about B, before any heading." in out.winner.body
+
+
 def test_human_notes_from_both_survive_and_say_where_they_came_from():
     """Spec 9.1: notes are the human's own words. Losing them is the one thing
     the protected section exists to prevent."""
@@ -91,6 +112,20 @@ def test_merging_twice_accumulates_the_marker():
     winner = _page("concepts/a.md", "A", extra={"merged_from": ["b"]})
     out = wiki_merge.plan(winner, _page("concepts/c.md", "C"), [])
     assert out.winner.extra["merged_from"] == ["b", "c"]
+
+
+def test_the_winners_own_body_links_to_the_loser_are_rewritten():
+    """F1: _relink was applied to `others` but never to the merged winner's own
+    body. A winner that itself linked to the loser (markdown link or wikilink)
+    kept both after the merge — a dead link plus a dead wikilink in the one
+    page the merge just rewrote, and link/wikilink is an autofix rule, so the
+    next fix run would materialise the wikilink into a permanent broken link."""
+    winner = _page("concepts/a.md", "A",
+                   "# Definition\n\nSee [job lease](/concepts/b.md) and [[b]].\n")
+    loser = _page("concepts/b.md", "B", "# Definition\n\nB.\n")
+    out = wiki_merge.plan(winner, loser, [])
+    assert "/concepts/b.md" not in out.winner.body and "[[b]]" not in out.winner.body
+    assert "/concepts/a.md" in out.winner.body and "[[a]]" in out.winner.body
 
 
 def test_other_pages_have_their_links_rewritten():
