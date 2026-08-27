@@ -1834,6 +1834,18 @@ class Service:
             with wiki_store.state_guard(self.substrate, program_id) as state:
                 state.setdefault("merges_refused", []).append(sorted([winner, loser]))
             return {"applied": False, "winner": winner, "loser": loser, "rewritten": []}
+        except Exception:
+            # Not a judgement that the merge was wrong — e.g. a genuine race
+            # against another process raising an OSError out of commit()/unlink().
+            # Spec 9.1: nothing gates an automatic merge but git, so the whole
+            # safety story is "you can see what happened" — a proposal must
+            # never evaporate on an unexpected error. Put it back and let the
+            # caller see the error.
+            with wiki_store.state_guard(self.substrate, program_id) as state:
+                pending = list(state.get("merge_proposals") or [])
+                pending.append(entry)
+                state["merge_proposals"] = pending
+            raise
         return {"applied": True, **out}
 
     def reject_wiki_merge(self, program_id: str, merge_id: str) -> dict:

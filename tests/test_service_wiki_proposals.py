@@ -51,13 +51,36 @@ def test_accepting_an_unknown_id_is_not_found(substrate):
         _seed(substrate).accept_wiki_merge("p1", "m9999")
 
 
-def test_rejecting_remembers_the_pair(substrate):
-    svc = _seed(substrate)
+def test_rejecting_remembers_the_pair_regardless_of_order(substrate):
+    svc = _seed(substrate, proposals=False)
+    with wiki_store.state_guard(substrate, "p1") as state:
+        state["merge_proposals"] = [
+            {"id": "m0001", "winner": "concepts/b.md", "loser": "concepts/a.md",
+             "why": "same idea", "run": "r0001", "at": 1.0}]
     svc.reject_wiki_merge("p1", "m0001")
     assert svc.list_wiki_merges("p1") == []
     refused = wiki_store.load_state(substrate, "p1")["merges_refused"]
-    assert sorted(refused[0]) == ["concepts/a.md", "concepts/b.md"]
-    assert wiki_store.read_page(substrate, "p1", "concepts/b.md") is not None
+    assert refused[0] == ["concepts/a.md", "concepts/b.md"]
+    assert wiki_store.read_page(substrate, "p1", "concepts/a.md") is not None
+
+
+def test_an_unexpected_error_puts_the_proposal_back(substrate, monkeypatch):
+    """An OSError from a genuine race (e.g. commit()/unlink() under concurrent
+    disk activity) is not a judgement that the merge was wrong. Spec 9.1: the
+    only safety story here is "you can see what happened", so the proposal
+    must not silently evaporate."""
+    svc = _seed(substrate)
+
+    def boom(*args, **kwargs):
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(svc, "merge_wiki_pages", boom)
+    with pytest.raises(OSError):
+        svc.accept_wiki_merge("p1", "m0001")
+    rows = svc.list_wiki_merges("p1")
+    assert rows and rows[0]["id"] == "m0001"
+    refused = wiki_store.load_state(substrate, "p1")["merges_refused"]
+    assert not refused
 
 
 def test_activity_is_the_recorded_runs(substrate):
