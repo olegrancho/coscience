@@ -241,16 +241,33 @@ def _next_merge_id(state: dict) -> str:
     return f"m{n + 1:04d}"
 
 
+def _names_a_source(substrate, program_id: str, winner: str, loser: str) -> bool:
+    """True if either page is a Source page. Spec 9.1: never merged, under
+    EITHER policy — a Source page stands for one real object and is bound to
+    it by `resource`/`origin_hash`; merging two would make `src/hash-drift`
+    and `src/missing` meaningless. Reads the bundle directly (cheap: two
+    files) rather than reaching for new IO machinery; never opens a state
+    guard — this runs inside `beat`'s own flock."""
+    for path in (winner, loser):
+        page = wiki_store.read_page(substrate, program_id, path)
+        if page is not None and page.type == "Source":
+            return True
+    return False
+
+
 def _handle_merges(substrate, program, state, report, run_id, now) -> list[list[str]]:
     """Apply or queue what the agent proposed. Returns the pairs actually merged.
 
     Which of the two happens is the ONLY difference between the policies —
     the agent's instructions and prohibitions are identical either way (spec 9.1).
+    That includes refusals: a pair naming a Source page is checked and refused
+    BEFORE the policy split, so `propose` never queues a choice that can never
+    be accepted.
 
-    Skips a pair already in `merges_refused` (a human said no) AND a pair
-    already sitting in `merge_proposals` (already queued) — without the
-    second check, every lint run in `propose` mode would append a fresh
-    duplicate proposal for the same two pages."""
+    Skips a pair already in `merges_refused` (a human said no, or the platform
+    already refused it) AND a pair already sitting in `merge_proposals`
+    (already queued) — without the second check, every lint run in `propose`
+    mode would append a fresh duplicate proposal for the same two pages."""
     from coscience.service import Service
     refused = {tuple(sorted(p)) for p in (state.get("merges_refused") or [])
                if isinstance(p, list) and len(p) == 2}
@@ -262,6 +279,10 @@ def _handle_merges(substrate, program, state, report, run_id, now) -> list[list[
         pair = _pair(winner, loser)
         if tuple(pair) in refused or tuple(pair) in queued:
             continue                       # a human already said no, or it's already queued
+        if _names_a_source(substrate, program.id, winner, loser):
+            state.setdefault("merges_refused", []).append(pair)
+            refused.add(tuple(pair))
+            continue
         if getattr(program, "wiki_merge", "auto") != "auto":
             state.setdefault("merge_proposals", []).append(
                 {"id": _next_merge_id(state), "winner": winner, "loser": loser,

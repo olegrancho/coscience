@@ -105,6 +105,38 @@ def test_a_refused_merge_is_recorded_so_it_stops_being_offered(substrate):
     assert ["concepts/a.md", "sources/result-r1.md"] in [sorted(p) for p in refused]
 
 
+def test_a_source_page_is_refused_under_propose_not_queued(substrate):
+    """Spec 9.1: 'A proposal naming a source page is refused under both
+    policies.' Queuing it under propose would show a human a choice that can
+    never be accepted — it must be refused before the policy split, exactly
+    like auto."""
+    program = _bundle(substrate, "propose")
+    wiki_store.write_page(substrate, "p1", wiki_okf.Page(
+        path="sources/result-r1.md", type="Source", title="r1"))
+    _finish(substrate, program, FakeWikiAgent(),
+            {"merges": [{"winner": "concepts/a.md", "loser": "sources/result-r1.md",
+                         "why": "no"}]})
+    state = wiki_store.load_state(substrate, "p1")
+    assert state["merge_proposals"] == []
+    refused = state["merges_refused"]
+    assert ["concepts/a.md", "sources/result-r1.md"] in [sorted(p) for p in refused]
+
+
+def test_a_source_page_is_refused_under_auto(substrate):
+    """Regression guard: this already worked via the apply-time except, but
+    must keep working now that the check moved ahead of the policy split."""
+    program = _bundle(substrate, "auto")
+    wiki_store.write_page(substrate, "p1", wiki_okf.Page(
+        path="sources/result-r1.md", type="Source", title="r1"))
+    _finish(substrate, program, FakeWikiAgent(),
+            {"merges": [{"winner": "concepts/a.md", "loser": "sources/result-r1.md",
+                         "why": "no"}]})
+    state = wiki_store.load_state(substrate, "p1")
+    assert wiki_store.read_page(substrate, "p1", "sources/result-r1.md") is not None
+    refused = state["merges_refused"]
+    assert ["concepts/a.md", "sources/result-r1.md"] in [sorted(p) for p in refused]
+
+
 def test_every_run_is_recorded_in_the_audit_trail(substrate):
     program = _bundle(substrate, "auto")
     _finish(substrate, program, FakeWikiAgent(), _MERGE)
