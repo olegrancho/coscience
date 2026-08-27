@@ -90,7 +90,7 @@ rather than copied from a plan:
 - **`page/unmerged-prose`** (`wiki_lint.py`) fires while a page's frontmatter
   still carries `merged_from`; `wiki_prompts.py` §5 tells the lint agent to
   rewrite the stacked prose into one voice and delete the key. `wiki_lint` now
-  carries 22 rule ids (diff the table against the code, not this prose, before
+  carries 23 rule ids (diff the table against the code, not this prose, before
   trusting a count).
 - **`state["runs"]`** (`wiki.py`, `RUNS_KEPT = 50`) — a capped audit trail of
   what each beat-driven run did, including which merges it applied and the git

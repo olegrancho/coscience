@@ -613,6 +613,7 @@ extended for OKF and for approach C.
 | `src/is-concept` | error | no | a concept page whose title closely matches a source page title — the article was turned into a concept |
 | `human-notes/removed` | error | no | a page that had `# Human notes` in its previous git revision no longer does |
 | `human-notes/machine-written` | error | no | content appeared under the protected `# Human notes` section that was empty in the previous revision |
+| `human-notes/footnote-definition` | error | no | a footnote definition (`[^id]: ...`) sits inside the protected `# Human notes` section — move it to `# References` |
 | `page/unmerged-prose` | warn | no | page carries `merged_from` — its sections are still two pages stacked (§9.1) |
 | `trust/unverified-stable` | info | no | `status: stable` with no `verified` entry |
 

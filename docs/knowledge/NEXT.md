@@ -91,9 +91,11 @@ tempted to touch merge or lint code while building the graph:
 | Agent lint mode + cadence | `wiki_prompts.render_lint`, `ingests_since_lint`, `wiki.lint_every()` |
 | Quarantine retry | `Service.unquarantine_wiki` + `WikiView` banner |
 
-`wiki_lint` carries 22 rule ids today (grep `Finding("` in `wiki_lint.py` for
-the live list — every prose count in these docs, including this one, has been
-wrong at least once).
+`wiki_lint` carries 23 rule ids today (a plain `grep 'Finding("'` undercounts:
+at least one id sits on the line after the `Finding(` call and a single-line
+grep misses it — count the rows in spec §9 instead, now that the table is
+complete, or use a line-wrap-tolerant search — every prose count in these
+docs, including this one, has been wrong at least once).
 
 ## 3. Rules that still bite
 
