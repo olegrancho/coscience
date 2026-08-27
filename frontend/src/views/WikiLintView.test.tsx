@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import WikiLintView from "./WikiLintView";
@@ -55,12 +55,14 @@ describe("WikiLintView", () => {
     expect(rows[1].textContent).toContain("r0001");
   });
 
-  it("names both pages of a merge and links to the substrate commit", async () => {
-    /* Nothing gates an automatic merge but git, so this row IS the audit trail. */
+  it("names both pages of a merge and links the winner to its wiki page", async () => {
+    /* No commit reference exists in the payload yet (that's its own tracked
+     * gap) — this only proves the winner is a real link, not inert text. */
     mount();
     const row = (await screen.findAllByTestId("wiki-run"))[0];
-    expect(row.textContent).toContain("compute-lease");
     expect(row.textContent).toContain("job-lease");
+    const winnerLink = within(row).getByRole("link", { name: /compute-lease/ });
+    expect(winnerLink.getAttribute("href")).toBe("/programs/p1/wiki/concepts/compute-lease");
   });
 
   it("shows a failed run rather than hiding it", async () => {
@@ -126,6 +128,34 @@ describe("WikiLintView proposals", () => {
     mount();
     fireEvent.click(await screen.findByRole("button", { name: /reject/i }));
     await waitFor(() => expect(reject).toHaveBeenCalledWith("p1", "m0001"));
+  });
+
+  it("removes the card once Accept actually resolves and the list re-fetches", async () => {
+    // The plumbing test above only proves the mutation was called with the
+    // right id. This proves the page reflects reality afterwards: the
+    // second listWikiMerges call (triggered by the onSuccess invalidation)
+    // comes back empty, and the card has to go.
+    vi.spyOn(api, "listWikiMerges")
+      .mockResolvedValueOnce(proposals as never)
+      .mockResolvedValueOnce([] as never);
+    vi.spyOn(api, "acceptWikiMerge")
+      .mockResolvedValue({ applied: true, winner: "", loser: "", rewritten: [] } as never);
+    mount();
+    await screen.findByTestId("merge-proposal");
+    fireEvent.click(screen.getByRole("button", { name: /accept/i }));
+    await waitFor(() => expect(screen.queryByTestId("merge-proposal")).toBeNull());
+  });
+
+  it("removes the card once Reject actually resolves and the list re-fetches", async () => {
+    vi.spyOn(api, "listWikiMerges")
+      .mockResolvedValueOnce(proposals as never)
+      .mockResolvedValueOnce([] as never);
+    vi.spyOn(api, "rejectWikiMerge")
+      .mockResolvedValue({ rejected: ["m0001"] } as never);
+    mount();
+    await screen.findByTestId("merge-proposal");
+    fireEvent.click(screen.getByRole("button", { name: /reject/i }));
+    await waitFor(() => expect(screen.queryByTestId("merge-proposal")).toBeNull());
   });
 
   it("says nothing is waiting when there are no proposals", async () => {

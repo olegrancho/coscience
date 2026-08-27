@@ -792,12 +792,12 @@ question standing between a wrong merge and nobody noticing.
   What it thought it was doing, in its own words, beside what it actually did.
 - **Findings** — live lint output grouped by rule, each linking to its page.
 
-**Proposals** appear as a fourth section only when the program's policy is
-`propose`: a card per proposal with the agent's `why`, both pages linked, and
-Accept / Reject. Accept applies immediately (§9.1) — the wiki is never left in a
-state where a human approved something and nothing happened. Reject records the pair in
-`merges_refused` (§8.3) so no later run re-proposes what a human already turned
-down.
+**Proposals** render first, above the audit sections, only when the program's
+policy is `propose` and at least one is pending: a card per proposal with the
+agent's `why`, both pages linked, and Accept / Reject. Accept applies
+immediately (§9.1) — the wiki is never left in a state where a human approved
+something and nothing happened. Reject records the pair in `merges_refused`
+(§8.3) so no later run re-proposes what a human already turned down.
 
 Findings are also surfaced **where you are reading**: a strip in the browse view's
 centre pane carrying the findings for that page. The maintenance page answers "is

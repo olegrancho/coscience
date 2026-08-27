@@ -16,7 +16,7 @@ function slugOf(path: string): string {
 
 /** This is the page that answers "is the wiki being looked after" — per the
  *  design's §11.3/§9.1, nothing else gates an automatic merge but git, so the
- *  Activity section below is the only place a human sees one happened at all. */
+ *  Activity section here is the only place a human sees one happened at all. */
 export default function WikiLintView() {
   const { id = "" } = useParams();
   const qc = useQueryClient();
@@ -61,6 +61,35 @@ export default function WikiLintView() {
         <EmptyState title="Nothing has run yet">
           Ingest and lint runs will show up here once the wiki has been touched.
         </EmptyState>
+      )}
+
+      {/* Spec §11.3 (amended): renders first, above the audit sections, when
+          non-empty — it only appears under the `propose` merge policy, and
+          it is the one section a human still owes an action to. Accept
+          applies immediately; reject records the pair in merges_refused so
+          no later run re-proposes it. */}
+      {proposals.length > 0 && (
+        <Card padding="lg" radius="md" style={cardStyle}>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>proposals</div>
+          <Stack gap="md">
+            {proposals.map((p) => (
+              <div key={p.id} data-testid="merge-proposal">
+                <Text size="sm" mb={4}>
+                  <Link to={wikiHref(id, p.loser)}>{slugOf(p.loser)}</Link>
+                  {" → "}
+                  <Link to={wikiHref(id, p.winner)}>{slugOf(p.winner)}</Link>
+                </Text>
+                <Text size="sm" c="dimmed" mb={8}>{p.why}</Text>
+                <Group gap={8}>
+                  <Button size="xs" variant="default" disabled={busy}
+                          onClick={() => accept.mutate(p.id)}>Accept</Button>
+                  <Button size="xs" variant="default" color="red" disabled={busy}
+                          onClick={() => reject.mutate(p.id)}>Reject</Button>
+                </Group>
+              </div>
+            ))}
+          </Stack>
+        </Card>
       )}
 
       <Card padding="lg" radius="md" style={cardStyle}>
@@ -130,34 +159,6 @@ export default function WikiLintView() {
           <Text size="sm" c="dimmed">{findings.length} finding(s).</Text>
         )}
       </Card>
-
-      {/* Spec §11.3: a fourth section, shown only when the program's merge
-          policy is `propose` — which in practice means the API returned
-          something to show. Accept applies immediately; reject records the
-          pair in merges_refused so no later run re-proposes it. */}
-      {proposals.length > 0 && (
-        <Card padding="lg" radius="md" style={cardStyle}>
-          <div className="eyebrow" style={{ marginBottom: 10 }}>proposals</div>
-          <Stack gap="md">
-            {proposals.map((p) => (
-              <div key={p.id} data-testid="merge-proposal">
-                <Text size="sm" mb={4}>
-                  <Link to={wikiHref(id, p.loser)}>{slugOf(p.loser)}</Link>
-                  {" → "}
-                  <Link to={wikiHref(id, p.winner)}>{slugOf(p.winner)}</Link>
-                </Text>
-                <Text size="sm" c="dimmed" mb={8}>{p.why}</Text>
-                <Group gap={8}>
-                  <Button size="xs" variant="default" disabled={busy}
-                          onClick={() => accept.mutate(p.id)}>Accept</Button>
-                  <Button size="xs" variant="default" color="red" disabled={busy}
-                          onClick={() => reject.mutate(p.id)}>Reject</Button>
-                </Group>
-              </div>
-            ))}
-          </Stack>
-        </Card>
-      )}
     </Stack>
   );
 }
