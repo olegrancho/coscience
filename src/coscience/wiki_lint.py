@@ -84,6 +84,13 @@ def _page_rules(pages: list[wiki_okf.Page], index_body: str,
         stale = _staleness(p, now)
         if stale:
             out.append(Finding("page/stale", "warn", p.path, stale))
+        marker = p.extra.get("merged_from")
+        names = ([str(x) for x in marker] if isinstance(marker, list)
+                 else [str(marker)] if marker else [])
+        if names:
+            out.append(Finding("page/unmerged-prose", "warn", p.path,
+                               "merged from " + ", ".join(names)
+                               + " — sections are still two pages stacked"))
         inbound = set(index_linked)
         for other_path, targets in page_linked.items():
             if other_path != p.path:
