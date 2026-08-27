@@ -76,7 +76,24 @@ def test_the_lint_route_carries_the_filed_reports(substrate):
     assert "reports" in _client(substrate).get("/api/programs/p1/wiki/lint").json()
 
 
-def test_a_literal_wiki_route_is_not_swallowed_by_the_page_catch_all(substrate):
-    """/wiki/merges must not resolve as a page slug named 'merges'."""
+def test_the_literal_merge_and_activity_routes_resolve(substrate):
+    """Not a catch-all-swallowing test: /wiki/merges and /wiki/activity never
+    share the wiki/pages/ prefix with {slug:path}, so that catch-all can't reach
+    them regardless of registration order. This just pins that both literal
+    routes resolve to their handlers (a 200 with a list), the way the docstring
+    used to (incorrectly) claim was at risk."""
     _seed(substrate)
     assert isinstance(_client(substrate).get("/api/programs/p1/wiki/merges").json(), list)
+    assert isinstance(_client(substrate).get("/api/programs/p1/wiki/activity").json(), list)
+
+
+def test_accepting_a_stale_proposal_reports_it_without_erroring(substrate):
+    """Spec 9.1: a proposal is re-checked at apply time. If a page moved on
+    between an agent proposing and a human clicking, the apply is refused and
+    the proposal dropped -- that is a fact about the wiki, not a client error,
+    so it must reach the caller as 200 with applied: false, never a 4xx."""
+    _seed(substrate)
+    Service(substrate.repo_root).delete_wiki_page("p1", "concepts/b")
+    r = _client(substrate).post("/api/programs/p1/wiki/merges/m0001/accept")
+    assert r.status_code == 200
+    assert r.json()["applied"] is False
