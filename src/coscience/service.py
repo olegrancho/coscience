@@ -1650,16 +1650,28 @@ class Service:
             return ""
 
     def wiki_lint_report(self, program_id: str) -> dict:
-        """Live findings, never autofixed. `fix=True` here would mean a GET
-        mutated the bundle."""
-        from coscience import wiki_lint
+        """Live findings, never autofixed, plus the agent's own filed summaries
+        (spec 11.1). `fix=True` here would mean a GET mutated the bundle."""
+        from coscience import wiki_lint, wiki_store
         findings, _ = wiki_lint.run_lint(self.substrate, program_id, fix=False)
         counts: dict[str, int] = {}
         for f in findings:
             counts[f.severity] = counts.get(f.severity, 0) + 1
+        d = wiki_store.state_dir(self.substrate, program_id) / "lint"
+        reports = []
+        try:
+            files = sorted(d.glob("*.md"), key=lambda f: f.stem, reverse=True)
+        except OSError:
+            files = []
+        for f in files:
+            try:
+                reports.append({"date": f.stem, "text": f.read_text()})
+            except OSError:
+                continue
         return {"counts": counts,
                 "findings": [{"rule": f.rule, "severity": f.severity,
-                              "path": f.path, "message": f.message} for f in findings]}
+                              "path": f.path, "message": f.message} for f in findings],
+                "reports": reports}
 
     # --- wiki (phase 2: curation) --------------------------------------------
 
