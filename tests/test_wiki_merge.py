@@ -179,3 +179,51 @@ def test_plan_does_not_mutate_the_caller_s_pages():
         (r.type, r.target) for r in other_snapshot_relations]
     assert out.winner is not winner
     assert out.rewritten[0] is not other
+
+
+def test_a_similarly_named_page_is_not_rewritten():
+    """_relink must not collide `b` with `b-other`: the markdown-link match is
+    exact-substring on the parenthesised target, and the wikilink regex
+    requires `\\s*(\\||\\]\\])` right after the slug, so `[[b-other]]` must not
+    become `[[a-other]]`."""
+    other = _page("concepts/z.md", "Z",
+                  "See [B](/concepts/b.md) and [[b]] and "
+                  "[Other](/concepts/b-other.md) and [[b-other]].")
+    out = wiki_merge.plan(_page("concepts/a.md", "A"), _page("concepts/b.md", "B"), [other])
+    body = out.rewritten[0].body
+    assert "/concepts/b.md" not in body and "[[b]]" not in body
+    assert "/concepts/a.md" in body and "[[a]]" in body
+    assert "/concepts/b-other.md" in body and "[[b-other]]" in body
+
+
+def test_merged_winner_s_tags_and_generated_are_not_aliased():
+    """The ruling names nested mutables explicitly: a caller mutating the
+    returned winner's tags/generated must not silently mutate the original
+    winner page still held by the caller."""
+    winner = _page("concepts/a.md", "A", tags=["x"], generated={"by": "agent", "at": 1.0})
+    out = wiki_merge.plan(winner, _page("concepts/b.md", "B"), [])
+    assert out.winner.tags is not winner.tags
+    assert out.winner.tags == winner.tags
+    assert out.winner.generated is not winner.generated
+    assert out.winner.generated == winner.generated
+
+
+def test_rewritten_other_s_tags_and_generated_are_not_aliased():
+    other = _page("concepts/z.md", "Z", "See [B](/concepts/b.md).",
+                  tags=["x"], generated={"by": "agent", "at": 1.0})
+    out = wiki_merge.plan(_page("concepts/a.md", "A"), _page("concepts/b.md", "B"), [other])
+    rewritten = out.rewritten[0]
+    assert rewritten.tags is not other.tags
+    assert rewritten.tags == other.tags
+    assert rewritten.generated is not other.generated
+    assert rewritten.generated == other.generated
+
+
+def test_merged_from_survives_a_render_and_reparse_round_trip():
+    """merged_from lives in Page.extra, an unknown frontmatter key. Confirm the
+    actual OKF round-trip (render_page -> parse_page), not just that the
+    in-memory dict has the key."""
+    out = wiki_merge.plan(_page("concepts/a.md", "A"), _page("concepts/b.md", "B"), [])
+    rendered = wiki_okf.render_page(out.winner)
+    reparsed = wiki_okf.parse_page(out.winner.path, rendered)
+    assert reparsed.extra["merged_from"] == ["b"]
