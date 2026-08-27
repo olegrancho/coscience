@@ -122,7 +122,17 @@ export interface WikiSummary {
   lint: Record<string, number>;
   wiki_model: string;     // model this program's wiki runs use
   wiki_enabled: boolean;  // false = the beat skips this program entirely
+  wiki_merge: "auto" | "propose";
+  merge_proposals: number;
   index_md: string;
+}
+export interface WikiMergeProposal {
+  id: string; winner: string; loser: string; why: string; run: string; at: number;
+}
+export interface WikiRun {
+  id: string; kind: string; status: string; at: number;
+  pages_created?: number; pages_updated?: number;
+  merged: [string, string][];     // [loser, winner] pairs
 }
 export interface WikiPageRow {
   path: string; slug: string; type: string; title: string;
@@ -151,6 +161,7 @@ export interface WikiLintFinding {
 }
 export interface WikiLintReport {
   counts: Record<string, number>; findings: WikiLintFinding[];
+  reports: { date: string; text: string }[];
 }
 
 /** A page address is a path ("concepts/auth-gate"), so each segment is encoded
@@ -477,4 +488,19 @@ export const api = {
   deleteWikiPage: (id: string, slug: string) =>
     fetch(`/api/programs/${id}/wiki/pages/${slugPath(slug)}`, { method: "DELETE" })
       .then(j<{ deleted: string; relations_dropped: unknown[] }>),
+  listWikiMerges: (id: string) =>
+    fetch(`/api/programs/${id}/wiki/merges`).then(j<WikiMergeProposal[]>),
+  acceptWikiMerge: (id: string, mid: string) =>
+    fetch(`/api/programs/${id}/wiki/merges/${mid}/accept`, { method: "POST" })
+      .then(j<{ applied: boolean; winner: string; loser: string; rewritten: string[] }>),
+  rejectWikiMerge: (id: string, mid: string) =>
+    fetch(`/api/programs/${id}/wiki/merges/${mid}/reject`, { method: "POST" })
+      .then(j<{ rejected: string[] }>),
+  getWikiActivity: (id: string) =>
+    fetch(`/api/programs/${id}/wiki/activity`).then(j<WikiRun[]>),
+  setWikiMergePolicy: (id: string, policy: string) =>
+    fetch(`/api/programs/${id}/wiki-merge-policy`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ policy }),
+    }).then(j<{ id: string; wiki_merge: string }>),
 };

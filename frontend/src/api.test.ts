@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "./api";
 import { MODEL_OPTIONS } from "./components/ui";
 
@@ -146,5 +146,40 @@ describe("wiki api", () => {
     const f = mockFetch(200, []);
     await api.searchWiki("p1", "compute lease");
     expect(f).toHaveBeenCalledWith("/api/programs/p1/wiki/search?q=compute%20lease");
+  });
+});
+
+describe("wiki merge client", () => {
+  beforeEach(() => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true, status: 200, json: async () => ({}),
+    }) as never;
+  });
+
+  it("lists proposals for a program", async () => {
+    await api.listWikiMerges("p1");
+    expect(global.fetch).toHaveBeenCalledWith("/api/programs/p1/wiki/merges");
+  });
+
+  it("accepts and rejects by proposal id", async () => {
+    await api.acceptWikiMerge("p1", "m0001");
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/programs/p1/wiki/merges/m0001/accept", { method: "POST" });
+    await api.rejectWikiMerge("p1", "m0001");
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/programs/p1/wiki/merges/m0001/reject", { method: "POST" });
+  });
+
+  it("fetches the activity trail", async () => {
+    await api.getWikiActivity("p1");
+    expect(global.fetch).toHaveBeenCalledWith("/api/programs/p1/wiki/activity");
+  });
+
+  it("sends the merge policy as a body, not a query", async () => {
+    await api.setWikiMergePolicy("p1", "propose");
+    const calls = (global.fetch as never as ReturnType<typeof vi.fn>).mock.calls;
+    const [url, init] = calls[calls.length - 1];
+    expect(url).toBe("/api/programs/p1/wiki-merge-policy");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ policy: "propose" });
   });
 });

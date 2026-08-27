@@ -26,6 +26,7 @@ const summary = {
               pages_updated: 3, notes: "", escaped: [] },
   ingests_since_lint: 1, lint: { error: 0, warn: 2 }, index_md: "# Index",
   wiki_model: "claude-sonnet-5", wiki_enabled: true,
+  wiki_merge: "propose" as const, merge_proposals: 0,
 };
 
 const rows = [
