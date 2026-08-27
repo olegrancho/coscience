@@ -5,12 +5,15 @@ machine or another.
 **Branch:** `feat/program-wiki`
 **Design:** `docs/superpowers/specs/2026-08-20-program-wiki-design.md` — the
 authoritative *what and why*. This file is the *where we are and how to work*.
-**Last updated:** 2026-08-26 · by: Claude Opus 5 (Avatar) · state: phases 1 and 2
-**both done** on `feat/program-wiki` (1129 backend / 156 frontend tests green).
-The first milestone — ingest + browse — is complete: a live bundle has been
-ingested, browsed by hand and curated. Still **not merged and not deployed**;
-both need the human's explicit go-ahead, and the human has said *not yet*.
-**Phase 3 (lint runs) is the work in progress.**
+**Last updated:** 2026-08-27 · by: Claude Sonnet 5 (Avatar) · state: phases 1, 2
+**and 3 all done** on `feat/program-wiki` (1208 backend / 184 frontend tests
+green, `tsc --noEmit` clean). The first milestone — ingest + browse — is
+complete: a live bundle has been ingested, browsed by hand and curated. Phase 3
+(merge proposals, lint cadence hardening, the maintenance view) is done and
+suite-verified, but **the live cadence run on a real substrate has still not
+been done** — see §2. Still **not merged and not deployed**; both need the
+human's explicit go-ahead, and the human has said *not yet*.
+**Phase 4 (graph) is next.**
 **Start here if you are picking this up:** `docs/knowledge/NEXT.md`
 
 > **Keep this file current.** It is the only handoff surface. Before you stop —
@@ -51,8 +54,8 @@ Update this table as you go. One row per phase from the design's §15.
 | — | Implementation plan (`superpowers:writing-plans`) | **done** — `docs/superpowers/plans/2026-08-20-program-wiki-phase-1.md` |
 | 1 | Store & ingest — `wiki_store`, `wiki_okf`, `wiki_prompts`, `wiki_agent`, `wiki.beat`, `agent_stream` extraction, `wiki_lint` as CLI, `coscience wiki --once` | **done** — 25 commits, HEAD `4840531`, 1037 tests green. All 3 review findings fixed (`final-fix-report.md`); live end-to-end run performed 2026-08-21 and verified, Obsidian vault included. **Not merged, not deployed.** Three defects the live run exposed are open — see below |
 | 2 | Browse — endpoints, `WikiView`, curation actions, provenance chips *(**first milestone** ends here)* | **done** — 16 commits, HEAD `975cb25`. Suites green; the manual pass was performed on a live bundle and its findings fixed. **Not merged, not deployed** |
-| 3 | Lint runs — agent lint mode, cadence, report UI, quarantine retry | **next** — more of it already exists than the spec's row implies; see §2's phase-3 note |
-| 4 | Graph — `wiki_graph`, `d3-force`, `WikiGraphView`, provenance backlinks | not started |
+| 3 | Lint runs — agent lint mode, cadence, report UI, quarantine retry, merge proposals | **done** — 21 commits, `42dfa3a..9867695`, 1208 backend / 184 frontend tests green |
+| 4 | Graph — `wiki_graph`, `d3-force`, `WikiGraphView`, provenance backlinks | **next** |
 | 5 | Ask & research — wiki chat, research runs, `QUESTIONS.md`, MCP tools | not started |
 
 **Phases 1 and 2 are done, and each met its definition of done against a real
@@ -63,29 +66,59 @@ execution record at the end of
 `docs/superpowers/plans/2026-08-21-program-wiki-phase-2.md`. The running order for
 whoever picks this up is `docs/knowledge/NEXT.md`.
 
-### What phase 3 still has to build (2026-08-26)
+### What phase 3 delivered (2026-08-27)
 
-The spec's §15 row for phase 3 reads as four things. Three of them are already on
-this branch, built in phase 1 and exercised by the suite:
+Twenty-one commits, `42dfa3a..9867695`. What it built, verified against the code
+rather than copied from a plan:
 
-- **agent lint mode** — `wiki_prompts.render_lint`, and `wiki.beat` launches
-  `kind="lint"` with a machine report produced by `_lint_report`.
-- **the cadence** — `ingests_since_lint` counts up in `_collect` and `lint_every()`
-  is the threshold; a lint run that collects `ok` resets it, a failed one stays
-  owed. `_file_lint_report` files the agent's summary under `.wiki/lint/<date>.md`.
-- **quarantine retry** — `Service.unquarantine_wiki`, the endpoint, and the
-  "Retry quarantined" banner in `WikiView`.
+- **`wiki_merge.py`** — a pure planner (`plan(winner, loser, others)`) that folds
+  two duplicate pages into one: sections stacked under matching headings, both
+  pages' `# Human notes` preserved and labelled, `verified` cleared, relations
+  retargeted (never dropped, unlike `delete_wiki_page`), sources/aliases/tags
+  unioned, links to the loser rewritten across every other page, and a
+  `merged_from` marker set on the survivor. Raises `ValueError` for a
+  self-merge or when either page is a `Source` — a Source page is never merged
+  under either policy.
+- **`Service.merge_wiki_pages`** performs the plan, writes every rewritten page,
+  deletes the loser, and commits once, naming both pages in the message.
+- **`Program.wiki_merge`** (`src/coscience/models.py:207`), defaulting to
+  `"auto"`: `auto` applies a proposal at collect (`wiki._handle_merges`);
+  `propose` queues it in `state["merge_proposals"]` for a human. The agent
+  itself never merges or deletes — it proposes into `report.json["merges"]`,
+  whose shape is documented in `wiki_prompts.py`. `merges_refused` is checked
+  before a pair is queued or applied, so a rejected pair is never re-proposed.
+- **`page/unmerged-prose`** (`wiki_lint.py`) fires while a page's frontmatter
+  still carries `merged_from`; `wiki_prompts.py` §5 tells the lint agent to
+  rewrite the stacked prose into one voice and delete the key. `wiki_lint` now
+  carries 22 rule ids (diff the table against the code, not this prose, before
+  trusting a count).
+- **`state["runs"]`** (`wiki.py`, `RUNS_KEPT = 50`) — a capped audit trail of
+  what each beat-driven run did, including which merges it applied and the git
+  SHA of each (`Service.wiki_activity`).
+- **`/programs/:id/wiki/lint`** (`WikiLintView.tsx`) — proposals first when any
+  are waiting, then activity, the agents' filed `.wiki/lint/<date>.md` reports,
+  and live findings grouped by rule. Plus a per-page findings strip in the
+  browse view and the merge-policy control in the header and settings modal.
 
-What is genuinely missing is the **report UI** — `api.wikiLintReport` and
-`GET /wiki/lint` exist and are wired to nothing; the header shows only
-`lint NE / NW`, so a reader can see that there are findings but not what they are,
-and the filed `.wiki/lint/<date>.md` summaries are unreachable from the dashboard
-(`GET /wiki/log` serves the bundle's `log.md`, not those) — and **proof that the
-cadence fires on a real substrate**, which no test can give because the suite never
-launches an agent. Plan phase 3 against that gap, not against the spec row. Note
-`wiki_lint` now carries 22 rule ids, the spec's 20 plus the two `human-notes/`
-rules from `b33be05`; diff the table against the code rather than trusting a count
-in prose.
+**Two things follow honestly, not as defects:**
+
+1. **The live cadence run has not been done.** No test can prove
+   `ingests_since_lint` fires a lint pass on a real substrate — the suite never
+   launches an agent, by design. It spends the human's Claude quota and needs
+   their explicit go-ahead first; it has not happened yet. Do not describe it
+   as verified.
+2. **A human-accepted merge does not appear in the Activity list.**
+   `Service.accept_wiki_merge` calls `merge_wiki_pages` directly and never
+   appends to `state["runs"]` — only the beat-driven `_collect` path does. This
+   matches spec §11.3 as written (Activity is defined as what *runs* did), so
+   it is a completeness question for phase 4 — should the audit trail record
+   human actions too — not a bug. Recorded as an open question for phase 4 in
+   `docs/knowledge/NEXT.md`.
+
+Also worth recording: `merge_wiki_pages` is non-atomic — a write failure partway
+through the loop over `result.rewritten` leaves some pages rewritten and no
+commit. This matches the existing shape of `delete_wiki_page`, which has the
+same property; phase 3 did not add new risk here, it inherited an existing one.
 
 ### What the first live run actually did (2026-08-21)
 
@@ -304,6 +337,7 @@ you believe a decision is wrong, say so to the user and add a row here.
 | Merge relations are **retargeted**, not dropped | `Service.delete_wiki_page` drops relations pointing at the deleted page, which is right for a deletion and wrong for a merge — it would discard exactly the knowledge the merge exists to preserve. Merge must not reuse that path. |
 | **Nothing gates an automatic merge but git.** Ruled by the human, 2026-08-27 | Full autonomy was the explicit ask. Each merge is its own substrate commit naming both pages, and that commit is the undo. Cost, stated and accepted: a wrong merge stays wrong until somebody notices, and nobody reads a wiki looking for absences. Two things follow rather than sit beside it — the `state["runs"]` audit trail and §11.3's activity view — and the deferred repo-wide `commit()` matters more under this ruling, since reverting a merge commit takes whatever else got swept in with it. |
 | `Program.wiki_merge` defaults to `auto` | Matches the stated intent to run mostly unattended, and no real substrate carries a wiki bundle yet, so there is no installed base to surprise with a destructive default. |
+| `substrate.commit()` returns the SHA it created, or `""` — never a stale HEAD | A caller that names a commit as the undo for something (a wiki merge, spec 9.1) must never be handed the *previous* commit because nothing changed. `commit()` reads HEAD before and after `git commit` and only returns the new SHA when it actually moved. |
 
 ---
 
@@ -324,6 +358,14 @@ you believe a decision is wrong, say so to the user and add a row here.
    refuses to mark the batch ingested if anything outside
    `programs/<pid>/wiki/` and `programs/<pid>/.wiki/` changed.
 8. **The suite runs offline**, in seconds, with no Claude call.
+9. **A merge never loses `# Human notes`, and never keeps `verified`.** Both
+   pages' notes survive, labelled; the merged page returns to the human queue
+   unverified because the text it makes a claim about just changed.
+10. **`merges_refused` is consulted before any proposal is queued or applied.**
+    A pair a human rejected, or the platform already refused (a Source page),
+    is never re-proposed and never re-queued.
+11. **A Source page is never merged**, under either policy. `wiki_merge.plan`
+    raises before either `auto` or `propose` can act on it.
 
 ---
 
