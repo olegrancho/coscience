@@ -7,6 +7,7 @@ export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
   wiki_model: string;     // model for this program's wiki runs; separate from pm_model
   wiki_enabled: boolean;  // false opts the program out of wiki ingest entirely
+  wiki_merge: "auto" | "propose";  // auto = merge duplicates unattended; propose = queue for a human
   instructions: string;   // standing house rules, in every PM prompt
   max_proposed: number;   // cap on sprints awaiting review; 0 = platform default
   activations: PMActivation[]; last_run: number | null;

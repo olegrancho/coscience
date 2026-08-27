@@ -3,7 +3,7 @@ import { notifications } from "@mantine/notifications";
 import { useEffect, useRef, useState } from "react";
 import { api, type Program } from "../api";
 import DirectoryPickerModal from "./DirectoryPickerModal";
-import { ModelSelect } from "./ui";
+import { MergePolicySelect, ModelSelect } from "./ui";
 
 interface Props {
   opened: boolean;
@@ -19,13 +19,14 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
   const [model, setModel] = useState("");
   const [wikiModel, setWikiModel] = useState("");
   const [wikiEnabled, setWikiEnabled] = useState(true);
+  const [wikiMerge, setWikiMerge] = useState("auto");
   const [workdir, setWorkdir] = useState("");
   const [maxProposed, setMaxProposed] = useState<number | string>("");
   const [instructions, setInstructions] = useState("");
   const [saving, setSaving] = useState(false);
   const [browsing, setBrowsing] = useState(false);
   const seeded = useRef({ goals: "", model: "", wikiModel: "", wikiEnabled: true,
-                          workdir: "", maxProposed: 0, instructions: "" });
+                          wikiMerge: "auto", workdir: "", maxProposed: 0, instructions: "" });
   const wasOpened = useRef(false);
 
   // Seed on the false->true open transition only. The program is refetched by a
@@ -37,12 +38,14 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
       setModel(program.pm_model);
       setWikiModel(program.wiki_model);
       setWikiEnabled(program.wiki_enabled);
+      setWikiMerge(program.wiki_merge || "auto");
       setWorkdir(program.workdir);
       setMaxProposed(program.max_proposed || "");
       setInstructions(program.instructions);
       seeded.current = {
         goals: program.goals, model: program.pm_model, workdir: program.workdir,
         wikiModel: program.wiki_model, wikiEnabled: program.wiki_enabled,
+        wikiMerge: program.wiki_merge || "auto",
         maxProposed: program.max_proposed, instructions: program.instructions,
       };
     }
@@ -69,6 +72,7 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
       if (wikiEnabled !== was.wikiEnabled) {
         await api.setProgramWikiEnabled(program.id, wikiEnabled);
       }
+      if (wikiMerge !== was.wikiMerge) await api.setWikiMergePolicy(program.id, wikiMerge);
       if (folder !== was.workdir) workdirResult = await api.setProgramWorkdir(program.id, folder);
       if (cap !== was.maxProposed) await api.setProgramMaxProposed(program.id, cap);
       if (instructions !== was.instructions) await api.setProgramInstructions(program.id, instructions);
@@ -113,6 +117,8 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
           <Group gap={8} align="center">
             <ModelSelect value={wikiModel} onChange={setWikiModel} label="wiki model"
                          disabled={!wikiEnabled} />
+            <MergePolicySelect value={wikiMerge} onChange={setWikiMerge}
+                                disabled={!wikiEnabled} />
             <Checkbox
               size="xs"
               label="build a wiki for this program"

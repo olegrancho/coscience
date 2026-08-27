@@ -155,6 +155,36 @@ describe("WikiView header and tree", () => {
                      { target: { value: "lease" } });
     await waitFor(() => expect(search).toHaveBeenCalledWith("p1", "lease"));
   });
+
+  // The shared `summary` fixture already carries wiki_merge: "propose" (Task 9's
+  // default in this suite), so the control starts on "propose" here — not "auto" —
+  // and this exercises the other direction of the toggle.
+  it("shows the merge policy and saves a change", async () => {
+    const set = vi.spyOn(api, "setWikiMergePolicy")
+      .mockResolvedValue({ id: "p1", wiki_merge: "auto" } as never);
+    mount();
+    const select = await screen.findByLabelText(/merges/i) as HTMLSelectElement;
+    expect(select.value).toBe("propose");
+    fireEvent.change(select, { target: { value: "auto" } });
+    await waitFor(() => expect(set).toHaveBeenCalledWith("p1", "auto"));
+  });
+
+  it("locks the merge picker while a run is in flight", async () => {
+    vi.spyOn(api, "getWikiSummary")
+      .mockResolvedValue({ ...summary, run: { id: "r2", kind: "ingest" } } as never);
+    mount();
+    const select = await screen.findByLabelText(/merges/i) as HTMLSelectElement;
+    expect(select.disabled).toBe(true);
+  });
+
+  it("links to the maintenance page, badged when proposals are waiting", async () => {
+    vi.spyOn(api, "getWikiSummary").mockResolvedValue(
+      { ...summary, wiki_merge: "propose", merge_proposals: 2 } as never);
+    mount();
+    const link = await screen.findByRole("link", { name: /maintenance/i });
+    expect(link.getAttribute("href")).toBe("/programs/p1/wiki/lint");
+    expect(link.textContent).toContain("2");
+  });
 });
 
 // Link text and relation titles below deliberately avoid the tree's titles

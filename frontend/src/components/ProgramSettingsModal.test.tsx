@@ -8,6 +8,7 @@ vi.mock("../api", () => ({
     setProgramModel: vi.fn().mockResolvedValue({}),
     setProgramWikiModel: vi.fn().mockResolvedValue({}),
     setProgramWikiEnabled: vi.fn().mockResolvedValue({}),
+    setWikiMergePolicy: vi.fn().mockResolvedValue({ id: "p1", wiki_merge: "propose" }),
     setProgramWorkdir: vi.fn().mockResolvedValue({ id: "p1", workdir: "/tmp/proj2", exists: true }),
     setProgramMaxProposed: vi.fn().mockResolvedValue({}),
     setProgramInstructions: vi.fn().mockResolvedValue({}),
@@ -39,7 +40,7 @@ beforeAll(() => {
 const program = {
   id: "p1", title: "A", status: "active", goals: "x",
   report: "", cycle: 0, sprints: [], pm_model: "claude-opus-5",
-  wiki_model: "claude-sonnet-5", wiki_enabled: true,
+  wiki_model: "claude-sonnet-5", wiki_enabled: true, wiki_merge: "auto",
   workdir: "/tmp/proj", instructions: "be careful", max_proposed: 6,
   activations: [], last_run: null,
 };
@@ -104,6 +105,13 @@ describe("ProgramSettingsModal", () => {
     await waitFor(() =>
       expect(api.setProgramWikiModel).toHaveBeenCalledWith("p1", "claude-opus-5"));
     expect(api.setProgramModel).not.toHaveBeenCalled();
+  });
+
+  it("saves the wiki merge policy", async () => {
+    renderModal();
+    fireEvent.change(screen.getByLabelText(/merges/i), { target: { value: "propose" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.setWikiMergePolicy).toHaveBeenCalledWith("p1", "propose"));
   });
 
   it("unchecking the wiki opts the program out", async () => {

@@ -526,6 +526,7 @@ class Service:
             "id": p.id, "title": p.title, "status": p.status.value, "goals": p.goals,
             "pm_model": p.pm_model, "workdir": p.workdir,
             "wiki_model": p.wiki_model, "wiki_enabled": p.wiki_enabled,
+            "wiki_merge": p.wiki_merge,
             "max_proposed": p.max_proposed,
             "instructions": self.substrate.load_instructions(program_id),
             "report": self.substrate.load_report(program_id),

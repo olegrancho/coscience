@@ -438,6 +438,37 @@ export function ModelSelect(
   );
 }
 
+/** Whether a program's wiki merges duplicate pages unattended or queues them for
+ *  a human — spec §11.3/§9.1. `auto` is the default: nothing else gates a merge
+ *  but git, so `propose` is the opt-in for a program where that trade isn't wanted. */
+export const MERGE_POLICY_OPTIONS = [
+  { value: "auto", label: "merge duplicates automatically" },
+  { value: "propose", label: "ask me first" },
+];
+
+/** Same idiom as ModelSelect: a wrapping <label> so the control is reachable by
+ *  its plain-text name, no separate `aria-label` needed. */
+export function MergePolicySelect(
+  { value, onChange, disabled }:
+  { value: string; onChange: (p: string) => void; disabled?: boolean },
+) {
+  return (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+      <span style={{ color: "var(--ink-muted)" }}>merges</span>
+      <select
+        className="mono"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ fontSize: 12, padding: "3px 6px", background: "var(--surface)",
+                 color: "var(--ink)", border: "1px solid var(--hairline)", borderRadius: 6 }}
+      >
+        {MERGE_POLICY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </label>
+  );
+}
+
 /** Claude usage: the rolling 5h/weekly budget plus PM and worker call counts. */
 export function UsagePanel({ usage }: { usage: Usage }) {
   const w = usage.budget?.windows ?? {};

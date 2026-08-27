@@ -5,7 +5,7 @@ import type { Components } from "react-markdown";
 import { Link, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { isInternalLink, outline, wikiHref } from "../components/wikiPage";
-import { BackLink, EmptyState, ModelSelect } from "../components/ui";
+import { BackLink, EmptyState, MergePolicySelect, ModelSelect } from "../components/ui";
 import { api, type WikiPageRow } from "../api";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -60,6 +60,11 @@ export default function WikiView() {
   // curation panel. There is nothing to batch it with here.
   const setWikiModel = useMutation({
     mutationFn: (model: string) => api.setProgramWikiModel(id, model),
+    onSuccess: invalidate });
+  // Same idiom: saves on change, locks during a run — the policy is read when
+  // a run collects, same reason the model picker locks (spec §11.3).
+  const setMergePolicy = useMutation({
+    mutationFn: (policy: string) => api.setWikiMergePolicy(id, policy),
     onSuccess: invalidate });
   const unquarantine = useMutation({ mutationFn: () => api.unquarantineWiki(id),
                                      onSuccess: invalidate });
@@ -136,10 +141,26 @@ export default function WikiView() {
                            disabled={!!s.run || setWikiModel.isPending}
                            onChange={(m) => setWikiModel.mutate(m)} />
             )}
+            {s && (
+              <MergePolicySelect value={s.wiki_merge}
+                                  disabled={!!s.run || setMergePolicy.isPending}
+                                  onChange={(p) => setMergePolicy.mutate(p)} />
+            )}
             <Button size="xs" variant="default" onClick={() => run.mutate("ingest")}
                     disabled={!!s?.run}>Ingest now</Button>
             <Button size="xs" variant="default" onClick={() => run.mutate("lint")}
                     disabled={!!s?.run}>Lint now</Button>
+            {/* Same idiom as ProgramDetail's "open wiki →": the destination
+                answers "is this wiki healthy", and a badge here says whether
+                anything there is waiting on a human. */}
+            <Link to={`/programs/${id}/wiki/lint`} className="view" style={{ fontSize: 13 }}>
+              maintenance
+              {!!s?.merge_proposals && (
+                <Badge size="xs" variant="light" color="machine" ml={6}>
+                  {s.merge_proposals}
+                </Badge>
+              )}
+            </Link>
           </Group>
         </Group>
       </div>
