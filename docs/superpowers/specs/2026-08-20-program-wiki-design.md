@@ -432,7 +432,8 @@ HTTP process can mutate it:
   "merges_refused": [["concepts/a.md", "concepts/b.md"]],
   "runs": [{"id": "r0007", "kind": "lint", "status": "ok", "at": 1755680000.0,
             "pages_created": 0, "pages_updated": 4,
-            "merged": [["concepts/job-lease.md", "concepts/compute-lease.md"]]}]
+            "merged": [{"loser": "concepts/job-lease.md",
+                       "winner": "concepts/compute-lease.md", "commit": "a1b2c3d"}]}]
 }
 ```
 
@@ -611,6 +612,7 @@ extended for OKF and for approach C.
 | `src/missing` | error | no | origin object no longer exists |
 | `src/is-concept` | error | no | a concept page whose title closely matches a source page title — the article was turned into a concept |
 | `human-notes/removed` | error | no | a page that had `# Human notes` in its previous git revision no longer does |
+| `human-notes/machine-written` | error | no | content appeared under the protected `# Human notes` section that was empty in the previous revision |
 | `page/unmerged-prose` | warn | no | page carries `merged_from` — its sections are still two pages stacked (§9.1) |
 | `trust/unverified-stable` | info | no | `status: stable` with no `verified` entry |
 
