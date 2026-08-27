@@ -4,9 +4,29 @@ import { Link, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { wikiHref } from "../components/wikiPage";
 import { AbsTime, BackLink, EmptyState } from "../components/ui";
-import { api } from "../api";
+import { api, type WikiLintFinding } from "../api";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
+
+// error, then warn, then info (or anything else) — the maintenance page is
+// the one place a human decides what to look at first, so what's most
+// urgent goes on top.
+const SEVERITY_ORDER: Record<string, number> = { error: 0, warn: 1, info: 2 };
+
+/** Findings grouped by rule, ordered by severity then by descending count —
+ *  spec §11.3's "Findings — live lint output grouped by rule". */
+function groupFindings(findings: WikiLintFinding[]): [string, WikiLintFinding[]][] {
+  const byRule = new Map<string, WikiLintFinding[]>();
+  for (const f of findings) {
+    const list = byRule.get(f.rule);
+    if (list) list.push(f); else byRule.set(f.rule, [f]);
+  }
+  return [...byRule.entries()].sort(([, a], [, b]) => {
+    const sevA = SEVERITY_ORDER[a[0].severity] ?? 99;
+    const sevB = SEVERITY_ORDER[b[0].severity] ?? 99;
+    return sevA !== sevB ? sevA - sevB : b.length - a.length;
+  });
+}
 
 /** A path like "concepts/compute-lease.md" is what the API carries; a reader
  *  scanning a list of runs wants the name, not the directory. */
@@ -152,11 +172,31 @@ export default function WikiLintView() {
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 10 }}>findings</div>
-        {/* Task 12 fills this in with the live findings grouped by rule. */}
         {findings.length === 0 ? (
           <Text size="sm" c="dimmed">No findings.</Text>
         ) : (
-          <Text size="sm" c="dimmed">{findings.length} finding(s).</Text>
+          <Stack gap="md">
+            {groupFindings(findings).map(([rule, items]) => (
+              <div key={rule} data-testid={`finding-group-${rule}`}>
+                <Group gap={8} mb={6}>
+                  <code className="mono" style={{ fontSize: 12 }}>{rule}</code>
+                  <Badge size="xs" variant="light"
+                         color={items[0].severity === "error" ? "red" : "gray"}>
+                    {items[0].severity}
+                  </Badge>
+                  <Badge size="xs" variant="light" color="gray">{items.length}</Badge>
+                </Group>
+                <ul style={{ margin: 0 }}>
+                  {items.map((f, i) => (
+                    <li key={i}>
+                      <Link to={wikiHref(id, f.path)}>{slugOf(f.path)}</Link>
+                      <Text component="span" size="xs" c="dimmed"> — {f.message}</Text>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </Stack>
         )}
       </Card>
     </Stack>

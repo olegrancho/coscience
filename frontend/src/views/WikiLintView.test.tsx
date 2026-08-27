@@ -165,6 +165,40 @@ describe("WikiLintView proposals", () => {
   });
 });
 
+describe("WikiLintView findings", () => {
+  const findings = [
+    { rule: "rel/no-source", severity: "error", path: "concepts/a.md", message: "no source" },
+    { rule: "rel/no-source", severity: "error", path: "concepts/b.md", message: "no source" },
+    { rule: "page/stub", severity: "warn", path: "concepts/c.md", message: "too short" },
+  ];
+
+  beforeEach(() => {
+    vi.spyOn(api, "getWikiActivity").mockResolvedValue([] as never);
+    vi.spyOn(api, "listWikiMerges").mockResolvedValue([] as never);
+    vi.spyOn(api, "getWikiLint").mockResolvedValue(
+      { counts: { error: 2, warn: 1 }, findings, reports: [] } as never);
+  });
+
+  it("groups findings by rule with a count", async () => {
+    mount();
+    const group = await screen.findByTestId("finding-group-rel/no-source");
+    expect(group.textContent).toContain("2");
+  });
+
+  it("links each finding to its page", async () => {
+    mount();
+    const group = await screen.findByTestId("finding-group-rel/no-source");
+    const link = group.querySelector('a[href="/programs/p1/wiki/concepts/a"]');
+    expect(link).toBeTruthy();
+  });
+
+  it("puts errors before warnings", async () => {
+    mount();
+    const groups = await screen.findAllByTestId(/^finding-group-/);
+    expect(groups[0].getAttribute("data-testid")).toContain("rel/no-source");
+  });
+});
+
 // Point 6 of the task-10/11 brief: confirm, don't assume, that the static
 // /wiki/lint route wins over the /wiki/* catch-all. Declared here with the
 // splat listed FIRST — the opposite of App.tsx — to prove React Router ranks

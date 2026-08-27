@@ -56,6 +56,8 @@ describe("WikiView header and tree", () => {
   beforeEach(() => {
     vi.spyOn(api, "getWikiSummary").mockResolvedValue(summary as never);
     vi.spyOn(api, "listWikiPages").mockResolvedValue(rows as never);
+    vi.spyOn(api, "getWikiLint").mockResolvedValue(
+      { counts: {}, findings: [], reports: [] } as never);
   });
 
   it("shows counts, pending and the last run outcome", async () => {
@@ -178,6 +180,8 @@ describe("WikiView centre pane", () => {
     vi.spyOn(api, "getWikiSummary").mockResolvedValue(summary as never);
     vi.spyOn(api, "listWikiPages").mockResolvedValue(rows as never);
     vi.spyOn(api, "getWikiPage").mockResolvedValue(centrePage as never);
+    vi.spyOn(api, "getWikiLint").mockResolvedValue(
+      { counts: {}, findings: [], reports: [] } as never);
   });
 
   it("renders the page title and body", async () => {
@@ -219,6 +223,28 @@ describe("WikiView centre pane", () => {
     mount("/programs/p1/wiki");
     expect(await screen.findByText("Index")).toBeTruthy();
   });
+
+  it("shows the findings for the page you are reading", async () => {
+    vi.spyOn(api, "getWikiLint").mockResolvedValue({
+      counts: { warn: 1 }, reports: [],
+      findings: [{ rule: "page/unmerged-prose", severity: "warn",
+                   path: "concepts/a.md", message: "merged from b" },
+                 { rule: "page/stub", severity: "warn",
+                   path: "concepts/other.md", message: "too short" }],
+    } as never);
+    mount("/programs/p1/wiki/concepts/a");
+    const strip = await screen.findByTestId("page-findings");
+    expect(strip.textContent).toContain("unmerged-prose");
+    expect(strip.textContent).not.toContain("stub");   // another page's problem
+  });
+
+  it("shows no strip on a clean page", async () => {
+    vi.spyOn(api, "getWikiLint").mockResolvedValue(
+      { counts: {}, findings: [], reports: [] } as never);
+    mount("/programs/p1/wiki/concepts/a");
+    await screen.findByRole("heading", { name: /Alpha/ });
+    expect(screen.queryByTestId("page-findings")).toBeNull();
+  });
 });
 
 const sidePage = {
@@ -240,6 +266,8 @@ describe("WikiView right pane", () => {
     vi.spyOn(api, "getWikiSummary").mockResolvedValue(summary as never);
     vi.spyOn(api, "listWikiPages").mockResolvedValue(rows as never);
     vi.spyOn(api, "getWikiPage").mockResolvedValue(sidePage as never);
+    vi.spyOn(api, "getWikiLint").mockResolvedValue(
+      { counts: {}, findings: [], reports: [] } as never);
   });
 
   it("lists the body outline", async () => {

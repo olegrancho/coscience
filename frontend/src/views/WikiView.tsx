@@ -39,6 +39,11 @@ export default function WikiView() {
                           queryFn: () => api.searchWiki(id, q) });
   const page = useQuery({ queryKey: ["wiki-page", id, slug], enabled: !!slug,
                           queryFn: () => api.getWikiPage(id, slug) });
+  // Findings are recomputed live on every /wiki/lint GET (never autofixed), so
+  // this is cheap enough to fetch unconditionally rather than only when a page
+  // is open — the strip needs it, but so would a future "clean wiki" indicator.
+  const lint = useQuery({ queryKey: ["wiki-lint", id],
+                          queryFn: () => api.getWikiLint(id) });
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["wiki", id] });
@@ -101,6 +106,12 @@ export default function WikiView() {
     setShut((prev) => ({ ...prev, [type]: isGroupOpen(type) }));
 
   const s = summary.data;
+  // Live findings for the page you are reading only — the maintenance page
+  // (WikiLintView) is where "is this wiki healthy" lives; this answers
+  // "is this page sound" without leaving it (spec §11.3).
+  const pageFindings = slug
+    ? (lint.data?.findings ?? []).filter((f) => f.path.replace(/\.md$/, "") === slug)
+    : [];
   const grouped = TYPE_ORDER
     .map((t) => [t, (pages.data ?? []).filter((p) => p.type === t)] as const)
     .filter(([, rows]) => rows.length > 0);
@@ -274,6 +285,25 @@ export default function WikiView() {
                     ))}
                   </Group>
                 </>
+              )}
+
+              {pageFindings.length > 0 && (
+                // Nothing renders here on a clean page — noise on every page you
+                // read defeats the point of a strip that is supposed to be worth
+                // glancing at (spec §11.3).
+                <Card data-testid="page-findings" padding="sm" radius="md" mb="md"
+                      style={{ border: "1px solid var(--signal-line)",
+                               background: "var(--signal-weak)" }}>
+                  <div className="eyebrow" style={{ marginBottom: 6 }}>findings</div>
+                  <Stack gap={4}>
+                    {pageFindings.map((f, i) => (
+                      <Text key={i} size="xs">
+                        <code className="mono" style={{ fontSize: 11 }}>{f.rule}</code>
+                        {" — "}{f.message}
+                      </Text>
+                    ))}
+                  </Stack>
+                </Card>
               )}
 
               <div className="report-leaf">
