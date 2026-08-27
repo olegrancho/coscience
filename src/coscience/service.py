@@ -1612,9 +1612,14 @@ class Service:
             program = self.substrate.load_program(program_id)
             model, enabled = program.wiki_model, program.wiki_enabled
         except (OSError, ValueError):
-            model, enabled = "", True
-        return wiki_read.summary(pages, state, pending, counts, index_md,
-                                 wiki_model=model, wiki_enabled=enabled)
+            program, model, enabled = None, "", True
+        out = wiki_read.summary(pages, state, pending, counts, index_md,
+                                wiki_model=model, wiki_enabled=enabled)
+        # Merge policy and its pending queue ride along with the rest of the
+        # wiki's own settings — same reasoning as wiki_model/wiki_enabled above.
+        out["wiki_merge"] = getattr(program, "wiki_merge", "auto")
+        out["merge_proposals"] = len(state.get("merge_proposals") or [])
+        return out
 
     def list_wiki_pages(self, program_id: str) -> list[dict]:
         from coscience import wiki_read
@@ -1781,6 +1786,69 @@ class Service:
             f"wiki {program_id}: merged {result.loser_path} into {result.winner.path}")
         return {"winner": result.winner.path, "loser": result.loser_path,
                 "rewritten": [p.path for p in result.rewritten]}
+
+    # --- wiki (phase 3: merge proposals, activity, policy) --------------------
+
+    _WIKI_MERGE_POLICIES = ("auto", "propose")
+
+    def list_wiki_merges(self, program_id: str) -> list[dict]:
+        from coscience import wiki_store
+        state = wiki_store.load_state(self.substrate, program_id)
+        return list(state.get("merge_proposals") or [])
+
+    def _take_proposal(self, state: dict, merge_id: str) -> dict:
+        pending = list(state.get("merge_proposals") or [])
+        for i, entry in enumerate(pending):
+            if str(entry.get("id")) == merge_id:
+                state["merge_proposals"] = pending[:i] + pending[i + 1:]
+                return entry
+        raise NotFoundError(merge_id)
+
+    def accept_wiki_merge(self, program_id: str, merge_id: str) -> dict:
+        """Apply a queued merge now.
+
+        Now, rather than at the next beat: a human who clicked accept and saw
+        nothing happen has no way to tell approval from a bug (spec 9.1). Prose
+        is tidied later by the lint run the merged_from marker summons."""
+        from coscience import wiki_store
+        with wiki_store.state_guard(self.substrate, program_id) as state:
+            entry = self._take_proposal(state, merge_id)
+        winner, loser = entry["winner"], entry["loser"]
+        try:
+            out = self.merge_wiki_pages(program_id, winner, loser)
+        except (NotFoundError, ValueError):
+            # Re-checked at apply time on purpose: pages move between an agent
+            # proposing and a human clicking.
+            with wiki_store.state_guard(self.substrate, program_id) as state:
+                state.setdefault("merges_refused", []).append(sorted([winner, loser]))
+            return {"applied": False, "winner": winner, "loser": loser, "rewritten": []}
+        return {"applied": True, **out}
+
+    def reject_wiki_merge(self, program_id: str, merge_id: str) -> dict:
+        from coscience import wiki_store
+        with wiki_store.state_guard(self.substrate, program_id) as state:
+            entry = self._take_proposal(state, merge_id)
+            pair = sorted([entry["winner"], entry["loser"]])
+            state.setdefault("merges_refused", []).append(pair)
+        return {"rejected": pair}
+
+    def wiki_activity(self, program_id: str) -> list[dict]:
+        from coscience import wiki_store
+        return list(wiki_store.load_state(self.substrate, program_id).get("runs") or [])
+
+    def set_program_wiki_merge(self, program_id: str, policy: str) -> dict:
+        """auto merges duplicates unattended; propose queues them for a human.
+
+        Nothing gates auto but git — each merge is its own commit and that commit
+        is the undo. Ruled deliberately (spec 9.1)."""
+        if policy not in self._WIKI_MERGE_POLICIES:
+            raise ValueError(f"policy must be auto or propose: {policy}")
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        program = self.substrate.load_program(program_id)
+        program.wiki_merge = policy
+        self.substrate.save_program(program)
+        return {"id": program_id, "wiki_merge": policy}
 
     def set_wiki_human_notes(self, program_id: str, slug: str, text: str) -> dict:
         """Replace the protected `# Human notes` section, and nothing else.
