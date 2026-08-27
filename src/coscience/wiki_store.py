@@ -102,6 +102,13 @@ lint error.
 5. **`# Human notes` is protected.** If a page has one, reproduce it byte for
    byte. It is a human's correction and outranks anything you would write.
 6. **Never delete a page.** Propose merges in the run report; a human decides.
+   Write the proposal into `report.json` under `"merges"`, each entry:
+
+   {"winner": "concepts/compute-lease.md", "loser": "concepts/job-lease.md",
+    "why": "one paragraph: why these are the same idea"}
+
+   Both are bundle-relative page paths, not slugs. Never propose a `sources/`
+   page: a source page stands for one real object and is bound to it.
 7. **Never compute a content hash.** The platform hands you `origin_hash` values;
    copy them exactly. A hash you invent cannot detect drift.
 8. **Never write outside this directory.**

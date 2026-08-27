@@ -115,8 +115,19 @@ _HOUSEKEEPING = """## Before you finish
 
 ```json
 {{"pages_created": ["concepts/a.md"], "pages_updated": ["concepts/b.md"],
-  "objects": ["result:r1"], "notes": "one or two sentences"}}
+  "objects": ["result:r1"], "merges": [], "notes": "one or two sentences"}}
 ```
+
+   `merges` is how you report two pages that are the same idea. You never merge
+   them yourself and you never delete a page — the platform performs the merge,
+   either immediately or after a human approves it. Each entry is:
+
+   {{"winner": "concepts/compute-lease.md", "loser": "concepts/job-lease.md",
+     "why": "one paragraph: why these are the same idea"}}
+
+   Both are bundle-relative page paths, not slugs. Never propose a `sources/`
+   page: a source page stands for one real object and is bound to it. If you
+   have nothing to propose, write `[]`.
 
    `objects` is the list of object ids from this run's batch that you actually
    covered: exactly as given above, and only the ones you finished. Anything you
@@ -208,10 +219,15 @@ cannot decide.
 3. **Refresh drifted sources.** A `src/hash-drift` finding means the raw object
    changed after ingest. Re-read it and update its source page; leave the
    `origin_hash` exactly as the report gives it.
-4. **Propose merges for near-duplicates.** Do not merge destructively — write the
-   proposal into `report.json` under `"merges"` and add an alias so the pages are
-   at least findable as one idea.
-5. **Fix stubs and orphans.** A stub either grows or is folded into a fuller page.
+4. **Propose merges for near-duplicates.** Do not merge and do not delete — write
+   the proposal into `report.json` under `merges` in the shape given below, and
+   add an alias so the pages are at least findable as one idea.
+5. **Rewrite merged pages.** A page whose frontmatter carries `merged_from` was
+   merged mechanically: its sections are two pages stacked under one heading.
+   Rewrite them into one voice — one definition, one set of evidence, no
+   repetition — then delete the `merged_from` key. This is the only way that
+   marker ever clears, and `page/unmerged-prose` reports it until you do.
+6. **Fix stubs and orphans.** A stub either grows or is folded into a fuller page.
    An orphan gets linked from `index.md` or from the page it belongs under.
 
 {_RULES}
