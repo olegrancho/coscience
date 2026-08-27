@@ -425,9 +425,28 @@ HTTP process can mutate it:
   "last_run": { "id": "r0007", "kind": "ingest", "status": "ok", "at": …,
                 "pages_created": 6, "pages_updated": 3 },
   "failures": 0,
-  "quarantined": []
+  "quarantined": [],
+  "merge_proposals": [{"id": "m0003", "winner": "concepts/compute-lease.md",
+                       "loser": "concepts/job-lease.md", "why": "…",
+                       "run": "r0007", "at": 1755680000.0}],
+  "merges_refused": [["concepts/a.md", "concepts/b.md"]],
+  "runs": [{"id": "r0007", "kind": "lint", "status": "ok", "at": 1755680000.0,
+            "pages_created": 0, "pages_updated": 4,
+            "merged": [["concepts/job-lease.md", "concepts/compute-lease.md"]]}]
 }
 ```
+
+`merges_refused` holds unordered page pairs a human rejected or the platform
+refused (§9.1). Both `_collect` and the accept path consult it, so a run never
+re-proposes what has already been turned down — without it, every lint run
+re-offers the same merge and the human's decision is worth nothing.
+
+`merge_proposals` is populated only when the program's merge policy is `propose`;
+in `auto` the merge is applied at collect and never queues. `runs` is a **capped**
+list (most recent 50) appended by `_collect` — the audit trail the maintenance
+page reads. It exists because §9.1 rules that nothing gates an automatic merge but
+git: without a record of what ran and what it merged, "revert the bad one" assumes
+a person who already knows a bad one happened.
 
 `run` is `null` when nothing is in flight. **At most one run per program at a
 time** — this is the concurrency model, and it is what makes merge-first safe.
@@ -592,6 +611,7 @@ extended for OKF and for approach C.
 | `src/missing` | error | no | origin object no longer exists |
 | `src/is-concept` | error | no | a concept page whose title closely matches a source page title — the article was turned into a concept |
 | `human-notes/removed` | error | no | a page that had `# Human notes` in its previous git revision no longer does |
+| `page/unmerged-prose` | warn | no | page carries `merged_from` — its sections are still two pages stacked (§9.1) |
 | `trust/unverified-stable` | info | no | `status: stable` with no `verified` entry |
 
 Mechanical auto-fixes are applied **by the script before the agent runs** —
@@ -603,6 +623,72 @@ writes `.wiki/lint/<date>.md` and appends to `log.md`.
 `link/broken` is a warning, never an error, because OKF requires consumers to
 tolerate broken links and because in a living wiki a broken link often marks
 knowledge not yet written.
+
+### 9.1 Merges (phase 3)
+
+Near-duplicate pages are how a wiki like this rots: ask it a question and get
+half an answer, because the other half is on the twin page. The agent is the only
+thing that can *find* them — `page/near-duplicate` is an exact normalised
+collision on title or alias, so it never sees *compute lease* vs *job lease*.
+The agent notices while reading, and writes the proposal into `report.json`.
+
+**`merges` has a defined shape.** An undefined key with no consumer is what
+`objects` was before the phase-1 review; the agent cannot honour a contract that
+was never written down:
+
+```json
+"merges": [{"winner": "concepts/compute-lease.md",
+            "loser":  "concepts/job-lease.md",
+            "why":    "one paragraph, why these are the same idea"}]
+```
+
+**One mechanism, two authorities.** The agent never merges and never deletes —
+it proposes. `wiki_merge.py` (pure) plans the merge; `Service.merge_wiki_pages`
+performs it and commits. What differs between modes is only who authorises the
+apply: `_collect` does it in `auto`, a human click does it in `propose`. The
+agent's **prohibitions** are unchanged, and identical under both policies — it is
+never told it may delete or merge. (Its *instructions* do change this phase: the
+`merges` shape above is pinned, and the prose pass below is added.)
+
+**What may be merged.** Concept, Entity, Synthesis and Question pages. **Never a
+`Source` page** — a source page stands for one real object and is bound to it by
+`resource` and `origin_hash`; merging two of them would make `src/hash-drift` and
+`src/missing` meaningless and detach the wiki from its evidence. A proposal naming
+a source page is refused under both policies and recorded in `merges_refused`.
+
+**A proposal is checked at apply time, not only at propose time.** Pages can be
+deleted, renamed or already merged between an agent proposing and a human
+accepting. If either page is missing, or the two resolve to the same page, the
+apply is refused and the proposal dropped — a stale proposal is not an error worth
+surfacing, it is a proposal about a wiki that no longer exists.
+
+| Element | Rule |
+|---|---|
+| Body sections | Loser's content concatenated under the winner's matching headings |
+| `# Human notes` | Both folded into the survivor, each labelled with its origin page |
+| `verified` | **Cleared.** A verification is a claim about specific text, and the text just changed |
+| Relations | Unioned and deduped by `(type, target)`; relations *pointing at* the loser are **retargeted** to the winner |
+| Sources | Unioned, deduped by `id` |
+| Aliases | Winner's + loser's + the loser's title and slug, so the old name still finds the page |
+| Body links | Every markdown link and `[[wikilink]]` to the loser rewritten to the winner |
+| The loser | Deleted, in the same commit |
+
+Retargeting is the one place merge must **not** reuse `Service.delete_wiki_page`,
+which drops inbound relations. Dropping them here would discard exactly the
+knowledge the merge exists to preserve.
+
+**Prose is fixed by the loop, not by a new mechanism.** A mechanical merge stacks
+two definitions under one heading: correct, and badly written. The survivor
+carries `merged_from: [<loser-slug>]` — an unknown key, so OKF round-trips it
+untouched — which raises `page/unmerged-prose` until a lint run rewrites the
+sections into one voice and clears the marker. The thing that notices and the
+thing that fixes it are the loop that already runs.
+
+**Nothing gates a merge in `auto` but git.** Each merge is its own substrate
+commit naming both pages, and that commit is the undo. Ruled deliberately, with
+the cost stated: a wrong merge stays wrong until somebody notices, and nobody
+reads a wiki looking for absences. The audit trail in §8.3 and the maintenance
+page in §11.3 exist because of this choice, not beside it.
 
 ---
 
@@ -642,7 +728,12 @@ GET    /api/programs/{pid}/wiki/pages                 list
 GET    /api/programs/{pid}/wiki/pages/{slug}          page + backlinks + relations + provenance
 GET    /api/programs/{pid}/wiki/search?q=             keyword search
 GET    /api/programs/{pid}/wiki/log                   log.md
-GET    /api/programs/{pid}/wiki/lint                  latest report + live findings
+GET    /api/programs/{pid}/wiki/lint                  filed reports + live findings
+GET    /api/programs/{pid}/wiki/activity              what recent runs did      (phase 3)
+GET    /api/programs/{pid}/wiki/merges                pending proposals         (phase 3)
+POST   /api/programs/{pid}/wiki/merges/{mid}/accept   apply it now              (phase 3)
+POST   /api/programs/{pid}/wiki/merges/{mid}/reject   drop it, never re-propose (phase 3)
+POST   /api/programs/{pid}/wiki-merge-policy          set auto|propose          (phase 3)
 POST   /api/programs/{pid}/wiki/run                   force a run  {kind: ingest|lint}
 POST   /api/programs/{pid}/wiki/unquarantine          clear quarantined objects
 POST   /api/programs/{pid}/wiki/pages/{slug}/verify   append {by: human:<user>, at: now}
@@ -658,7 +749,13 @@ root after symlink resolution**, exactly as `artifacts.resolve_sources` and
 
 `summary` returns: page counts by type, trust-tier breakdown, pending-object
 count, quarantined ids, `last_run`, `run` (if in flight), `ingests_since_lint`,
-lint error/warning counts, and `index.md` rendered.
+lint error/warning counts, the merge policy and pending-proposal count, and
+`index.md` rendered.
+
+`/wiki/lint` serves both halves: the live findings, recomputed on the request and
+**never autofixed** (a GET that mutates the bundle is not a GET), and the agent's
+own filed summaries from `.wiki/lint/<date>.md`. Only the first half existed after
+phase 2.
 
 ### 11.2 Browse UI — `/programs/:id/wiki`
 
@@ -680,7 +777,38 @@ Three panes, in the Obsidian idiom, reusing what exists:
 `ProgramDetail` gains an "open wiki →" link beside ideas and artifacts, with the
 pending-object count as a badge.
 
-### 11.3 Graph UI — `/programs/:id/wiki/graph` (phase 4)
+### 11.3 Maintenance UI — `/programs/:id/wiki/lint` (phase 3)
+
+Phase 2's browse view answers *what does this wiki know*. This one answers *is it
+being looked after* — and under §9.1's git-is-the-only-guard ruling, that is the
+question standing between a wrong merge and nobody noticing.
+
+`WikiLintView`, one route, three sections:
+
+- **Activity** — what recent runs did, newest first, from `state["runs"]`. Each
+  merge names both pages and links to the substrate commit that performed it. This
+  is the section the ruling in §9.1 depends on.
+- **Reports** — the agent's own filed summaries (`.wiki/lint/<date>.md`), rendered.
+  What it thought it was doing, in its own words, beside what it actually did.
+- **Findings** — live lint output grouped by rule, each linking to its page.
+
+**Proposals** appear as a fourth section only when the program's policy is
+`propose`: a card per proposal with the agent's `why`, both pages linked, and
+Accept / Reject. Accept applies immediately (§9.1) — the wiki is never left in a
+state where a human approved something and nothing happened. Reject records the pair in
+`merges_refused` (§8.3) so no later run re-proposes what a human already turned
+down.
+
+Findings are also surfaced **where you are reading**: a strip in the browse view's
+centre pane carrying the findings for that page. The maintenance page answers "is
+this wiki healthy"; the strip answers "is *this page* sound", and a reader curating
+a page should not have to leave it to find out.
+
+The **merge policy** control sits in the wiki header beside the model picker, and
+in `ProgramSettingsModal` beside `wiki_model` / `wiki_enabled`. It is a program
+field, `wiki_merge`, defaulting to `auto`.
+
+### 11.4 Graph UI — `/programs/:id/wiki/graph` (phase 4)
 
 Force-directed. Filters by node type, relation type and trust tier; a
 **typed-only toggle** (the visible half of approach C); orphans highlighted;
@@ -697,6 +825,7 @@ src/coscience/
   wiki_okf.py       OKF frontmatter model + conformance checks              (pure)
   wiki_graph.py     graph construction                                     (pure)
   wiki_lint.py      lint rules + mechanical fixes                          (pure)
+  wiki_merge.py     plan a merge of two pages into one           (pure, phase 3)
   wiki_prompts.py   instruction rendering                                  (pure)
   wiki_agent.py     launch / poll / collect a detached run   ← the ONLY side-effecting seam
   wiki.py           beat(): the §8.4 state machine; called by Dispatcher
@@ -719,6 +848,7 @@ Frontend:
 
 ```
 frontend/src/views/WikiView.tsx          browse            (phase 2)
+frontend/src/views/WikiLintView.tsx      maintenance       (phase 3)
 frontend/src/views/WikiGraphView.tsx     graph             (phase 4)
 frontend/src/components/wikiPage.ts      pure: link rewriting, backlinks   + test
 frontend/src/components/wikiGraph.ts     pure: graph → xyflow nodes/edges  + test
@@ -817,7 +947,7 @@ gets its own implementation plan.
 |---|---|---|
 | **1 — Store & ingest** | `wiki_store`, `wiki_okf`, `wiki_prompts`, `wiki_agent`, `wiki.beat` wired into `Dispatcher`, `agent_stream` extraction, `Program.wiki_model` / `wiki_enabled`, bundle `CLAUDE.md` template, `wiki_lint` as a CLI-only script, `coscience wiki --once` | a real program's results and artifacts produce a valid, linted bundle from the CLI |
 | **2 — Browse** | Service methods, endpoints, `WikiView`, curation actions, provenance chips, `ProgramDetail` link | **first milestone**: you can read the wiki in the dashboard and mark pages verified |
-| **3 — Lint runs** | agent lint mode, lint cadence live, report UI, quarantine retry | the wiki self-maintains |
+| **3 — Lint runs** | *(agent lint mode, the cadence and quarantine retry shipped with phase 1.)* `merges` given a shape; `wiki_merge` module; `Service.merge_wiki_pages`; auto-apply at collect vs. human-approved apply; `page/unmerged-prose` and the prose pass; `state["runs"]` audit trail; `/wiki/lint` serving filed reports; `WikiLintView`; the in-page findings strip; `Program.wiki_merge` | the wiki self-maintains: duplicates it finds actually get merged, and you can see what it did |
 | **4 — Graph** | `wiki_graph`, endpoint, `WikiGraphView`, `d3-force`, provenance backlinks on SprintDetail / ArtifactDetail | you can explore the concept graph and click through to evidence |
 | **5 — Ask & research** | wiki-scoped chat thread, research/gap-analysis run mode, `QUESTIONS.md` flow, MCP `wiki_search` / `wiki_read` / `wiki_neighbors`, "consult the wiki first" in the sprint worker prompt | agents and humans both query the wiki instead of the raw pile |
 
