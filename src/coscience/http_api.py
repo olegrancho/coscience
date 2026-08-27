@@ -96,6 +96,10 @@ class WikiNotesIn(BaseModel):
     text: str
 
 
+class WikiMergePolicyIn(BaseModel):
+    policy: str
+
+
 class SprintPatch(BaseModel):
     goals: str | None = None
     plan: list[str] | None = None
@@ -677,6 +681,14 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def wiki_lint_report(program_id: str) -> dict:
         return service.wiki_lint_report(program_id)
 
+    @api.get("/programs/{program_id}/wiki/activity")
+    def wiki_activity(program_id: str) -> list[dict]:
+        return service.wiki_activity(program_id)
+
+    @api.get("/programs/{program_id}/wiki/merges")
+    def list_wiki_merges(program_id: str) -> list[dict]:
+        return service.list_wiki_merges(program_id)
+
     # Registered last of the wiki GETs: a literal path like /wiki/pages must not
     # be swallowed by the {slug:path} pattern.
     @api.get("/programs/{program_id}/wiki/pages/{slug:path}")
@@ -737,6 +749,20 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.delete_wiki_page(program_id, slug)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"page not found: {slug}")
+
+    @api.post("/programs/{program_id}/wiki/merges/{merge_id}/accept")
+    def accept_wiki_merge(program_id: str, merge_id: str) -> dict:
+        try:
+            return service.accept_wiki_merge(program_id, merge_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"no such proposal: {merge_id}")
+
+    @api.post("/programs/{program_id}/wiki/merges/{merge_id}/reject")
+    def reject_wiki_merge(program_id: str, merge_id: str) -> dict:
+        try:
+            return service.reject_wiki_merge(program_id, merge_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"no such proposal: {merge_id}")
 
     @api.get("/programs/{program_id}/artifact-tags")
     def list_artifact_tags(program_id: str,
@@ -901,6 +927,15 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.set_program_wiki_enabled(program_id, body.enabled)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.post("/programs/{program_id}/wiki-merge-policy")
+    def set_program_wiki_merge(program_id: str, body: WikiMergePolicyIn) -> dict:
+        try:
+            return service.set_program_wiki_merge(program_id, body.policy)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     @api.post("/programs/{program_id}/workdir")
     def set_program_workdir(program_id: str, body: ProgramWorkdirIn) -> dict:
