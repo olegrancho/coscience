@@ -118,6 +118,12 @@ _HOUSEKEEPING = """## Before you finish
   "objects": ["result:r1"], "merges": [], "notes": "one or two sentences"}}
 ```
 
+   `objects` is the list of object ids from this run's batch that you actually
+   covered: exactly as given above, and only the ones you finished. Anything you
+   leave out comes back to you in a later run, so leaving one out is the honest
+   way to do fewer objects well.
+   Never list an id you were not given, and never put page paths in `objects`.
+
    `merges` is how you report two pages that are the same idea. You never merge
    them yourself and you never delete a page — the platform performs the merge,
    either immediately or after a human approves it. Each entry is:
@@ -128,12 +134,6 @@ _HOUSEKEEPING = """## Before you finish
    Both are bundle-relative page paths, not slugs. Never propose a `sources/`
    page: a source page stands for one real object and is bound to it. If you
    have nothing to propose, write `[]`.
-
-   `objects` is the list of object ids from this run's batch that you actually
-   covered: exactly as given above, and only the ones you finished. Anything you
-   leave out comes back to you in a later run, so leaving one out is the honest
-   way to do fewer objects well.
-   Never list an id you were not given, and never put page paths in `objects`.
 """
 
 

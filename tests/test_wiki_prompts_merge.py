@@ -20,7 +20,8 @@ def test_the_lint_document_defines_the_merges_shape():
 def test_the_merges_shape_uses_page_paths_not_slugs():
     """A slug is ambiguous across directories; page/duplicate-slug exists because
     of it. The consumer resolves paths."""
-    assert "concepts/" in _doc().split('"merges"', 1)[1][:400]
+    doc = _doc()
+    assert "concepts/compute-lease.md" in doc and "concepts/job-lease.md" in doc
 
 
 def test_the_lint_document_asks_for_the_prose_pass():
