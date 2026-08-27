@@ -1,4 +1,5 @@
 import { MantineProvider } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -146,6 +147,25 @@ describe("WikiLintView proposals", () => {
     await waitFor(() => expect(accept).toHaveBeenCalledWith("p1", "m0001"));
   });
 
+  it("surfaces the merge commit once Accept resolves", async () => {
+    /* F10: service.accept_wiki_merge already returns the commit SHA on the
+     * PROPOSE path — the one path where a human personally authorises a
+     * destructive merge — and the HTTP route passes it through. Discarding
+     * it here throws away the one thing spec 9.1 says is the undo, on
+     * exactly the path where a human is watching for confirmation. Same
+     * spy-on-notifications.show pattern as ProgramDetail.test.tsx, since the
+     * toast portal itself isn't mounted in this harness. */
+    vi.spyOn(api, "acceptWikiMerge").mockResolvedValue(
+      { applied: true, winner: "concepts/compute-lease.md", loser: "concepts/job-lease.md",
+        rewritten: [], commit: "abc1234def5678" } as never);
+    const show = vi.spyOn(notifications, "show").mockImplementation(() => "" as never);
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: /accept/i }));
+    await waitFor(() => expect(show).toHaveBeenCalled());
+    const n = show.mock.calls[show.mock.calls.length - 1][0] as { message?: string };
+    expect(String(n.message)).toMatch(/abc1234/);
+  });
+
   it("rejects a proposal by id", async () => {
     const reject = vi.spyOn(api, "rejectWikiMerge")
       .mockResolvedValue({ rejected: [] } as never);
@@ -185,6 +205,11 @@ describe("WikiLintView proposals", () => {
   it("says nothing is waiting when there are no proposals", async () => {
     vi.spyOn(api, "listWikiMerges").mockResolvedValue([] as never);
     mount();
+    // Without this await the component is still rendering its <Loader/> (the
+    // activity/lint queries haven't resolved yet), so the assertion below
+    // would pass against an implementation that renders every proposal
+    // unconditionally — it just hasn't rendered anything yet.
+    await screen.findByText(/nothing has run/i);
     expect(screen.queryByTestId("merge-proposal")).toBeNull();
   });
 });

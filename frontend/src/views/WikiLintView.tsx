@@ -1,4 +1,5 @@
 import { Badge, Button, Card, Group, Loader, Stack, Text } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import Md from "../components/Md";
@@ -63,8 +64,20 @@ export default function WikiLintView() {
     qc.invalidateQueries({ queryKey: ["wiki-merges", id] });
     qc.invalidateQueries({ queryKey: ["wiki-activity", id] });
   };
-  const accept = useMutation({ mutationFn: (mid: string) => api.acceptWikiMerge(id, mid),
-                               onSuccess: invalidateProposals });
+  // On the PROPOSE path a human just personally authorised a destructive
+  // merge (spec 9.1) — service.accept_wiki_merge already returns the commit
+  // that is its undo, so this is the one place that SHA must reach a reader
+  // rather than be thrown away.
+  const accept = useMutation({
+    mutationFn: (mid: string) => api.acceptWikiMerge(id, mid),
+    onSuccess: (out) => {
+      invalidateProposals();
+      if (out.applied && out.commit) {
+        notifications.show({ color: "teal", title: "Merge applied",
+                             message: `Commit ${out.commit.slice(0, 7)}` });
+      }
+    },
+  });
   const reject = useMutation({ mutationFn: (mid: string) => api.rejectWikiMerge(id, mid),
                                onSuccess: invalidateProposals });
 

@@ -495,7 +495,8 @@ export const api = {
     fetch(`/api/programs/${id}/wiki/merges`).then(j<WikiMergeProposal[]>),
   acceptWikiMerge: (id: string, mid: string) =>
     fetch(`/api/programs/${id}/wiki/merges/${mid}/accept`, { method: "POST" })
-      .then(j<{ applied: boolean; winner: string; loser: string; rewritten: string[] }>),
+      .then(j<{ applied: boolean; winner: string; loser: string; rewritten: string[];
+               commit?: string }>),
   rejectWikiMerge: (id: string, mid: string) =>
     fetch(`/api/programs/${id}/wiki/merges/${mid}/reject`, { method: "POST" })
       .then(j<{ rejected: string[] }>),
