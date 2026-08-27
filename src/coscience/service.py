@@ -1756,6 +1756,32 @@ class Service:
         self.substrate.commit(f"wiki {program_id}: deleted {rel}")
         return {"deleted": rel, "relations_dropped": dropped}
 
+    def merge_wiki_pages(self, program_id: str, winner: str, loser: str) -> dict:
+        """Fold `loser` into `winner`, rewrite everything that pointed at it, and
+        delete it — in one commit.
+
+        Deliberately NOT built on delete_wiki_page: that drops inbound relations,
+        which is right for a deletion and wrong here. A merge retargets them, or
+        it discards exactly the knowledge it exists to preserve (spec 9.1).
+
+        Nothing gates this in `auto` but git, so the commit is the undo and names
+        both pages."""
+        from coscience import wiki_merge, wiki_store
+        win = self._load_wiki_page(program_id, _strip_md(winner))
+        lose = self._load_wiki_page(program_id, _strip_md(loser))
+        others = [p for p in self._wiki_pages(program_id)
+                  if p.path not in (win.path, lose.path)]
+        result = wiki_merge.plan(win, lose, others)      # ValueError on a refusal
+
+        wiki_store.write_page(self.substrate, program_id, result.winner)
+        for page in result.rewritten:
+            wiki_store.write_page(self.substrate, program_id, page)
+        self.wiki_page_path(program_id, _strip_md(loser)).unlink()
+        self.substrate.commit(
+            f"wiki {program_id}: merged {result.loser_path} into {result.winner.path}")
+        return {"winner": result.winner.path, "loser": result.loser_path,
+                "rewritten": [p.path for p in result.rewritten]}
+
     def set_wiki_human_notes(self, program_id: str, slug: str, text: str) -> dict:
         """Replace the protected `# Human notes` section, and nothing else.
 
@@ -1766,6 +1792,13 @@ class Service:
         page.body = _replace_section(page.body, "Human notes", text)
         return self._save_wiki_page(program_id, page,
                                     f"wiki {program_id}: human notes on {slug}")
+
+
+def _strip_md(path: str) -> str:
+    """Page paths cross the API as `concepts/a.md`; the guarded loaders take a
+    slug without the extension. One place to convert, so the guard is never
+    accidentally bypassed by a caller that forgot."""
+    return path[:-3] if path.endswith(".md") else path
 
 
 def _replace_section(body: str, heading: str, text: str) -> str:
