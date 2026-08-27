@@ -90,6 +90,21 @@ describe("WikiView header and tree", () => {
     expect(select.disabled).toBe(true);
   });
 
+  it("says who forced a run in flight, and says nothing when nobody did", async () => {
+    vi.spyOn(api, "getWikiSummary").mockResolvedValue(
+      { ...summary, run: { id: "r2", kind: "ingest", forced_by: "human:stroganov" } } as never);
+    // Mantine puts the title on the badge root and the text in a child span, so
+    // query the title itself rather than reading it off whatever matched "running".
+    const { unmount } = mount();
+    expect(await screen.findByTitle(/forced by human:stroganov/)).toBeTruthy();
+    unmount();
+
+    vi.spyOn(api, "getWikiSummary")
+      .mockResolvedValue({ ...summary, run: { id: "r2", kind: "ingest" } } as never);
+    mount();
+    expect(await screen.findByTitle(/scheduled beat/i)).toBeTruthy();
+  });
+
   it("marks a stale page", async () => {
     mount();
     await screen.findByText("Beta");

@@ -1693,13 +1693,17 @@ class Service:
         return self._save_wiki_page(program_id, page,
                                     f"wiki {program_id}: {slug} status {status}")
 
-    def run_wiki(self, program_id: str, kind: str = "ingest", agent=None) -> dict:
+    def run_wiki(self, program_id: str, kind: str = "ingest", agent=None,
+                 by: str | None = None) -> dict:
         """Force one wiki beat now.
 
         The usage gate is forced open: a human pressing the button is a stronger
         signal than the gate, which exists to stop *unattended* loops burning a
         window. `kind="lint"` pushes ingests_since_lint to the threshold and lets
-        beat() decide, rather than adding a second definition of what a run is."""
+        beat() decide, rather than adding a second definition of what a run is.
+
+        `by` is the actor the caller resolved from the session, recorded on the
+        run because a forced run spends a Claude window on someone's say-so."""
         from coscience import wiki, wiki_store
         if kind not in ("ingest", "lint"):
             raise ValueError(f"kind must be ingest or lint: {kind}")
@@ -1710,7 +1714,7 @@ class Service:
                                                   wiki.lint_every())
         real = agent if agent is not None else self._wiki_agent()
         line = wiki.beat(self.substrate, program, time.time(), real,
-                         usage_gate=lambda: True)
+                         usage_gate=lambda: True, forced_by=by)
         return {"line": line or "wiki: nothing to do"}
 
     def _wiki_agent(self):

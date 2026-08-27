@@ -5,11 +5,12 @@ machine or another.
 **Branch:** `feat/program-wiki`
 **Design:** `docs/superpowers/specs/2026-08-20-program-wiki-design.md` — the
 authoritative *what and why*. This file is the *where we are and how to work*.
-**Last updated:** 2026-08-21 · by: Claude Opus 5 (RBS-138384 → aish-sandbox dev)
-· state: phase 1 **done** on `feat/program-wiki` (HEAD `4840531`, 1037 tests
-green). All 3 Important review findings fixed; the live end-to-end run has been
-performed and verified, including the Obsidian vault check. Still **not merged
-and not deployed** — both need the human's explicit go-ahead.
+**Last updated:** 2026-08-26 · by: Claude Opus 5 (Avatar) · state: phases 1 and 2
+**both done** on `feat/program-wiki` (1129 backend / 156 frontend tests green).
+The first milestone — ingest + browse — is complete: a live bundle has been
+ingested, browsed by hand and curated. Still **not merged and not deployed**;
+both need the human's explicit go-ahead, and the human has said *not yet*.
+**Phase 3 (lint runs) is the work in progress.**
 **Start here if you are picking this up:** `docs/knowledge/NEXT.md`
 
 > **Keep this file current.** It is the only handoff surface. Before you stop —
@@ -49,14 +50,42 @@ Update this table as you go. One row per phase from the design's §15.
 | — | Design spec | **done**, approved |
 | — | Implementation plan (`superpowers:writing-plans`) | **done** — `docs/superpowers/plans/2026-08-20-program-wiki-phase-1.md` |
 | 1 | Store & ingest — `wiki_store`, `wiki_okf`, `wiki_prompts`, `wiki_agent`, `wiki.beat`, `agent_stream` extraction, `wiki_lint` as CLI, `coscience wiki --once` | **done** — 25 commits, HEAD `4840531`, 1037 tests green. All 3 review findings fixed (`final-fix-report.md`); live end-to-end run performed 2026-08-21 and verified, Obsidian vault included. **Not merged, not deployed.** Three defects the live run exposed are open — see below |
-| 2 | Browse — endpoints, `WikiView`, curation actions, provenance chips *(**first milestone** ends here)* | **next** |
-| 3 | Lint runs — agent lint mode, cadence, report UI, quarantine retry | not started |
+| 2 | Browse — endpoints, `WikiView`, curation actions, provenance chips *(**first milestone** ends here)* | **done** — 16 commits, HEAD `975cb25`. Suites green; the manual pass was performed on a live bundle and its findings fixed. **Not merged, not deployed** |
+| 3 | Lint runs — agent lint mode, cadence, report UI, quarantine retry | **next** — more of it already exists than the spec's row implies; see §2's phase-3 note |
 | 4 | Graph — `wiki_graph`, `d3-force`, `WikiGraphView`, provenance backlinks | not started |
 | 5 | Ask & research — wiki chat, research runs, `QUESTIONS.md`, MCP tools | not started |
 
-**Phase 1 is done, and the definition of done was met by a real run.** The full
-record (decision log, review, deferred items, fix brief, fix report) is in
-`docs/knowledge/phase-1-record/`; the running order is `docs/knowledge/NEXT.md`.
+**Phases 1 and 2 are done, and each met its definition of done against a real
+bundle** — phase 1 by a live ingest, phase 2 by a human reading and curating what
+that ingest produced. Phase 1's full record (decision log, review, deferred items,
+fix brief, fix report) is in `docs/knowledge/phase-1-record/`; phase 2's is the
+execution record at the end of
+`docs/superpowers/plans/2026-08-21-program-wiki-phase-2.md`. The running order for
+whoever picks this up is `docs/knowledge/NEXT.md`.
+
+### What phase 3 still has to build (2026-08-26)
+
+The spec's §15 row for phase 3 reads as four things. Three of them are already on
+this branch, built in phase 1 and exercised by the suite:
+
+- **agent lint mode** — `wiki_prompts.render_lint`, and `wiki.beat` launches
+  `kind="lint"` with a machine report produced by `_lint_report`.
+- **the cadence** — `ingests_since_lint` counts up in `_collect` and `lint_every()`
+  is the threshold; a lint run that collects `ok` resets it, a failed one stays
+  owed. `_file_lint_report` files the agent's summary under `.wiki/lint/<date>.md`.
+- **quarantine retry** — `Service.unquarantine_wiki`, the endpoint, and the
+  "Retry quarantined" banner in `WikiView`.
+
+What is genuinely missing is the **report UI** — `api.wikiLintReport` and
+`GET /wiki/lint` exist and are wired to nothing; the header shows only
+`lint NE / NW`, so a reader can see that there are findings but not what they are,
+and the filed `.wiki/lint/<date>.md` summaries are unreachable from the dashboard
+(`GET /wiki/log` serves the bundle's `log.md`, not those) — and **proof that the
+cadence fires on a real substrate**, which no test can give because the suite never
+launches an agent. Plan phase 3 against that gap, not against the spec row. Note
+`wiki_lint` now carries 22 rule ids, the spec's 20 plus the two `human-notes/`
+rules from `b33be05`; diff the table against the code rather than trusting a count
+in prose.
 
 ### What the first live run actually did (2026-08-21)
 
@@ -85,44 +114,61 @@ coherent pages without thrashing. Sonnet was sufficient; there is no evidence ye
 that Opus is needed for ingest. The run cost ~6 minutes of wall clock, so the
 dispatch cadence does not need to allow for long ingests.
 
-### Three defects the live run exposed — one fixed, two open
+### What the two live passes exposed, and where each landed
 
-1. **The wikilink autofix never fired on what agents actually write — FIXED.**
-   `wiki_lint.autofix` resolved `[[x]]` through `by_slug = {p.slug: p.path}`, a
-   *bare slug* lookup. The agent wrote `[[concepts/session-based-attribution]]`, a
-   *path*, so the lookup missed, `continue` fired, and the link was left alone —
-   all 19 wikilinks in the run were skipped, and a `--fix` pass reported success
-   while changing nothing. `wiki_lint._wikilink_index` now maps the bare slug, the
-   bundle path, and the path without `.md`; callers strip a leading `/` and a
-   trailing `.md` first. Verified on the run's own bundle: **19 warnings → 0**,
-   4 pages rewritten. Rewrites are labelled with the target's slug, deliberately,
-   rather than echoing a whole path at the reader.
-2. **The agent wrote into `# Human notes`.** That section is declared protected —
-   reproduce byte for byte, it outranks agent prose. The agent put its footnote
-   definitions there (`[^c13]: sources[c13] — …`). Harmless on a new page with no
-   human content, but every later run must now preserve the agent's own footnote
-   as though a human wrote it, and the human-notes lint rule did not flag it.
-   Either the prompt must name a different home for footnote definitions, or the
-   rule must catch an agent writing into that section on a page it just created.
-3. **`substrate.commit()` is repo-wide.** `substrate.py:549` runs `git add -A`,
-   so `.coscience/wiki.lock` was swept into the wiki's own commit. Pre-existing
-   platform behaviour, not introduced by the wiki, but it makes the plan's "nothing
-   outside `programs/<pid>/` changed" weaker than stated: a wiki run does not
-   *write* elsewhere, but its commit *records* whatever else happened to be dirty.
-   On a substrate with concurrent sprint work, unrelated changes land under a
-   message reading `wiki …`. Path-scoped commits are the fix and are a platform
-   change, not a wiki one.
+Phase 1's ingest and phase 2's manual browse each surfaced defects. All of them
+are closed except one, which is deferred by decision.
+
+1. **The wikilink autofix never fired on what agents actually write — FIXED
+   (phase 1).** `wiki_lint.autofix` resolved `[[x]]` through `by_slug = {p.slug:
+   p.path}`, a *bare slug* lookup. The agent wrote `[[concepts/session-based-
+   attribution]]`, a *path*, so the lookup missed, `continue` fired, and the link
+   was left alone — all 19 wikilinks in the run were skipped, and a `--fix` pass
+   reported success while changing nothing. `wiki_lint._wikilink_index` now maps
+   the bare slug, the bundle path, and the path without `.md`; callers strip a
+   leading `/` and a trailing `.md` first. Verified on the run's own bundle:
+   **19 warnings → 0**, 4 pages rewritten.
+2. **The agent wrote into `# Human notes` — FIXED (`b33be05`).** It was putting
+   its footnote definitions there, because markdown convention puts them at the
+   end of a file and the page template ended with that heading. The template now
+   shows `# References` before it, `wiki_prompts` says so explicitly, and two lint
+   rules catch it from either direction: `human-notes/footnote-definition` needs
+   no previous revision so it also finds pages already written that way, and
+   `human-notes/machine-written` catches the general case against the previous
+   body. Re-ingesting the test program under the new prompt took lint from 12
+   errors to zero findings of any severity.
+3. **The pages read like extraction notes, not like a wiki — FIXED (`b33be05`).**
+   Not a defect in the code: the prompt carried detailed rules on structure and
+   not one word on writing for a reader, while passes 1–3 explicitly produce
+   compressed notes. `_VOICE` now states the standard — open with a definition a
+   newcomer can use, expand every term on first use, say what a number *means*.
+   It goes into the lint document as well as the ingest one, because a lint run
+   rewrites pages too.
+4. **Three read-path defects from the first browse — FIXED (`9b18510`,
+   `975cb25`).** `index.md`'s OKF frontmatter was served raw and rendered as the
+   page's largest heading; every `cited from` chip was unroutable because
+   `provenance_ref` did not know the `/sources/result-<id>.md` spelling the bundle's
+   own `CLAUDE.md` tells the agent to write; `human_notes` returned the footnote
+   definitions sitting in the protected section, offering machine text to a human
+   to save over. Plus the index pane rendering links through a bare `<Md>` with no
+   components override — every link on the landing page was a raw browser
+   navigation — and `isInternalLink("#user-content-fn-c1")` being true, which sent
+   every footnote marker to the wiki index instead of down the page.
+5. **`substrate.commit()` is repo-wide — OPEN, DEFERRED BY DECISION
+   (2026-08-26).** `substrate.py:549` runs `git add -A`, so a wiki commit records
+   whatever else happened to be dirty. Phase 2 makes this more visible, not worse:
+   every curation click commits. It is **pre-existing platform behaviour, not a
+   wiki bug**, and path-scoped commits are a platform change touching every writer
+   — sprints, results, artifacts — so it does not belong inside the wiki's phases.
+   Ruled: leave it, and do not let it block the merge. Revisit it as its own task
+   when someone runs concurrent sprint work against a substrate whose history has
+   to stay legible.
 
 Two smaller notes, neither a defect. The mechanical fix writes body links
 bundle-absolute (`/concepts/x.md`); Obsidian resolves those, but GitHub and VS Code
 preview will not — the bundle is portable to Obsidian, not to every renderer.
 And `.wiki/state.json` is written *after* `substrate.commit()`, so a run's state
 update always lands in the *following* commit rather than its own.
-
-Uncommitted files in the working tree (`frontend/src/styles.css`,
-`ProgramDetail.tsx`, `SprintDetail.tsx`, `PageToc.tsx`, `frontend/.coscience/`,
-`docs/_tmp_wiki/`) are **someone else's in-flight work carried over from `main`.
-Do not commit them.** Stage explicit paths; never `git add -A`.
 
 ---
 
@@ -154,7 +200,10 @@ Do not commit them.** Stage explicit paths; never `git add -A`.
   the **substrate**. Code deploys never touch it. Confusing the two is the single
   most damaging mistake available here.
 - **Never commit or push without explicit approval.** Ask. Every time.
-- **Never `git add -A`** on this branch (see §2).
+- **Stage explicit paths, never `git add -A`.** The carried-over frontend work
+  that made this a hard rule landed on `main` and was merged in (`fe0c125`), so
+  the tree is no longer a minefield — but the substrate's own `commit()` still
+  sweeps (§2 item 5), and the habit is what keeps a wiki commit about the wiki.
 - **Linux-only runtime** — `/proc`, `os.killpg`, `fcntl`. Do not add code paths
   that assume otherwise, and do not "fix" the platform checks.
 - **`npm run build` on every deploy**, even for python-only changes. The
@@ -243,6 +292,12 @@ you believe a decision is wrong, say so to the user and add a row here.
 | Quarantine after 3 failures | Without it, one malformed object silently wedges a program's wiki forever, and the symptom — nothing happening — is invisible. |
 | Trust is derived from OKF `verified`, not a hand-rolled `status` enum | An earlier draft conflated lifecycle and trust in one field. They are orthogonal. |
 | `# Human notes` is a protected section, enforced by lint | It is the only way "read + curate" survives re-ingest. Prompt-only enforcement is not enforcement. |
+| Footnote definitions go under `# References`, above `# Human notes` | Markdown convention puts them at the end of the file, so a template ending in the protected heading was *asking* the agent to write there. Moving the target is cheaper and more reliable than forbidding the habit; the two lint rules exist because prompts are not enforcement. |
+| The ingest prompt carries a voice standard (`_VOICE`), not only a structure spec | The first live bundle was correct and unreadable. Passes 1–3 produce compressed notes and nothing told the agent to turn them into prose; a rule about structure cannot ask for one. |
+| Planning and wiki writing get independent model dials (`wiki_model`) | They are different jobs. Sonnet was sufficient for ingest on the first live run; forcing the planner's model on it would spend Opus on extraction. The picker locks during a run because the model is captured at launch. |
+| The wiki route gets its own 1360px canvas, outside the app shell's 980px measure | 980px is right for a document read top to bottom and wrong for a browser: two rails plus gaps left the reading column 448px. Three panes at 260/1fr/320 put it at ~730px, about 72 characters. |
+| A forced run records `forced_by`; an unattended beat records nothing | `POST /wiki/run` spends a Claude window on someone's say-so, and the run should say whose. Access was never the gap — the `api` router gates the route like every other — attribution was. Built server-side, like `verify`'s actor, so a request cannot name someone else. |
+| `substrate.commit()`'s repo-wide `git add -A` stays, for now | Path-scoped commits touch every writer on the platform, not just the wiki. Deferring it is a scope call, not a judgement that it is fine; see §2 item 5. |
 
 ---
 

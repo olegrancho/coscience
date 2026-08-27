@@ -49,3 +49,23 @@ def test_unquarantine_clears_the_list_and_says_what_it_cleared(wiki_bundle):
 def test_unquarantine_with_nothing_quarantined_is_a_no_op(wiki_bundle):
     substrate, _ = wiki_bundle
     assert Service(substrate.repo_root).unquarantine_wiki("p1")["cleared"] == []
+
+
+def test_a_forced_run_records_who_spent_the_quota(wiki_bundle):
+    """A forced run is the one wiki path a human can trigger, and it costs a
+    Claude window. The run entry says who asked for it; an unattended beat
+    leaves the field absent rather than claiming a person."""
+    substrate, _ = wiki_bundle
+    _seed_object(substrate)
+    Service(substrate.repo_root).run_wiki("p1", "ingest", agent=FakeWikiAgent(),
+                                          by="human:stroganov")
+    assert wiki_store.load_state(substrate, "p1")["run"]["forced_by"] == "human:stroganov"
+
+
+def test_an_unattended_beat_claims_nobody(wiki_bundle):
+    substrate, _ = wiki_bundle
+    _seed_object(substrate)
+    from coscience import wiki
+    wiki.beat(substrate, substrate.load_program("p1"), 1.0, FakeWikiAgent(),
+              usage_gate=lambda: True)
+    assert "forced_by" not in wiki_store.load_state(substrate, "p1")["run"]

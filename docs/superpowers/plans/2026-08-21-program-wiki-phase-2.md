@@ -2799,13 +2799,32 @@ to stop CRLF churn across synced machines. Python's `write_text` on Windows emit
 commit — so 8 files were briefly CRLF in the working tree. Use heredocs or an
 editor tool, not `pathlib.write_text`, when editing from Windows.
 
-## Still open
+## Still open — closed out 2026-08-26
 
-- The two phase-1 defects remain (an agent wrote into the protected
-  `# Human notes`; `substrate.commit()` is repo-wide via `git add -A`). The notes
-  editor built here writes that exact section, and every curation action commits.
-- `POST /wiki/run` still has no auth guard. `verify` is the only route reading the
-  session user. It spends Claude quota, so if forcing a run should require a
-  logged-in user, add `Depends(current_user)`.
-- Nothing here has been exercised against a real bundle in a browser. The suite
-  proves the wiring; it does not prove the view is pleasant to read.
+Nothing. Phase 2 is done. What this section listed, and where each went:
+
+- **The two phase-1 defects.** The agent writing into `# Human notes` is **fixed**
+  (`b33be05`): footnote definitions now have their own `# References` home, the
+  prompt says so, and two lint rules catch it from either direction. The repo-wide
+  `substrate.commit()` is **deferred by decision** — it is platform behaviour, not
+  wiki behaviour, and path-scoped commits touch every writer. Recorded in the
+  charter's §2 item 5 and its decision log.
+- **`POST /wiki/run` and authentication.** The premise was wrong: the route was
+  never unauthenticated. It hangs off the `api` router, which carries
+  `dependencies=[Depends(current_user)]` and 401s every route on it whenever a user
+  registry exists — `test_forcing_a_run_requires_a_logged_in_user` now pins that.
+  The real gap was **attribution**: a forced run spends a Claude window and the run
+  said nothing about whose say-so it was. It now records `forced_by`, built
+  server-side from the session like `verify`'s actor, and the running badge names
+  them. An unattended beat leaves the field absent rather than claiming a person.
+- **The manual browse.** **Done**, on a live bundle, in a session of its own. It
+  earned its keep: it found the four read-path defects fixed in `9b18510` and
+  `975cb25` — raw frontmatter rendered as the index's largest heading, unroutable
+  `cited from` chips, footnote definitions pre-filling the curation textarea, and a
+  reading column squeezed to 448px — none of which the 1280-test suite could see.
+  The plan document (`docs/knowledge/phase-2-ui-test-plan.md`) has been deleted now
+  that it has been executed; what it found lives in those commits and in the
+  charter's §2.
+
+The milestone is complete and **unmerged by choice**. Merge and deploy are the
+human's call and have not been given.

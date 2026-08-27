@@ -72,9 +72,14 @@ def _next_run_id(state: dict) -> str:
 
 
 def beat(substrate, program, now: float, agent, *,
-         usage_gate: Callable[[], bool] | None = None) -> str:
+         usage_gate: Callable[[], bool] | None = None,
+         forced_by: str | None = None) -> str:
     """One wiki beat for one program. Returns a short line for the dispatch beat
-    summary, or "" when there is nothing to say."""
+    summary, or "" when there is nothing to say.
+
+    `forced_by` names the human who pressed the button, and is recorded on the
+    run. An unattended beat passes None and the field stays absent, so the run
+    log never attributes a spent window to someone who was not there."""
     if program.status != ProgramStatus.ACTIVE or not program.wiki_enabled:
         return ""
 
@@ -125,6 +130,8 @@ def beat(substrate, program, now: float, agent, *,
         state["run"] = {"id": run_id, "kind": kind, "batch": batch, "token": token,
                         "started_at": now, "model": program.wiki_model,
                         "dirty_before": dirty_before}
+        if forced_by:
+            state["run"]["forced_by"] = forced_by
         return f"wiki: launched {kind} {run_id}" + (
             f" ({len(batch)} object{'s' if len(batch) != 1 else ''})" if batch else "")
 

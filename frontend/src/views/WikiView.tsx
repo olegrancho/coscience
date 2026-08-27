@@ -147,7 +147,12 @@ export default function WikiView() {
               last: {s.last_run.kind} {s.last_run.status}
             </Badge>
           )}
-          {s.run && <Badge variant="light" color="machine">running…</Badge>}
+          {s.run && (
+            <Badge variant="light" color="machine"
+                   title={s.run.forced_by
+                     ? `forced by ${s.run.forced_by}`
+                     : "scheduled beat"}>running…</Badge>
+          )}
         </Group>
       )}
 

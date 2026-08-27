@@ -73,3 +73,36 @@ def test_curating_a_missing_page_is_404(substrate):
     _seed(substrate)
     assert _client(substrate).post(
         "/api/programs/p1/wiki/pages/concepts/ghost/verify").status_code == 404
+
+
+def _with_users(substrate):
+    d = substrate.repo_root / ".coscience"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "users.yaml").write_text(
+        "users:\n  - username: stroganov\n    name: Oleg Stroganov\n    initials: OS\n")
+
+
+def test_forcing_a_run_requires_a_logged_in_user(substrate):
+    """The route spends a Claude window. It carries no exemption from the `api`
+    router's gate, and this test is what keeps it that way."""
+    _seed(substrate)
+    _with_users(substrate)
+    r = _client(substrate).post("/api/programs/p1/wiki/run", json={"kind": "ingest"})
+    assert r.status_code == 401
+
+
+def test_the_forcing_actor_is_built_server_side(substrate, monkeypatch):
+    _seed(substrate)
+    _with_users(substrate)
+    seen = {}
+
+    def fake_run_wiki(self, program_id, kind="ingest", agent=None, by=None):
+        seen["by"] = by
+        return {"line": "wiki: nothing to do"}
+
+    monkeypatch.setattr(Service, "run_wiki", fake_run_wiki)
+    c = _client(substrate)
+    c.post("/api/login", json={"username": "stroganov"})
+    # The client does not get to name the actor: `by` in the body is ignored.
+    c.post("/api/programs/p1/wiki/run", json={"kind": "ingest", "by": "human:someone-else"})
+    assert seen["by"] == "human:stroganov"

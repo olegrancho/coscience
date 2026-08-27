@@ -687,9 +687,16 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=404, detail=f"page not found: {slug}")
 
     @api.post("/programs/{program_id}/wiki/run")
-    def run_wiki(program_id: str, body: WikiRunIn) -> dict:
+    def run_wiki(program_id: str, body: WikiRunIn,
+                 user: "auth.User | None" = Depends(current_user)) -> dict:
+        # Access is the `api` router's gate, which 401s this route like any
+        # other whenever a user registry exists. What is resolved here is the
+        # actor: a forced run spends a Claude window, and the run should record
+        # whose say-so it was. Built server-side for the same reason `verify`
+        # builds its own — a request does not get to name someone else.
+        actor = f"human:{user.username}" if user else "human:anonymous"
         try:
-            return service.run_wiki(program_id, body.kind)
+            return service.run_wiki(program_id, body.kind, by=actor)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 

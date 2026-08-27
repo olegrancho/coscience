@@ -112,7 +112,9 @@ export interface WikiSummary {
   counts: Record<string, number>;
   trust: Record<WikiTrust, number>;
   pages: number; pending: number; quarantined: string[];
-  run: { id: string; kind: string } | null;
+  // forced_by is absent on an unattended beat: only a human pressing the button
+  // puts a name on the window it spends.
+  run: { id: string; kind: string; forced_by?: string } | null;
   last_run: { id: string; kind: string; status: string; at: number;
               pages_created: number; pages_updated: number; notes: string;
               escaped: string[] } | null;
