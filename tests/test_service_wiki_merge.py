@@ -57,6 +57,20 @@ def test_the_merge_is_its_own_commit_naming_both_pages(substrate):
     assert "concepts/a.md" in subject and "concepts/b.md" in subject
 
 
+def test_the_merge_reports_the_commit_it_made(substrate):
+    """git is the only guard on an automatic merge, so the SHA is the undo."""
+    import subprocess
+    _seed(substrate)
+    subprocess.run(["git", "init", "-q", str(substrate.repo_root)], check=True)
+    for k, v in (("user.email", "t@example.com"), ("user.name", "T")):
+        subprocess.run(["git", "-C", str(substrate.repo_root), "config", k, v], check=True)
+    out = Service(substrate.repo_root).merge_wiki_pages(
+        "p1", "concepts/a.md", "concepts/b.md")
+    head = subprocess.run(["git", "-C", str(substrate.repo_root), "rev-parse", "HEAD"],
+                          capture_output=True, text=True).stdout.strip()
+    assert out["commit"] == head
+
+
 def test_a_missing_page_is_not_found(substrate):
     _seed(substrate)
     with pytest.raises(NotFoundError):

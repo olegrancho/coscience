@@ -1795,10 +1795,10 @@ class Service:
         for page in result.rewritten:
             wiki_store.write_page(self.substrate, program_id, page)
         self.wiki_page_path(program_id, _strip_md(loser)).unlink()
-        self.substrate.commit(
+        sha = self.substrate.commit(
             f"wiki {program_id}: merged {result.loser_path} into {result.winner.path}")
         return {"winner": result.winner.path, "loser": result.loser_path,
-                "rewritten": [p.path for p in result.rewritten]}
+                "rewritten": [p.path for p in result.rewritten], "commit": sha}
 
     # --- wiki (phase 3: merge proposals, activity, policy) --------------------
 

@@ -786,8 +786,10 @@ question standing between a wrong merge and nobody noticing.
 `WikiLintView`, one route, three sections:
 
 - **Activity** — what recent runs did, newest first, from `state["runs"]`. Each
-  merge names both pages and links to the substrate commit that performed it. This
-  is the section the ruling in §9.1 depends on.
+  merge names both pages and names the substrate commit that performed it — the
+  short SHA shown, the full SHA on hover, so a reader can run `git -C <substrate>
+  show <sha>` (the substrate has no remote to link to). This is the section the
+  ruling in §9.1 depends on.
 - **Reports** — the agent's own filed summaries (`.wiki/lint/<date>.md`), rendered.
   What it thought it was doing, in its own words, beside what it actually did.
 - **Findings** — live lint output grouped by rule, each linking to its page.

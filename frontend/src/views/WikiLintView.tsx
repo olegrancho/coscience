@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { wikiHref } from "../components/wikiPage";
 import { AbsTime, BackLink, EmptyState } from "../components/ui";
-import { api, type WikiLintFinding } from "../api";
+import { api, type WikiLintFinding, type WikiRun } from "../api";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
@@ -32,6 +32,15 @@ function groupFindings(findings: WikiLintFinding[]): [string, WikiLintFinding[]]
  *  scanning a list of runs wants the name, not the directory. */
 function slugOf(path: string): string {
   return path.split("/").pop()?.replace(/\.md$/, "") ?? path;
+}
+
+/** A run's `merged` entries were `[loser, winner]` pairs before this change
+ *  started capturing the commit (spec 9.1); tolerate both shapes rather than
+ *  crash on state written before today, same spirit as the OKF parsers. */
+function normaliseMerge(
+  entry: WikiRun["merged"][number],
+): { loser: string; winner: string; commit?: string } {
+  return Array.isArray(entry) ? { loser: entry[0], winner: entry[1] } : entry;
 }
 
 /** This is the page that answers "is the wiki being looked after" — per the
@@ -136,11 +145,19 @@ export default function WikiLintView() {
                 </Group>
                 {r.merged.length > 0 && (
                   <ul style={{ margin: "6px 0 0" }}>
-                    {r.merged.map(([loser, winner], i) => (
+                    {r.merged.map(normaliseMerge).map(({ loser, winner, commit }, i) => (
                       <li key={i}>
                         <Text size="xs">
                           <b>{slugOf(loser)}</b> {"→"}{" "}
                           <Link to={wikiHref(id, winner)}><b>{slugOf(winner)}</b></Link>
+                          {commit && (
+                            <>
+                              {" "}
+                              <code className="mono" title={commit} style={{ fontSize: 11 }}>
+                                {commit.slice(0, 7)}
+                              </code>
+                            </>
+                          )}
                         </Text>
                       </li>
                     ))}

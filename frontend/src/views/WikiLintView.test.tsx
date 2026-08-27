@@ -84,6 +84,30 @@ describe("WikiLintView", () => {
     mount();
     expect(await screen.findByText(/nothing has run/i)).toBeTruthy();
   });
+
+  it("names the commit that performed each merge", async () => {
+    vi.spyOn(api, "getWikiActivity").mockResolvedValue([
+      { id: "r0002", kind: "lint", status: "ok", at: 1756200000,
+        pages_created: 0, pages_updated: 4,
+        merged: [{ loser: "concepts/job-lease.md", winner: "concepts/compute-lease.md",
+                   commit: "abc1234def5678" }] },
+    ] as never);
+    mount();
+    const row = (await screen.findAllByTestId("wiki-run"))[0];
+    expect(row.textContent).toContain("abc1234");        // short sha shown
+    expect(within(row).getByTitle(/abc1234def5678/)).toBeTruthy();   // full sha on hover
+  });
+
+  it("still renders a run recorded before commits were captured", async () => {
+    vi.spyOn(api, "getWikiActivity").mockResolvedValue([
+      { id: "r0001", kind: "lint", status: "ok", at: 1756100000,
+        pages_created: 0, pages_updated: 1,
+        merged: [["concepts/old-loser.md", "concepts/old-winner.md"]] },
+    ] as never);
+    mount();
+    const row = (await screen.findAllByTestId("wiki-run"))[0];
+    expect(row.textContent).toContain("old-winner");
+  });
 });
 
 describe("WikiLintView proposals", () => {

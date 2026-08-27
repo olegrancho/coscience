@@ -133,7 +133,9 @@ export interface WikiMergeProposal {
 export interface WikiRun {
   id: string; kind: string; status: string; at: number;
   pages_created?: number; pages_updated?: number;
-  merged: [string, string][];     // [loser, winner] pairs
+  // New shape names the commit that performed the merge (spec 9.1/11.3); old
+  // runs recorded before that were captured are still [loser, winner] pairs.
+  merged: ({ loser: string; winner: string; commit?: string } | [string, string])[];
 }
 export interface WikiPageRow {
   path: string; slug: string; type: string; title: string;

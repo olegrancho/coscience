@@ -44,6 +44,19 @@ def test_auto_applies_the_merge_at_collect(substrate):
     assert wiki_store.load_state(substrate, "p1")["merge_proposals"] == []
 
 
+def test_the_audit_trail_names_the_commit_for_each_merge(substrate):
+    import subprocess
+    program = _bundle(substrate, "auto")
+    subprocess.run(["git", "init", "-q", str(substrate.repo_root)], check=True)
+    for k, v in (("user.email", "t@example.com"), ("user.name", "T")):
+        subprocess.run(["git", "-C", str(substrate.repo_root), "config", k, v], check=True)
+    _finish(substrate, program, FakeWikiAgent(), _MERGE)
+    merged = wiki_store.load_state(substrate, "p1")["runs"][0]["merged"]
+    assert merged[0]["loser"] == "concepts/b.md"
+    assert merged[0]["winner"] == "concepts/a.md"
+    assert len(merged[0]["commit"]) >= 7
+
+
 def test_propose_queues_it_instead(substrate):
     program = _bundle(substrate, "propose")
     _finish(substrate, program, FakeWikiAgent(), _MERGE)
@@ -142,7 +155,8 @@ def test_every_run_is_recorded_in_the_audit_trail(substrate):
     _finish(substrate, program, FakeWikiAgent(), _MERGE)
     runs = wiki_store.load_state(substrate, "p1")["runs"]
     assert runs[0]["kind"] and runs[0]["status"] == "ok"
-    assert runs[0]["merged"] == [["concepts/b.md", "concepts/a.md"]]
+    assert runs[0]["merged"] == [{"loser": "concepts/b.md", "winner": "concepts/a.md",
+                                  "commit": ""}]
 
 
 def test_the_audit_trail_is_newest_first_and_capped(substrate):

@@ -548,11 +548,26 @@ class Substrate:
         (d / "ideas.md").write_text(serialize(fm, f"# Ideas {program_id}\n"))
 
     # --- git ---
-    def commit(self, message: str) -> None:
+    def commit(self, message: str) -> str:
+        """Commit everything currently dirty and return the SHA it created.
+
+        Returns "" when no new commit exists — either because this is not a
+        git repo, or because there was nothing to commit. Callers that name a
+        commit as the undo for something (e.g. a wiki merge, spec 9.1) must
+        never be handed a stale, unrelated HEAD."""
         if not (self.repo_root / ".git").is_dir():
-            return
+            return ""
+        before = subprocess.run(
+            ["git", "-C", str(self.repo_root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=False,
+        ).stdout.strip()
         subprocess.run(["git", "-C", str(self.repo_root), "add", "-A"], check=True)
         subprocess.run(
             ["git", "-C", str(self.repo_root), "commit", "-q", "-m", message],
             check=False,  # tolerate "nothing to commit"
         )
+        after = subprocess.run(
+            ["git", "-C", str(self.repo_root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=False,
+        ).stdout.strip()
+        return after if after and after != before else ""

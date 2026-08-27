@@ -255,8 +255,9 @@ def _names_a_source(substrate, program_id: str, winner: str, loser: str) -> bool
     return False
 
 
-def _handle_merges(substrate, program, state, report, run_id, now) -> list[list[str]]:
-    """Apply or queue what the agent proposed. Returns the pairs actually merged.
+def _handle_merges(substrate, program, state, report, run_id, now) -> list[dict]:
+    """Apply or queue what the agent proposed. Returns the pairs actually merged,
+    each as {"loser", "winner", "commit"} — the commit is the undo (spec 9.1).
 
     Which of the two happens is the ONLY difference between the policies —
     the agent's instructions and prohibitions are identical either way (spec 9.1).
@@ -273,7 +274,7 @@ def _handle_merges(substrate, program, state, report, run_id, now) -> list[list[
                if isinstance(p, list) and len(p) == 2}
     queued = {tuple(sorted([p.get("winner", ""), p.get("loser", "")]))
               for p in (state.get("merge_proposals") or []) if isinstance(p, dict)}
-    merged: list[list[str]] = []
+    merged: list[dict] = []
     service = None
     for winner, loser, why in _proposals(report):
         pair = _pair(winner, loser)
@@ -291,12 +292,12 @@ def _handle_merges(substrate, program, state, report, run_id, now) -> list[list[
             continue
         service = service or Service(substrate.repo_root)
         try:
-            service.merge_wiki_pages(program.id, winner, loser)
+            out = service.merge_wiki_pages(program.id, winner, loser)
         except Exception:                  # NotFoundError, ValueError, or a bad path
             state.setdefault("merges_refused", []).append(pair)
             refused.add(tuple(pair))
             continue
-        merged.append([loser, winner])
+        merged.append({"loser": loser, "winner": winner, "commit": out.get("commit", "")})
     return merged
 
 
@@ -318,7 +319,7 @@ def _collect(substrate, program, now, agent, state, run) -> str:
 
     batch = list(run.get("batch") or [])
     escaped: list[str] = []
-    merged: list[list[str]] = []
+    merged: list[dict] = []
     if status == "ok":
         escaped = _escaped(substrate, program.id,
                            list(run.get("dirty_before") or []), _dirty_paths(substrate))
