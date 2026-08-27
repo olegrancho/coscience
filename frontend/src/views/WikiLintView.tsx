@@ -1,5 +1,5 @@
-import { Badge, Card, Group, Loader, Stack, Text } from "@mantine/core";
-import { useQuery } from "@tanstack/react-query";
+import { Badge, Button, Card, Group, Loader, Stack, Text } from "@mantine/core";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { wikiHref } from "../components/wikiPage";
@@ -19,18 +19,36 @@ function slugOf(path: string): string {
  *  Activity section below is the only place a human sees one happened at all. */
 export default function WikiLintView() {
   const { id = "" } = useParams();
+  const qc = useQueryClient();
 
   const activity = useQuery({ queryKey: ["wiki-activity", id],
                               queryFn: () => api.getWikiActivity(id) });
   const lint = useQuery({ queryKey: ["wiki-lint", id],
                           queryFn: () => api.getWikiLint(id) });
+  const merges = useQuery({ queryKey: ["wiki-merges", id],
+                            queryFn: () => api.listWikiMerges(id) });
+
+  // A proposal, once actioned, is gone either way — either applied (so the
+  // activity list now shows it) or refused (so it should stop being offered).
+  const invalidateProposals = () => {
+    qc.invalidateQueries({ queryKey: ["wiki-merges", id] });
+    qc.invalidateQueries({ queryKey: ["wiki-activity", id] });
+  };
+  const accept = useMutation({ mutationFn: (mid: string) => api.acceptWikiMerge(id, mid),
+                               onSuccess: invalidateProposals });
+  const reject = useMutation({ mutationFn: (mid: string) => api.rejectWikiMerge(id, mid),
+                               onSuccess: invalidateProposals });
 
   if (activity.isLoading || lint.isLoading) return <Loader color="machine" />;
 
   const runs = activity.data ?? [];
   const reports = lint.data?.reports ?? [];
   const findings = lint.data?.findings ?? [];
+  const proposals = merges.data ?? [];
   const nothingHasRun = runs.length === 0 && reports.length === 0;
+  // Neither mutation should be able to fire while the other is in flight —
+  // a double click on Accept then Reject must not apply and then also reject.
+  const busy = accept.isPending || reject.isPending;
 
   return (
     <Stack gap="lg">
@@ -112,6 +130,34 @@ export default function WikiLintView() {
           <Text size="sm" c="dimmed">{findings.length} finding(s).</Text>
         )}
       </Card>
+
+      {/* Spec §11.3: a fourth section, shown only when the program's merge
+          policy is `propose` — which in practice means the API returned
+          something to show. Accept applies immediately; reject records the
+          pair in merges_refused so no later run re-proposes it. */}
+      {proposals.length > 0 && (
+        <Card padding="lg" radius="md" style={cardStyle}>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>proposals</div>
+          <Stack gap="md">
+            {proposals.map((p) => (
+              <div key={p.id} data-testid="merge-proposal">
+                <Text size="sm" mb={4}>
+                  <Link to={wikiHref(id, p.loser)}>{slugOf(p.loser)}</Link>
+                  {" → "}
+                  <Link to={wikiHref(id, p.winner)}>{slugOf(p.winner)}</Link>
+                </Text>
+                <Text size="sm" c="dimmed" mb={8}>{p.why}</Text>
+                <Group gap={8}>
+                  <Button size="xs" variant="default" disabled={busy}
+                          onClick={() => accept.mutate(p.id)}>Accept</Button>
+                  <Button size="xs" variant="default" color="red" disabled={busy}
+                          onClick={() => reject.mutate(p.id)}>Reject</Button>
+                </Group>
+              </div>
+            ))}
+          </Stack>
+        </Card>
+      )}
     </Stack>
   );
 }

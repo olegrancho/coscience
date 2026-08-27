@@ -1,6 +1,6 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import WikiLintView from "./WikiLintView";
@@ -81,6 +81,57 @@ describe("WikiLintView", () => {
       { counts: {}, findings: [], reports: [] } as never);
     mount();
     expect(await screen.findByText(/nothing has run/i)).toBeTruthy();
+  });
+});
+
+describe("WikiLintView proposals", () => {
+  const proposals = [{
+    id: "m0001", winner: "concepts/compute-lease.md", loser: "concepts/job-lease.md",
+    why: "Both describe a time-bounded claim on a worker slot.",
+    run: "r0002", at: 1756200000,
+  }];
+
+  beforeEach(() => {
+    vi.spyOn(api, "getWikiActivity").mockResolvedValue([] as never);
+    vi.spyOn(api, "getWikiLint").mockResolvedValue(
+      { counts: {}, findings: [], reports: [] } as never);
+    vi.spyOn(api, "listWikiMerges").mockResolvedValue(proposals as never);
+  });
+
+  it("shows the agent's reasoning and both pages", async () => {
+    mount();
+    const card = await screen.findByTestId("merge-proposal");
+    expect(card.textContent).toContain("time-bounded claim");
+    expect(card.textContent).toContain("compute-lease");
+    expect(card.textContent).toContain("job-lease");
+  });
+
+  it("says which page survives, because that is the irreversible half", async () => {
+    mount();
+    const card = await screen.findByTestId("merge-proposal");
+    expect(card.textContent).toMatch(/job-lease[\s\S]*compute-lease/);
+  });
+
+  it("accepts a proposal by id", async () => {
+    const accept = vi.spyOn(api, "acceptWikiMerge")
+      .mockResolvedValue({ applied: true, winner: "", loser: "", rewritten: [] } as never);
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: /accept/i }));
+    await waitFor(() => expect(accept).toHaveBeenCalledWith("p1", "m0001"));
+  });
+
+  it("rejects a proposal by id", async () => {
+    const reject = vi.spyOn(api, "rejectWikiMerge")
+      .mockResolvedValue({ rejected: [] } as never);
+    mount();
+    fireEvent.click(await screen.findByRole("button", { name: /reject/i }));
+    await waitFor(() => expect(reject).toHaveBeenCalledWith("p1", "m0001"));
+  });
+
+  it("says nothing is waiting when there are no proposals", async () => {
+    vi.spyOn(api, "listWikiMerges").mockResolvedValue([] as never);
+    mount();
+    expect(screen.queryByTestId("merge-proposal")).toBeNull();
   });
 });
 
