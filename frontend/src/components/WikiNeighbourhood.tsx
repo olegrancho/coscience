@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
-import { neighbourhood } from "./wikiNeighbourhood";
+import { neighbourhood, oidForSourceSlug } from "./wikiNeighbourhood";
 import { radialLayout } from "./graphLayout";
 import { nodeStyle, nodeSize } from "./wikiGraphStyle";
 
@@ -40,6 +40,16 @@ export default function WikiNeighbourhood(
       position: { x: 0, y: 0 }, style: {},
     }))),
     [sub, centreId]);
+  // Only a slug shaped like a Source page's (`result-<id>`, `artifact-<aid>-<vid>`)
+  // has an object id to look citations up for; anything else — including "no
+  // page here at all" — has none, so the query is skipped rather than firing a
+  // request that citing_pages would answer empty anyway.
+  const oid = oidForSourceSlug(slug);
+  const cites = useQuery({
+    queryKey: ["wiki-citations", programId, slug],
+    queryFn: () => api.getWikiCitations(programId, oid),
+    enabled: !centreId && !!oid,
+  });
 
   if (q.isLoading) return null;
   if (!centreId) {
@@ -49,7 +59,21 @@ export default function WikiNeighbourhood(
       ? "No page was found at this address."
       : "This page is not in the concept graph.";
     return (
-      <p className="muted" style={{ fontSize: 12 }}>{message}</p>
+      <div>
+        <p className="muted" style={{ fontSize: 12 }}>{message}</p>
+        {cites.data && cites.data.length > 0 && (
+          <div>
+            <p className="muted" style={{ fontSize: 12, marginBottom: 4 }}>cited by:</p>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {cites.data.map((c) => (
+                <li key={c.path} style={{ fontSize: 12 }}>
+                  <Link to={`/programs/${programId}/wiki/${c.slug}`} className="view">{c.title}</Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
     );
   }
 

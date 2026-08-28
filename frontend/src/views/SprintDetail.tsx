@@ -14,9 +14,31 @@ import PageToc, { type TocEntry } from "../components/PageToc";
 import SprintEditModal from "../components/SprintEditModal";
 import { useMe, useIsMine, UserChip, OTHER_SHADE } from "../auth";
 
+/** The wiki pages that cite this result, if any — the reverse of a Source
+ *  page's `origin` link. A result nothing cites renders nothing; that's the
+ *  common case and not worth a message. */
+function ResultCitations({ programId, resultId }: { programId: string; resultId: string }) {
+  const cites = useQuery({
+    queryKey: ["wiki-citations", programId, `result:${resultId}`],
+    queryFn: () => api.getWikiCitations(programId, `result:${resultId}`),
+    enabled: !!programId,
+  });
+  if (!cites.data || cites.data.length === 0) return null;
+  return (
+    <Group gap={8} mt={4} wrap="wrap">
+      <Text size="xs" c="dimmed">cited in the wiki:</Text>
+      {cites.data.map((c) => (
+        <Link key={c.path} to={`/programs/${programId}/wiki/${c.slug}`} className="view" style={{ fontSize: 12 }}>
+          {c.title}
+        </Link>
+      ))}
+    </Group>
+  );
+}
+
 /** Inline result: shows a clamped preview that unfolds in place, plus a link to
  *  the full report page. Long reports start folded; short ones show whole. */
-function ResultPreview({ id }: { id: string }) {
+function ResultPreview({ id, programId }: { id: string; programId: string }) {
   const [open, setOpen] = useState(false);
   const result = useQuery({ queryKey: ["result", id], queryFn: () => api.getResult(id) });
   if (result.isLoading) return <Text size="sm" c="dimmed">Loading the result…</Text>;
@@ -49,6 +71,7 @@ function ResultPreview({ id }: { id: string }) {
           <Text size="xs" c="dimmed">finished <RelTime at={result.data.completed_at} /></Text>
         )}
       </Group>
+      <ResultCitations programId={programId} resultId={id} />
     </div>
   );
 }
@@ -520,7 +543,7 @@ export default function SprintDetail() {
             {s.results.length > 1 ? `results · ${s.results.length}` : "what the experiment found"}
           </div>
           <Stack gap={22}>
-            {s.results.map((rid) => <ResultPreview key={rid} id={rid} />)}
+            {s.results.map((rid) => <ResultPreview key={rid} id={rid} programId={prog} />)}
           </Stack>
         </Card>
       )}

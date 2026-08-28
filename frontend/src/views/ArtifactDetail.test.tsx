@@ -205,6 +205,29 @@ describe("ArtifactDetail", () => {
     await waitFor(() => expect(screen.getByText(/couldn.t load the description/i)).toBeTruthy());
   });
 
+  it("explains an old version has no citations rather than showing an empty row", async () => {
+    // program_objects ingests the CURRENT version only, so a non-current version
+    // always has zero backlinks. Rendering nothing reads as a bug.
+    vi.spyOn(api, "getWikiCitations").mockResolvedValue([]);
+    vi.spyOn(api, "getArtifact").mockResolvedValue({
+      id: "doc", program: "p", title: "Manuscript", kind: "md", current: "v2",
+      archived: false, lock: {}, current_files: ["content.md"], linked_sprints: [],
+      threads: [],
+      versions: [
+        { id: "v1", parent: "", created_at: 1, created_by: "human", archived: false, note: "" },
+        { id: "v2", parent: "v1", created_at: 2, created_by: "human", archived: false, note: "" },
+      ],
+    } as any);
+    vi.spyOn(api, "readArtifactFile").mockResolvedValue({ name: "content.md", size: 5, content: "hello", binary: false } as any);
+    vi.spyOn(api, "listArtifactVersionFiles").mockResolvedValue(["content.md"] as any);
+    renderAt();
+    await waitFor(() => expect(screen.getByText("v1")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+
+    expect(await screen.findByText(/only the current version/i)).toBeTruthy();
+  });
+
   it("resolves an image the description references by relative path", async () => {
     vi.spyOn(api, "getArtifact").mockResolvedValue({
       id: "fig", program: "p", title: "Gap plot", kind: "figure", current: "v1",

@@ -188,6 +188,36 @@ function VersionRow(
   );
 }
 
+/** Wiki pages citing this artifact version. `program_objects` ingests an
+ *  artifact's CURRENT version only (a figure revised five times must not leave
+ *  five near-identical source pages) — so a non-current version's zero
+ *  backlinks are expected, not a bug, and get an explanation rather than an
+ *  empty list that reads as broken. */
+function ArtifactCitations({ pid, aid, vid, isCurrent }: { pid: string; aid: string; vid: string; isCurrent: boolean }) {
+  const cites = useQuery({
+    queryKey: ["wiki-citations", pid, `artifact:${aid}@${vid}`],
+    queryFn: () => api.getWikiCitations(pid, `artifact:${aid}@${vid}`),
+    enabled: isCurrent && !!vid,
+  });
+  if (!isCurrent) {
+    return (
+      <p className="muted" style={{ fontSize: 12 }}>
+        Not ingested — the wiki tracks only the current version.
+      </p>
+    );
+  }
+  if (!cites.data || cites.data.length === 0) {
+    return <Text size="sm" c="dimmed">No wiki pages cite this artifact yet.</Text>;
+  }
+  return (
+    <Stack gap={6}>
+      {cites.data.map((c) => (
+        <Link key={c.path} to={`/programs/${pid}/wiki/${c.slug}`} className="view">{c.title}</Link>
+      ))}
+    </Stack>
+  );
+}
+
 function TagEditor({ pid, aid, tags, onUpdate }: { pid: string; aid: string; tags: string[]; onUpdate: () => void }) {
   const [opened, setOpened] = useState(false);
   const [newTag, setNewTag] = useState("");
@@ -422,6 +452,11 @@ export default function ArtifactDetail() {
             ))}
           </Stack>
         ) : <Text size="sm" c="dimmed">No sprints linked.</Text>}
+      </Card>
+
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <div className="eyebrow" style={{ marginBottom: 10 }}>cited in the wiki</div>
+        <ArtifactCitations pid={id} aid={aid} vid={showingVersion} isCurrent={showingVersion === art.current} />
       </Card>
 
       <Card padding="lg" radius="md" style={cardStyle}>

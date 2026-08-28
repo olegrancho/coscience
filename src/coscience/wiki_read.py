@@ -163,6 +163,28 @@ def page_detail(page: wiki_okf.Page, pages: list[wiki_okf.Page],
     }
 
 
+def citing_pages(pages: list[wiki_okf.Page], oid: str) -> list[dict]:
+    """Pages citing the object `oid`, the reverse of the `cited from` chips.
+
+    object id -> the Source page whose `origin` is that id -> every page naming
+    that Source page in `sources[].resource`."""
+    if not oid:
+        return []
+    source_paths = {p.path for p in pages
+                    if p.type == "Source" and str(p.extra.get("origin", "")) == oid}
+    if not source_paths:
+        return []
+    out = []
+    for p in pages:
+        if p.type == "Source":
+            continue
+        refs = {str(s.resource or "").lstrip("/") for s in p.sources}
+        if refs & source_paths:
+            out.append({"path": p.path, "slug": p.slug,
+                        "title": p.title or p.slug, "type": p.type})
+    return sorted(out, key=lambda c: c["path"])
+
+
 def summary(pages: list[wiki_okf.Page], state: dict, pending: int,
             lint_counts: dict, index_md: str, *,
             wiki_model: str = "", wiki_enabled: bool = True) -> dict:

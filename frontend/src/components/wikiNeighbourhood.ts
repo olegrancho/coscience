@@ -19,3 +19,21 @@ export function neighbourhood(g: WikiGraphT, centreId: string, hops: number): Wi
     edges: g.edges.filter((e) => reached.has(e.src) && reached.has(e.dst)),
   };
 }
+
+/** Inverts wiki_store's Source-page naming so a Source page's pane can look up
+ *  what cites it. `sources/result-<id>.md` came from `result:<id>`;
+ *  `sources/artifact-<aid>-<vid>.md` came from `artifact:<aid>@<vid>` — the
+ *  version id is the LAST `-`-separated segment, so an artifact id containing
+ *  its own hyphens still splits correctly. `slug` is the bare filename stem
+ *  (no directory, no `.md`), matching `wiki_okf.Page.slug`. Anything not
+ *  shaped like a source page's slug returns "" rather than guessing. */
+export function oidForSourceSlug(slug: string): string {
+  if (slug.startsWith("result-")) return `result:${slug.slice("result-".length)}`;
+  if (slug.startsWith("artifact-")) {
+    const rest = slug.slice("artifact-".length);
+    const cut = rest.lastIndexOf("-");
+    if (cut <= 0 || cut === rest.length - 1) return "";
+    return `artifact:${rest.slice(0, cut)}@${rest.slice(cut + 1)}`;
+  }
+  return "";
+}

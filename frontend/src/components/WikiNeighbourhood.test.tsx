@@ -16,11 +16,11 @@ const graph = {
             confidence: "high", source: "s", typed: true, materialized: false }],
 };
 
-function show(slug: string) {
+function show(slug: string, pageType?: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter><WikiNeighbourhood programId="p1" slug={slug} /></MemoryRouter>
+      <MemoryRouter><WikiNeighbourhood programId="p1" slug={slug} pageType={pageType} /></MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -42,5 +42,15 @@ describe("WikiNeighbourhood", () => {
     // broken, so the pane must say so instead.
     show("result-wt-r1");
     expect(await screen.findByText(/not in the concept graph/i)).toBeTruthy();
+  });
+
+  it("lists the pages citing a Source page below the explanation", async () => {
+    vi.spyOn(api, "getWikiCitations").mockResolvedValue([
+      { path: "concepts/a.md", slug: "a", title: "Alpha", type: "Concept" },
+    ] as never);
+    show("result-wt-r1", "Source");
+    expect(await screen.findByText(/sources are excluded/i)).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Alpha" })).toBeTruthy();
+    expect(api.getWikiCitations).toHaveBeenCalledWith("p1", "result:wt-r1");
   });
 });

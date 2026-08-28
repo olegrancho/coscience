@@ -696,6 +696,13 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
 
+    @api.get("/programs/{program_id}/wiki/citations/{oid:path}")
+    def wiki_citations(program_id: str, oid: str) -> list[dict]:
+        try:
+            return service.wiki_citations(program_id, oid)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
     # Registered last of the wiki GETs: a literal path like /wiki/pages must not
     # be swallowed by the {slug:path} pattern.
     @api.get("/programs/{program_id}/wiki/pages/{slug:path}")

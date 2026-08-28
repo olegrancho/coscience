@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { neighbourhood } from "./wikiNeighbourhood";
+import { neighbourhood, oidForSourceSlug } from "./wikiNeighbourhood";
 import type { WikiGraphT } from "../api";
 
 const n = (id: string) => ({
@@ -31,5 +31,21 @@ describe("neighbourhood", () => {
 
   it("an unknown centre yields an empty graph rather than throwing", () => {
     expect(neighbourhood(g, "sources/x.md", 1)).toEqual({ nodes: [], edges: [] });
+  });
+});
+
+describe("oidForSourceSlug", () => {
+  it("inverts a result source slug", () => {
+    expect(oidForSourceSlug("result-wt-r1")).toBe("result:wt-r1");
+  });
+
+  it("inverts an artifact source slug, splitting on the LAST hyphen", () => {
+    // the artifact id itself may contain hyphens, so only the version id
+    // (the final segment) may be split off.
+    expect(oidForSourceSlug("artifact-fig-1-v3")).toBe("artifact:fig-1@v3");
+  });
+
+  it("returns empty for a slug that isn't a source page at all", () => {
+    expect(oidForSourceSlug("auth-gate")).toBe("");
   });
 });
