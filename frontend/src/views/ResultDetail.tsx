@@ -16,7 +16,7 @@ export default function ResultDetail() {
   const program = useQuery({ queryKey: ["program", programId], queryFn: () => api.getProgram(programId!), enabled: !!programId });
 
   if (result.isLoading) return <Loader color="machine" />;
-  if (result.error || !result.data) return <EmptyState title="Result not found">Nothing here at “{id}”.</EmptyState>;
+  if (!result.data) return <EmptyState title="Result not found">Nothing here at “{id}”.</EmptyState>;
   const r = result.data;
   const expTitle = sprint.data?.title || sprint.data?.goals || r.sprint;
   // the gist to show under the title — only if it adds something the title didn't

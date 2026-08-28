@@ -304,7 +304,11 @@ export default function ArtifactDetail() {
   };
 
   if (artifact.isLoading) return <Loader color="machine" />;
-  if (artifact.error || !artifact.data) {
+  // A failed poll must NEVER replace loaded content: every query polls on a 10s
+  // interval and on window focus (main.tsx), so one blip — a backend restart, a
+  // proxy hiccup — used to swap a working page for "not found", and it did not
+  // come back on the next successful poll. Only absence means absent.
+  if (!artifact.data) {
     return <EmptyState title="Artifact not found">Nothing here at "{aid}". It may have been removed.</EmptyState>;
   }
   const art = artifact.data;
