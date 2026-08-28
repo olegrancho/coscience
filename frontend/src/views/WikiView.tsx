@@ -161,6 +161,9 @@ export default function WikiView() {
                 </Badge>
               )}
             </Link>
+            <Link to={`/programs/${id}/wiki/graph`} className="view" style={{ fontSize: 13 }}>
+              Graph
+            </Link>
           </Group>
         </Group>
       </div>

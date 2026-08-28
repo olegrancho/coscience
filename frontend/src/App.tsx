@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 import { AppShell, Group, Text } from "@mantine/core";
 import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,6 +17,10 @@ import WikiView from "./views/WikiView";
 import WikiLintView from "./views/WikiLintView";
 import ArtifactsView from "./views/ArtifactsView";
 import Ledger from "./views/Ledger";
+
+// Lazy so d3-force (pulled in by forceLayout) stays out of the main bundle —
+// same idiom as LineageCard's LineageGraph.
+const WikiGraphView = lazy(() => import("./views/WikiGraphView"));
 
 const NAV = [
   { to: "/", label: "Overview" },
@@ -226,6 +230,9 @@ export default function App() {
               <Route path="/programs/:id/artifacts/:aid" element={<ArtifactDetail />} />
               <Route path="/programs/:id/wiki" element={<WikiView />} />
               <Route path="/programs/:id/wiki/lint" element={<WikiLintView />} />
+              <Route path="/programs/:id/wiki/graph" element={
+                <Suspense fallback={<div>Loading…</div>}><WikiGraphView /></Suspense>
+              } />
               <Route path="/programs/:id/wiki/*" element={<WikiView />} />
               <Route path="/ledger" element={<Ledger />} />
             </Routes>
