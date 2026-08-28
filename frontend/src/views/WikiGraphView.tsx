@@ -1,20 +1,34 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { api, type WikiGraphNode } from "../api";
+import { api, type WikiGraphT } from "../api";
 import { forceLayout } from "../components/graphLayout";
 import { nodeStyle, edgeStyle, nodeSize, type Lens } from "../components/wikiGraphStyle";
+import { applyFilters, emptyFilters, type Filters } from "../components/wikiGraphFilter";
 
 // Padding around the laid-out bounding box, big enough to clear the largest
 // node's radius (nodeSize tops out at 14 + 26 = 40, so a radius of 20).
 const NODE_PAD = 60;
+
+const EMPTY_GRAPH: WikiGraphT = { nodes: [], edges: [] };
+
+function toggle(set: Set<string>, v: string): Set<string> {
+  const next = new Set(set);
+  if (next.has(v)) next.delete(v); else next.add(v);
+  return next;
+}
 
 export default function WikiGraphView() {
   const { id = "" } = useParams();
   const nav = useNavigate();
   const lens: Lens = "structure";
   const q = useQuery({ queryKey: ["wiki-graph", id], queryFn: () => api.getWikiGraph(id) });
+  const [filters, setFilters] = useState<Filters>(emptyFilters());
 
+  // Filtering hides; it never re-layouts (design 5.3). `placed` and `viewBox`
+  // are both derived from the UNFILTERED graph so toggling a checkbox never
+  // moves a node the reader is already looking at, or resizes the canvas
+  // under them — only what's rendered from `shown` below changes.
   const placed = useMemo(() => {
     if (!q.data) return [];
     const flow = q.data.nodes.map((n) => ({
@@ -44,17 +58,70 @@ export default function WikiGraphView() {
     return `${minX} ${minY} ${w} ${h}`;
   }, [placed]);
 
+  // Checkbox options come from the unfiltered graph so ticking one filter
+  // never makes another filter's own choices disappear.
+  const options = useMemo(() => {
+    const g = q.data ?? EMPTY_GRAPH;
+    return {
+      types: Array.from(new Set(g.nodes.map((n) => n.type))).sort(),
+      trust: Array.from(new Set(g.nodes.map((n) => n.trust))).sort(),
+      relations: Array.from(new Set(g.edges.filter((e) => e.typed && e.type).map((e) => e.type))).sort(),
+    };
+  }, [q.data]);
+
+  // `shown` is what's rendered; `placed`/`viewBox` above stay unfiltered so
+  // hiding a node or edge never moves the rest or resizes the canvas.
+  const shown = useMemo(() => applyFilters(q.data ?? EMPTY_GRAPH, filters), [q.data, filters]);
+
   if (q.isLoading) return <div className="wiki-graph">Loading the graph…</div>;
   if (q.isError) return <div className="wiki-graph">Could not load the graph.</div>;
 
-  const byId = new Map<string, WikiGraphNode>((q.data?.nodes ?? []).map((n) => [n.id, n]));
+  const placedById = new Map(placed.map((p) => [p.id, p]));
 
   return (
     <div className="wiki-graph">
+      <p className="eyebrow">
+        showing {shown.nodes.length} of {q.data?.nodes.length ?? 0} nodes
+      </p>
+      <fieldset>
+        <legend>Type</legend>
+        {options.types.map((t) => (
+          <label key={t} style={{ marginRight: 12 }}>
+            <input type="checkbox" aria-label={t} checked={filters.types.has(t)}
+                   onChange={() => setFilters((f) => ({ ...f, types: toggle(f.types, t) }))} />
+            {" "}{t}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset>
+        <legend>Relation</legend>
+        {options.relations.map((r) => (
+          <label key={r} style={{ marginRight: 12 }}>
+            <input type="checkbox" aria-label={r} checked={filters.relations.has(r)}
+                   onChange={() => setFilters((f) => ({ ...f, relations: toggle(f.relations, r) }))} />
+            {" "}{r}
+          </label>
+        ))}
+      </fieldset>
+      <fieldset>
+        <legend>Trust</legend>
+        {options.trust.map((t) => (
+          <label key={t} style={{ marginRight: 12 }}>
+            <input type="checkbox" aria-label={t} checked={filters.trust.has(t)}
+                   onChange={() => setFilters((f) => ({ ...f, trust: toggle(f.trust, t) }))} />
+            {" "}{t}
+          </label>
+        ))}
+      </fieldset>
+      <label>
+        <input type="checkbox" aria-label="typed only" checked={filters.typedOnly}
+               onChange={(e) => setFilters((f) => ({ ...f, typedOnly: e.target.checked }))} />
+        {" "}typed only
+      </label>
       <svg role="img" aria-label="concept graph" width="100%" height="640" viewBox={viewBox}>
-        {(q.data?.edges ?? []).map((e) => {
-          const a = placed.find((p) => p.id === e.src);
-          const b = placed.find((p) => p.id === e.dst);
+        {shown.edges.map((e) => {
+          const a = placedById.get(e.src);
+          const b = placedById.get(e.dst);
           if (!a || !b) return null;
           const s = edgeStyle(e, lens);
           return (
@@ -65,9 +132,9 @@ export default function WikiGraphView() {
                   opacity={Number(s.opacity)} />
           );
         })}
-        {placed.map((p) => {
-          const n = byId.get(p.id);
-          if (!n) return null;
+        {shown.nodes.map((n) => {
+          const p = placedById.get(n.id);
+          if (!p) return null;
           const st = nodeStyle(n, lens);
           return (
             // A `<title>` nested inside `<circle>` is invisible to

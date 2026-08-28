@@ -132,4 +132,15 @@ describe("WikiGraphView", () => {
       expect(p.position.y).toBeLessThanOrEqual(maxY);
     }
   });
+
+  it("reports how many nodes are visible, and filtering does not move the rest", async () => {
+    renderAt("/programs/p1/wiki/graph");
+    const before = await screen.findByText(/showing 2 of 2 nodes/);
+    expect(before).toBeTruthy();
+    const alpha = await screen.findByTitle("Alpha");
+    const cx = alpha.parentElement?.getAttribute("cx");
+    fireEvent.click(screen.getByLabelText("typed only"));
+    await waitFor(() => expect(screen.getByText(/showing 2 of 2 nodes/)).toBeTruthy());
+    expect(alpha.parentElement?.getAttribute("cx")).toBe(cx);   // layout unmoved
+  });
 });
