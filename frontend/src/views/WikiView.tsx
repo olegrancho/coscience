@@ -421,7 +421,13 @@ export default function WikiView() {
           {slug && (
             <>
               <div className="eyebrow" style={{ marginBottom: 8 }}>neighbourhood</div>
-              <WikiNeighbourhood programId={id} slug={slug} />
+              {/* pageType lets the pane say *why* a page isn't in the concept
+                  graph (a Source, by design) instead of guessing — but only
+                  once the page list has actually loaded; before that, pass
+                  undefined rather than a premature "" that would misread as
+                  "no such page". */}
+              <WikiNeighbourhood programId={id} slug={slug}
+                                  pageType={pages.data ? currentType : undefined} />
             </>
           )}
         </aside>

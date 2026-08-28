@@ -10,10 +10,21 @@ const BOX = 240, HALF = BOX / 2;
 
 /** The browse view's neighbourhood pane. Deliberately laid out with
  *  `radialLayout`, never `forceLayout` — a one-hop neighbourhood is under ten
- *  nodes, and keeping d3-force out of this component is the whole reason the
- *  radial layout exists (design 6). */
+ *  nodes, and keeping d3-force off the browse view's bundle is the whole
+ *  reason the radial layout exists (design 6).
+ *
+ *  `pageType` is optional and comes from data the caller (WikiView) already
+ *  has loaded for its own page tree — passing it costs no extra fetch. It
+ *  lets the "not in the graph" message be honest about *why*:
+ *    - "Source" (a real page, just a type the concept graph excludes by
+ *      design) gets the specific, confident explanation.
+ *    - `""` (the caller looked and found no page at that address at all)
+ *      gets a "no such page" message instead.
+ *    - `undefined` (the caller didn't look, e.g. this component used on its
+ *      own) falls back to a message that doesn't assert a reason it can't
+ *      know — better silent about the cause than confidently wrong. */
 export default function WikiNeighbourhood(
-  { programId, slug }: { programId: string; slug: string },
+  { programId, slug, pageType }: { programId: string; slug: string; pageType?: string },
 ) {
   const q = useQuery({ queryKey: ["wiki-graph", programId],
                        queryFn: () => api.getWikiGraph(programId) });
@@ -32,10 +43,13 @@ export default function WikiNeighbourhood(
 
   if (q.isLoading) return null;
   if (!centreId) {
+    const message = pageType === "Source"
+      ? "This is a Source page — sources are excluded from the concept graph by design."
+      : pageType === ""
+      ? "No page was found at this address."
+      : "This page is not in the concept graph.";
     return (
-      <p className="muted" style={{ fontSize: 12 }}>
-        This page is not in the concept graph — source pages are excluded.
-      </p>
+      <p className="muted" style={{ fontSize: 12 }}>{message}</p>
     );
   }
 

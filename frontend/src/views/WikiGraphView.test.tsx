@@ -191,3 +191,61 @@ describe("WikiGraphView", () => {
     expect(alpha.getAttribute("cx")).toBe(before);
   });
 });
+
+describe("WikiGraphView focus mode", () => {
+  // A 5-node chain a-b-c-d-e. Focusing on "b" with hops=2 reaches a, b, c, d
+  // (b's own hop-1 neighbours are a and c; hop-2 adds d via c) but never e —
+  // a genuine strict subset, so "focused" and "unfocused" render different
+  // node counts and the test can actually tell them apart.
+  const chain = {
+    nodes: ["a", "b", "c", "d", "e"].map((s, i) => ({
+      id: `concepts/${s}.md`, slug: s, title: s.toUpperCase(), type: "Concept",
+      status: "draft", trust: "unverified",
+      in_degree: i === 0 ? 0 : 1, out_degree: i === 4 ? 0 : 1,
+      orphan: false, cluster: 0,
+    })),
+    edges: [
+      { id: "a->b", src: "concepts/a.md", dst: "concepts/b.md", type: "refines",
+        confidence: "high", source: "s", typed: true, materialized: false },
+      { id: "b->c", src: "concepts/b.md", dst: "concepts/c.md", type: "refines",
+        confidence: "high", source: "s", typed: true, materialized: false },
+      { id: "c->d", src: "concepts/c.md", dst: "concepts/d.md", type: "refines",
+        confidence: "high", source: "s", typed: true, materialized: false },
+      { id: "d->e", src: "concepts/d.md", dst: "concepts/e.md", type: "refines",
+        confidence: "high", source: "s", typed: true, materialized: false },
+    ],
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(api, "getWikiGraph").mockResolvedValue(chain as never);
+  });
+
+  it("?focus=<slug> reduces the rendered nodes to that node's neighbourhood", async () => {
+    renderAt("/programs/p1/wiki/graph?focus=b");
+    // a, b, c, d are within 2 hops of b; e is not — a strict subset of the
+    // 5-node graph, so this genuinely distinguishes focused from unfocused.
+    expect(await screen.findByText(/showing 4 of 4 nodes/)).toBeTruthy();
+    expect(await screen.findByTitle("A")).toBeTruthy();
+    expect(await screen.findByTitle("D")).toBeTruthy();
+    expect(screen.queryByTitle("E")).toBeNull();
+  });
+
+  it("shows no 'show whole graph' link when nothing is focused", async () => {
+    renderAt("/programs/p1/wiki/graph");
+    await screen.findByText(/showing 5 of 5 nodes/);
+    expect(screen.queryByRole("link", { name: /show whole graph/i })).toBeNull();
+  });
+
+  it("offers 'show whole graph' while focused, and clearing it restores the full graph", async () => {
+    renderAt("/programs/p1/wiki/graph?focus=b");
+    await screen.findByText(/showing 4 of 4 nodes/);
+    const link = screen.getByRole("link", { name: /show whole graph/i });
+
+    fireEvent.click(link);
+
+    await waitFor(() => expect(screen.getByText(/showing 5 of 5 nodes/)).toBeTruthy());
+    expect(screen.queryByRole("link", { name: /show whole graph/i })).toBeNull();
+    expect(await screen.findByTitle("E")).toBeTruthy();
+  });
+});
