@@ -1,9 +1,13 @@
 """Wiki concept graph: pure rules over parsed pages.
 
 Parsed pages in, {nodes, edges} out. No IO — the same split as wiki_lint, so
-the graph can be tested without a substrate. Service owns the cache and the
-filesystem; nothing here touches either."""
+the graph can be tested without a substrate. build() and everything above it
+stay pure; cached_build() at the bottom is the sole exception, memoising
+build() in the bundle's .wiki/graph.json."""
 from __future__ import annotations
+
+import hashlib
+import json
 
 from coscience import wiki_okf, wiki_read
 
@@ -113,3 +117,43 @@ def build(pages: list[wiki_okf.Page]) -> dict:
     edges += _materialized(edges)
     _apply_metrics(nodes, edges)
     return {"nodes": nodes, "edges": edges}
+
+
+def digest(pages: list[wiki_okf.Page]) -> str:
+    """Content hash over every page's path and body-plus-frontmatter.
+
+    The parent spec 10 keys this on (path, mtime, size). Content is used
+    instead (design 8.1): mtime churns on every git checkout while content does
+    not, and content can change while size does not — that second case serves a
+    stale graph. Rebuild is milliseconds at this scale, so correctness is free."""
+    h = hashlib.sha256()
+    for p in sorted(pages, key=lambda x: x.path):
+        h.update(p.path.encode())
+        h.update(b"\0")
+        h.update(wiki_okf.render_page(p).encode())
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def cached_build(substrate, program_id: str) -> dict:
+    """build() over the program's bundle, memoised in .wiki/graph.json.
+
+    Every failure path rebuilds rather than raising: a graph that dies on a
+    corrupt cache is a graph that breaks exactly when someone is debugging."""
+    from coscience import wiki_store
+    pages = wiki_store.iter_pages(substrate, program_id)
+    key = digest(pages)
+    cache = wiki_store.state_dir(substrate, program_id) / "graph.json"
+    try:
+        blob = json.loads(cache.read_text())
+        if blob.get("key") == key:
+            return blob["graph"]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    graph = build(pages)
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({"key": key, "graph": graph}))
+    except OSError:
+        pass          # an unwritable cache must not fail the request
+    return graph
