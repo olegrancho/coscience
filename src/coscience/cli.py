@@ -47,7 +47,8 @@ def pm_beat_line(summaries: list[dict], reasoned: int) -> str:
     released = [sid for s in summaries for sid in s.get("released") or ()]
     reopened = [sid for s in summaries for sid in s.get("reopened") or ()]
     missed = [k for s in summaries
-              for k in list(s.get("release_skipped") or ()) + list(s.get("reopen_skipped") or ())]
+              for k in list(s.get("release_skipped") or ()) + list(s.get("reopen_skipped") or ())
+              + list(s.get("adopt_skipped") or ())]
     unbacked = [c for s in summaries for c in s.get("unbacked_claims") or ()]
     # A backed-off program is stuck, not idle: it stopped calling the reasoner after
     # repeated failures on unchanged input. Said as a part (not a fallback line) so a

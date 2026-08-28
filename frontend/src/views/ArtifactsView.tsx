@@ -74,7 +74,11 @@ export default function ArtifactsView() {
   const allTags = useQuery({ queryKey: ["artifact-tags", id], queryFn: () => api.listArtifactTags(id) });
 
   if (artifacts.isLoading) return <Loader color="machine" />;
-  if (artifacts.error || !artifacts.data) {
+  // A failed poll must NEVER replace loaded content: every query polls on a 10s
+  // interval and on window focus (main.tsx), so one blip — a backend restart, a
+  // proxy hiccup — used to swap a working page for "not found", and it did not
+  // come back on the next successful poll. Only absence means absent.
+  if (!artifacts.data) {
     return <EmptyState title="Program not found">Nothing here at "{id}".</EmptyState>;
   }
 

@@ -113,17 +113,32 @@ def cut_version_for(substrate, program_id: str, aid: str, holder_id: str,
 
 
 # --- adoption: turn output that already exists into an artifact, in one call ---
-def resolve_sources(base, names, restrict: bool = True) -> list[Path]:
-    """Resolve caller-supplied source names against `base`. With `restrict` (the
-    default, used for anything an agent names) every path must land inside `base`
-    after symlink resolution, so a program's agent cannot adopt another program's
-    files. Raises ValueError on an escape or a path that does not exist."""
-    base = Path(base).resolve()
+def resolve_sources(base, names, restrict: bool = True, roots=None) -> list[Path]:
+    """Resolve caller-supplied source names.
+
+    `base` is where a relative name is looked up; pass several and they are tried in
+    order, first hit wins (the program workdir, then the substrate root, so a name
+    like `sprints/<id>/figure.png` resolves without an absolute path).
+
+    Resolving a name is not permission to take it. With `restrict` (the default, used
+    for anything an agent names) the resolved path must land inside one of `roots`
+    after symlink resolution — defaulting to the lookup bases. Callers that widen the
+    lookup pass a NARROWER `roots` so a program's agent still cannot adopt another
+    program's files. Raises ValueError on an escape or a path that does not exist."""
+    bases = [Path(b).resolve() for b in
+             ([base] if isinstance(base, (str, Path)) else list(base))]
+    allowed = bases if roots is None else [Path(r).resolve() for r in roots]
     out: list[Path] = []
     for name in names:
         p = Path(name)
-        p = (p if p.is_absolute() else base / p).resolve()
-        if restrict and p != base and base not in p.parents:
+        if p.is_absolute():
+            p = p.resolve()
+        else:
+            # First base that actually holds the name; else the primary, so the
+            # "no such file" error still names the directory the caller meant.
+            cands = [(b / p).resolve() for b in bases]
+            p = next((c for c in cands if c.exists()), cands[0])
+        if restrict and not any(p == a or a in p.parents for a in allowed):
             raise ValueError(f"source outside the working directory: {name}")
         if not p.exists():
             raise ValueError(f"no such file or directory: {name}")

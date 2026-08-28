@@ -82,3 +82,66 @@ def test_adopt_skips_an_artifact_another_holder_is_editing(substrate, tmp_path):
     summary = pm_beat(substrate, "p", FakeReasoner([out]), now=2.0)
     assert summary["adopted"] == []
     assert substrate.load_artifact("p", "doc").current == ""    # untouched
+
+
+def test_adopt_takes_a_sprint_directory_file_from_this_program(substrate, tmp_path):
+    """The PM's own sprints write their output to <substrate>/sprints/<id>/, which is
+    outside the program workdir. Adoption has to reach it or a finished figure/report
+    can never become an artifact — the case the prompt calls "a report a completed
+    sprint wrote"."""
+    work = tmp_path / "work-p"                 # a real workdir, NOT the substrate root
+    work.mkdir()
+    substrate.save_program(Program(id="p", title="P", goals="g", workdir=str(work)))
+    substrate.save_sprint(Sprint(id="p-c1-figure", program="p", title="Figure", goals="g",
+                                 status=SprintStatus.DONE))
+    sdir = substrate.sprint_dir("p-c1-figure")
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / "figure.png").write_text("fake-png-bytes")
+    out = PMCycleOutput(report="r", adopt_artifacts=[
+        {"aid": "fig", "title": "Toy figure", "kind": "figure",
+         "files": ["sprints/p-c1-figure/figure.png"]}])
+    summary = pm_beat(substrate, "p", FakeReasoner([out]), now=1.0)
+    assert summary["adopted"] == ["fig"]
+    assert (substrate.artifact_dir("p", "fig") / "v1" / "figure.png").read_text() == "fake-png-bytes"
+
+
+def test_adopt_refuses_another_programs_sprint_output(substrate, tmp_path):
+    """Reaching sprint dirs must not become a hole in program isolation."""
+    work = tmp_path / "work-p"
+    work.mkdir()
+    substrate.save_program(Program(id="p", title="P", goals="g", workdir=str(work)))
+    substrate.save_program(Program(id="other", title="O", goals="g",
+                                   workdir=str(tmp_path / "work-other")))
+    substrate.save_sprint(Sprint(id="other-c1", program="other", title="Theirs", goals="g",
+                                 status=SprintStatus.DONE))
+    sdir = substrate.sprint_dir("other-c1")
+    sdir.mkdir(parents=True, exist_ok=True)
+    (sdir / "secret.md").write_text("theirs")
+    out = PMCycleOutput(report="r", adopt_artifacts=[
+        {"aid": "leak", "files": ["sprints/other-c1/secret.md"]}])
+    summary = pm_beat(substrate, "p", FakeReasoner([out]), now=1.0)
+    assert summary["adopted"] == []
+    assert not (substrate.artifact_dir("p", "leak") / "meta.md").is_file()
+    assert [k["id"] for k in summary["adopt_skipped"]] == ["leak"]
+
+
+def test_a_rejected_adoption_is_reported_not_silently_dropped(substrate, tmp_path):
+    """A bad source used to `continue` out of the loop, so the whole adoption vanished
+    with no trace in the summary, the ledger or the beat log — indistinguishable from
+    the PM never asking."""
+    _program(substrate, tmp_path)
+    out = PMCycleOutput(report="r", adopt_artifacts=[
+        {"aid": "fig", "files": ["nope.png"]}])
+    summary = pm_beat(substrate, "p", FakeReasoner([out]), now=1.0)
+    assert summary["adopted"] == []
+    skipped = summary["adopt_skipped"]
+    assert [s["id"] for s in skipped] == ["fig"]
+    assert "nope.png" in skipped[0]["why"]
+
+
+def test_a_rejected_adoption_reaches_the_actions_ledger(substrate, tmp_path):
+    _program(substrate, tmp_path)
+    out = PMCycleOutput(report="r", adopt_artifacts=[
+        {"aid": "fig", "files": ["nope.png"]}])
+    pm_beat(substrate, "p", FakeReasoner([out]), now=1.0)
+    assert "Adopt FAILED" in substrate.load_report("p")
