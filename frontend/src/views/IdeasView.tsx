@@ -225,7 +225,11 @@ export default function IdeasView() {
   };
 
   if (pool.isLoading) return <Loader color="machine" />;
-  if (pool.error || !pool.data) {
+  // A failed poll must NEVER replace loaded content: every query polls on a 10s
+  // interval and on window focus (main.tsx), so one blip — a backend restart, a
+  // proxy hiccup — used to swap a working page for "not found", and it did not
+  // come back on the next successful poll. Only absence means absent.
+  if (!pool.data) {
     return <EmptyState title="Program not found">Nothing here at “{id}”.</EmptyState>;
   }
   const { summary, ideas } = pool.data;

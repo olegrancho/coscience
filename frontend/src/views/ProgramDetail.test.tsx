@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
@@ -101,5 +101,51 @@ describe("replan", () => {
     const n = await clickReplan({ skipped: false });
     expect(n.color).toBe("teal");
     expect(String(n.message)).toMatch(/Re-planned/i);
+  });
+});
+
+
+describe("a transient fetch failure", () => {
+  const PROG = {
+    id: "p", title: "Embeddings program", status: "active", goals: "g", report: "", cycle: 0,
+    sprints: [], pm_model: "", workdir: "", activations: [], last_run: null, instructions: "",
+  } as any;
+
+  function mockSides() {
+    vi.spyOn(api, "listGuidance").mockResolvedValue([]);
+    vi.spyOn(api, "listIdeas").mockResolvedValue({ summary: "", ideas: [] } as any);
+    vi.spyOn(api, "listArtifacts").mockResolvedValue([]);
+  }
+
+  function renderWith(qc: QueryClient) {
+    return render(
+      <QueryClientProvider client={qc}><MantineProvider>
+        <MemoryRouter initialEntries={["/programs/p"]}>
+          <Routes><Route path="/programs/:id" element={<ProgramDetail />} /></Routes>
+        </MemoryRouter>
+      </MantineProvider></QueryClientProvider>);
+  }
+
+  it("keeps the loaded program on screen when a background poll fails", async () => {
+    // Every query polls every 10s and on window focus, so a backend restart or a proxy
+    // blip lands here routinely. It used to swap the whole page for "Program not found"
+    // — and stay that way until a full reload.
+    mockSides();
+    const gp = vi.spyOn(api, "getProgram").mockResolvedValue(PROG);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWith(qc);
+    await waitFor(() => expect(screen.getByText("Embeddings program")).toBeTruthy());
+    gp.mockRejectedValue(new Error("502 Bad Gateway"));
+    await act(async () => { await qc.refetchQueries({ queryKey: ["program", "p"] }); });
+    expect(screen.queryByText(/Program not found/i)).toBeNull();
+    expect(screen.getByText("Embeddings program")).toBeTruthy();
+  });
+
+  it("still reports a program that genuinely is not there", async () => {
+    mockSides();
+    vi.spyOn(api, "getProgram").mockRejectedValue(new Error("404 Not Found"));
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWith(qc);
+    await waitFor(() => expect(screen.getByText(/Program not found/i)).toBeTruthy());
   });
 });

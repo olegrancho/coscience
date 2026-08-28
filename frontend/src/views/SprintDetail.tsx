@@ -20,7 +20,7 @@ function ResultPreview({ id }: { id: string }) {
   const [open, setOpen] = useState(false);
   const result = useQuery({ queryKey: ["result", id], queryFn: () => api.getResult(id) });
   if (result.isLoading) return <Text size="sm" c="dimmed">Loading the result…</Text>;
-  if (result.error || !result.data) {
+  if (!result.data) {                       // a failed poll must not hide a loaded result
     return <Link to={`/results/${id}`} className="view">Open result →</Link>;
   }
   const summary = result.data.summary;
@@ -211,7 +211,11 @@ export default function SprintDetail() {
   }, [sprint.data]);
 
   if (sprint.isLoading) return <Loader color="machine" />;
-  if (sprint.error || !sprint.data) {
+  // A failed poll must NEVER replace loaded content: every query polls on a 10s
+  // interval and on window focus (main.tsx), so one blip — a backend restart, a
+  // proxy hiccup — used to swap a working page for "not found", and it did not
+  // come back on the next successful poll. Only absence means absent.
+  if (!sprint.data) {
     return <EmptyState title="Experiment not found">Nothing here at “{id}”. It may have been removed.</EmptyState>;
   }
   const s = sprint.data;

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
@@ -128,5 +128,50 @@ describe("ChatView bound split-view", () => {
     await qc.invalidateQueries({ queryKey: ["chat", "p", "c1"] });
 
     await waitFor(() => expect(screen.getByText("final caption.")).toBeTruthy());
+  });
+});
+
+describe("ChatView chat switcher with a stale list", () => {
+  const many = [1, 2, 3, 4].map((n) => ({
+    id: `c${n}`, title: `chat ${n}`, scope: "read", created_at: n, busy: false,
+    messages: 0, last_at: n, artifacts: [],
+  }));
+
+  function mockList(list: any[]) {
+    vi.spyOn(api, "getProgram").mockResolvedValue({ id: "p", title: "P" } as any);
+    vi.spyOn(api, "listChats").mockResolvedValue(list as any);
+    vi.spyOn(api, "getChatThread").mockResolvedValue({
+      id: "cNEW", title: "New chat", scope: "read", created_at: 9, turns_done: 0,
+      busy: false, messages: [], live: "", artifacts: [] } as any);
+  }
+
+  it("survives '+ New' before the chat list refetches", async () => {
+    // The switcher folds to 3 chips past 3 chats and splices the active one back in.
+    // `+ New` sets active to an id the cached list does not contain yet, so that
+    // splice used to look up nothing and render `undefined.id` — blanking the page.
+    mockList(many);
+    vi.spyOn(api, "createChat").mockResolvedValue({
+      id: "cNEW", title: "New chat", scope: "read", created_at: 9, turns_done: 0,
+      busy: false, messages: [], live: "", artifacts: [] } as any);
+    renderAt();
+    await waitFor(() => expect(screen.getByText("chat 4")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /\+ New/ }));
+    // Still rendered: the switcher survives the window where active ∉ list.
+    await waitFor(() => expect(screen.getByText(/chat with the planner/i)).toBeTruthy());
+    expect(screen.getByText("chat 4")).toBeTruthy();
+  });
+
+  it("survives a ?c= id that the cached list does not contain", async () => {
+    mockList(many);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}><MantineProvider>
+        <MemoryRouter initialEntries={["/programs/p/chat?c=cNEW"]}>
+          <Routes><Route path="/programs/:id/chat" element={<ChatView />} /></Routes>
+        </MemoryRouter>
+      </MantineProvider></QueryClientProvider>);
+    // The switcher renders its chips (rather than blanking) once the list lands.
+    await waitFor(() => expect(screen.getByText("chat 4")).toBeTruthy());
+    expect(screen.getByText(/chat with the planner/i)).toBeTruthy();
   });
 });

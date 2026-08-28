@@ -81,7 +81,8 @@ def actions_ledger(actions: dict) -> str:
     for key, label in (("ideas_added", "Ideas added"), ("ideas_removed", "Ideas pruned")):
         if actions.get(key):
             lines.append(f"- {label}: {actions[key]}")
-    for key, label in (("release_skipped", "Release FAILED"), ("reopen_skipped", "Reopen FAILED")):
+    for key, label in (("release_skipped", "Release FAILED"), ("reopen_skipped", "Reopen FAILED"),
+                       ("adopt_skipped", "Adopt FAILED")):
         for skip in actions.get(key) or ():
             lines.append(f"- {label}: `{skip['id']}` — {skip['why']}")
     for claim in actions.get("unbacked_claims") or ():
@@ -689,7 +690,15 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     # path outside the tree, an artifact another holder is editing — is skipped,
     # never fatal: the rest of the cycle still applies.
     adopted: list[str] = []
+    adopt_skipped: list[dict] = []
     base = _resolve_workdir(substrate, substrate.load_program(program_id).workdir)
+    # A sprint writes its output to <substrate>/sprints/<id>/, which is NOT under the
+    # program workdir — so "promote the figure that sprint just made" was unreachable
+    # by every spelling of the path. Look names up in the substrate root as well, but
+    # allow only this program's own sprint dirs, so widening the lookup doesn't let one
+    # program adopt another's output.
+    own_sprint_dirs = [substrate.sprint_dir(sp.id) for sp in substrate.iter_sprints()
+                       if sp.program == program_id]
     for spec in staged.output.adopt_artifacts:
         if not isinstance(spec, dict):
             continue
@@ -697,7 +706,9 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         if not aid:
             continue
         try:
-            sources = artifacts.resolve_sources(base, [str(f) for f in spec.get("files", [])])
+            sources = artifacts.resolve_sources(
+                [base, substrate.repo_root], [str(f) for f in spec.get("files", [])],
+                roots=[base, *own_sprint_dirs])
             artifacts.adopt(
                 substrate, program_id, aid,
                 title=str(spec.get("title") or aid), kind=str(spec.get("kind") or "md"),
@@ -705,7 +716,10 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 content=str(spec.get("content") or ""),
                 filename=str(spec.get("filename") or ""),
                 note=str(spec.get("note") or ""))
-        except (ValueError, OSError, artifacts.ArtifactBusy):
+        except (ValueError, OSError, artifacts.ArtifactBusy) as exc:
+            # Never fatal — the rest of the cycle still applies — but never silent
+            # either: a swallowed adoption read exactly like the PM never asking.
+            adopt_skipped.append({"id": aid, "why": str(exc)})
             continue
         adopted.append(aid)
 
@@ -899,7 +913,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     actions = {"released": released, "reopened": reopened, "submitted": submitted,
                "dropped": dropped, "adopted": adopted,
                "ideas_added": ideas_added, "ideas_removed": ideas_removed,
-               "release_skipped": release_skipped, "reopen_skipped": reopen_skipped}
+               "release_skipped": release_skipped, "reopen_skipped": reopen_skipped,
+               "adopt_skipped": adopt_skipped}
     actions["unbacked_claims"] = unbacked_claims(staged.output.report, actions)
     # The reasoner's prose, then the platform's own record of what it applied.
     substrate.save_report(program_id, staged.output.report + actions_ledger(actions))
@@ -916,6 +931,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                   + (f", dropped {dropped} (cap)" if dropped else "")
                   + (f", FAILED to release {[s['id'] for s in release_skipped]}"
                      if release_skipped else "")
+                  + (f", FAILED to adopt {[s['id'] for s in adopt_skipped]}"
+                     if adopt_skipped else "")
                   + (f", UNBACKED CLAIMS {actions['unbacked_claims']}"
                      if actions["unbacked_claims"] else ""))
     if new_signals is not None:                        # we actually reasoned this beat
@@ -929,6 +946,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             "submitted": list(submitted), "forced": bool(force),
             "released": list(released), "reopened": list(reopened),
             "release_skipped": [dict(s) for s in release_skipped],
+            "adopt_skipped": [dict(s) for s in adopt_skipped],
             "unbacked_claims": list(actions["unbacked_claims"]),
         })
         pm.activations = pm.activations[-50:]          # keep the recent timeline bounded
@@ -942,4 +960,5 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             "edges_added": edges_added, "edges_removed": edges_removed,
             "released": released, "reopened": reopened,
             "release_skipped": release_skipped, "reopen_skipped": reopen_skipped,
+            "adopt_skipped": adopt_skipped,
             "unbacked_claims": actions["unbacked_claims"]}
