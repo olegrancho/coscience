@@ -173,8 +173,14 @@ export default function ChatView() {
   let visible = sorted;
   if (!expanded && sorted.length > 3) {
     const top = sorted.slice(0, 3);
-    visible = active && !top.some((c) => c.id === active)
-      ? [...top.slice(0, 2), sorted.find((c) => c.id === active)!]
+    // The active chat may not be in the list yet: "+ New" and an artifact's `?c=`
+    // both set it from the create response, while this list is still the pre-create
+    // cache. Splice it in only once it actually resolves — it appears on the next
+    // refetch a moment later. (Asserting it non-null here rendered `undefined.id`
+    // and took the whole page down with it.)
+    const activeChat = active ? sorted.find((c) => c.id === active) : undefined;
+    visible = activeChat && !top.some((c) => c.id === active)
+      ? [...top.slice(0, 2), activeChat]
       : top;
   }
   const hiddenCount = sorted.length - visible.length;
