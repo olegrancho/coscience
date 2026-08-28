@@ -230,6 +230,11 @@ export default function App() {
               <Route path="/programs/:id/artifacts/:aid" element={<ArtifactDetail />} />
               <Route path="/programs/:id/wiki" element={<WikiView />} />
               <Route path="/programs/:id/wiki/lint" element={<WikiLintView />} />
+              {/* React Router v6 ranks sibling routes by path specificity (a
+                  static segment always outranks a trailing "*" splat),
+                  independent of declaration order below — so this does not
+                  need to precede the /wiki/* catch-all to win the match.
+                  It's kept here anyway for readability, not correctness. */}
               <Route path="/programs/:id/wiki/graph" element={
                 <Suspense fallback={<div>Loading…</div>}><WikiGraphView /></Suspense>
               } />
