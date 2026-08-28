@@ -45,3 +45,26 @@ def test_a_corrupt_cache_file_rebuilds_instead_of_raising(wiki_bundle):
     cache.write_text("{not json")
     g = wiki_graph.cached_build(substrate, pid)
     assert [n["id"] for n in g["nodes"]] == ["concepts/a.md"]
+
+
+def test_valid_json_wrong_shape_rebuilds_instead_of_raising(wiki_bundle):
+    """Syntactically valid JSON that isn't an object: blob.get("key") must not
+    raise AttributeError on null/list/number/string/bool payloads."""
+    substrate, pid = wiki_bundle
+    _write(substrate, pid, "concepts/a.md")
+    cache = wiki_store.state_dir(substrate, pid) / "graph.json"
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    for payload in ("null", "[]", "5", '"x"', "true"):
+        cache.write_text(payload)
+        g = wiki_graph.cached_build(substrate, pid)
+        assert [n["id"] for n in g["nodes"]] == ["concepts/a.md"]
+
+
+def test_missing_key_field_rebuilds_instead_of_raising(wiki_bundle):
+    substrate, pid = wiki_bundle
+    _write(substrate, pid, "concepts/a.md")
+    cache = wiki_store.state_dir(substrate, pid) / "graph.json"
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({"graph": {"nodes": [], "edges": []}}))
+    g = wiki_graph.cached_build(substrate, pid)
+    assert [n["id"] for n in g["nodes"]] == ["concepts/a.md"]

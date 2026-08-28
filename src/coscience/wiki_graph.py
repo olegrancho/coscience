@@ -148,7 +148,7 @@ def cached_build(substrate, program_id: str) -> dict:
         blob = json.loads(cache.read_text())
         if blob.get("key") == key:
             return blob["graph"]
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         pass
     graph = build(pages)
     try:
