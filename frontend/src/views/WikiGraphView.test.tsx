@@ -134,13 +134,49 @@ describe("WikiGraphView", () => {
   });
 
   it("reports how many nodes are visible, and filtering does not move the rest", async () => {
+    // graph (module fixture) has one typed edge only, which would make
+    // "typed only" a no-op — unable to prove either that positions survive a
+    // real filter change or that the filter fired at all. This fixture adds
+    // an untyped body-link edge (b -> c) so toggling the control genuinely
+    // removes an edge from what's rendered.
+    const withUntypedEdge = {
+      nodes: [
+        ...graph.nodes,
+        { id: "concepts/c.md", slug: "c", title: "Gamma", type: "Concept",
+          status: "draft", trust: "unverified", in_degree: 1, out_degree: 0,
+          orphan: false, cluster: 0 },
+      ],
+      edges: [
+        ...graph.edges,
+        { id: "t:b->c:body-link", src: "concepts/b.md", dst: "concepts/c.md",
+          type: "", confidence: "", source: "", typed: false, materialized: false },
+      ],
+    };
+    vi.spyOn(api, "getWikiGraph").mockResolvedValue(withUntypedEdge as never);
+
     renderAt("/programs/p1/wiki/graph");
-    const before = await screen.findByText(/showing 2 of 2 nodes/);
+    const svg = await screen.findByRole("img", { name: "concept graph" });
+    const before = await screen.findByText(/showing 3 of 3 nodes/);
     expect(before).toBeTruthy();
+    // Both edges render before the toggle — the proof that there is
+    // something for "typed only" to actually remove.
+    expect(svg.querySelectorAll("line").length).toBe(2);
+
+    // `alpha` is itself the <circle title="Alpha">: getByTitle's attribute
+    // match returns the element carrying the `title` attribute, not a
+    // wrapper, so `cx` is read off `alpha` directly, not `alpha.parentElement`
+    // (which would be the <svg>, whose `cx` is always null).
     const alpha = await screen.findByTitle("Alpha");
-    const cx = alpha.parentElement?.getAttribute("cx");
+    const cx = alpha.getAttribute("cx");
+    expect(cx).not.toBeNull();
+
     fireEvent.click(screen.getByLabelText("typed only"));
-    await waitFor(() => expect(screen.getByText(/showing 2 of 2 nodes/)).toBeTruthy());
-    expect(alpha.parentElement?.getAttribute("cx")).toBe(cx);   // layout unmoved
+
+    // The filter fired: the untyped edge is gone from the render.
+    await waitFor(() => expect(svg.querySelectorAll("line").length).toBe(1));
+    // Node count is unaffected — hiding an edge must never hide (or ring an
+    // orphan onto) the nodes it used to connect (design 5.3).
+    expect(screen.getByText(/showing 3 of 3 nodes/)).toBeTruthy();
+    expect(alpha.getAttribute("cx")).toBe(cx);   // layout unmoved
   });
 });
