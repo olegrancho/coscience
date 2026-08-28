@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import tempfile
 from pathlib import Path
 
 from coscience.executor import launch_detached
@@ -111,8 +112,13 @@ def scope_change_notice(scope: str) -> str:
         "and read files, but can no longer run commands or edit files.")
 
 
-def _turn_shell(claude_bin, prompt, scope, session_id, resume, model, out, exitf) -> str:
-    parts = [claude_bin, "-p", shlex.quote(prompt)]
+def _turn_shell(claude_bin, promptf, scope, session_id, resume, model, out, exitf) -> str:
+    """The shell line for one turn. The prompt is fed on stdin from `promptf`,
+    never as an argv word: a first-turn prompt carries the whole program preamble
+    and routinely exceeds Linux's 128 KiB per-argument limit (MAX_ARG_STRLEN),
+    which fails the spawn outright with OSError(E2BIG). stdin has no such cap.
+    The file is removed once the turn exits, so it never outlives the run."""
+    parts = [claude_bin, "-p"]
     parts += ["--resume", shlex.quote(session_id)] if resume else ["--session-id", shlex.quote(session_id)]
     if model:
         parts += ["--model", shlex.quote(model)]
@@ -122,7 +128,20 @@ def _turn_shell(claude_bin, prompt, scope, session_id, resume, model, out, exitf
         parts += ["--allowedTools", *_READ_TOOLS]
     parts += ["--output-format", "stream-json", "--verbose"]
     return (" ".join(parts)
-            + f" > {shlex.quote(str(out))} 2>&1; echo $? > {shlex.quote(str(exitf))}")
+            + f" < {shlex.quote(str(promptf))} > {shlex.quote(str(out))} 2>&1"
+            + f"; echo $? > {shlex.quote(str(exitf))}"
+            + f"; rm -f {shlex.quote(str(promptf))}")
+
+
+def _write_prompt_file(prompt: str) -> str:
+    """Stage the prompt outside the thread dir. The substrate is committed with
+    `git add -A` while the turn is still running, so a prompt file living next to
+    turn.out would be committed on every first turn — a six-figure-byte blob of
+    context that is already in the repo it was rendered from."""
+    fd, path = tempfile.mkstemp(prefix="coscience-turn-", suffix=".prompt")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(prompt)
+    return path
 
 
 def launch_turn(thread_dir: Path, workdir: str, prompt: str, scope: str,
@@ -134,8 +153,13 @@ def launch_turn(thread_dir: Path, workdir: str, prompt: str, scope: str,
     for f in (out, exitf):
         if f.exists():
             f.unlink()
-    cmd = _turn_shell(claude_bin, prompt, scope, session_id, resume, model, out, exitf)
-    return launch_detached(cmd, cwd=workdir)
+    promptf = _write_prompt_file(prompt)
+    cmd = _turn_shell(claude_bin, promptf, scope, session_id, resume, model, out, exitf)
+    try:
+        return launch_detached(cmd, cwd=workdir)
+    except BaseException:
+        os.unlink(promptf)   # nothing will ever run the `rm` in the shell line
+        raise
 
 
 def collect_turn(thread_dir: Path) -> tuple[str, str, str]:
