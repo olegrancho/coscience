@@ -179,4 +179,15 @@ describe("WikiGraphView", () => {
     expect(screen.getByText(/showing 3 of 3 nodes/)).toBeTruthy();
     expect(alpha.getAttribute("cx")).toBe(cx);   // layout unmoved
   });
+
+  it("the tension lens restyles edges without moving anything", async () => {
+    // The defect this catches: recomputing layout when the lens changes. A
+    // toggle that rearranges the picture is one the reader stops trusting.
+    renderAt("/programs/p1/wiki/graph");
+    const alpha = await screen.findByTitle("Alpha");
+    const before = alpha.getAttribute("cx");
+    fireEvent.click(screen.getByLabelText("tension"));
+    await waitFor(() => expect((screen.getByLabelText("tension") as HTMLInputElement).checked).toBe(true));
+    expect(alpha.getAttribute("cx")).toBe(before);
+  });
 });

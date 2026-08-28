@@ -21,7 +21,7 @@ function toggle(set: Set<string>, v: string): Set<string> {
 export default function WikiGraphView() {
   const { id = "" } = useParams();
   const nav = useNavigate();
-  const lens: Lens = "structure";
+  const [lens, setLens] = useState<Lens>("structure");
   const q = useQuery({ queryKey: ["wiki-graph", id], queryFn: () => api.getWikiGraph(id) });
   const [filters, setFilters] = useState<Filters>(emptyFilters());
 
@@ -117,6 +117,12 @@ export default function WikiGraphView() {
         <input type="checkbox" aria-label="typed only" checked={filters.typedOnly}
                onChange={(e) => setFilters((f) => ({ ...f, typedOnly: e.target.checked }))} />
         {" "}typed only
+      </label>
+      <label>
+        <input type="checkbox" aria-label="tension"
+               checked={lens === "tension"}
+               onChange={(e) => setLens(e.target.checked ? "tension" : "structure")} />
+        {" "}tension
       </label>
       <svg role="img" aria-label="concept graph" width="100%" height="640" viewBox={viewBox}>
         {shown.edges.map((e) => {
