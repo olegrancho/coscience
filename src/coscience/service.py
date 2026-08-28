@@ -1656,6 +1656,15 @@ class Service:
         except OSError:
             return ""
 
+    def wiki_graph(self, program_id: str) -> dict:
+        """The concept graph for this program's bundle (spec 11.1).
+
+        Read-only and cached; the builder is pure and lives in wiki_graph."""
+        from coscience import wiki_graph
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        return wiki_graph.cached_build(self.substrate, program_id)
+
     def wiki_lint_report(self, program_id: str) -> dict:
         """Live findings, never autofixed, plus the agent's own filed summaries
         (spec 11.1). `fix=True` here would mean a GET mutated the bundle."""

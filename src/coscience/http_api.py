@@ -689,6 +689,13 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def list_wiki_merges(program_id: str) -> list[dict]:
         return service.list_wiki_merges(program_id)
 
+    @api.get("/programs/{program_id}/wiki/graph")
+    def wiki_graph(program_id: str) -> dict:
+        try:
+            return service.wiki_graph(program_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
     # Registered last of the wiki GETs: a literal path like /wiki/pages must not
     # be swallowed by the {slug:path} pattern.
     @api.get("/programs/{program_id}/wiki/pages/{slug:path}")
