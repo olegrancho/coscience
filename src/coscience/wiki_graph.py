@@ -50,6 +50,57 @@ def _edges(pages: list[wiki_okf.Page], known: set[str]) -> list[dict]:
     return out
 
 
+def _materialized(edges: list[dict]) -> list[dict]:
+    """Parent spec 7: `contradicts` is symmetric in meaning but stored on one
+    side only. Materialize the reverse for display — and mark it, because it
+    must not count toward any metric (design 2)."""
+    have = {(e["src"], e["dst"]) for e in edges if e["type"] == "contradicts"}
+    out = []
+    for e in edges:
+        if e["type"] != "contradicts" or (e["dst"], e["src"]) in have:
+            continue
+        out.append({"id": f"m:{e['dst']}->{e['src']}:contradicts",
+                    "src": e["dst"], "dst": e["src"], "type": "contradicts",
+                    "confidence": e["confidence"], "source": e["source"],
+                    "typed": True, "materialized": True})
+    return out
+
+
+def _clusters(node_ids: list[str], edges: list[dict]) -> dict[str, int]:
+    """Connected components, direction ignored. Union-find keyed by the node
+    order given, so ids are deterministic for a given page order."""
+    parent = {nid: nid for nid in node_ids}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for e in edges:
+        a, b = find(e["src"]), find(e["dst"])
+        if a != b:
+            parent[a] = b
+    order: dict[str, int] = {}
+    return {nid: order.setdefault(find(nid), len(order)) for nid in node_ids}
+
+
+def _apply_metrics(nodes: list[dict], edges: list[dict]) -> None:
+    """Degree and orphan count REAL edges only — materialized reverses are
+    display artefacts, and counting them doubles one disagreement."""
+    real = [e for e in edges if not e["materialized"]]
+    by_id = {n["id"]: n for n in nodes}
+    for e in real:
+        if e["src"] in by_id:
+            by_id[e["src"]]["out_degree"] += 1
+        if e["dst"] in by_id:
+            by_id[e["dst"]]["in_degree"] += 1
+    cluster = _clusters([n["id"] for n in nodes], real)
+    for n in nodes:
+        n["orphan"] = (n["in_degree"] + n["out_degree"]) == 0
+        n["cluster"] = cluster[n["id"]]
+
+
 def build(pages: list[wiki_okf.Page]) -> dict:
     node_pages = _node_pages(pages)
     known = {p.path for p in node_pages}
@@ -58,4 +109,7 @@ def build(pages: list[wiki_okf.Page]) -> dict:
         "type": p.type, "status": p.status, "trust": wiki_read.trust_tier(p),
         "in_degree": 0, "out_degree": 0, "orphan": True, "cluster": 0,
     } for p in node_pages]
-    return {"nodes": nodes, "edges": _edges(node_pages, known)}
+    edges = _edges(node_pages, known)
+    edges += _materialized(edges)
+    _apply_metrics(nodes, edges)
+    return {"nodes": nodes, "edges": edges}
