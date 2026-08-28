@@ -148,6 +148,15 @@ export default function WikiLintView() {
                   <Badge size="xs" variant="light" color={r.status === "ok" ? "gray" : "red"}>
                     {r.status}
                   </Badge>
+                  {/* Amends spec §11.3 (ruled 2026-08-28): a human-accepted
+                      merge lands in this same list as agent runs, so it must
+                      say so — a reader must not mistake it for an agent's
+                      own work. */}
+                  {r.by === "human" && (
+                    <Badge size="xs" variant="filled" color="grape" data-testid="run-by-human">
+                      human
+                    </Badge>
+                  )}
                   <AbsTime at={r.at} />
                   {typeof r.pages_created === "number" && r.pages_created > 0 && (
                     <Text size="xs" c="dimmed">+{r.pages_created} created</Text>

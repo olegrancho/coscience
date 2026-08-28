@@ -99,6 +99,27 @@ describe("WikiLintView", () => {
     expect(within(row).getByTitle(/abc1234def5678/)).toBeTruthy();   // full sha on hover
   });
 
+  it("marks a human-accepted merge so it isn't mistaken for an agent run", async () => {
+    // Ruled 2026-08-28: accept_wiki_merge now appends its own activity entry,
+    // kind "merge" with by: "human" — this must render distinguishably from
+    // the ingest/lint rows an agent produced.
+    vi.spyOn(api, "getWikiActivity").mockResolvedValue([
+      { id: "m0001", kind: "merge", by: "human", status: "ok", at: 1756300000,
+        pages_created: 0, pages_updated: 1,
+        merged: [{ loser: "concepts/job-lease.md", winner: "concepts/compute-lease.md",
+                   commit: "abc1234def5678" }] },
+    ] as never);
+    mount();
+    const row = (await screen.findAllByTestId("wiki-run"))[0];
+    expect(within(row).getByTestId("run-by-human").textContent).toMatch(/human/i);
+  });
+
+  it("does not mark an ordinary agent run as human", async () => {
+    mount();
+    const row = (await screen.findAllByTestId("wiki-run"))[0];
+    expect(within(row).queryByTestId("run-by-human")).toBeNull();
+  });
+
   it("still renders a run recorded before commits were captured", async () => {
     vi.spyOn(api, "getWikiActivity").mockResolvedValue([
       { id: "r0001", kind: "lint", status: "ok", at: 1756100000,

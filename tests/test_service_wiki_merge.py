@@ -94,3 +94,22 @@ def test_a_traversing_path_is_not_found(substrate):
     with pytest.raises(NotFoundError):
         Service(substrate.repo_root).merge_wiki_pages(
             "p1", "concepts/a.md", "../../../etc/passwd")
+
+
+def test_accepting_a_merge_records_it_in_the_activity_trail(substrate):
+    """Ruled 2026-08-28: Activity shows everything that changed the wiki, not
+    only what runs did. The entry must say a human did it."""
+    _seed(substrate)
+    merge_id = "m0001"
+    winner = "concepts/a.md"
+    with wiki_store.state_guard(substrate, "p1") as state:
+        state["merge_proposals"] = [
+            {"id": merge_id, "winner": winner, "loser": "concepts/b.md",
+             "why": "same idea", "run": "r0001", "at": 1.0}]
+    svc = Service(substrate.repo_root)
+    svc.accept_wiki_merge("p1", merge_id)
+    state = wiki_store.load_state(substrate, "p1")
+    entry = state["runs"][0]
+    assert entry["kind"] == "merge"
+    assert entry["by"] == "human"
+    assert entry["merged"] and entry["merged"][0]["winner"] == winner

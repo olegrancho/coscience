@@ -1870,6 +1870,18 @@ class Service:
                 pending.append(entry)
                 state["merge_proposals"] = pending
             raise
+        # Amends spec §11.3 (ruled 2026-08-28): Activity shows everything that
+        # changed the wiki, not only what runs did. `by: "human"` keeps this
+        # entry from being mistaken for an agent's work in the same list.
+        from coscience.wiki import RUNS_KEPT
+        with wiki_store.state_guard(self.substrate, program_id) as state:
+            state["runs"] = ([{
+                "id": merge_id, "kind": "merge", "by": "human",
+                "status": "ok", "at": time.time(),
+                "pages_created": 0, "pages_updated": len(out.get("rewritten") or []),
+                "merged": [{"loser": loser, "winner": winner,
+                            "commit": out.get("commit", "")}],
+            }] + list(state.get("runs") or []))[:RUNS_KEPT]
         return {"applied": True, **out}
 
     def reject_wiki_merge(self, program_id: str, merge_id: str) -> dict:

@@ -133,6 +133,10 @@ export interface WikiMergeProposal {
 export interface WikiRun {
   id: string; kind: string; status: string; at: number;
   pages_created?: number; pages_updated?: number;
+  // Present only on a human-actioned entry (e.g. accepting a merge proposal),
+  // amending spec §11.3 (ruled 2026-08-28): Activity shows everything that
+  // changed the wiki, not only what agent runs did.
+  by?: string;
   // New shape names the commit that performed the merge (spec 9.1/11.3); old
   // runs recorded before that were captured are still [loser, winner] pairs.
   merged: ({ loser: string; winner: string; commit?: string } | [string, string])[];
