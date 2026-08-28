@@ -311,9 +311,10 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
     {{"aid": "<short-slug id for the artifact — reuse an existing id to add a new version to it>",
       "title": "<what it is, for a human scanning the artifact list>",
       "kind": "md|data|figure|page",
-      "files": ["<path, relative to YOUR working directory, of output that ALREADY EXISTS
-                 and should become this artifact — a file, or a directory whose contents
-                 are taken. Must be inside your working directory.>", "..."],
+      "files": ["<path of output that ALREADY EXISTS and should become this artifact —
+                 a file, or a directory whose contents are taken. Relative to YOUR working
+                 directory, or `sprints/<sprint-id>/<file>` for output one of THIS
+                 program's own sprints left behind. Nothing else is reachable.>", "..."],
       "content": "<INSTEAD of files: literal text to write as the artifact (use for a stub
                    you are creating from nothing). Put real newlines in as \\n.>",
       "filename": "<optional name for the `content` file; default <aid>.md>",
@@ -359,9 +360,12 @@ Run the program by curating ideas, not by piling on sprints:
   When a human does ask for an artifact, two routes, and picking the right one matters:
   * ADOPT (adopt_artifacts) — for output that ALREADY EXISTS. It lands immediately: no
     sprint, no human approval, no compute, and it does NOT touch the sprint cap. Use it
-    to promote a finished file your working directory already holds (a report a completed
-    sprint wrote, a dataset it left behind), or to stand up a stub with `content` that a
-    later sprint fills in. Adopting the same aid again adds a new version — the old one is
+    to promote a finished file your working directory already holds, or one a completed
+    sprint of this program left in its own directory — name that as
+    `sprints/<sprint-id>/<file>` (e.g. `sprints/p-c4-figure/figure.png`), which is where
+    a sprint's output actually lives. A `figure` you adopt this way should list BOTH the
+    image and its description.md. Or stand up a stub with `content` for a later sprint to
+    fill in. Adopting the same aid again adds a new version — the old one is
     kept, so this is safe and reversible. Prefer this whenever the work is already done.
   * ARTIFACT_TASK (artifact_tasks) — for output that still has to be COMPUTED. It becomes
     a PROPOSED sprint bound to the artifact; a human approves it like any sprint and it

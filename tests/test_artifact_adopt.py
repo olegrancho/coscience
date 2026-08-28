@@ -124,3 +124,33 @@ def test_resolve_sources_allows_escape_when_unrestricted(tmp_path):
 def test_resolve_sources_rejects_missing_path(tmp_path):
     with pytest.raises(ValueError):
         artifacts.resolve_sources(tmp_path, ["nope.md"])
+
+
+def test_resolve_sources_looks_up_relative_names_in_each_base(tmp_path):
+    """Several lookup roots, tried in order — the program workdir first, then the
+    substrate root, so `sprints/<id>/out.png` resolves without an absolute path."""
+    work, repo = tmp_path / "work", tmp_path / "repo"
+    (work / "sub").mkdir(parents=True)
+    (repo / "sprints" / "s1").mkdir(parents=True)
+    (repo / "sprints" / "s1" / "out.png").write_text("img")
+    got = artifacts.resolve_sources([work, repo], ["sprints/s1/out.png"],
+                                    roots=[work, repo / "sprints" / "s1"])
+    assert got == [(repo / "sprints" / "s1" / "out.png").resolve()]
+
+
+def test_resolve_sources_restricts_to_roots_not_lookup_bases(tmp_path):
+    """Being able to resolve a name is not permission to take it: the substrate root
+    is a lookup base, but only the listed roots are allowed."""
+    work, repo = tmp_path / "work", tmp_path / "repo"
+    work.mkdir()
+    (repo / "sprints" / "mine").mkdir(parents=True)
+    (repo / "sprints" / "theirs").mkdir(parents=True)
+    (repo / "sprints" / "theirs" / "secret.md").write_text("no")
+    with pytest.raises(ValueError, match="outside"):
+        artifacts.resolve_sources([work, repo], ["sprints/theirs/secret.md"],
+                                  roots=[work, repo / "sprints" / "mine"])
+
+
+def test_resolve_sources_defaults_roots_to_the_bases(tmp_path):
+    (tmp_path / "out.md").write_text("x")
+    assert artifacts.resolve_sources(tmp_path, ["out.md"]) == [(tmp_path / "out.md").resolve()]

@@ -1274,13 +1274,19 @@ class Service:
                        note: str = "", by: str = "") -> dict:
         """Register output that already exists as an artifact (new, or a new version
         of an existing one) and snapshot it — no sprint, no compute grant. `files`
-        resolve against the program's workdir and may not escape it, the same rule
-        the PM's own adoption follows."""
+        resolve against the program's workdir, then the substrate root so a finished
+        sprint's own output (`sprints/<id>/figure.png`) is reachable, and may not
+        escape either that workdir or this program's sprints — the same rule the PM's
+        own adoption follows."""
         from coscience import artifacts
         from coscience.pm_agent import _resolve_workdir
         self._require_program(program_id)
         base = _resolve_workdir(self.substrate, self.substrate.load_program(program_id).workdir)
-        sources = artifacts.resolve_sources(base, [str(f) for f in (files or [])])
+        own_sprint_dirs = [self.substrate.sprint_dir(sp.id)
+                           for sp in self.substrate.iter_sprints() if sp.program == program_id]
+        sources = artifacts.resolve_sources(
+            [base, self.substrate.repo_root], [str(f) for f in (files or [])],
+            roots=[base, *own_sprint_dirs])
         vid = artifacts.adopt(self.substrate, program_id, aid, title=title, kind=kind,
                               now=time.time(), created_by=by or "human",
                               sources=sources, content=content, filename=filename,
