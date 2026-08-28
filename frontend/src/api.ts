@@ -166,6 +166,17 @@ export interface WikiLintReport {
   counts: Record<string, number>; findings: WikiLintFinding[];
   reports: { date: string; text: string }[];
 }
+export interface WikiGraphNode {
+  id: string; slug: string; title: string;
+  type: "Concept" | "Entity" | "Synthesis";
+  status: string; trust: string;
+  in_degree: number; out_degree: number; orphan: boolean; cluster: number;
+}
+export interface WikiGraphEdge {
+  id: string; src: string; dst: string; type: string;
+  confidence: string; source: string; typed: boolean; materialized: boolean;
+}
+export interface WikiGraphT { nodes: WikiGraphNode[]; edges: WikiGraphEdge[] }
 
 /** A page address is a path ("concepts/auth-gate"), so each segment is encoded
  *  on its own — encodeURIComponent on the whole slug would turn the separator
@@ -502,6 +513,8 @@ export const api = {
       .then(j<{ rejected: string[] }>),
   getWikiActivity: (id: string) =>
     fetch(`/api/programs/${id}/wiki/activity`).then(j<WikiRun[]>),
+  getWikiGraph: (id: string) =>
+    fetch(`/api/programs/${id}/wiki/graph`).then(j<WikiGraphT>),
   setWikiMergePolicy: (id: string, policy: string) =>
     fetch(`/api/programs/${id}/wiki-merge-policy`, {
       method: "POST", headers: { "Content-Type": "application/json" },

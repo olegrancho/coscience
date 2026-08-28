@@ -182,4 +182,20 @@ describe("wiki merge client", () => {
     expect(url).toBe("/api/programs/p1/wiki-merge-policy");
     expect(JSON.parse((init as RequestInit).body as string)).toEqual({ policy: "propose" });
   });
+
+  it("getWikiGraph fetches the program's concept graph", async () => {
+    const payload = {
+      nodes: [{ id: "concepts/a.md", slug: "a", title: "A", type: "Concept",
+                status: "draft", trust: "unverified", in_degree: 0, out_degree: 1,
+                orphan: false, cluster: 0 }],
+      edges: [{ id: "t:a->b:refines", src: "concepts/a.md", dst: "concepts/b.md",
+                type: "refines", confidence: "high", source: "wt-r1",
+                typed: true, materialized: false }],
+    };
+    const fetchMock = mockFetch(200, payload);
+    const g = await api.getWikiGraph("p1");
+    expect(fetchMock).toHaveBeenCalledWith("/api/programs/p1/wiki/graph");
+    expect(g.nodes[0].slug).toBe("a");
+    expect(g.edges[0].typed).toBe(true);
+  });
 });
