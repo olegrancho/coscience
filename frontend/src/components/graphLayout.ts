@@ -26,10 +26,14 @@ export function layout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
 const FORCE_TICKS = 300;
 const RING = 120;
 
-/** Deterministic seed positions: d3's phyllotaxis, without its random jiggle.
- *  d3-force perturbs coincident nodes with Math.random, so an unseeded run
- *  draws a different picture every visit and the graph never becomes a shape
- *  you can learn. Seeding + a fixed tick count makes it reproducible. */
+/** Deterministic seed positions, using d3's own phyllotaxis spiral formula
+ *  (the fallback d3-force reaches for when a node's x/y is NaN/undefined).
+ *  d3-force@3's own jiggle is already seeded off a fixed-seed LCG, so it does
+ *  not reintroduce Math.random nondeterminism on its own — but leaving nodes
+ *  unseeded means relying on that fallback's internals rather than making our
+ *  determinism explicit here. A fixed tick count (rather than an animated
+ *  on("tick", ...) loop) is what actually makes the result reproducible:
+ *  running the simulation to a stable stopping point every time. */
 function seed(i: number): { x: number; y: number } {
   const r = 10 * Math.sqrt(0.5 + i);
   const a = i * Math.PI * (3 - Math.sqrt(5));

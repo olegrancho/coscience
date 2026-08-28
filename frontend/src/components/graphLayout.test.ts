@@ -50,10 +50,21 @@ describe("forceLayout", () => {
     expect(second).toEqual(first);
   });
 
-  it("separates unconnected nodes rather than stacking them at the origin", () => {
+  it("separates unconnected nodes via the simulation's repulsion, not just the seed", () => {
+    // The phyllotaxis seed alone already spaces 3 nodes ~17-26px apart (no
+    // ticks needed for that much). 150 sits well above what seeding alone
+    // produces, and well above what forceCollide's local anti-overlap alone
+    // achieves once forceManyBody is removed (~71px, measured) — so this
+    // threshold is only reachable when the charge force actually runs for
+    // the full tick count. See task-6-report.md fix-round-1 log for the
+    // measured numbers behind 150.
     const out = forceLayout(["a", "b", "c"].map(n), []);
-    const keys = new Set(out.map((x) => `${Math.round(x.position.x)},${Math.round(x.position.y)}`));
-    expect(keys.size).toBe(3);
+    const pts = out.map((x) => x.position);
+    const dist = (p: { x: number; y: number }, q: { x: number; y: number }) =>
+      Math.hypot(p.x - q.x, p.y - q.y);
+    const pairs: Array<[number, number]> = [[0, 1], [0, 2], [1, 2]];
+    const minPairwiseDistance = Math.min(...pairs.map(([i, j]) => dist(pts[i], pts[j])));
+    expect(minPairwiseDistance).toBeGreaterThan(150);
   });
 });
 
