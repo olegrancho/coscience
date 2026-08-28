@@ -212,6 +212,10 @@ describe("WikiView centre pane", () => {
     vi.spyOn(api, "getWikiPage").mockResolvedValue(centrePage as never);
     vi.spyOn(api, "getWikiLint").mockResolvedValue(
       { counts: {}, findings: [], reports: [] } as never);
+    // Mounting a page (slug set) now also mounts the neighbourhood pane,
+    // which fetches its own graph — mock it so the pane doesn't hit the
+    // network unmocked.
+    vi.spyOn(api, "getWikiGraph").mockResolvedValue({ nodes: [], edges: [] } as never);
   });
 
   it("renders the page title and body", async () => {
@@ -298,6 +302,9 @@ describe("WikiView right pane", () => {
     vi.spyOn(api, "getWikiPage").mockResolvedValue(sidePage as never);
     vi.spyOn(api, "getWikiLint").mockResolvedValue(
       { counts: {}, findings: [], reports: [] } as never);
+    // Same as the centre-pane suite: the neighbourhood pane mounts alongside
+    // the page and fetches its own graph.
+    vi.spyOn(api, "getWikiGraph").mockResolvedValue({ nodes: [], edges: [] } as never);
   });
 
   it("lists the body outline", async () => {

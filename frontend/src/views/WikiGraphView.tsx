@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, type WikiGraphT } from "../api";
 import { forceLayout } from "../components/graphLayout";
 import { nodeStyle, edgeStyle, nodeSize, type Lens } from "../components/wikiGraphStyle";
 import { applyFilters, emptyFilters, type Filters } from "../components/wikiGraphFilter";
+import { neighbourhood } from "../components/wikiNeighbourhood";
 
 // Padding around the laid-out bounding box, big enough to clear the largest
 // node's radius (nodeSize tops out at 14 + 26 = 40, so a radius of 20).
@@ -21,26 +22,38 @@ function toggle(set: Set<string>, v: string): Set<string> {
 export default function WikiGraphView() {
   const { id = "" } = useParams();
   const nav = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const focus = params.get("focus") ?? "";
   const [lens, setLens] = useState<Lens>("structure");
   const q = useQuery({ queryKey: ["wiki-graph", id], queryFn: () => api.getWikiGraph(id) });
   const [filters, setFilters] = useState<Filters>(emptyFilters());
+
+  // Focus mode reduces to a neighbourhood around one node before anything
+  // else runs — layout, filtering and the count all read `source`, never
+  // `q.data`, so a focused view is indistinguishable from having loaded a
+  // smaller graph in the first place.
+  const source = useMemo(() => {
+    if (!q.data) return undefined;
+    const nid = q.data.nodes.find((n) => n.slug === focus)?.id;
+    return nid ? neighbourhood(q.data, nid, 2) : q.data;
+  }, [q.data, focus]);
 
   // Filtering hides; it never re-layouts (design 5.3). `placed` and `viewBox`
   // are both derived from the UNFILTERED graph so toggling a checkbox never
   // moves a node the reader is already looking at, or resizes the canvas
   // under them — only what's rendered from `shown` below changes.
   const placed = useMemo(() => {
-    if (!q.data) return [];
-    const flow = q.data.nodes.map((n) => ({
+    if (!source) return [];
+    const flow = source.nodes.map((n) => ({
       id: n.id, data: { label: n.title, stage: "", kind: "", status: n.status },
       position: { x: 0, y: 0 }, style: {},
     }));
-    const links = q.data.edges.map((e) => ({
+    const links = source.edges.map((e) => ({
       id: e.id, source: e.src, target: e.dst, label: e.type,
       data: { edge: e as never }, animated: false, style: {},
     }));
     return forceLayout(flow, links);
-  }, [q.data]);
+  }, [source]);
 
   // forceLayout's charge/collide forces push nodes wherever they need to go
   // to avoid overlap — at 50-200 nodes (spec 5.4) that lands well outside any
@@ -71,7 +84,7 @@ export default function WikiGraphView() {
 
   // `shown` is what's rendered; `placed`/`viewBox` above stay unfiltered so
   // hiding a node or edge never moves the rest or resizes the canvas.
-  const shown = useMemo(() => applyFilters(q.data ?? EMPTY_GRAPH, filters), [q.data, filters]);
+  const shown = useMemo(() => applyFilters(source ?? EMPTY_GRAPH, filters), [source, filters]);
 
   if (q.isLoading) return <div className="wiki-graph">Loading the graph…</div>;
   if (q.isError) return <div className="wiki-graph">Could not load the graph.</div>;
@@ -81,7 +94,18 @@ export default function WikiGraphView() {
   return (
     <div className="wiki-graph">
       <p className="eyebrow">
-        showing {shown.nodes.length} of {q.data?.nodes.length ?? 0} nodes
+        showing {shown.nodes.length} of {source?.nodes.length ?? 0} nodes
+        {focus && (
+          <>
+            {" — "}
+            <a href="#" onClick={(e) => {
+              e.preventDefault();
+              setParams((p) => { const next = new URLSearchParams(p); next.delete("focus"); return next; });
+            }}>
+              show whole graph
+            </a>
+          </>
+        )}
       </p>
       <fieldset>
         <legend>Type</legend>

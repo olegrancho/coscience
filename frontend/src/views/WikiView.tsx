@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { Components } from "react-markdown";
 import { Link, useParams } from "react-router-dom";
 import Md from "../components/Md";
+import WikiNeighbourhood from "../components/WikiNeighbourhood";
 import { isInternalLink, outline, wikiHref } from "../components/wikiPage";
 import { BackLink, EmptyState, MergePolicySelect, ModelSelect } from "../components/ui";
 import { api, type WikiPageRow } from "../api";
@@ -416,6 +417,12 @@ export default function WikiView() {
                 </Button>
               </Card>
             </Stack>
+          )}
+          {slug && (
+            <>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>neighbourhood</div>
+              <WikiNeighbourhood programId={id} slug={slug} />
+            </>
           )}
         </aside>
       </div>
