@@ -67,4 +67,10 @@ describe("edge encoding", () => {
     const partOf = edgeStyle(edge({ type: "part_of" }), "structure");
     expect(contra.strokeWidth).toBe(partOf.strokeWidth);
   });
+
+  it("tension lens draws untyped edges fainter than typed quiet edges", () => {
+    const typedQuiet = edgeStyle(edge({ type: "part_of", typed: true }), "tension");
+    const untypedQuiet = edgeStyle(edge({ type: "part_of", typed: false }), "tension");
+    expect(Number(untypedQuiet.opacity)).toBeLessThan(Number(typedQuiet.opacity));
+  });
 });

@@ -16,8 +16,8 @@ export const TYPE_HUE: Record<string, string> = {
 
 const TRUST_FILL: Record<string, string> = {
   "unverified": "transparent",
-  "machine-confirmed": "#e9ecef",
-  "human-reviewed": "#c9d8ee",
+  "machine-confirmed": "var(--ink-faint)",
+  "human-reviewed": "var(--machine)",
 };
 
 export const TENSION_TYPES = new Set(["contradicts", "replaces", "refines"]);
@@ -50,7 +50,7 @@ export function edgeStyle(e: WikiGraphEdge, lens: Lens): Record<string, string> 
       stroke: loud ? (TENSION_COLOUR[e.type] ?? "#dc2626") : "#c9ccd1",
       strokeWidth: loud ? (e.type === "contradicts" ? "3" : "2") : "1",
       strokeDasharray: e.typed ? "" : "3 3",
-      opacity: loud ? "1" : "0.15",
+      opacity: loud ? "1" : (e.typed ? "0.15" : "0.08"),
     };
   }
   return {
