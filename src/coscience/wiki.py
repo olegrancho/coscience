@@ -18,7 +18,7 @@ from coscience.pause import is_paused
 from coscience.worker import WEEKLY_WORKER_THRESHOLD, claude_usage_ok
 
 WIKI_THRESHOLD = 70.0
-RUNS_KEPT = 50
+RUNS_KEPT = 500
 
 
 def _env_int(name: str, default: int) -> int:
