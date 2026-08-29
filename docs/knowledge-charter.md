@@ -13,7 +13,11 @@ complete: a live bundle has been ingested, browsed by hand and curated. Phase 3
 suite-verified, but **the live cadence run on a real substrate has still not
 been done** — see §2. Still **not merged and not deployed**; both need the
 human's explicit go-ahead, and the human has said *not yet*.
-**Phase 4 (graph) is next.**
+**Phase 4 (graph) is done** — 14 tasks shipped and individually reviewed, then a
+whole-phase review found a page-addressing defect all of them missed (a page is
+addressed by its bundle path minus `.md`, and several call sites used the bare
+`slug` instead); the single fix wave for that review has been applied. **Phase
+5 (ask & research) is next.**
 **Start here if you are picking this up:** `docs/knowledge/NEXT.md`
 
 > **Keep this file current.** It is the only handoff surface. Before you stop —
@@ -55,7 +59,7 @@ Update this table as you go. One row per phase from the design's §15.
 | 1 | Store & ingest — `wiki_store`, `wiki_okf`, `wiki_prompts`, `wiki_agent`, `wiki.beat`, `agent_stream` extraction, `wiki_lint` as CLI, `coscience wiki --once` | **done** — 25 commits, HEAD `4840531`, 1037 tests green. All 3 review findings fixed (`final-fix-report.md`); live end-to-end run performed 2026-08-21 and verified, Obsidian vault included. **Not merged, not deployed.** Three defects the live run exposed are open — see below |
 | 2 | Browse — endpoints, `WikiView`, curation actions, provenance chips *(**first milestone** ends here)* | **done** — 16 commits, HEAD `975cb25`. Suites green; the manual pass was performed on a live bundle and its findings fixed. **Not merged, not deployed** |
 | 3 | Lint runs — agent lint mode, cadence, report UI, quarantine retry, merge proposals | **done** — 21 commits, `42dfa3a..9867695`, 1208 backend / 184 frontend tests green |
-| 4 | Graph — `wiki_graph`, `d3-force`, `WikiGraphView`, provenance backlinks | **next** |
+| 4 | Graph — `wiki_graph`, `d3-force`, `WikiGraphView`, provenance backlinks | **done** — 14 tasks, individually reviewed; whole-phase review found a page-addressing defect (bare `slug` used as a page address instead of path-minus-`.md`) and a bundle-chunking regression, both fixed in one pass (`final-fix-report.md`). **Not merged, not deployed.** Some spec'd node-encoding channels (labels, orphan ring, deprecated strike-through, direction arrows, lens-aware node dimming) deliberately deferred — see `docs/knowledge/NEXT.md` §5 |
 | 5 | Ask & research — wiki chat, research runs, `QUESTIONS.md`, MCP tools | not started |
 
 **Phases 1 and 2 are done, and each met its definition of done against a real
@@ -92,7 +96,7 @@ rather than copied from a plan:
   rewrite the stacked prose into one voice and delete the key. `wiki_lint` now
   carries 23 rule ids (diff the table against the code, not this prose, before
   trusting a count).
-- **`state["runs"]`** (`wiki.py`, `RUNS_KEPT = 50`) — a capped audit trail of
+- **`state["runs"]`** (`wiki.py`, `RUNS_KEPT = 500`) — a capped audit trail of
   what each beat-driven run did, including which merges it applied and the git
   SHA of each (`Service.wiki_activity`).
 - **`/programs/:id/wiki/lint`** (`WikiLintView.tsx`) — proposals first when any
@@ -100,20 +104,18 @@ rather than copied from a plan:
   and live findings grouped by rule. Plus a per-page findings strip in the
   browse view and the merge-policy control in the header and settings modal.
 
-**Two things follow honestly, not as defects:**
+**One thing follows honestly, not as a defect:**
 
 1. **The live cadence run has not been done.** No test can prove
    `ingests_since_lint` fires a lint pass on a real substrate — the suite never
    launches an agent, by design. It spends the human's Claude quota and needs
    their explicit go-ahead first; it has not happened yet. Do not describe it
    as verified.
-2. **A human-accepted merge does not appear in the Activity list.**
-   `Service.accept_wiki_merge` calls `merge_wiki_pages` directly and never
-   appends to `state["runs"]` — only the beat-driven `_collect` path does. This
-   matches spec §11.3 as written (Activity is defined as what *runs* did), so
-   it is a completeness question for phase 4 — should the audit trail record
-   human actions too — not a bug. Recorded as an open question for phase 4 in
-   `docs/knowledge/NEXT.md`.
+
+(A human-accepted merge not appearing in the Activity list was recorded here as
+an open question for phase 4; it is resolved — see the §7 row "A human-accepted
+merge belongs in the Activity list. Ruled by the human, 2026-08-28" — and
+`accept_wiki_merge` now appends a `state["runs"]` entry with `by: "human"`.)
 
 Also worth recording: `merge_wiki_pages` is non-atomic — a write failure partway
 through the loop over `result.rewritten` leaves some pages rewritten and no
@@ -300,6 +302,20 @@ not convey:
   differs between them (interrupted handling, the cost sidecar, session-id
   capture). Behaviour-preserving; the existing tests for those two paths are your
   safety net. Do this in phase 1, before there is a third copy to keep in sync.
+- **`wiki_graph.py` (phase 4) extends the pure-vs-IO split.** Parsed pages in,
+  `{nodes, edges}` out, no IO — the same shape as `wiki_lint.lint()`. The only
+  disk contact is the `.wiki/graph.json` cache, and even that goes through
+  `wiki_store`, keyed on a content hash rather than `(path, mtime, size)` (§7)
+  so a `git checkout` cannot serve a stale graph.
+- **`graphLayout.ts` now holds three layouts, one seam.** `layout()` (dagre,
+  unchanged, `LineageGraph`'s), `forceLayout()` (`d3-force`, the full-page
+  graph), and `radialLayout()` (no dependency, the neighbourhood pane). Phase 4
+  added the latter two behind the existing seam without touching the first or
+  its callers.
+- **`wiki_read.citing_pages`** is the provenance-backlinks lookup — given an
+  object id, which pages cite it. It sits beside `provenance_ref` because it is
+  the same kind of pure lookup over already-parsed pages, not graph data, even
+  though it ships in the same phase as the graph.
 
 ---
 
@@ -338,6 +354,13 @@ you believe a decision is wrong, say so to the user and add a row here.
 | **Nothing gates an automatic merge but git.** Ruled by the human, 2026-08-27 | Full autonomy was the explicit ask. Each merge is its own substrate commit naming both pages, and that commit is the undo. Cost, stated and accepted: a wrong merge stays wrong until somebody notices, and nobody reads a wiki looking for absences. Two things follow rather than sit beside it — the `state["runs"]` audit trail and §11.3's activity view — and the deferred repo-wide `commit()` matters more under this ruling, since reverting a merge commit takes whatever else got swept in with it. |
 | `Program.wiki_merge` defaults to `auto` | Matches the stated intent to run mostly unattended, and no real substrate carries a wiki bundle yet, so there is no installed base to surprise with a destructive default. |
 | `substrate.commit()` returns the SHA it created, or `""` — never a stale HEAD | A caller that names a commit as the undo for something (a wiki merge, spec 9.1) must never be handed the *previous* commit because nothing changed. `commit()` reads HEAD before and after `git commit` and only returns the new SHA when it actually moved. |
+| `RUNS_KEPT = 500`, raised from 50. Ruled by the human, 2026-08-28 | 50 was roughly a month of activity for a busy program, and entry 51 pushes the oldest off permanently — a plain slice, not an archive. An entry is a few hundred bytes, so 500 costs nothing and buys about a year. |
+| **A human-accepted merge belongs in the Activity list.** Ruled by the human, 2026-08-28 | Spec §11.3 defines Activity as what *runs* did, and `accept_wiki_merge` writes no `state["runs"]` entry — so the audit trail silently omits merges a human approved. The intent is "show everything that changed the wiki", so this amends §11.3. Implemented in `accept_wiki_merge` (`service.py`): the appended `state["runs"]` entry carries `by: "human"` so the view does not imply an agent did it. |
+| The dispatch loop's `commit()` races wiki runs — the run's own commit does not contain its work | Observed live on 2026-08-28, lint run `r0002`: four `dispatch cycle` commits (02:16:53–02:17:34) swept up the agent's edits while it was still writing, and `wiki wikitest: lint r0002 ok` (02:17:59) captured only the report and stream files. Any wiki run outlasting one ~5s dispatch beat has this shape. It defeats the revert-is-the-undo premise the merge-autonomy ruling above rests on, so the repo-wide `git add -A` is no longer merely untidy. Fix is to scope `commit()` to explicit paths; scheduling is open. |
+| **Phase 4 (2026-08-28):** graph cache keyed on page **content**, not `(path, mtime, size)` | Amends parent design §10. `mtime` changes on every `git checkout` while content does not, and content can change while size stays put — that second case would serve a stale graph forever. At the expected node counts (50–200) a rebuild is milliseconds, so correctness costs nearly nothing. |
+| Graph colour: hue carries page type, fill carries trust | Amends parent design §10 and §11.4, which each independently claim colour for a different meaning (trust vs type). Splitting the two channels satisfies both instead of forcing a choice between them. |
+| Materialized `contradicts` edges excluded from degree, orphan and cluster | Node size is degree. `contradicts` is stored on one side only and the graph builder materializes the reverse edge for display; counting the materialized copy would draw one disagreement as two connections and inflate both ends' apparent connectivity — the picture would state something false. |
+| **Retracted, 2026-08-28:** the `/wiki/graph` route-ordering constraint | Phase 4 design §4 (and its plan) claimed `/wiki/graph` must be registered *before* the `/wiki/*` catch-all or React Router would match the catch-all first. Tested empirically during the phase: moving the route after the catch-all changed nothing. React Router v6 ranks sibling routes by path specificity — a static segment outranks a trailing `*` splat — independent of declaration order. The route's current position is unchanged and is fine; only the stated justification was wrong. Design §4 and §9 have been corrected to say so. |
 
 ---
 
