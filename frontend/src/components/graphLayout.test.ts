@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { layout, forceLayout } from "./graphLayout";
+import { layout } from "./graphLayout";
 import type { FlowNode, FlowEdge } from "./graphFlow";
 
 const node = (id: string): FlowNode => ({
@@ -39,31 +39,4 @@ const n = (id: string): FlowNode => ({
 const e = (source: string, target: string): FlowEdge => ({
   id: `${source}->${target}`, source, target, label: "",
   data: { edge: {} as never }, animated: false, style: {},
-});
-
-describe("forceLayout", () => {
-  it("is deterministic — the same graph lays out identically every time", () => {
-    const nodes = ["a", "b", "c", "d"].map(n);
-    const edges = [e("a", "b"), e("b", "c"), e("c", "d")];
-    const first = forceLayout(nodes, edges).map((x) => x.position);
-    const second = forceLayout(nodes, edges).map((x) => x.position);
-    expect(second).toEqual(first);
-  });
-
-  it("separates unconnected nodes via the simulation's repulsion, not just the seed", () => {
-    // The phyllotaxis seed alone already spaces 3 nodes ~17-26px apart (no
-    // ticks needed for that much). 150 sits well above what seeding alone
-    // produces, and well above what forceCollide's local anti-overlap alone
-    // achieves once forceManyBody is removed (~71px, measured) — so this
-    // threshold is only reachable when the charge force actually runs for
-    // the full tick count. See task-6-report.md fix-round-1 log for the
-    // measured numbers behind 150.
-    const out = forceLayout(["a", "b", "c"].map(n), []);
-    const pts = out.map((x) => x.position);
-    const dist = (p: { x: number; y: number }, q: { x: number; y: number }) =>
-      Math.hypot(p.x - q.x, p.y - q.y);
-    const pairs: Array<[number, number]> = [[0, 1], [0, 2], [1, 2]];
-    const minPairwiseDistance = Math.min(...pairs.map(([i, j]) => dist(pts[i], pts[j])));
-    expect(minPairwiseDistance).toBeGreaterThan(150);
-  });
 });

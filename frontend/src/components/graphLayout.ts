@@ -1,6 +1,4 @@
 import dagre from "dagre";
-import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide }
-  from "d3-force";
 import type { FlowNode, FlowEdge } from "./graphFlow";
 
 const NODE_W = 160;
@@ -20,40 +18,5 @@ export function layout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
     const w = n.width ?? NODE_W;
     const h = n.height ?? NODE_H;
     return { ...n, position: { x: p.x - w / 2, y: p.y - h / 2 } };
-  });
-}
-
-const FORCE_TICKS = 300;
-
-/** Deterministic seed positions, using d3's own phyllotaxis spiral formula
- *  (the fallback d3-force reaches for when a node's x/y is NaN/undefined).
- *  d3-force@3's own jiggle is already seeded off a fixed-seed LCG, so it does
- *  not reintroduce Math.random nondeterminism on its own — but leaving nodes
- *  unseeded means relying on that fallback's internals rather than making our
- *  determinism explicit here. A fixed tick count (rather than an animated
- *  on("tick", ...) loop) is what actually makes the result reproducible:
- *  running the simulation to a stable stopping point every time. */
-function seed(i: number): { x: number; y: number } {
-  const r = 10 * Math.sqrt(0.5 + i);
-  const a = i * Math.PI * (3 - Math.sqrt(5));
-  return { x: r * Math.cos(a), y: r * Math.sin(a) };
-}
-
-export function forceLayout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
-  const sim = nodes.map((nd, i) => ({ id: nd.id, ...seed(i) }));
-  const links = edges
-    .filter((ed) => ed.source !== ed.target)
-    .map((ed) => ({ source: ed.source, target: ed.target }));
-  forceSimulation(sim as never[])
-    .force("link", forceLink(links as never[]).id((d: unknown) => (d as { id: string }).id).distance(90))
-    .force("charge", forceManyBody().strength(-240))
-    .force("centre", forceCenter(0, 0))
-    .force("collide", forceCollide(28))
-    .stop()
-    .tick(FORCE_TICKS);
-  const at = new Map(sim.map((s) => [s.id, s]));
-  return nodes.map((nd) => {
-    const p = at.get(nd.id);
-    return { ...nd, position: { x: p?.x ?? 0, y: p?.y ?? 0 } };
   });
 }

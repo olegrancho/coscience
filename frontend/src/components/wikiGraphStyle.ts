@@ -32,13 +32,21 @@ export function nodeSize(n: WikiGraphNode): number {
   return 14 + Math.min(26, 4 * Math.sqrt(n.in_degree + n.out_degree));
 }
 
-export function nodeStyle(n: WikiGraphNode, _lens: Lens): Record<string, string> {
+/** `inTension` says whether this node touches a tension edge. Under the tension
+ *  lens a node that touches none is dimmed back, so the disagreements are what
+ *  the eye lands on (design 5.2). It is optional: callers that do not compute
+ *  participation get the undimmed structure styling, which is what the
+ *  neighbourhood pane wants. */
+export function nodeStyle(
+  n: WikiGraphNode, lens: Lens, inTension?: boolean,
+): Record<string, string> {
   const deprecated = n.status === "deprecated";
+  const quiet = lens === "tension" && inTension === false;
   return {
     borderColor: TYPE_HUE[n.type] ?? "#8a8f98",
     background: TRUST_FILL[n.trust] ?? "transparent",
     outline: n.orphan ? "2px dotted #8a8f98" : "",
-    opacity: deprecated ? "0.4" : "1",
+    opacity: deprecated ? "0.4" : quiet ? "0.25" : "1",
     textDecoration: deprecated ? "line-through" : "none",
   };
 }

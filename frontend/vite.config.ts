@@ -19,5 +19,5 @@ export default defineConfig({
     host: true, // listen on 0.0.0.0 so the dev server is reachable over the LAN
     proxy: { "/api": "http://localhost:8000" },
   },
-  test: { environment: "jsdom", globals: true },
+  test: { environment: "jsdom", globals: true, setupFiles: ["./src/setupTests.ts"] },
 });

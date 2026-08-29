@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "../App";
 import { api } from "../api";
-import * as graphLayout from "../components/graphLayout";
+import * as wikiGraphSim from "../components/wikiGraphSim";
 
 // AppShell (Mantine) needs these to exist in jsdom, same polyfills as
 // WikiLintView.test.tsx.
@@ -105,41 +105,26 @@ describe("WikiGraphView", () => {
     await waitFor(() => expect(getPage).toHaveBeenCalledWith("p1", "concepts/a"));
   });
 
-  it("fits the svg viewBox around nodes even when force layout spreads them far outside a fixed canvas", async () => {
-    // At the 50-200 node scale the binding spec targets (design doc 5.4),
-    // forceLayout's charge/collide forces land nodes well outside any fixed
-    // canvas. A viewBox fitted to the real bounding box is what keeps them
-    // visible instead of clipped; simulate that spread directly rather than
-    // relying on the real simulation to wander far enough by chance.
-    const far = [
-      { id: "concepts/a.md", data: { label: "Alpha", stage: "", kind: "", status: "draft" },
-        position: { x: 5000, y: -3000 }, style: {} },
-      { id: "concepts/b.md", data: { label: "Beta", stage: "", kind: "", status: "draft" },
-        position: { x: -4000, y: 6000 }, style: {} },
-    ];
-    vi.spyOn(graphLayout, "forceLayout").mockReturnValue(far);
-
+  // The old "viewBox fits the spread" test is gone with the hand-rolled SVG.
+  // Panning, zooming and fit-to-view are @xyflow/react's job now, not ours, and
+  // testing a dependency's own viewport maths would be testing the wrong thing.
+  // What remains ours is that every node in the graph is handed to the renderer
+  // however far the simulation flings it — nothing of ours clips the set.
+  it("renders every node regardless of how far the simulation spreads them", async () => {
     renderAt("/programs/p1/wiki/graph");
-    const svg = await screen.findByRole("img", { name: "concept graph" });
-    await waitFor(() => expect(svg.getAttribute("viewBox")).toBeTruthy());
-
-    const [minX, minY, w, h] = svg.getAttribute("viewBox")!.split(" ").map(Number);
-    const maxX = minX + w;
-    const maxY = minY + h;
-    for (const p of far) {
-      expect(p.position.x).toBeGreaterThanOrEqual(minX);
-      expect(p.position.x).toBeLessThanOrEqual(maxX);
-      expect(p.position.y).toBeGreaterThanOrEqual(minY);
-      expect(p.position.y).toBeLessThanOrEqual(maxY);
-    }
+    expect(await screen.findByTitle("Alpha")).toBeTruthy();
+    expect(await screen.findByTitle("Beta")).toBeTruthy();
+    await waitFor(() =>
+      expect(document.querySelectorAll(".react-flow__node").length).toBe(2));
   });
 
-  it("reports how many nodes are visible, and filtering does not move the rest", async () => {
-    // graph (module fixture) has one typed edge only, which would make
-    // "typed only" a no-op — unable to prove either that positions survive a
-    // real filter change or that the filter fired at all. This fixture adds
-    // an untyped body-link edge (b -> c) so toggling the control genuinely
-    // removes an edge from what's rendered.
+  it("reports how many nodes are visible, and a filter never rebuilds the simulation", async () => {
+    // The live-simulation form of "filtering never re-layouts": rebuilding the
+    // sim would reseed every node and throw away the arrangement (and any drag)
+    // the reader is looking at. Node POSITIONS cannot be asserted here — jsdom
+    // gives React Flow no real geometry — so this pins the invariant at its
+    // source instead: the simulation is constructed once and survives the
+    // toggle. wikiGraphSim.test.ts covers what the physics then does.
     const withUntypedEdge = {
       nodes: [
         ...graph.nodes,
@@ -154,42 +139,36 @@ describe("WikiGraphView", () => {
       ],
     };
     vi.spyOn(api, "getWikiGraph").mockResolvedValue(withUntypedEdge as never);
+    const build = vi.spyOn(wikiGraphSim, "createWikiSim");
 
     renderAt("/programs/p1/wiki/graph");
-    const svg = await screen.findByRole("img", { name: "concept graph" });
-    const before = await screen.findByText(/showing 3 of 3 nodes/);
-    expect(before).toBeTruthy();
-    // Both edges render before the toggle — the proof that there is
-    // something for "typed only" to actually remove.
-    expect(svg.querySelectorAll("line").length).toBe(2);
-
-    // `alpha` is itself the <circle title="Alpha">: getByTitle's attribute
-    // match returns the element carrying the `title` attribute, not a
-    // wrapper, so `cx` is read off `alpha` directly, not `alpha.parentElement`
-    // (which would be the <svg>, whose `cx` is always null).
-    const alpha = await screen.findByTitle("Alpha");
-    const cx = alpha.getAttribute("cx");
-    expect(cx).not.toBeNull();
+    expect(await screen.findByText(/showing 3 of 3 nodes/)).toBeTruthy();
+    const builtOnce = build.mock.calls.length;
+    expect(builtOnce).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByLabelText("typed only"));
 
-    // The filter fired: the untyped edge is gone from the render.
-    await waitFor(() => expect(svg.querySelectorAll("line").length).toBe(1));
-    // Node count is unaffected — hiding an edge must never hide (or ring an
-    // orphan onto) the nodes it used to connect (design 5.3).
-    expect(screen.getByText(/showing 3 of 3 nodes/)).toBeTruthy();
-    expect(alpha.getAttribute("cx")).toBe(cx);   // layout unmoved
+    // Hiding an edge must never hide the nodes it connected (design 5.3) ...
+    await waitFor(() => expect(screen.getByText(/showing 3 of 3 nodes/)).toBeTruthy());
+    // ... nor rebuild the simulation underneath the reader.
+    expect(build.mock.calls.length).toBe(builtOnce);
   });
 
-  it("the tension lens restyles edges without moving anything", async () => {
-    // The defect this catches: recomputing layout when the lens changes. A
-    // toggle that rearranges the picture is one the reader stops trusting.
+  it("the tension lens repaints without rebuilding the simulation", async () => {
+    // Previously this compared a <circle>'s cx before and after. Under React
+    // Flow there is no cx, so that assertion silently became null === null —
+    // the same vacuous shape this file was already burned by once. Pinned at
+    // the simulation instead, which is what "does not move" actually means.
+    const build = vi.spyOn(wikiGraphSim, "createWikiSim");
     renderAt("/programs/p1/wiki/graph");
-    const alpha = await screen.findByTitle("Alpha");
-    const before = alpha.getAttribute("cx");
+    await screen.findByTitle("Alpha");
+    const builtOnce = build.mock.calls.length;
+    expect(builtOnce).toBeGreaterThan(0);
+
     fireEvent.click(screen.getByLabelText("tension"));
-    await waitFor(() => expect((screen.getByLabelText("tension") as HTMLInputElement).checked).toBe(true));
-    expect(alpha.getAttribute("cx")).toBe(before);
+    await waitFor(() =>
+      expect((screen.getByLabelText("tension") as HTMLInputElement).checked).toBe(true));
+    expect(build.mock.calls.length).toBe(builtOnce);
   });
 });
 
