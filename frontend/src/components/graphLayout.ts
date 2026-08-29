@@ -24,7 +24,6 @@ export function layout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
 }
 
 const FORCE_TICKS = 300;
-const RING = 120;
 
 /** Deterministic seed positions, using d3's own phyllotaxis spiral formula
  *  (the fallback d3-force reaches for when a node's x/y is NaN/undefined).
@@ -56,18 +55,5 @@ export function forceLayout(nodes: FlowNode[], edges: FlowEdge[]): FlowNode[] {
   return nodes.map((nd) => {
     const p = at.get(nd.id);
     return { ...nd, position: { x: p?.x ?? 0, y: p?.y ?? 0 } };
-  });
-}
-
-/** A one-hop neighbourhood is under ten nodes, so no simulation is needed —
- *  and this keeps d3-force off the browse view's bundle entirely. */
-export function radialLayout(centreId: string, nodes: FlowNode[]): FlowNode[] {
-  const others = nodes.filter((nd) => nd.id !== centreId);
-  const step = others.length ? (2 * Math.PI) / others.length : 0;
-  let i = 0;
-  return nodes.map((nd) => {
-    if (nd.id === centreId) return { ...nd, position: { x: 0, y: 0 } };
-    const a = step * i++ - Math.PI / 2;
-    return { ...nd, position: { x: RING * Math.cos(a), y: RING * Math.sin(a) } };
   });
 }

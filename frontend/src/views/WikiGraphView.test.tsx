@@ -89,7 +89,7 @@ describe("WikiGraphView", () => {
     expect(await screen.findByTitle("Beta")).toBeTruthy();
   });
 
-  it("clicking a node navigates to its own wiki page by slug", async () => {
+  it("clicking a node navigates to its own wiki page by path", async () => {
     vi.spyOn(api, "getWikiSummary").mockResolvedValue(summary as never);
     vi.spyOn(api, "listWikiPages").mockResolvedValue(rows as never);
     vi.spyOn(api, "getWikiLint").mockResolvedValue(
@@ -99,9 +99,10 @@ describe("WikiGraphView", () => {
     renderAt("/programs/p1/wiki/graph");
     const node = await screen.findByTitle("Alpha");
     fireEvent.click(node);
-    // Alpha's slug is "a" (its id "concepts/a.md" is not the slug) — proves
-    // the click target's own slug is used, not its graph node id.
-    await waitFor(() => expect(getPage).toHaveBeenCalledWith("p1", "a"));
+    // Alpha's node id is "concepts/a.md" and its bare slug is "a" — a page is
+    // addressed by its bundle path minus ".md" ("concepts/a"), not by the
+    // bare slug, so this proves the path form is what's navigated to.
+    await waitFor(() => expect(getPage).toHaveBeenCalledWith("p1", "concepts/a"));
   });
 
   it("fits the svg viewBox around nodes even when force layout spreads them far outside a fixed canvas", async () => {
@@ -221,8 +222,8 @@ describe("WikiGraphView focus mode", () => {
     vi.spyOn(api, "getWikiGraph").mockResolvedValue(chain as never);
   });
 
-  it("?focus=<slug> reduces the rendered nodes to that node's neighbourhood", async () => {
-    renderAt("/programs/p1/wiki/graph?focus=b");
+  it("?focus=<path> reduces the rendered nodes to that node's neighbourhood", async () => {
+    renderAt("/programs/p1/wiki/graph?focus=concepts/b");
     // a, b, c, d are within 2 hops of b; e is not — a strict subset of the
     // 5-node graph, so this genuinely distinguishes focused from unfocused.
     expect(await screen.findByText(/showing 4 of 4 nodes/)).toBeTruthy();
@@ -238,7 +239,7 @@ describe("WikiGraphView focus mode", () => {
   });
 
   it("offers 'show whole graph' while focused, and clearing it restores the full graph", async () => {
-    renderAt("/programs/p1/wiki/graph?focus=b");
+    renderAt("/programs/p1/wiki/graph?focus=concepts/b");
     await screen.findByText(/showing 4 of 4 nodes/);
     const link = screen.getByRole("link", { name: /show whole graph/i });
 

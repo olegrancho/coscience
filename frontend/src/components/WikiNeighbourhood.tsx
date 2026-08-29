@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { neighbourhood, oidForSourceSlug } from "./wikiNeighbourhood";
-import { radialLayout } from "./graphLayout";
+import { radialLayout } from "./radialLayout";
 import { nodeStyle, nodeSize } from "./wikiGraphStyle";
 
 const BOX = 240, HALF = BOX / 2;
@@ -29,7 +29,7 @@ export default function WikiNeighbourhood(
   const q = useQuery({ queryKey: ["wiki-graph", programId],
                        queryFn: () => api.getWikiGraph(programId) });
   const centreId = useMemo(
-    () => q.data?.nodes.find((n) => n.slug === slug)?.id ?? "",
+    () => q.data?.nodes.find((n) => n.id.replace(/\.md$/, "") === slug)?.id ?? "",
     [q.data, slug]);
   const sub = useMemo(
     () => (q.data && centreId ? neighbourhood(q.data, centreId, 1) : { nodes: [], edges: [] }),
@@ -43,8 +43,11 @@ export default function WikiNeighbourhood(
   // Only a slug shaped like a Source page's (`result-<id>`, `artifact-<aid>-<vid>`)
   // has an object id to look citations up for; anything else — including "no
   // page here at all" — has none, so the query is skipped rather than firing a
-  // request that citing_pages would answer empty anyway.
-  const oid = oidForSourceSlug(slug);
+  // request that citing_pages would answer empty anyway. `slug` here is a page
+  // ADDRESS (bundle path minus `.md`, e.g. "sources/result-wt-r1"), so
+  // oidForSourceSlug — which expects the bare filename stem — gets only the
+  // last path segment.
+  const oid = oidForSourceSlug(slug.split("/").pop() ?? "");
   const cites = useQuery({
     queryKey: ["wiki-citations", programId, slug],
     queryFn: () => api.getWikiCitations(programId, oid),
@@ -52,6 +55,12 @@ export default function WikiNeighbourhood(
   });
 
   if (q.isLoading) return null;
+  // A fetch error is not evidence the page is absent from the graph — it's
+  // evidence the graph never loaded at all, so the pane must not claim a data
+  // fact ("not in the concept graph") it has no basis for.
+  if (q.isError) {
+    return <p className="muted" style={{ fontSize: 12 }}>Could not load the concept graph.</p>;
+  }
   if (!centreId) {
     const message = pageType === "Source"
       ? "This is a Source page — sources are excluded from the concept graph by design."
@@ -67,7 +76,7 @@ export default function WikiNeighbourhood(
             <ul style={{ margin: 0, paddingLeft: 18 }}>
               {cites.data.map((c) => (
                 <li key={c.path} style={{ fontSize: 12 }}>
-                  <Link to={`/programs/${programId}/wiki/${c.slug}`} className="view">{c.title}</Link>
+                  <Link to={`/programs/${programId}/wiki/${c.path.replace(/\.md$/, "")}`} className="view">{c.title}</Link>
                 </li>
               ))}
             </ul>

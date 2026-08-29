@@ -11,6 +11,11 @@ beforeEach(() => {
     matches: false, media: q, onchange: null, addListener: () => {}, removeListener: () => {},
     addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
   })) as any;
+  // Most tests here render ArtifactCitations (phase 4) incidentally, with
+  // isCurrent true, and don't care about its content — default it to empty
+  // so they don't each fire a real, unmocked fetch. Tests that DO care about
+  // citations override this with their own vi.spyOn call.
+  vi.spyOn(api, "getWikiCitations").mockResolvedValue([]);
 });
 
 /** Stands in for the chat view so a redirect is observable, `?c=` and all. */

@@ -173,7 +173,7 @@ export interface WikiLintReport {
 export interface WikiGraphNode {
   id: string; slug: string; title: string;
   type: "Concept" | "Entity" | "Synthesis";
-  status: string; trust: string;
+  status: string; trust: WikiTrust;
   in_degree: number; out_degree: number; orphan: boolean; cluster: number;
 }
 export interface WikiGraphEdge {

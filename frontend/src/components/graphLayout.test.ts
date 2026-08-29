@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { layout, forceLayout, radialLayout } from "./graphLayout";
+import { layout, forceLayout } from "./graphLayout";
 import type { FlowNode, FlowEdge } from "./graphFlow";
 
 const node = (id: string): FlowNode => ({
@@ -65,21 +65,5 @@ describe("forceLayout", () => {
     const pairs: Array<[number, number]> = [[0, 1], [0, 2], [1, 2]];
     const minPairwiseDistance = Math.min(...pairs.map(([i, j]) => dist(pts[i], pts[j])));
     expect(minPairwiseDistance).toBeGreaterThan(150);
-  });
-});
-
-describe("radialLayout", () => {
-  it("puts the centre at the origin and the rest on a ring around it", () => {
-    const out = radialLayout("a", ["a", "b", "c", "d"].map(n));
-    const at = (id: string) => out.find((x) => x.id === id)!.position;
-    expect(at("a")).toEqual({ x: 0, y: 0 });
-    const r = (p: { x: number; y: number }) => Math.round(Math.hypot(p.x, p.y));
-    expect(r(at("b"))).toBe(r(at("c")));
-    expect(r(at("b"))).toBeGreaterThan(0);
-  });
-
-  it("is deterministic", () => {
-    const nodes = ["a", "b", "c"].map(n);
-    expect(radialLayout("a", nodes)).toEqual(radialLayout("a", nodes));
   });
 });

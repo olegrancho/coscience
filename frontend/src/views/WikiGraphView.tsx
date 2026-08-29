@@ -34,7 +34,7 @@ export default function WikiGraphView() {
   // smaller graph in the first place.
   const source = useMemo(() => {
     if (!q.data) return undefined;
-    const nid = q.data.nodes.find((n) => n.slug === focus)?.id;
+    const nid = q.data.nodes.find((n) => n.id.replace(/\.md$/, "") === focus)?.id;
     return nid ? neighbourhood(q.data, nid, 2) : q.data;
   }, [q.data, focus]);
 
@@ -182,7 +182,7 @@ export default function WikiGraphView() {
                     opacity={Number(st.opacity)}
                     style={{ cursor: "pointer" }}
                     {...{ title: n.title }}
-                    onClick={() => nav(`/programs/${id}/wiki/${n.slug}`)} />
+                    onClick={() => nav(`/programs/${id}/wiki/${n.id.replace(/\.md$/, "")}`)} />
           );
         })}
       </svg>

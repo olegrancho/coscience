@@ -212,7 +212,7 @@ function ArtifactCitations({ pid, aid, vid, isCurrent }: { pid: string; aid: str
   return (
     <Stack gap={6}>
       {cites.data.map((c) => (
-        <Link key={c.path} to={`/programs/${pid}/wiki/${c.slug}`} className="view">{c.title}</Link>
+        <Link key={c.path} to={`/programs/${pid}/wiki/${c.path.replace(/\.md$/, "")}`} className="view">{c.title}</Link>
       ))}
     </Stack>
   );
