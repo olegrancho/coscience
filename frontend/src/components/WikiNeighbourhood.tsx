@@ -6,7 +6,8 @@ import { neighbourhood, oidForSourceSlug, fitLabel } from "./wikiNeighbourhood";
 import { radialLayout } from "./radialLayout";
 import { rimSegment, segmentPath } from "./discGeometry";
 import { nodeStyle, nodeSize } from "./wikiGraphStyle";
-import { panBy, toWorld, viewBox, zoomAt, zoomOf, type View } from "./svgViewport";
+import { panBy, toWorld, viewBox, zoomAt, type View } from "./svgViewport";
+import { loadPositions, savePositions, clearPositions, type PosMap } from "./graphPositions";
 
 // The pane fills the 320px side rail. The ring is an ellipse, not a circle:
 // a circle of the radius the old 240-box used put every node's centre ON the
@@ -56,6 +57,19 @@ export default function WikiNeighbourhood(
   // only when there is something to reset.
   const [view, setView] = useState<View | null>(null);
   const [hover, setHover] = useState("");
+  // Nodes the reader has moved, in the same centre-relative coordinates the
+  // radial layout works in. Keyed by the page whose neighbourhood this is:
+  // every page draws a different set around a different centre, so one map per
+  // program would have them overwriting each other.
+  const posKey = `${programId}::${slug}`;
+  const [moved, setMoved] = useState<PosMap>(() => loadPositions(posKey, "wiki-nbhd"));
+  // Which node is being dragged, where the pointer started, and whether it has
+  // actually travelled — a node is a link, so a click that merely wobbled must
+  // still navigate while a real drag must not.
+  const nodeDrag = useRef<
+    { id: string; from: { x: number; y: number }; at: { x: number; y: number }; moved: boolean }
+    | null>(null);
+  const suppressClick = useRef(false);
   // A callback ref, not a plain one: the pane returns null while the graph
   // loads, so a mount-time effect would attach its wheel listener to an SVG
   // that does not exist yet and never get another chance.
@@ -84,19 +98,62 @@ export default function WikiNeighbourhood(
     return () => el.removeEventListener("wheel", onWheel);
   }, [svgEl]);
 
+  // A pointerdown on a node grabs that node; anywhere else grabs the picture.
+  // Both gestures live on the <svg> so a fast drag that outruns the pointer
+  // keeps working — the capture is on the element that owns the listeners.
+  const grabNode = useCallback(
+    (e: React.PointerEvent, id: string, at: { x: number; y: number }) => {
+      e.stopPropagation();
+      nodeDrag.current = { id, from: { x: e.clientX, y: e.clientY }, at, moved: false };
+      (e.currentTarget as Element).closest("svg")
+        ?.setPointerCapture?.(e.pointerId);
+    }, []);
+
   const onPointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
     drag.current = { x: e.clientX, y: e.clientY };
     e.currentTarget.setPointerCapture?.(e.pointerId);
   }, []);
+
   const onPointerMove = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
-    const from = drag.current;
-    if (!from) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const { sx, sy } = toWorld(vRef.current, rect);
+
+    const nd = nodeDrag.current;
+    if (nd) {
+      const dx = (e.clientX - nd.from.x) * sx;
+      const dy = (e.clientY - nd.from.y) * sy;
+      if (Math.abs(e.clientX - nd.from.x) > 3 || Math.abs(e.clientY - nd.from.y) > 3) {
+        nd.moved = true;
+      }
+      setMoved((m) => ({ ...m, [nd.id]: { x: nd.at.x + dx, y: nd.at.y + dy } }));
+      return;
+    }
+
+    const from = drag.current;
+    if (!from) return;
     setView(panBy(vRef.current, (e.clientX - from.x) * sx, (e.clientY - from.y) * sy));
     drag.current = { x: e.clientX, y: e.clientY };
   }, []);
-  const endDrag = useCallback(() => { drag.current = null; }, []);
+
+  const endDrag = useCallback(() => {
+    const nd = nodeDrag.current;
+    if (nd) {
+      // The click event lands after pointerup. Swallow it only if the pointer
+      // actually travelled, so dragging a node does not also open its page.
+      suppressClick.current = nd.moved;
+      if (nd.moved) {
+        setMoved((m) => { savePositions(posKey, m, "wiki-nbhd"); return m; });
+      }
+    }
+    nodeDrag.current = null;
+    drag.current = null;
+  }, [posKey]);
+
+  const resetLayout = useCallback(() => {
+    setView(null);
+    setMoved({});
+    clearPositions(posKey, "wiki-nbhd");
+  }, [posKey]);
 
   const q = useQuery({ queryKey: ["wiki-graph", programId],
                        queryFn: () => api.getWikiGraph(programId) });
@@ -159,11 +216,15 @@ export default function WikiNeighbourhood(
   }
 
   const byId = new Map(sub.nodes.map((n) => [n.id, n]));
+  // Everything below — edges, discs, labels, the hover plate — asks this, so a
+  // dragged node cannot end up with its edges still attached where it was.
+  const layout = new Map(placed.map((p) => [p.id, moved[p.id] ?? p.position]));
+  const at = (nid: string) => layout.get(nid) ?? { x: 0, y: 0 };
 
   // Built here rather than inline so it can be drawn after every node: an SVG
   // has no z-index, only document order.
   const hoverNode = hover ? byId.get(hover) : undefined;
-  const hoverAt = hover ? placed.find((p) => p.id === hover) : undefined;
+  const hoverAt = hover && layout.has(hover) ? { position: at(hover) } : undefined;
   let hoverLabel = null;
   if (hoverNode && hoverAt) {
     const w = hoverNode.title.length * CHAR_PX + 8;
@@ -194,8 +255,8 @@ export default function WikiNeighbourhood(
            onPointerDown={onPointerDown} onPointerMove={onPointerMove}
            onPointerUp={endDrag} onPointerCancel={endDrag} onPointerLeave={endDrag}>
         {sub.edges.map((e) => {
-          const a = placed.find((p) => p.id === e.src);
-          const b = placed.find((p) => p.id === e.dst);
+          const a = layout.has(e.src) ? { position: at(e.src) } : null;
+          const b = layout.has(e.dst) ? { position: at(e.dst) } : null;
           const na = byId.get(e.src), nb = byId.get(e.dst);
           if (!a || !b || !na || !nb) return null;
           // Trimmed to the rims, like the full graph's edges: an untrusted
@@ -208,9 +269,10 @@ export default function WikiNeighbourhood(
           return <path key={e.id} d={segmentPath(seg)} fill="none"
                        stroke="#8a8f98" strokeWidth={1} />;
         })}
-        {placed.map((p) => {
-          const n = byId.get(p.id);
+        {placed.map((base) => {
+          const n = byId.get(base.id);
           if (!n) return null;
+          const p = { id: base.id, position: at(base.id) };
           const st = nodeStyle(n, "structure");
           const r = nodeSize(n) / 2;
           const cx = p.position.x + CX, cy = p.position.y + CY;
@@ -237,7 +299,13 @@ export default function WikiNeighbourhood(
           const href = `/programs/${programId}/wiki/${p.id.replace(/\.md$/, "")}`;
           const disc = (
             <>
-              <circle cx={cx} cy={cy} r={r}
+              {/* pointerEvents "all", or the disc of an UNVERIFIED page — drawn
+                  fill="none" to say "nothing has checked this" — is hit-tested
+                  only on its 2px outline, because SVG does not hit-test the
+                  interior of an unfilled shape. Every disc in a fresh wiki is
+                  unverified, so grabbing one to move it, and clicking one to
+                  open it, both mostly missed and fell through to the pan. */}
+              <circle cx={cx} cy={cy} r={r} pointerEvents="all"
                       fill={st.background === "transparent" ? "none" : st.background}
                       stroke={st.borderColor}
                       strokeWidth={isCentre ? 3 : hover === p.id ? 3 : 2}
@@ -255,15 +323,24 @@ export default function WikiNeighbourhood(
             </>
           );
           return (
-            <g key={p.id} onPointerEnter={() => setHover(p.id)}
-               onPointerLeave={() => setHover((h) => (h === p.id ? "" : h))}>
+            <g key={p.id}
+               onPointerEnter={() => setHover(p.id)}
+               onPointerLeave={() => setHover((h) => (h === p.id ? "" : h))}
+               onPointerDown={(e) => grabNode(e, p.id, p.position)}
+               style={{ cursor: "grab", touchAction: "none" }}>
               {isCentre ? disc : (
                 // A real <a>, so the destination shows in the status bar and
                 // middle-click opens a tab; the click itself is routed rather
                 // than reloading the app. The centre is the page you are
                 // already on, so it is not a link.
-                <a href={href} onClick={(e) => { e.preventDefault(); nav(href); }}
-                   style={{ cursor: "pointer" }}>
+                <a href={href}
+                   onDragStart={(e) => e.preventDefault()}
+                   onClick={(e) => {
+                     e.preventDefault();
+                     // Set by endDrag when the pointer actually travelled.
+                     if (suppressClick.current) { suppressClick.current = false; return; }
+                     nav(href);
+                   }}>
                   {disc}
                 </a>
               )}
@@ -281,8 +358,8 @@ export default function WikiNeighbourhood(
               className="view" style={{ fontSize: 12 }}>
           open full graph ↗
         </Link>
-        {view && (
-          <button type="button" className="linklike" onClick={() => setView(null)}>
+        {(view || Object.keys(moved).length > 0) && (
+          <button type="button" className="linklike" onClick={resetLayout}>
             reset view
           </button>
         )}

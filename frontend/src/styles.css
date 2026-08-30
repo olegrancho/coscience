@@ -517,7 +517,9 @@ a { color: inherit; }
   border: 1px solid var(--hairline); border-radius: 8px; background: var(--card);
 }
 .wiki-nbhd:active { cursor: grabbing; }
-.wiki-nbhd a { cursor: pointer; }
+/* The disc is grabbable in its own right — dragging one node rearranges just
+   that node, while a drag on the background moves the whole picture. */
+.wiki-nbhd g:active { cursor: grabbing; }
 .wiki-nbhd a:hover circle { stroke-width: 3; }
 .wiki-nbhd-foot {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;

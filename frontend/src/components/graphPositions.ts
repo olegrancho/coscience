@@ -8,7 +8,7 @@
 // working untouched.
 export type PosMap = Record<string, { x: number; y: number }>;
 
-export type PosNamespace = "lineage" | "wiki-graph";
+export type PosNamespace = "lineage" | "wiki-graph" | "wiki-nbhd";
 
 const key = (pid: string, ns: PosNamespace) => `${ns}-pos:${pid}`;
 

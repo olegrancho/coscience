@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import WikiNeighbourhood from "./WikiNeighbourhood";
 import { api } from "../api";
+
+function Where() {
+  return <span data-testid="where">{useLocation().pathname}</span>;
+}
 
 const graph = {
   nodes: [
@@ -251,5 +255,154 @@ describe("WikiNeighbourhood viewport", () => {
       expect(x + w / 2).toBeCloseTo(150, 5);
       expect(y + h / 2).toBeCloseTo(125, 5);
     });
+  });
+});
+
+describe("WikiNeighbourhood node dragging", () => {
+  const discOf = (title: string) =>
+    screen.getByTitle(title) as unknown as SVGCircleElement;
+  const centreOf = (title: string) => {
+    const c = discOf(title);
+    return { x: Number(c.getAttribute("cx")), y: Number(c.getAttribute("cy")) };
+  };
+  const sizedSvg = () => {
+    const svg = document.querySelector("svg.wiki-nbhd") as SVGSVGElement;
+    svg.getBoundingClientRect = () => ({
+      x: 0, y: 0, left: 0, top: 0, right: 300, bottom: 250, width: 300, height: 250,
+      toJSON: () => ({}),
+    }) as DOMRect;
+    return svg;
+  };
+  const N1 = "Neighbour n1 of the ivywrel correlation";
+  const N2 = "Neighbour n2 of the ivywrel correlation";
+
+  /** Renders the pane under a router we can read the location off, so
+   *  "navigated" and "did not navigate" are actually distinguishable. */
+  async function showWithRouter() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.spyOn(api, "getWikiGraph").mockResolvedValue(cross as never);
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/start"]}>
+          <Where />
+          <WikiNeighbourhood programId="p1" slug="concepts/hub" />
+        </MemoryRouter>
+      </QueryClientProvider>);
+    await screen.findByTitle("Hub hub of the ivywrel correlation");
+  }
+
+  beforeEach(() => localStorage.clear());
+
+  it("moves the node you grabbed, and only that one", async () => {
+    await showCross();
+    const svg = sizedSvg();
+    const before = { n1: centreOf(N1), n2: centreOf(N2) };
+
+    fireEvent.pointerDown(discOf(N1).closest("g")!, { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(svg, { clientX: 140, clientY: 130 });
+    fireEvent.pointerUp(svg);
+
+    await waitFor(() => expect(centreOf(N1).x).toBeCloseTo(before.n1.x + 40));
+    expect(centreOf(N1).y).toBeCloseTo(before.n1.y + 30);
+    // Its neighbours stay exactly where they were — this is the whole request.
+    expect(centreOf(N2)).toEqual(before.n2);
+  });
+
+  it("leaves the picture where it was — a node drag is not a pan", async () => {
+    await showCross();
+    const svg = sizedSvg();
+    fireEvent.pointerDown(discOf(N1).closest("g")!, { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(svg, { clientX: 160, clientY: 100 });
+    fireEvent.pointerUp(svg);
+    await waitFor(() => expect(centreOf(N1)).not.toEqual({ x: 0, y: 0 }));
+    expect(svg.getAttribute("viewBox")).toBe("0 0 300 250");
+  });
+
+  it("drags the node's edges along with it", async () => {
+    await showCross();
+    const svg = sizedSvg();
+    const edgeEnds = () => Array.from(document.querySelectorAll("svg path"))
+      .map((p) => p.getAttribute("d"));
+    const before = edgeEnds();
+
+    fireEvent.pointerDown(discOf(N1).closest("g")!, { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(svg, { clientX: 150, clientY: 140 });
+    fireEvent.pointerUp(svg);
+
+    await waitFor(() => expect(edgeEnds()).not.toEqual(before));
+    // Exactly one of the four spokes should have changed: the one that ends
+    // on the node that moved.
+    const changed = edgeEnds().filter((d, i) => d !== before[i]);
+    expect(changed).toHaveLength(1);
+  });
+
+  it("does not open the page when a drag ends on the node", async () => {
+    // A node is a link. Dragging it must not also navigate, or the pane jumps
+    // away the moment you rearrange it. Asserting the href would prove
+    // nothing — the href is there either way — so this watches where the
+    // router actually goes.
+    await showWithRouter();
+    const svg = sizedSvg();
+    expect(screen.getByTestId("where").textContent).toBe("/start");
+    const before = centreOf(N1);
+
+    fireEvent.pointerDown(discOf(N1).closest("g")!, { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(svg, { clientX: 150, clientY: 140 });
+    fireEvent.pointerUp(svg);
+    fireEvent.click(discOf(N1));
+
+    // It moved...
+    await waitFor(() => expect(centreOf(N1).x).toBeCloseTo(before.x + 50));
+    // ...and going nowhere is the point.
+    expect(screen.getByTestId("where").textContent).toBe("/start");
+  });
+
+  it("still opens the page on a click that did not travel", async () => {
+    await showWithRouter();
+    const svg = sizedSvg();
+    // Down and up in the same place: a click, not a drag.
+    fireEvent.pointerDown(discOf(N1).closest("g")!, { clientX: 100, clientY: 100 });
+    fireEvent.pointerUp(svg, { clientX: 100, clientY: 100 });
+    fireEvent.click(discOf(N1));
+
+    await waitFor(() => expect(screen.getByTestId("where").textContent)
+      .toBe("/programs/p1/wiki/concepts/n1"));
+  });
+
+  it("suppresses only the one click that ended a drag", async () => {
+    // The guard is a latch. If it is not cleared, the node becomes permanently
+    // unclickable after its first drag.
+    await showWithRouter();
+    const svg = sizedSvg();
+    fireEvent.pointerDown(discOf(N1).closest("g")!, { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(svg, { clientX: 150, clientY: 140 });
+    fireEvent.pointerUp(svg);
+    fireEvent.click(discOf(N1));
+    expect(screen.getByTestId("where").textContent).toBe("/start");
+
+    fireEvent.click(discOf(N1));
+    await waitFor(() => expect(screen.getByTestId("where").textContent)
+      .toBe("/programs/p1/wiki/concepts/n1"));
+  });
+
+  it("remembers a drag, and offers one way to undo it", async () => {
+    await showCross();
+    const svg = sizedSvg();
+    expect(screen.queryByText(/reset view/i)).toBeNull();
+
+    fireEvent.pointerDown(discOf(N1).closest("g")!, { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(svg, { clientX: 150, clientY: 140 });
+    fireEvent.pointerUp(svg);
+    await waitFor(() => expect(screen.getByText(/reset view/i)).toBeTruthy());
+
+    // Positions are keyed by the PAGE, not the program: every page draws a
+    // different set around a different centre.
+    expect(localStorage.getItem("wiki-nbhd-pos:p1::concepts/hub")).toContain("concepts/n1");
+
+    const dragged = centreOf(N1);
+    fireEvent.click(screen.getByText(/reset view/i));
+    await waitFor(() => expect(centreOf(N1)).not.toEqual(dragged));
+    expect(screen.queryByText(/reset view/i)).toBeNull();
+    expect(localStorage.getItem("wiki-nbhd-pos:p1::concepts/hub")).toBeNull();
   });
 });
