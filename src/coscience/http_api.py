@@ -1234,6 +1234,35 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     return app
 
 
+# The entry document must never be reused. `npm run build` empties `dist`, so
+# every previously-hashed bundle is DELETED on each deploy — a browser holding a
+# cached index.html then asks for a script that is gone (404) and renders a
+# blank page, or, worse, keeps running the JS it already loaded and quietly
+# shows a build from before the fix you are looking for. Neither failure says
+# anything on screen. Served with no cache-control at all, index.html was
+# subject to heuristic caching, which is exactly that hazard.
+NO_STORE = {"Cache-Control": "no-store, must-revalidate"}
+
+# Asset filenames carry a content hash, so a given URL's bytes never change and
+# it can be cached for as long as the browser likes.
+IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
+
+
+def _ui_cache_headers(path: Path) -> dict[str, str]:
+    """Hashed build output may be cached forever; anything else must not be."""
+    return IMMUTABLE if path.parent.name == "assets" else NO_STORE
+
+
+class _HashedAssets(StaticFiles):
+    """StaticFiles that says its output is immutable. It takes no headers=
+    argument, so the only way in is the response hook."""
+
+    def file_response(self, *args, **kwargs):  # type: ignore[override]
+        response = super().file_response(*args, **kwargs)
+        response.headers.update(IMMUTABLE)
+        return response
+
+
 def create_app() -> FastAPI:
     """uvicorn factory: API from the environment, plus the SPA bundle if present."""
     app = build_app(service_from_env())
@@ -1243,7 +1272,7 @@ def create_app() -> FastAPI:
     if index.is_file():
         assets = ui_dir / "assets"
         if assets.is_dir():
-            app.mount("/assets", StaticFiles(directory=assets), name="assets")
+            app.mount("/assets", _HashedAssets(directory=assets), name="assets")
 
         @app.get("/{full_path:path}")
         def spa(full_path: str) -> FileResponse:
@@ -1254,8 +1283,8 @@ def create_app() -> FastAPI:
                 and candidate.is_file()
                 and (candidate == ui_root or ui_root in candidate.parents)
             ):
-                return FileResponse(candidate)
-            return FileResponse(index)
+                return FileResponse(candidate, headers=_ui_cache_headers(candidate))
+            return FileResponse(index, headers=NO_STORE)
     return app
 
 
