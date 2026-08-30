@@ -4,6 +4,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import WikiNeighbourhood from "./WikiNeighbourhood";
 import { api } from "../api";
+import * as wikiGraphSim from "./wikiGraphSim";
 
 function Where() {
   return <span data-testid="where">{useLocation().pathname}</span>;
@@ -293,19 +294,62 @@ describe("WikiNeighbourhood node dragging", () => {
 
   beforeEach(() => localStorage.clear());
 
-  it("moves the node you grabbed, and only that one", async () => {
+  it("the node you grab follows the pointer", async () => {
     await showCross();
     const svg = sizedSvg();
-    const before = { n1: centreOf(N1), n2: centreOf(N2) };
+    const before = centreOf(N1);
 
     fireEvent.pointerDown(discOf(N1).closest("g")!, { clientX: 100, clientY: 100 });
-    fireEvent.pointerMove(svg, { clientX: 140, clientY: 130 });
+    fireEvent.pointerMove(svg, { clientX: 200, clientY: 190 });
     fireEvent.pointerUp(svg);
 
-    await waitFor(() => expect(centreOf(N1).x).toBeCloseTo(before.n1.x + 40));
-    expect(centreOf(N1).y).toBeCloseTo(before.n1.y + 30);
-    // Its neighbours stay exactly where they were — this is the whole request.
-    expect(centreOf(N2)).toEqual(before.n2);
+    // Right and down by about what the pointer travelled. Not exact: the
+    // simulation is live, so a frame may land between the read and the grab.
+    await waitFor(() => expect(centreOf(N1).x).toBeGreaterThan(before.x + 70));
+    expect(centreOf(N1).y).toBeGreaterThan(before.y + 60);
+  });
+
+  it("makes its neighbours give way, rather than sliding over them", async () => {
+    // This is what "optimise like the main graph" means: the drag is an input
+    // to the physics, not a position assignment. Before, every other node
+    // stayed frozen where it was.
+    await showCross();
+    const svg = sizedSvg();
+    const others = [N2, "Neighbour n3 of the ivywrel correlation",
+                    "Neighbour n4 of the ivywrel correlation"];
+    const before = Object.fromEntries(others.map((t) => [t, centreOf(t)]));
+
+    fireEvent.pointerDown(discOf(N1).closest("g")!, { clientX: 100, clientY: 100 });
+    for (let i = 1; i <= 6; i++) {
+      fireEvent.pointerMove(svg, { clientX: 100 + i * 18, clientY: 100 + i * 15 });
+    }
+    fireEvent.pointerUp(svg);
+
+    await waitFor(() => {
+      const shifted = others.filter((t) => {
+        const a = before[t], b = centreOf(t);
+        return Math.hypot(b.x - a.x, b.y - a.y) > 1;
+      });
+      expect(shifted.length).toBeGreaterThan(0);
+    }, { timeout: 3000 });
+  });
+
+  it("pins the page you are on to the middle", async () => {
+    // "You are here" must not drift while the neighbours arrange around it.
+    // Asserted where it is decided, not by watching a coordinate: jsdom runs
+    // so few simulation frames that an UNPINNED centre also fails to move,
+    // and the coordinate version of this test passed against the defect.
+    const spy = vi.spyOn(wikiGraphSim, "createWikiSim");
+    await showCross();
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+
+    const opts = spy.mock.calls[0][2];
+    expect(opts.pinned?.["concepts/hub.md"]).toEqual({ x: 0, y: 0 });
+    // ...and nothing else is held, so the physics is free to arrange them.
+    expect(Object.keys(opts.pinned ?? {})).toEqual(["concepts/hub.md"]);
+    // The rings are handed over as a SEED, not as pinned positions, or the
+    // simulation would have nothing to do.
+    expect(Object.keys(opts.seed ?? {}).length).toBeGreaterThan(1);
   });
 
   it("leaves the picture where it was — a node drag is not a pan", async () => {
@@ -318,22 +362,30 @@ describe("WikiNeighbourhood node dragging", () => {
     expect(svg.getAttribute("viewBox")).toBe("0 0 300 300");
   });
 
-  it("drags the node's edges along with it", async () => {
+  it("keeps every edge attached to where its nodes actually are", async () => {
     await showCross();
     const svg = sizedSvg();
-    const edgeEnds = () => Array.from(document.querySelectorAll("svg path"))
+    const spokes = () => Array.from(document.querySelectorAll("svg path"))
       .map((p) => p.getAttribute("d"));
-    const before = edgeEnds();
+    const before = spokes();
 
     fireEvent.pointerDown(discOf(N1).closest("g")!, { clientX: 100, clientY: 100 });
-    fireEvent.pointerMove(svg, { clientX: 150, clientY: 140 });
+    fireEvent.pointerMove(svg, { clientX: 180, clientY: 170 });
     fireEvent.pointerUp(svg);
 
-    await waitFor(() => expect(edgeEnds()).not.toEqual(before));
-    // Exactly one of the four spokes should have changed: the one that ends
-    // on the node that moved.
-    const changed = edgeEnds().filter((d, i) => d !== before[i]);
-    expect(changed).toHaveLength(1);
+    await waitFor(() => expect(spokes()).not.toEqual(before));
+    // Every spoke still starts and ends on a disc — no line left stranded
+    // where a node used to be.
+    const discs = Array.from(document.querySelectorAll("svg circle[title]"))
+      .map((c) => ({ x: Number(c.getAttribute("cx")), y: Number(c.getAttribute("cy")) }));
+    const onADisc = (x: number, y: number) =>
+      discs.some((d) => Math.hypot(d.x - x, d.y - y) < 40);
+    for (const d of spokes()) {
+      const m = /^M ([-\d.]+),([-\d.]+) L ([-\d.]+),([-\d.]+)$/.exec(d ?? "");
+      expect(m).toBeTruthy();
+      expect(onADisc(Number(m![1]), Number(m![2]))).toBe(true);
+      expect(onADisc(Number(m![3]), Number(m![4]))).toBe(true);
+    }
   });
 
   it("does not open the page when a drag ends on the node", async () => {
@@ -399,11 +451,15 @@ describe("WikiNeighbourhood node dragging", () => {
     // different set around a different centre.
     expect(localStorage.getItem("wiki-nbhd-pos:p1::concepts/hub")).toContain("concepts/n1");
 
-    const dragged = centreOf(N1);
     fireEvent.click(screen.getByText(/reset view/i));
-    await waitFor(() => expect(centreOf(N1)).not.toEqual(dragged));
-    expect(screen.queryByText(/reset view/i)).toBeNull();
+
+    // Asserting a coordinate here would be a coin flip: the simulation is live,
+    // and a released node can perfectly well settle back near where it was.
+    // What reset actually promises is that nothing is held any more.
+    await waitFor(() => expect(screen.queryByText(/reset view/i)).toBeNull());
     expect(localStorage.getItem("wiki-nbhd-pos:p1::concepts/hub")).toBeNull();
+    // That the release itself frees the node is wikiGraphSim's contract,
+    // covered by its own tests.
   });
 });
 

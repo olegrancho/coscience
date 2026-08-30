@@ -25,6 +25,9 @@ export async function run({ eval: ev, wait, drag, shot }) {
     .map(c => ({ t: c.getAttribute('title'), x: +c.getAttribute('cx'), y: +c.getAttribute('cy') }))`);
   const vb = () => ev(`document.querySelector('svg.wiki-nbhd')?.getAttribute('viewBox')`);
   const path = () => ev(`location.pathname`);
+  const halo = () => ev(`(() => {
+    const h = document.querySelector('svg.wiki-nbhd circle.wiki-nbhd-halo');
+    return h ? { x: +h.getAttribute('cx'), y: +h.getAttribute('cy') } : null; })()`);
 
   const before = await discs();
   check(before.length >= 2, `pane drew ${before.length} discs, expected at least 2`);
@@ -54,6 +57,7 @@ export async function run({ eval: ev, wait, drag, shot }) {
 
   const vbBefore = await vb();
   const pathBefore = await path();
+  const haloAt = await halo();
   await drag(target.cx, target.cy, target.cx + 55, target.cy - 45);
   await wait(500);
   const after = await discs();
@@ -62,12 +66,26 @@ export async function run({ eval: ev, wait, drag, shot }) {
   const now = after.find((d) => d.t === target.t);
   check(now && (!near(now.x, was.x) || !near(now.y, was.y)),
     `dragging "${target.t}" did not move it`);
-  for (const d of before) {
-    if (d.t === target.t) continue;
-    const still = after.find((x) => x.t === d.t);
-    check(still && near(still.x, d.x) && near(still.y, d.y),
-      `dragging one node moved "${d.t}" as well`);
+  // The pane runs the same live physics as the full graph, so the neighbours
+  // are SUPPOSED to give way — a drag is an input to the simulation, not a
+  // position assignment. What must not move is the page you are on.
+  const gaveWay = before.filter((d) => {
+    if (d.t === target.t) return false;
+    const n = after.find((x) => x.t === d.t);
+    return n && (!near(n.x, d.x) || !near(n.y, d.y));
+  });
+  check(gaveWay.length > 0,
+    "dragging a node moved nothing else — the layout is not being simulated");
+  // The page you are on is pinned: everything else may give way, that must not.
+  // Identified by its halo — the bold label is not it, since the node under
+  // the pointer is bold too, and after a drag that is the node you just moved.
+  check(haloAt !== null, "no halo marking the page you are on");
+  if (haloAt) {
+    const now = await halo();
+    check(now && near(now.x, haloAt.x) && near(now.y, haloAt.y),
+      "the page you are on drifted while its neighbours moved");
   }
+
   check(await vb() === vbBefore, "dragging a node panned the whole picture");
   check(await path() === pathBefore, "dragging a node navigated away from the page");
   check(await ev(`!!Array.from(document.querySelectorAll('button'))

@@ -27,9 +27,22 @@ export interface SimLink {
 
 export type Pinned = Record<string, { x: number; y: number }>;
 
-export interface WikiSimOptions {
+export interface WikiSimTuning {
+  /** Rest length of a link. */
+  linkDistance?: number;
+  /** How hard nodes push each other away; negative repels. */
+  charge?: number;
+  /** Minimum centre-to-centre distance. */
+  collide?: number;
+}
+
+export interface WikiSimOptions extends WikiSimTuning {
   /** Positions restored from a previous session; these load pinned. */
   pinned?: Pinned;
+  /** Where to START unpinned nodes. Unlike `pinned` these are free to move —
+   *  it just saves the simulation from having to undo a layout nobody chose.
+   *  The neighbourhood pane seeds from its radial rings for that reason. */
+  seed?: Pinned;
   /** Called on every tick, for the view to re-render from. */
   onTick?: () => void;
 }
@@ -42,12 +55,18 @@ export interface WikiSim {
   dragTo(id: string, x: number, y: number): void;
   dragEnd(id: string): void;
   unpinAll(): void;
+  /** Hold one node in place. The neighbourhood pane pins the page you are on,
+   *  so "you are here" does not wander while its neighbours arrange. */
+  pin(id: string, x: number, y: number): void;
   alpha(): number;
   /** Advance deterministically without the timer — used by tests. */
   settle(ticks: number): void;
   stop(): void;
 }
 
+// Defaults are tuned for the full-page canvas. The neighbourhood pane is a
+// 300px square and overrides all three; at these values it would fling its
+// nodes clean out of the box.
 const LINK_DISTANCE = 90;
 const CHARGE = -240;
 const COLLIDE = 28;
@@ -67,10 +86,9 @@ export function createWikiSim(
   const known = new Set(ids);
   const nodes: SimNode[] = ids.map((id, i) => {
     const p = opts.pinned?.[id];
-    const s = seed(i);
-    return p
-      ? { id, x: p.x, y: p.y, fx: p.x, fy: p.y }
-      : { id, x: s.x, y: s.y };
+    if (p) return { id, x: p.x, y: p.y, fx: p.x, fy: p.y };
+    const s = opts.seed?.[id] ?? seed(i);
+    return { id, x: s.x, y: s.y };
   });
   const byId = new Map(nodes.map((n) => [n.id, n]));
 
@@ -83,10 +101,10 @@ export function createWikiSim(
 
   const sim: Simulation<SimNode, undefined> = forceSimulation(nodes)
     .force("link", forceLink<SimNode, never>(live as never[])
-      .id((d) => (d as SimNode).id).distance(LINK_DISTANCE))
-    .force("charge", forceManyBody().strength(CHARGE))
+      .id((d) => (d as SimNode).id).distance(opts.linkDistance ?? LINK_DISTANCE))
+    .force("charge", forceManyBody().strength(opts.charge ?? CHARGE))
     .force("centre", forceCenter(0, 0))
-    .force("collide", forceCollide(COLLIDE))
+    .force("collide", forceCollide(opts.collide ?? COLLIDE))
     .on("tick", () => { for (const cb of subscribers) cb(); });
 
   return {
@@ -119,6 +137,11 @@ export function createWikiSim(
     unpinAll: () => {
       for (const n of nodes) { n.fx = null; n.fy = null; }
       sim.alpha(DRAG_ALPHA).restart();
+    },
+    pin: (id, x, y) => {
+      const n = byId.get(id);
+      if (!n) return;
+      n.x = x; n.y = y; n.fx = x; n.fy = y;
     },
 
     alpha: () => sim.alpha(),

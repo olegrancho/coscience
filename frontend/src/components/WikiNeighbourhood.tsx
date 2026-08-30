@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import { neighbourhood, hopsFrom, oidForSourceSlug, fitLabel } from "./wikiNeighbourhood";
 import { radialLayout } from "./radialLayout";
+import type { WikiSim, createWikiSim as CreateWikiSim } from "./wikiGraphSim";
 import { rimSegment, segmentPath } from "./discGeometry";
 import { nodeStyle, nodeSize } from "./wikiGraphStyle";
 import { panBy, toWorld, viewBox, zoomAt, type View } from "./svgViewport";
@@ -22,6 +23,32 @@ const RING_X = 42, RING_Y = 58;
 /** How far out to look. Two hops is what the full graph's focus mode shows, so
  *  the pane and "open full graph ↗" now agree about what a neighbourhood is. */
 const HOPS = 2;
+
+// The pane runs the same live simulation as the full graph, at pane scale —
+// the defaults are tuned for a full-page canvas and would fling nine nodes
+// clean out of a 300px square.
+const SIM = { linkDistance: 58, charge: -220, collide: 21 };
+/** Below this alpha the arrangement has stopped moving and can be framed. */
+const SETTLED = 0.05;
+// Margin left around the nodes when the pane frames itself. Wider sideways
+// because that is where the names go.
+const FIT_PAD_X = 58, FIT_PAD_Y = 26;
+
+/** A viewBox that contains every node, keeping the pane's aspect so nothing is
+ *  squashed. The pane has no fitView of its own — this is it. */
+function fit(sim: WikiSim): View {
+  const ns = sim.nodes();
+  if (!ns.length) return BASE;
+  const xs = ns.map((n) => n.x), ys = ns.map((n) => n.y);
+  const minX = Math.min(...xs) - FIT_PAD_X, maxX = Math.max(...xs) + FIT_PAD_X;
+  const minY = Math.min(...ys) - FIT_PAD_Y, maxY = Math.max(...ys) + FIT_PAD_Y;
+  const w = Math.max(maxX - minX, 1), h = Math.max(maxY - minY, 1);
+  // Grow the short side rather than stretching: the SVG letterboxes anyway,
+  // and a viewBox with the wrong aspect just moves the letterbox around.
+  const aspect = BOX_W / BOX_H;
+  const [fw, fh] = w / h > aspect ? [w, w / aspect] : [h * aspect, h];
+  return { x: (minX + maxX) / 2 - fw / 2 + CX, y: (minY + maxY) / 2 - fh / 2 + CY, w: fw, h: fh };
+}
 
 // Annotation. A disc says nothing about which page it is, and the reader
 // should not have to hover every one to find out.
@@ -58,9 +85,14 @@ export default function WikiNeighbourhood(
   { programId, slug, pageType }: { programId: string; slug: string; pageType?: string },
 ) {
   const nav = useNavigate();
-  // `null` means the reader has not moved the view, so "reset" can be offered
-  // only when there is something to reset.
+  // Two layers, deliberately. `fitted` is where the pane framed ITSELF once the
+  // physics settled; `view` is where the reader then put it. Folding them into
+  // one would make "reset" appear the moment the pane finished loading, with
+  // nothing to reset.
+  const [fitted, setFitted] = useState<View | null>(null);
   const [view, setView] = useState<View | null>(null);
+  // Bumped to re-arm the automatic framing after a reset.
+  const [fitSeq, setFitSeq] = useState(0);
   const [hover, setHover] = useState("");
   // Nodes the reader has moved, in the same centre-relative coordinates the
   // radial layout works in. Keyed by the page whose neighbourhood this is:
@@ -75,12 +107,15 @@ export default function WikiNeighbourhood(
     { id: string; from: { x: number; y: number }; at: { x: number; y: number }; moved: boolean }
     | null>(null);
   const suppressClick = useRef(false);
+  // The pointer callbacks are declared before `centreId` is derived, and must
+  // not be rebuilt every time it changes, so they read it through a ref.
+  const centreIdRef = useRef("");
   // A callback ref, not a plain one: the pane returns null while the graph
   // loads, so a mount-time effect would attach its wheel listener to an SVG
   // that does not exist yet and never get another chance.
   const [svgEl, setSvgEl] = useState<SVGSVGElement | null>(null);
   const drag = useRef<{ x: number; y: number } | null>(null);
-  const v = view ?? BASE;
+  const v = view ?? fitted ?? BASE;
   const vRef = useRef(v);
   vRef.current = v;
 
@@ -110,6 +145,7 @@ export default function WikiNeighbourhood(
     (e: React.PointerEvent, id: string, at: { x: number; y: number }) => {
       e.stopPropagation();
       nodeDrag.current = { id, from: { x: e.clientX, y: e.clientY }, at, moved: false };
+      simRef.current?.dragStart(id);
       (e.currentTarget as Element).closest("svg")
         ?.setPointerCapture?.(e.pointerId);
     }, []);
@@ -130,7 +166,11 @@ export default function WikiNeighbourhood(
       if (Math.abs(e.clientX - nd.from.x) > 3 || Math.abs(e.clientY - nd.from.y) > 3) {
         nd.moved = true;
       }
-      setMoved((m) => ({ ...m, [nd.id]: { x: nd.at.x + dx, y: nd.at.y + dy } }));
+      const to = { x: nd.at.x + dx, y: nd.at.y + dy };
+      // Feed the physics, exactly as the full graph does, so the neighbours
+      // shove out of the way instead of the dragged node sliding over them.
+      if (simRef.current) simRef.current.dragTo(nd.id, to.x, to.y);
+      else setMoved((m) => ({ ...m, [nd.id]: to }));
       return;
     }
 
@@ -146,8 +186,19 @@ export default function WikiNeighbourhood(
       // The click event lands after pointerup. Swallow it only if the pointer
       // actually travelled, so dragging a node does not also open its page.
       suppressClick.current = nd.moved;
+      simRef.current?.dragEnd(nd.id);
       if (nd.moved) {
-        setMoved((m) => { savePositions(posKey, m, "wiki-nbhd"); return m; });
+        const s = simRef.current;
+        if (s) {
+          // A dropped node stays where it was put — same rule as the full
+          // graph — so what the simulation has pinned IS what to remember.
+          const keep = { ...s.pinned() };
+          delete keep[centreIdRef.current];   // the centre is pinned by us, not by a drag
+          savePositions(posKey, keep, "wiki-nbhd");
+          setMoved(keep);
+        } else {
+          setMoved((m) => { savePositions(posKey, m, "wiki-nbhd"); return m; });
+        }
       }
     }
     nodeDrag.current = null;
@@ -157,7 +208,14 @@ export default function WikiNeighbourhood(
   const resetLayout = useCallback(() => {
     setView(null);
     setMoved({});
+    setFitSeq((n) => n + 1);   // let the pane frame itself again once it settles
     clearPositions(posKey, "wiki-nbhd");
+    const s = simRef.current;
+    if (s) {
+      s.unpinAll();
+      // unpinAll releases everything, the centre included; put it back.
+      if (centreIdRef.current) s.pin(centreIdRef.current, 0, 0);
+    }
   }, [posKey]);
 
   const q = useQuery({ queryKey: ["wiki-graph", programId],
@@ -165,6 +223,7 @@ export default function WikiNeighbourhood(
   const centreId = useMemo(
     () => q.data?.nodes.find((n) => n.id.replace(/\.md$/, "") === slug)?.id ?? "",
     [q.data, slug]);
+  centreIdRef.current = centreId;
   const sub = useMemo(
     () => (q.data && centreId ? neighbourhood(q.data, centreId, HOPS)
                               : { nodes: [], edges: [] }),
@@ -172,12 +231,67 @@ export default function WikiNeighbourhood(
   const hop = useMemo(
     () => (q.data && centreId ? hopsFrom(q.data, centreId, HOPS) : new Map<string, number>()),
     [q.data, centreId]);
+  // The radial rings are no longer the layout — they are the SEED the physics
+  // starts from. Beginning at rings rather than d3's phyllotaxis spiral means
+  // the first frame already looks like a neighbourhood and the simulation
+  // spends its energy refining rather than undoing.
   const placed = useMemo(
     () => radialLayout(centreId, sub.nodes.map((n) => ({
       id: n.id, data: { label: n.title, stage: "", kind: "", status: n.status },
       position: { x: 0, y: 0 }, style: {},
     })), RING_X, RING_Y, (nid) => hop.get(nid) ?? 1),
     [sub, centreId, hop]);
+
+  // d3-force is loaded on demand, NOT imported. This pane is statically
+  // reachable from App -> WikiView, so a plain import would put the whole
+  // library in the eager bundle — which is the entire reason radialLayout
+  // lives in its own module (see its header). A dynamic import keeps it in its
+  // own chunk, fetched once the page is already up.
+  const [makeSim, setMakeSim] = useState<typeof CreateWikiSim | null>(null);
+  useEffect(() => {
+    let alive = true;
+    import("./wikiGraphSim")
+      .then((m) => { if (alive) setMakeSim(() => m.createWikiSim); })
+      .catch(() => { /* stay on the seeded rings; they are a real layout */ });
+    return () => { alive = false; };
+  }, []);
+
+  const sim = useMemo(() => {
+    if (!makeSim || !centreId || sub.nodes.length === 0) return null;
+    const seed: Record<string, { x: number; y: number }> = {};
+    for (const pl of placed) seed[pl.id] = pl.position;
+    return makeSim(
+      sub.nodes.map((n) => n.id),
+      sub.edges.map((e) => ({ source: e.src, target: e.dst })),
+      {
+        ...SIM,
+        seed,
+        // The page you are on holds the middle, plus anything dragged before.
+        pinned: { ...loadPositions(posKey, "wiki-nbhd"), [centreId]: { x: 0, y: 0 } },
+      },
+    );
+    // `placed` is deliberately absent: it is a seed, and rebuilding the whole
+    // simulation because a seed changed would throw away the arrangement.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [makeSim, centreId, sub, posKey]);
+
+  const simRef = useRef<WikiSim | null>(null);
+  simRef.current = sim;
+  const [, bump] = useState(0);
+
+  useEffect(() => {
+    if (!sim) return;
+    let frame = 0;
+    let framed = false;
+    sim.onTick(() => {
+      // Framed once per settling, not continuously: re-framing after every
+      // drag would yank the picture out from under the hand that moved it.
+      if (!framed && sim.alpha() < SETTLED) { framed = true; setFitted(fit(sim)); }
+      if (frame) return;
+      frame = requestAnimationFrame(() => { frame = 0; bump((n) => n + 1); });
+    });
+    return () => { if (frame) cancelAnimationFrame(frame); sim.stop(); };
+  }, [sim, fitSeq]);
   // Only a slug shaped like a Source page's (`result-<id>`, `artifact-<aid>-<vid>`)
   // has an object id to look citations up for; anything else — including "no
   // page here at all" — has none, so the query is skipped rather than firing a
@@ -227,7 +341,13 @@ export default function WikiNeighbourhood(
   const byId = new Map(sub.nodes.map((n) => [n.id, n]));
   // Everything below — edges, discs, labels, the hover plate — asks this, so a
   // dragged node cannot end up with its edges still attached where it was.
-  const layout = new Map(placed.map((p) => [p.id, moved[p.id] ?? p.position]));
+  // The simulation is the source once it has loaded; until then the seeded
+  // rings are, so the pane draws something real from the first frame rather
+  // than piling every node on the origin while a chunk downloads.
+  const live = sim?.nodes();
+  const layout = new Map(
+    live?.length ? live.map((n) => [n.id, { x: n.x, y: n.y }] as const)
+                 : placed.map((p) => [p.id, p.position] as const));
   const at = (nid: string) => layout.get(nid) ?? { x: 0, y: 0 };
 
   // Built here rather than inline so it can be drawn after every node: an SVG
@@ -302,9 +422,14 @@ export default function WikiNeighbourhood(
           const ty = upright
             ? (above ? cy - r - LABEL_GAP : cy + r + LABEL_GAP)
             : cy;
+          // Measured against the CURRENT view, not the nominal box: once the
+          // pane frames itself the two are different, and truncating against
+          // the box while drawing into the frame is how a name gets cut off
+          // at an edge that is not there.
+          const left = v.x + EDGE_PAD, right = v.x + v.w - EDGE_PAD;
           const avail = upright
-            ? 2 * Math.min(tx, BOX_W - tx) - 2 * EDGE_PAD
-            : p.position.x > 0 ? BOX_W - EDGE_PAD - tx : tx - EDGE_PAD;
+            ? 2 * Math.min(tx - left, right - tx)
+            : p.position.x > 0 ? right - tx : tx - left;
           const label = fitLabel(n.title, avail, CHAR_PX);
           // A `title` attribute on the circle itself, not a nested `<title>`
           // child — byTitle's svg-title match requires the `<title>` to be a

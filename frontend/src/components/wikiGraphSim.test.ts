@@ -118,3 +118,70 @@ describe("createWikiSim", () => {
     sim.stop();
   });
 });
+
+describe("pin", () => {
+  it("holds a node where it is put, through any number of ticks", () => {
+    const sim = createWikiSim(["a", "b", "c"],
+      [{ source: "a", target: "b" }, { source: "b", target: "c" }], {});
+    sim.pin("a", 40, -25);
+    sim.settle(200);
+    const a = sim.nodes().find((n) => n.id === "a")!;
+    expect(a.x).toBe(40);
+    expect(a.y).toBe(-25);
+    // ...while everything else is still free to arrange itself.
+    const b = sim.nodes().find((n) => n.id === "b")!;
+    expect(Math.hypot(b.x - 40, b.y + 25)).toBeGreaterThan(1);
+  });
+
+  it("reports a pinned node as pinned, so the view can persist it", () => {
+    const sim = createWikiSim(["a", "b"], [], {});
+    sim.pin("a", 7, 8);
+    expect(sim.pinned()).toEqual({ a: { x: 7, y: 8 } });
+  });
+
+  it("unpinAll releases it again", () => {
+    const sim = createWikiSim(["a", "b"], [{ source: "a", target: "b" }], {});
+    sim.pin("a", 300, 300);
+    sim.unpinAll();
+    sim.settle(300);
+    expect(sim.pinned()).toEqual({});
+    // Freed, the centring force pulls it back in from 300,300.
+    const a = sim.nodes().find((n) => n.id === "a")!;
+    expect(Math.hypot(a.x, a.y)).toBeLessThan(200);
+  });
+
+  it("ignores a node it does not have", () => {
+    const sim = createWikiSim(["a"], [], {});
+    expect(() => sim.pin("nope", 1, 2)).not.toThrow();
+    expect(sim.pinned()).toEqual({});
+  });
+});
+
+describe("tuning", () => {
+  it("honours a shorter link distance, so a small pane can use the same physics", () => {
+    const spread = (linkDistance: number) => {
+      const sim = createWikiSim(["a", "b"], [{ source: "a", target: "b" }],
+        { linkDistance, charge: -60, collide: 5 });
+      sim.settle(400);
+      const [a, b] = sim.nodes();
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+    const tight = spread(30);
+    const loose = spread(120);
+    expect(tight).toBeLessThan(loose);
+    // And it actually lands near the distance asked for, not merely "less".
+    expect(tight).toBeGreaterThan(20);
+    expect(tight).toBeLessThan(45);
+  });
+});
+
+describe("seed", () => {
+  it("starts a node where told, without pinning it there", () => {
+    const sim = createWikiSim(["a", "b"], [{ source: "a", target: "b" }],
+      { seed: { a: { x: 111, y: 222 } } });
+    expect(sim.nodes().find((n) => n.id === "a")!.x).toBe(111);
+    expect(sim.pinned()).toEqual({});     // seeded, not held
+    sim.settle(300);
+    expect(sim.nodes().find((n) => n.id === "a")!.x).not.toBe(111);
+  });
+});
