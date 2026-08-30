@@ -218,6 +218,42 @@ describe("WikiView header and tree", () => {
     expect(link.getAttribute("href")).toBe("/programs/p1/wiki/lint");
   });
 
+  it("says the wiki is switched off, instead of rendering an empty shell", async () => {
+    // How this was found: every fixture in this file has pages in it, and
+    // wikitest is the only program on the box that does. A program with the
+    // wiki disabled rendered an empty index card over an empty tree — nothing
+    // said why, and nothing pointed at the switch.
+    vi.spyOn(api, "getWikiSummary").mockResolvedValue({
+      ...summary, wiki_enabled: false, pages: 0, counts: {}, pending: 10, index_md: "",
+    } as never);
+    vi.spyOn(api, "listWikiPages").mockResolvedValue([] as never);
+    mount();
+    expect(await screen.findByText(/switched off/i)).toBeTruthy();
+    expect(screen.getByText(/10 finished objects would be read/i)).toBeTruthy();
+    expect(screen.getByText("wiki off")).toBeTruthy();
+    // wiki.beat() returns early for a disabled wiki, so these do nothing.
+    expect((screen.getByRole("button", { name: /ingest now/i }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    expect((screen.getByRole("button", { name: /lint now/i }) as HTMLButtonElement).disabled)
+      .toBe(true);
+    // No furniture with nothing behind it.
+    expect(screen.queryByPlaceholderText(/search the wiki/i)).toBeNull();
+  });
+
+  it("distinguishes an empty wiki from a switched-off one", async () => {
+    vi.spyOn(api, "getWikiSummary").mockResolvedValue({
+      ...summary, wiki_enabled: true, pages: 0, counts: {}, pending: 3, index_md: "",
+    } as never);
+    vi.spyOn(api, "listWikiPages").mockResolvedValue([] as never);
+    mount();
+    expect(await screen.findByText(/nothing written yet/i)).toBeTruthy();
+    expect(screen.queryByText(/switched off/i)).toBeNull();
+    expect(screen.queryByText("wiki off")).toBeNull();
+    // It is on, so the button that would fill it stays live.
+    expect((screen.getByRole("button", { name: /ingest now/i }) as HTMLButtonElement).disabled)
+      .toBe(false);
+  });
+
   it("puts the concept graph with the navigation, not with the actions", async () => {
     mount();
     const link = await screen.findByRole("link", { name: /concept graph/i });

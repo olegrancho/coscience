@@ -167,10 +167,19 @@ export default function WikiView() {
             </Link>
           </Group>
           <Group gap={8} wrap="nowrap">
+            {/* wiki.beat() returns early when the wiki is switched off, so
+                these do nothing at all for such a program. A button that looks
+                live and silently no-ops is worse than one that is out. */}
             <Button size="xs" variant="default" onClick={() => run.mutate("ingest")}
-                    disabled={!!s?.run}>Ingest now</Button>
+                    disabled={!!s?.run || !s?.wiki_enabled}
+                    title={s && !s.wiki_enabled ? "the wiki is switched off" : undefined}>
+              Ingest now
+            </Button>
             <Button size="xs" variant="default" onClick={() => run.mutate("lint")}
-                    disabled={!!s?.run}>Lint now</Button>
+                    disabled={!!s?.run || !s?.wiki_enabled}
+                    title={s && !s.wiki_enabled ? "the wiki is switched off" : undefined}>
+              Lint now
+            </Button>
             {/* The badge stays out here rather than moving into the dialog with
                 everything else: unaccepted merges are the one thing behind
                 settings that is waiting on a person. */}
@@ -194,6 +203,11 @@ export default function WikiView() {
 
       {s && (
         <Group gap={6} wrap="wrap">
+          {!s.wiki_enabled && (
+            <Badge variant="light" color="gray" title="no wiki runs happen for this program">
+              wiki off
+            </Badge>
+          )}
           {TYPE_ORDER.filter((t) => s.counts[t]).map((t) => (
             <Badge key={t} variant="light" color="gray">{t} {s.counts[t]}</Badge>
           ))}
@@ -233,8 +247,10 @@ export default function WikiView() {
 
       <div className="wiki-panes">
         <nav className="wiki-tree">
-          <TextInput size="xs" placeholder="Search the wiki" value={q} mb={8}
-                     onChange={(e) => setQ(e.currentTarget.value)} />
+          {total > 0 && (
+            <TextInput size="xs" placeholder="Search the wiki" value={q} mb={8}
+                       onChange={(e) => setQ(e.currentTarget.value)} />
+          )}
           {q.trim() ? (
             <ul>
               {(hits.data ?? []).map((h) => (
@@ -284,7 +300,35 @@ export default function WikiView() {
         </nav>
 
         <main className="wiki-page">
-          {!slug && s && (
+          {/* A wiki with no pages used to render as an empty card above an
+              empty tree — indistinguishable from a broken page, and giving no
+              hint that the reason is a switch in Settings. There are two ways
+              to have nothing, and they want different answers. */}
+          {!slug && s && s.pages === 0 && (
+            <Card padding="lg" radius="md" style={cardStyle}>
+              {s.wiki_enabled ? (
+                <EmptyState title="Nothing written yet">
+                  No pages have been written for this program.{" "}
+                  {s.pending > 0
+                    ? `${s.pending} finished ${s.pending === 1 ? "object is" : "objects are"}
+                       waiting to be read — the next wiki beat will pick them up, or press
+                       “Ingest now”.`
+                    : "Nothing has finished that there would be anything to write about yet."}
+                </EmptyState>
+              ) : (
+                <EmptyState title="The wiki is switched off">
+                  No wiki runs happen for this program, so nothing is written and no
+                  quota is spent on it.{" "}
+                  {s.pending > 0
+                    ? `${s.pending} finished ${s.pending === 1 ? "object" : "objects"} would
+                       be read if you turned it on.`
+                    : ""}
+                  {" "}Turn it on under Settings.
+                </EmptyState>
+              )}
+            </Card>
+          )}
+          {!slug && s && s.pages > 0 && (
             <Card padding="lg" radius="md" style={cardStyle}>
               <div className="eyebrow" style={{ marginBottom: 12 }}>index</div>
               <div className="report-leaf">

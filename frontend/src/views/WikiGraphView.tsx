@@ -24,6 +24,18 @@ import { BackLink } from "../components/ui";
 
 const EMPTY_GRAPH: WikiGraphT = { nodes: [], edges: [] };
 const LABEL_ZOOM = 0.6;
+/** Label size in SCREEN pixels. A label styled in flow coordinates grows with
+ *  the zoom, so `fitView` on a small graph — which zooms in — rendered names
+ *  bigger than the nodes and piled them on top of each other. Dividing by the
+ *  zoom pins them to a constant on-screen size instead. */
+const LABEL_PX = 11;
+/** Below this alpha the simulation has stopped rearranging things. */
+const SETTLED = 0.05;
+/** Relation names are detail, not structure. They are drawn at a constant
+ *  on-screen size like the node labels, and only once the reader is close
+ *  enough for them to be worth the clutter. */
+const EDGE_LABEL_PX = 10;
+const EDGE_LABEL_ZOOM = 0.85;
 
 type ConceptData = {
   node: WikiGraphNode;
@@ -70,8 +82,9 @@ function ConceptNode({ data }: NodeProps) {
       />
       {zoom >= LABEL_ZOOM && (
         <span style={{
-          position: "absolute", left: r + 6, top: "50%", transform: "translateY(-50%)",
-          fontSize: 10, whiteSpace: "nowrap", pointerEvents: "none",
+          position: "absolute", left: r + 6 / zoom, top: "50%",
+          transform: "translateY(-50%)",
+          fontSize: LABEL_PX / zoom, whiteSpace: "nowrap", pointerEvents: "none",
           color: "var(--ink, #222)", textDecoration: st.textDecoration,
         }}>
           {d.node.title}
@@ -92,6 +105,7 @@ type RimData = { sourceR: number; targetR: number };
 function RimEdge(
   { sourceX, sourceY, targetX, targetY, markerStart, markerEnd, style, label, data }: EdgeProps,
 ) {
+  const zoom = useStore((st) => st.transform[2]);
   const d = data as RimData | undefined;
   const seg = rimSegment(sourceX, sourceY, targetX, targetY, d?.sourceR ?? 0, d?.targetR ?? 0);
   if (!seg) return null;
@@ -99,11 +113,12 @@ function RimEdge(
     <>
       <BaseEdge path={segmentPath(seg)} markerStart={markerStart} markerEnd={markerEnd}
                 style={style} />
-      {label && (
+      {label && zoom >= EDGE_LABEL_ZOOM && (
         <EdgeLabelRenderer>
           <div style={{
-            position: "absolute", pointerEvents: "none", fontSize: 9, lineHeight: 1.4,
-            padding: "0 3px", borderRadius: 3, whiteSpace: "nowrap",
+            position: "absolute", pointerEvents: "none",
+            fontSize: EDGE_LABEL_PX / zoom, lineHeight: 1.4,
+            padding: `0 ${3 / zoom}px`, borderRadius: 3, whiteSpace: "nowrap",
             background: "var(--paper, #f1f4f2)", color: "var(--ink-faint, #8b9a94)",
             opacity: Number(style?.opacity ?? 1),
             transform: `translate(-50%, -50%) translate(${(seg.x1 + seg.x2) / 2}px, ${
@@ -159,11 +174,24 @@ export default function WikiGraphView() {
 
   const simRef = useRef<WikiSim | null>(null);
   simRef.current = sim;
+  // Just the one call we make; the full instance type is parameterised by the
+  // node and edge shapes and does not survive being widened to a ref.
+  const flow = useRef<{ fitView: (o?: { duration?: number; padding?: number }) => void } | null>(null);
 
   useEffect(() => {
     if (!sim) return;
     let frame = 0;
+    // React Flow's own `fitView` runs on mount, when every node is still sitting
+    // on its seed position — a tight little cluster. It fits THAT, which means
+    // it zooms a long way in, and then the simulation spreads the graph out
+    // underneath a viewport that never looks again. So fit once more when the
+    // physics has actually stopped moving things.
+    let refit = false;
     sim.onTick(() => {
+      if (!refit && sim.alpha() < SETTLED) {
+        refit = true;
+        flow.current?.fitView({ duration: 400, padding: 0.18 });
+      }
       // Coalesce to one React render per animation frame; d3 ticks faster than
       // the screen refreshes and re-rendering per tick wastes most of them.
       if (frame) return;
@@ -315,7 +343,9 @@ export default function WikiGraphView() {
           onNodeDragStop={onDragStop}
           nodesDraggable
           nodesConnectable={false}
+          onInit={(i) => { flow.current = i; }}
           fitView
+          fitViewOptions={{ padding: 0.18 }}
           proOptions={{ hideAttribution: true }}
         >
           <Background />
