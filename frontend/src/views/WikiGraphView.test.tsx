@@ -154,12 +154,19 @@ describe("WikiGraphView", () => {
     expect(build.mock.calls.length).toBe(builtOnce);
   });
 
-  it("offers a way back to the wiki", async () => {
+  it("offers a way back to the page list, and says which view you are in", async () => {
     // The graph is a view OF the wiki; without this the browser's back button
-    // was the only way out of it.
+    // was the only way out of it. It is a switch rather than a link now, so
+    // "back to the wiki" and "which of the two am I looking at" are the same
+    // control.
     renderAt("/programs/p1/wiki/graph");
-    const back = await screen.findByRole("link", { name: /wiki/i });
-    expect(back.getAttribute("href")).toBe("/programs/p1/wiki");
+    const pages = await screen.findByRole("link", { name: "Pages" });
+    expect(pages.getAttribute("href")).toBe("/programs/p1/wiki");
+    expect(pages.getAttribute("aria-current")).toBeNull();
+
+    const graph = screen.getByRole("link", { name: "Graph" });
+    expect(graph.getAttribute("href")).toBe("/programs/p1/wiki/graph");
+    expect(graph.getAttribute("aria-current")).toBe("page");
   });
 
   it("starts with every filter ticked, because everything is shown", async () => {

@@ -20,6 +20,7 @@ import {
 import { GraphFilters } from "../components/WikiGraphControls";
 import { neighbourhood } from "../components/wikiNeighbourhood";
 import { loadPositions, savePositions, clearPositions } from "../components/graphPositions";
+import WikiViewSwitch from "../components/WikiViewSwitch";
 import { BackLink } from "../components/ui";
 
 const EMPTY_GRAPH: WikiGraphT = { nodes: [], edges: [] };
@@ -336,12 +337,15 @@ export default function WikiGraphView() {
 
   return (
     <div className="wiki-graph">
-      {/* The graph is a view OF the wiki, not a place of its own: without this
-          the only way back was the browser's back button. Same idiom as the
-          maintenance log's header. */}
-      <BackLink to={`/programs/${id}/wiki`}>Wiki</BackLink>
-      <Group justify="space-between" align="baseline" wrap="nowrap" mb="xs">
-        <Text fw={600} size="xl">Concept graph</Text>
+      {/* The graph is a view OF the wiki, not a place of its own — so the
+          header is the wiki's header with Graph selected, and "up" goes to the
+          program, exactly as it does from the page list. */}
+      <BackLink to={`/programs/${id}`}>Program</BackLink>
+      <Group justify="space-between" align="center" wrap="nowrap" mb="xs">
+        <Group gap={14} align="center" wrap="nowrap">
+          <Text fw={600} size="xl">Wiki</Text>
+          <WikiViewSwitch programId={id} current="graph" />
+        </Group>
         <Text size="xs" c="dimmed">
           showing {shown.nodes.length} of {source?.nodes.length ?? 0} nodes
           {focus && (

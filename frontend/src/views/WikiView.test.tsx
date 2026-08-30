@@ -254,10 +254,19 @@ describe("WikiView header and tree", () => {
       .toBe(false);
   });
 
-  it("puts the concept graph with the navigation, not with the actions", async () => {
+  it("switches between the two views, rather than linking away to one", async () => {
+    // The graph used to be a `.view` link — the bold teal "↗" idiom that means
+    // "leave for somewhere else" — wedged beside the page heading. These are
+    // one wiki looked at two ways.
     mount();
-    const link = await screen.findByRole("link", { name: /concept graph/i });
-    expect(link.getAttribute("href")).toBe("/programs/p1/wiki/graph");
+    const graph = await screen.findByRole("link", { name: "Graph" });
+    expect(graph.getAttribute("href")).toBe("/programs/p1/wiki/graph");
+    expect(graph.getAttribute("aria-current")).toBeNull();
+
+    const pages = screen.getByRole("link", { name: "Pages" });
+    expect(pages.getAttribute("aria-current")).toBe("page");
+    // Still real links: middle-click and "open in new tab" have to work.
+    expect(pages.tagName).toBe("A");
   });
 });
 

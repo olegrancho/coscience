@@ -15,7 +15,7 @@ const fail = [];
 const check = (cond, what) => { if (!cond) fail.push(what); };
 const near = (a, b, eps = 1.5) => Math.abs(a - b) <= eps;
 
-export async function run({ eval: ev, wait, drag, shot }) {
+export async function run({ eval: ev, wait, drag, shot, mouse }) {
   await wait(3000);
   // The pane lives in a sticky right rail, below the fold on a short viewport.
   await ev(`document.querySelector('svg.wiki-nbhd')?.scrollIntoView({block:'center'})`);
@@ -98,6 +98,40 @@ export async function run({ eval: ev, wait, drag, shot }) {
   check(await vb() !== pannedFrom, "dragging the background no longer pans");
 
   await shot("neighbourhood");
+
+  // 4. A node is a hyperlink. Done LAST, because it navigates away.
+  //
+  // This has to be a real mouse press and release, not el.click(): the bug it
+  // guards was that capturing the pointer on pointerdown retargets the click
+  // that follows to the <svg>, so it never reached the <a> at all. Dispatching
+  // a click straight at the element — which is all jsdom can do — sails past
+  // that completely, and did.
+  // Step 2 dragged a node, which legitimately pins and saves one. Clear that,
+  // or "a click pinned something" is measuring the drag.
+  await ev(`Object.keys(localStorage).filter(k => k.startsWith('wiki-nbhd-pos'))
+    .forEach(k => localStorage.removeItem(k))`);
+  const link = await ev(`(() => {
+    const c = document.querySelector('svg.wiki-nbhd a circle');
+    if (!c) return null;
+    const r = c.getBoundingClientRect();
+    return { cx: r.x + r.width/2, cy: r.y + r.height/2,
+             href: c.closest('a').getAttribute('href') }; })()`);
+  check(!!link, "no linked neighbour to click");
+  if (link) {
+    const from = await path();
+    await mouse("mousePressed", link.cx, link.cy);
+    await mouse("mouseReleased", link.cx, link.cy);
+    await wait(900);
+    const to = await path();
+    check(to === link.href,
+      `clicking a neighbour went to "${to}", expected "${link.href}" `
+      + `(was "${from}") — the disc is not acting as a link`);
+    // ...and a click is not a drag: it must not pin the node it opened.
+    check(await ev(`Object.keys(localStorage)
+      .filter(k => k.startsWith('wiki-nbhd-pos')).length === 0`),
+      "a plain click pinned the node it opened");
+  }
+
   report();
 }
 

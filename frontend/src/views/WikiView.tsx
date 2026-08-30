@@ -7,6 +7,7 @@ import Md from "../components/Md";
 import WikiNeighbourhood from "../components/WikiNeighbourhood";
 import { isInternalLink, linkFootnotes, outline, wikiHref } from "../components/wikiPage";
 import WikiSettingsModal from "../components/WikiSettingsModal";
+import WikiViewSwitch from "../components/WikiViewSwitch";
 import { AbsTime, BackLink, EmptyState } from "../components/ui";
 import { api, type WikiPageRow } from "../api";
 
@@ -160,11 +161,9 @@ export default function WikiView() {
             can configure — because a "Graph" link reading as a sibling of
             "Lint now" is what made it look misplaced. */}
         <Group justify="space-between" align="center" wrap="wrap" gap={12}>
-          <Group gap={14} align="baseline" wrap="nowrap">
+          <Group gap={14} align="center" wrap="nowrap">
             <Text fw={600} size="xl">Wiki</Text>
-            <Link to={`/programs/${id}/wiki/graph`} className="view" style={{ fontSize: 13 }}>
-              Concept graph ↗
-            </Link>
+            <WikiViewSwitch programId={id} current="pages" />
           </Group>
           <Group gap={8} wrap="nowrap">
             {/* wiki.beat() returns early when the wiki is switched off, so

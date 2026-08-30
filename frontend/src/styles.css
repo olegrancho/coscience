@@ -544,3 +544,22 @@ a { color: inherit; }
 .wiki-page .footnotes p { margin: 0; }
 /* The marker in the prose: small, raised, and not competing with the sentence. */
 .wiki-page sup a { text-decoration: none; padding: 0 1px; }
+
+/* ── pages / graph switch ────────────────────────────────────────── */
+/* Two ways of looking at one wiki, so it reads as a switch and not as an exit.
+   The `.view` idiom next to it means "leave for somewhere else". */
+.viewswitch {
+  display: inline-flex; gap: 2px; padding: 2px;
+  border: 1px solid var(--hairline); border-radius: 7px;
+  background: var(--paper-2);
+}
+.viewswitch a {
+  display: block; padding: 3px 12px; border-radius: 5px;
+  font-size: 12px; font-weight: 500; line-height: 1.5;
+  color: var(--ink-faint); text-decoration: none; white-space: nowrap;
+}
+.viewswitch a:hover { color: var(--ink-muted); }
+.viewswitch a[aria-current="page"] {
+  background: var(--card); color: var(--machine); font-weight: 600;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .05);
+}

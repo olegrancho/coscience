@@ -23,6 +23,8 @@ const RING_X = 42, RING_Y = 58;
 /** How far out to look. Two hops is what the full graph's focus mode shows, so
  *  the pane and "open full graph ↗" now agree about what a neighbourhood is. */
 const HOPS = 2;
+/** Pointer travel, in screen px, below which a gesture is still a click. */
+const DRAG_SLOP = 3;
 
 // The pane runs the same live simulation as the full graph, at pane scale —
 // the defaults are tuned for a full-page canvas and would fling nine nodes
@@ -103,9 +105,14 @@ export default function WikiNeighbourhood(
   // Which node is being dragged, where the pointer started, and whether it has
   // actually travelled — a node is a link, so a click that merely wobbled must
   // still navigate while a real drag must not.
-  const nodeDrag = useRef<
-    { id: string; from: { x: number; y: number }; at: { x: number; y: number }; moved: boolean }
-    | null>(null);
+  const nodeDrag = useRef<{
+    id: string;
+    from: { x: number; y: number };
+    at: { x: number; y: number };
+    /** Set once the pointer has travelled far enough to mean a drag. */
+    moved: boolean;
+    pointerId: number;
+  } | null>(null);
   const suppressClick = useRef(false);
   // The pointer callbacks are declared before `centreId` is derived, and must
   // not be rebuilt every time it changes, so they read it through a ref.
@@ -138,16 +145,19 @@ export default function WikiNeighbourhood(
     return () => el.removeEventListener("wheel", onWheel);
   }, [svgEl]);
 
-  // A pointerdown on a node grabs that node; anywhere else grabs the picture.
-  // Both gestures live on the <svg> so a fast drag that outruns the pointer
-  // keeps working — the capture is on the element that owns the listeners.
+  // A pointerdown on a node is only a CANDIDATE drag. Nothing is captured,
+  // pinned or reheated yet, for two reasons: capturing the pointer retargets
+  // the click that follows to the <svg>, so a plain click never reached the
+  // <a> and the node stopped being a link; and dragStart pins the node, so a
+  // mere click left it stuck where it was. Both start on the first real
+  // movement instead (`beginDrag`).
   const grabNode = useCallback(
     (e: React.PointerEvent, id: string, at: { x: number; y: number }) => {
       e.stopPropagation();
-      nodeDrag.current = { id, from: { x: e.clientX, y: e.clientY }, at, moved: false };
-      simRef.current?.dragStart(id);
-      (e.currentTarget as Element).closest("svg")
-        ?.setPointerCapture?.(e.pointerId);
+      nodeDrag.current = {
+        id, from: { x: e.clientX, y: e.clientY }, at, moved: false,
+        pointerId: e.pointerId,
+      };
     }, []);
 
   const onPointerDown = useCallback((e: React.PointerEvent<SVGSVGElement>) => {
@@ -161,12 +171,18 @@ export default function WikiNeighbourhood(
 
     const nd = nodeDrag.current;
     if (nd) {
-      const dx = (e.clientX - nd.from.x) * sx;
-      const dy = (e.clientY - nd.from.y) * sy;
-      if (Math.abs(e.clientX - nd.from.x) > 3 || Math.abs(e.clientY - nd.from.y) > 3) {
+      if (!nd.moved) {
+        // Still could be a click. Nothing has been captured or pinned yet.
+        if (Math.abs(e.clientX - nd.from.x) <= DRAG_SLOP
+            && Math.abs(e.clientY - nd.from.y) <= DRAG_SLOP) return;
         nd.moved = true;
+        e.currentTarget.setPointerCapture?.(nd.pointerId);
+        simRef.current?.dragStart(nd.id);
       }
-      const to = { x: nd.at.x + dx, y: nd.at.y + dy };
+      const to = {
+        x: nd.at.x + (e.clientX - nd.from.x) * sx,
+        y: nd.at.y + (e.clientY - nd.from.y) * sy,
+      };
       // Feed the physics, exactly as the full graph does, so the neighbours
       // shove out of the way instead of the dragged node sliding over them.
       if (simRef.current) simRef.current.dragTo(nd.id, to.x, to.y);
@@ -184,10 +200,12 @@ export default function WikiNeighbourhood(
     const nd = nodeDrag.current;
     if (nd) {
       // The click event lands after pointerup. Swallow it only if the pointer
-      // actually travelled, so dragging a node does not also open its page.
+      // actually travelled, so dragging a node does not also open its page —
+      // and a click that never became a drag is left completely alone, right
+      // down to not having reheated the simulation.
       suppressClick.current = nd.moved;
-      simRef.current?.dragEnd(nd.id);
       if (nd.moved) {
+        simRef.current?.dragEnd(nd.id);
         const s = simRef.current;
         if (s) {
           // A dropped node stays where it was put — same rule as the full
