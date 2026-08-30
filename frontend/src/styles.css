@@ -563,3 +563,29 @@ a { color: inherit; }
   background: var(--card); color: var(--machine); font-weight: 600;
   box-shadow: 0 1px 2px rgb(0 0 0 / .05);
 }
+
+/* ── concept graph canvas ────────────────────────────────────────── */
+/* The canvas was a fixed 640px, which wasted most of a tall monitor and was
+   nearly all of a short one. It fills what the shell leaves instead — 52px of
+   header plus 26px of canvas padding top and bottom — and the header, title
+   and filter strip take their natural height off the top, so a toolbar that
+   wraps onto a second row narrows the canvas rather than pushing it off the
+   bottom.
+
+   Below the min-height there is no arrangement worth looking at, so the page
+   gives up and scrolls instead of shrinking further. */
+.wiki-graph {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 104px);
+  height: calc(100dvh - 104px);   /* dvh where supported: mobile chrome moves */
+  min-height: 520px;
+}
+.wiki-graph-canvas {
+  flex: 1 1 auto;
+  min-height: 280px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--card);
+}

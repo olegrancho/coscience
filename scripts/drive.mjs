@@ -32,7 +32,7 @@ fs.mkdirSync(OUT, { recursive: true });
 const chrome = spawn("google-chrome", [
   "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
   `--remote-debugging-port=${PORT}`,
-  "--window-size=1600,1100",
+  `--window-size=${process.env.WIDTH || 1600},${process.env.HEIGHT || 1100}`,
   `--user-data-dir=${fs.mkdtempSync("/tmp/cdp-")}`,
   "about:blank",
 ], { stdio: "ignore" });

@@ -79,6 +79,31 @@ export async function run({ eval: ev, wait, box, drag, mouse }) {
     + `(was ${before.nodes}, got ${filtered.minNodes})`);
   check(filtered.minEdges > 0, "EDGES VANISHED after filtering");
 
+  // 5. The canvas takes the height the window actually has. It used to be a
+  //    fixed 640px, which wasted most of a tall monitor and was nearly all of
+  //    a short one. Run this at more than one --window-size (WIDTH/HEIGHT).
+  const canvas = await ev(`(() => {
+    const c = document.querySelector('.wiki-graph-canvas');
+    if (!c) return null;
+    const r = c.getBoundingClientRect();
+    return { h: Math.round(r.height), bottom: Math.round(r.bottom),
+             vh: innerHeight,
+             scrolls: document.documentElement.scrollHeight > innerHeight + 1 }; })()`);
+  check(!!canvas, "no graph canvas found");
+  if (canvas) {
+    check(canvas.h >= 280,
+      `canvas is only ${canvas.h}px tall — below this there is no arrangement to read`);
+    if (!canvas.scrolls) {
+      // Nothing below it on the page, so any gap left under it is wasted.
+      const gap = canvas.vh - canvas.bottom;
+      check(gap <= 60,
+        `canvas leaves ${gap}px of dead space below it in a ${canvas.vh}px viewport `
+        + `— it is not using the height available`);
+    }
+    console.log(`canvas             ${canvas.h}px in a ${canvas.vh}px viewport`
+      + `${canvas.scrolls ? " (page scrolls: at the floor)" : ""}`);
+  }
+
   if (fail.length) {
     console.log("\nFAILED:");
     for (const f of fail) console.log("  - " + f);

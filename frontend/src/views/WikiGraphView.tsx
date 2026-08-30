@@ -374,7 +374,7 @@ export default function WikiGraphView() {
         onReset={resetLayout}
       />
 
-      <div role="img" aria-label="concept graph" style={{ width: "100%", height: 640 }}>
+      <div role="img" aria-label="concept graph" className="wiki-graph-canvas">
         <ReactFlow
           nodes={rfNodes}
           edges={flowEdges}
