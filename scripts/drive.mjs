@@ -94,6 +94,38 @@ const api = {
   },
   text: (sel) => evaluate(
     `(document.querySelector(${JSON.stringify(sel)}) || {}).textContent ?? null`),
+  /** Viewport rect of the first match, or null. */
+  box: (sel) => evaluate(`(() => {
+    const el = document.querySelector(${JSON.stringify(sel)});
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.x, y: r.y, w: r.width, h: r.height,
+             cx: r.x + r.width / 2, cy: r.y + r.height / 2 };
+  })()`),
+  /** Real mouse input through the protocol — a synthetic el.click() does not
+   *  go near the pointer/drag handling that a graph actually runs on. */
+  async mouse(type, x, y, button = "left") {
+    await send("Input.dispatchMouseEvent", {
+      type, x, y, button: type === "mouseMoved" ? "none" : button,
+      buttons: type === "mouseMoved" ? 0 : 1, clickCount: 1,
+    });
+    await sleep(40);
+  },
+  async drag(fromX, fromY, toX, toY, steps = 12) {
+    await send("Input.dispatchMouseEvent", {
+      type: "mousePressed", x: fromX, y: fromY, button: "left", buttons: 1, clickCount: 1 });
+    await sleep(60);
+    for (let i = 1; i <= steps; i++) {
+      await send("Input.dispatchMouseEvent", {
+        type: "mouseMoved", button: "left", buttons: 1,
+        x: fromX + ((toX - fromX) * i) / steps,
+        y: fromY + ((toY - fromY) * i) / steps });
+      await sleep(30);
+    }
+    await send("Input.dispatchMouseEvent", {
+      type: "mouseReleased", x: toX, y: toY, button: "left", buttons: 0, clickCount: 1 });
+    await sleep(120);
+  },
   async shot(name) {
     const r = await send("Page.captureScreenshot", { format: "png" });
     const f = path.join(OUT, name.replace(/[^\w.-]/g, "_") + ".png");
@@ -108,6 +140,21 @@ const consoleErrors = [];
 await send("Runtime.enable");
 await send("Page.enable");
 
+// Listen BEFORE navigating, or everything the page says while loading — which
+// is most of what it says — is missed.
+ws.addEventListener("message", (m) => {
+  const msg = JSON.parse(m.data);
+  if (msg.method === "Runtime.exceptionThrown") {
+    consoleErrors.push("THROWN " + (msg.params.exceptionDetails?.exception?.description
+      || msg.params.exceptionDetails?.text));
+  }
+  if (msg.method === "Runtime.consoleAPICalled"
+      && ["error", "warning", "assert"].includes(msg.params.type)) {
+    consoleErrors.push(msg.params.type.toUpperCase() + " "
+      + msg.params.args.map((a) => a.description ?? a.value ?? a.type).join(" "));
+  }
+});
+
 // Navigate through the protocol rather than the command line: the URL given
 // on the command line lands in a target we are not necessarily attached to,
 // and the one we get is about:blank. That is how this driver first "found"
@@ -118,16 +165,6 @@ for (let i = 0; i < 80; i++) {
   const ready = await evaluate("document.readyState").catch(() => null);
   if (ready === "complete") break;
 }
-ws.addEventListener("message", (m) => {
-  const msg = JSON.parse(m.data);
-  if (msg.method === "Runtime.exceptionThrown") {
-    consoleErrors.push(msg.params.exceptionDetails?.exception?.description
-      || msg.params.exceptionDetails?.text);
-  }
-  if (msg.method === "Runtime.consoleAPICalled" && msg.params.type === "error") {
-    consoleErrors.push(msg.params.args.map((a) => a.description ?? a.value).join(" "));
-  }
-});
 
 let code = 0;
 try {

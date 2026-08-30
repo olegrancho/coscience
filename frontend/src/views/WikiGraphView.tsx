@@ -4,7 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   ReactFlow, Background, BaseEdge, Controls, EdgeLabelRenderer, MarkerType,
-  Handle, Position, useStore,
+  Handle, Position, useStore, useNodesState,
   type Node, type NodeProps, type EdgeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -162,7 +162,6 @@ export default function WikiGraphView() {
   // paint, so the first render would place every node at (0,0) — and React
   // Flow's fitView, which runs on mount, would fit that degenerate box and
   // leave the graph zoomed wrong once the nodes spread out.
-  const [, bump] = useState(0);
   const sim = useMemo(() => {
     if (!source) return null;
     return createWikiSim(
@@ -178,30 +177,6 @@ export default function WikiGraphView() {
   // node and edge shapes and does not survive being widened to a ref.
   const flow = useRef<{ fitView: (o?: { duration?: number; padding?: number }) => void } | null>(null);
 
-  useEffect(() => {
-    if (!sim) return;
-    let frame = 0;
-    // React Flow's own `fitView` runs on mount, when every node is still sitting
-    // on its seed position — a tight little cluster. It fits THAT, which means
-    // it zooms a long way in, and then the simulation spreads the graph out
-    // underneath a viewport that never looks again. So fit once more when the
-    // physics has actually stopped moving things.
-    let refit = false;
-    sim.onTick(() => {
-      if (!refit && sim.alpha() < SETTLED) {
-        refit = true;
-        flow.current?.fitView({ duration: 400, padding: 0.18 });
-      }
-      // Coalesce to one React render per animation frame; d3 ticks faster than
-      // the screen refreshes and re-rendering per tick wastes most of them.
-      if (frame) return;
-      frame = requestAnimationFrame(() => { frame = 0; bump((n) => n + 1); });
-    });
-    return () => { if (frame) cancelAnimationFrame(frame); sim.stop(); };
-  }, [sim]);
-
-  // Options come from the WHOLE graph, not the focused subset, so entering
-  // focus mode never silently drops a control the reader had set.
   const options = useMemo(() => filterOptions(q.data ?? EMPTY_GRAPH), [q.data]);
   // An untouched group resolves to "all of it" here, once, and everything
   // downstream — the chips and the filtering — reads the same resolved sets.
@@ -218,33 +193,96 @@ export default function WikiGraphView() {
     return s;
   }, [shown]);
 
-  const pos = sim?.nodes() ?? [];
-  const posById = new Map(pos.map((p) => [p.id, p]));
+  // React Flow owns the node array. This is not a style choice: React Flow
+  // attaches what it has MEASURED — the node's size and where its handles
+  // ended up — to the objects it hands back through onNodesChange, and it will
+  // not draw an edge until both endpoints are measured. Rebuilding the node
+  // objects from scratch, which is what a `nodes={...}` computed during render
+  // does, therefore un-measures every node on every animation frame, and while
+  // the simulation is ticking NO EDGE RENDERS AT ALL. It came back a few
+  // seconds after the graph settled, which is what made it look like a filter
+  // bug rather than a rendering one.
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<Node>([]);
+
+  // Everything about a node except where it is.
+  const nodeSpecs = useMemo(() => shown.nodes.map((n) => ({
+    id: n.id,
+    type: "concept",
+    data: {
+      node: n, r: nodeSize(n), lens, inTension: inTension.has(n.id),
+      onOpen: () => nav(`/programs/${id}/wiki/${n.id.replace(/\.md$/, "")}`),
+    } satisfies ConceptData,
+  })), [shown, lens, inTension, id, nav]);
+
+  const positionOf = useCallback((nid: string, r: number, from: WikiSim | null) => {
+    const p = from?.nodes().find((x) => x.id === nid);
+    return toCorner({ x: p?.x ?? 0, y: p?.y ?? 0 }, r);
+  }, []);
+
+  // Rebuild the list when the visible SET or the styling changes, carrying over
+  // whatever React Flow measured for the nodes that are still there.
+  useEffect(() => {
+    setRfNodes((prev) => {
+      const was = new Map(prev.map((n) => [n.id, n]));
+      return nodeSpecs.map((spec) => {
+        const old = was.get(spec.id);
+        const position = old?.position
+          ?? positionOf(spec.id, spec.data.r, simRef.current);
+        return old ? { ...old, ...spec, position } : { ...spec, position };
+      });
+    });
+  }, [nodeSpecs, setRfNodes, positionOf]);
 
   // The simulation thinks in centres; React Flow places a node by its top-left
-  // corner. Shifting by half the disc keeps the two in the same coordinates —
-  // without it the disc, and so every edge anchored to it, sits down and right
-  // of where the physics put the node.
-  const radius = new Map(shown.nodes.map((n) => [n.id, nodeSize(n) / 2]));
+  // corner. `toCorner` keeps the two in the same coordinates — without it the
+  // disc, and so every edge anchored to it, sits down and right of where the
+  // physics put the node.
+  useEffect(() => {
+    if (!sim) return;
+    let frame = 0;
+    // React Flow's own `fitView` runs on mount, when every node is still sitting
+    // on its seed position — a tight little cluster. It fits THAT, which means
+    // it zooms a long way in, and then the simulation spreads the graph out
+    // underneath a viewport that never looks again. So fit once more when the
+    // physics has actually stopped moving things.
+    let refit = false;
+    const apply = () => setRfNodes((prev) => {
+      const pos = new Map(sim.nodes().map((p) => [p.id, p]));
+      let moved = false;
+      const next = prev.map((n) => {
+        const p = pos.get(n.id);
+        if (!p) return n;
+        const np = toCorner({ x: p.x, y: p.y }, (n.data as unknown as ConceptData).r);
+        if (n.position.x === np.x && n.position.y === np.y) return n;
+        moved = true;
+        // Spread the node React Flow gave back, so `measured` survives.
+        return { ...n, position: np };
+      });
+      return moved ? next : prev;
+    });
+    sim.onTick(() => {
+      if (!refit && sim.alpha() < SETTLED) {
+        refit = true;
+        flow.current?.fitView({ duration: 400, padding: 0.18 });
+      }
+      // Coalesce to one React render per animation frame; d3 ticks faster than
+      // the screen refreshes and re-rendering per tick wastes most of them.
+      if (frame) return;
+      frame = requestAnimationFrame(() => { frame = 0; apply(); });
+    });
+    return () => { if (frame) cancelAnimationFrame(frame); sim.stop(); };
+  }, [sim, setRfNodes]);
 
-  const flowNodes: Node[] = shown.nodes.map((n) => {
-    const p = posById.get(n.id);
-    const r = nodeSize(n);
-    return {
-      id: n.id,
-      type: "concept",
-      position: toCorner({ x: p?.x ?? 0, y: p?.y ?? 0 }, r),
-      data: {
-        node: n, r, lens, inTension: inTension.has(n.id),
-        onOpen: () => nav(`/programs/${id}/wiki/${n.id.replace(/\.md$/, "")}`),
-      } satisfies ConceptData,
-    };
-  });
+  // Options come from the WHOLE graph, not the focused subset, so entering
+  // focus mode never silently drops a control the reader had set.
+  const radius = new Map(shown.nodes.map((n) => [n.id, nodeSize(n) / 2]));
 
   // A materialized `contradicts` reverse is the same disagreement as its
   // forward edge. Drawing both stacks two lines on identical endpoints at
   // double alpha; drawing one with a head at each end says it once.
-  const flowEdges = shown.edges
+  // Memoised on what actually determines it: recomputing 26 edge objects on
+  // every simulation frame is pure waste.
+  const flowEdges = useMemo(() => shown.edges
     .filter((e) => !e.materialized)
     .map((e) => {
       const s = edgeStyle(e, lens);
@@ -265,7 +303,7 @@ export default function WikiGraphView() {
           opacity: Number(s.opacity),
         },
       };
-    });
+    }), [shown, lens, radius]);
 
   const onDragStart = useCallback((_: unknown, n: Node) => {
     simRef.current?.dragStart(n.id);
@@ -334,8 +372,9 @@ export default function WikiGraphView() {
 
       <div role="img" aria-label="concept graph" style={{ width: "100%", height: 640 }}>
         <ReactFlow
-          nodes={flowNodes}
+          nodes={rfNodes}
           edges={flowEdges}
+          onNodesChange={onNodesChange}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onNodeDragStart={onDragStart}
