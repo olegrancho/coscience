@@ -1,19 +1,35 @@
 import type { WikiGraphT } from "../api";
 
+/** How many edges away each reachable node is, out to `hops`. Direction is
+ *  ignored — "related to" is symmetric for the purpose of looking around.
+ *  The centre is 0. Nodes further than `hops` are absent, not Infinity. */
+export function hopsFrom(
+  g: WikiGraphT, centreId: string, hops: number,
+): Map<string, number> {
+  const dist = new Map<string, number>();
+  if (!g.nodes.some((n) => n.id === centreId)) return dist;
+  dist.set(centreId, 0);
+  let frontier = [centreId];
+  for (let d = 1; d <= hops && frontier.length; d++) {
+    const next: string[] = [];
+    for (const e of g.edges) {
+      for (const [from, to] of [[e.src, e.dst], [e.dst, e.src]] as const) {
+        if (dist.get(from) !== d - 1 || dist.has(to)) continue;
+        dist.set(to, d);
+        next.push(to);
+      }
+    }
+    frontier = next;
+  }
+  return dist;
+}
+
 /** The centre plus everything within `hops` edges, direction ignored.
  *  Serves both the browse view's pane and the full view's focus mode, so the
  *  two can never disagree about what a neighbourhood is. */
 export function neighbourhood(g: WikiGraphT, centreId: string, hops: number): WikiGraphT {
-  if (!g.nodes.some((n) => n.id === centreId)) return { nodes: [], edges: [] };
-  let reached = new Set([centreId]);
-  for (let i = 0; i < hops; i++) {
-    const next = new Set(reached);
-    for (const e of g.edges) {
-      if (reached.has(e.src)) next.add(e.dst);
-      if (reached.has(e.dst)) next.add(e.src);
-    }
-    reached = next;
-  }
+  const reached = hopsFrom(g, centreId, hops);
+  if (reached.size === 0) return { nodes: [], edges: [] };
   return {
     nodes: g.nodes.filter((n) => reached.has(n.id)),
     edges: g.edges.filter((e) => reached.has(e.src) && reached.has(e.dst)),

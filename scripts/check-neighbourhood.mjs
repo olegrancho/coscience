@@ -21,7 +21,7 @@ export async function run({ eval: ev, wait, drag, shot }) {
   await ev(`document.querySelector('svg.wiki-nbhd')?.scrollIntoView({block:'center'})`);
   await wait(600);
 
-  const discs = () => ev(`Array.from(document.querySelectorAll('svg.wiki-nbhd circle'))
+  const discs = () => ev(`Array.from(document.querySelectorAll('svg.wiki-nbhd circle[title]'))
     .map(c => ({ t: c.getAttribute('title'), x: +c.getAttribute('cx'), y: +c.getAttribute('cy') }))`);
   const vb = () => ev(`document.querySelector('svg.wiki-nbhd')?.getAttribute('viewBox')`);
   const path = () => ev(`location.pathname`);
@@ -31,7 +31,7 @@ export async function run({ eval: ev, wait, drag, shot }) {
   if (!before.length) { report(); return; }
 
   // 1. Every disc must be hit-testable in its middle, not only on its outline.
-  const hits = await ev(`Array.from(document.querySelectorAll('svg.wiki-nbhd circle'))
+  const hits = await ev(`Array.from(document.querySelectorAll('svg.wiki-nbhd circle[title]'))
     .map(c => { const r = c.getBoundingClientRect();
       const el = document.elementFromPoint(r.x + r.width/2, r.y + r.height/2);
       return { t: c.getAttribute('title'), hit: el && el.tagName }; })`);

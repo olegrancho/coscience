@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api";
-import { neighbourhood, oidForSourceSlug, fitLabel } from "./wikiNeighbourhood";
+import { neighbourhood, hopsFrom, oidForSourceSlug, fitLabel } from "./wikiNeighbourhood";
 import { radialLayout } from "./radialLayout";
 import { rimSegment, segmentPath } from "./discGeometry";
 import { nodeStyle, nodeSize } from "./wikiGraphStyle";
@@ -14,9 +14,14 @@ import { loadPositions, savePositions, clearPositions, type PosMap } from "./gra
 // box edge, clipping half of each disc, and left no room beside them for a
 // name. Squashing it horizontally and using the rail's full height gives the
 // labels their room without shrinking the picture.
-const BOX_W = 300, BOX_H = 250;
+const BOX_W = 300, BOX_H = 300;
 const CX = BOX_W / 2, CY = BOX_H / 2;
-const RING_X = 54, RING_Y = 84;
+// Radii of the FIRST ring; hop 2 sits at twice these. The rail is 320 wide and
+// its height is free, so the ellipse is taller than it is wide.
+const RING_X = 42, RING_Y = 58;
+/** How far out to look. Two hops is what the full graph's focus mode shows, so
+ *  the pane and "open full graph ↗" now agree about what a neighbourhood is. */
+const HOPS = 2;
 
 // Annotation. A disc says nothing about which page it is, and the reader
 // should not have to hover every one to find out.
@@ -161,14 +166,18 @@ export default function WikiNeighbourhood(
     () => q.data?.nodes.find((n) => n.id.replace(/\.md$/, "") === slug)?.id ?? "",
     [q.data, slug]);
   const sub = useMemo(
-    () => (q.data && centreId ? neighbourhood(q.data, centreId, 1) : { nodes: [], edges: [] }),
+    () => (q.data && centreId ? neighbourhood(q.data, centreId, HOPS)
+                              : { nodes: [], edges: [] }),
+    [q.data, centreId]);
+  const hop = useMemo(
+    () => (q.data && centreId ? hopsFrom(q.data, centreId, HOPS) : new Map<string, number>()),
     [q.data, centreId]);
   const placed = useMemo(
     () => radialLayout(centreId, sub.nodes.map((n) => ({
       id: n.id, data: { label: n.title, stage: "", kind: "", status: n.status },
       position: { x: 0, y: 0 }, style: {},
-    })), RING_X, RING_Y),
-    [sub, centreId]);
+    })), RING_X, RING_Y, (nid) => hop.get(nid) ?? 1),
+    [sub, centreId, hop]);
   // Only a slug shaped like a Source page's (`result-<id>`, `artifact-<aid>-<vid>`)
   // has an object id to look citations up for; anything else — including "no
   // page here at all" — has none, so the query is skipped rather than firing a
@@ -266,8 +275,10 @@ export default function WikiNeighbourhood(
             a.position.x + CX, a.position.y + CY, b.position.x + CX, b.position.y + CY,
             nodeSize(na) / 2, nodeSize(nb) / 2);
           if (!seg) return null;
+          const near = (hop.get(e.src) ?? 9) <= 1 && (hop.get(e.dst) ?? 9) <= 1;
           return <path key={e.id} d={segmentPath(seg)} fill="none"
-                       stroke="#8a8f98" strokeWidth={1} />;
+                       stroke="#8a8f98" strokeWidth={1}
+                       strokeOpacity={near ? 0.85 : 0.4} />;
         })}
         {placed.map((base) => {
           const n = byId.get(base.id);
@@ -277,6 +288,9 @@ export default function WikiNeighbourhood(
           const r = nodeSize(n) / 2;
           const cx = p.position.x + CX, cy = p.position.y + CY;
           const isCentre = p.id === centreId;
+          // Distance has to be visible or the two rings are just a crowd: the
+          // page you are on gets a halo, and the second hop sits back.
+          const far = (hop.get(p.id) ?? 1) > 1;
           // Labels go outward from the ring so they never cross a spoke: to
           // the right of a node on the right, to the left of one on the left,
           // and above/below the ones near the vertical axis. The centre's own
@@ -299,6 +313,12 @@ export default function WikiNeighbourhood(
           const href = `/programs/${programId}/wiki/${p.id.replace(/\.md$/, "")}`;
           const disc = (
             <>
+              {isCentre && (
+                <circle className="wiki-nbhd-halo"
+                        cx={cx} cy={cy} r={r + 5} fill="none" pointerEvents="none"
+                        stroke="var(--machine, #1b9a85)" strokeOpacity={0.35}
+                        strokeWidth={2} />
+              )}
               {/* pointerEvents "all", or the disc of an UNVERIFIED page — drawn
                   fill="none" to say "nothing has checked this" — is hit-tested
                   only on its 2px outline, because SVG does not hit-test the
@@ -323,7 +343,7 @@ export default function WikiNeighbourhood(
             </>
           );
           return (
-            <g key={p.id}
+            <g key={p.id} opacity={far && hover !== p.id ? 0.62 : 1}
                onPointerEnter={() => setHover(p.id)}
                onPointerLeave={() => setHover((h) => (h === p.id ? "" : h))}
                onPointerDown={(e) => grabNode(e, p.id, p.position)}

@@ -95,7 +95,7 @@ const cross = {
   })),
 };
 
-const BOX_W = 300, BOX_H = 250, CHAR_PX = 5;
+const BOX_W = 300, BOX_H = 300, CHAR_PX = 5;
 
 const labelsOf = () => Array.from(document.querySelectorAll("svg text"));
 
@@ -134,7 +134,7 @@ describe("WikiNeighbourhood annotation", () => {
     // Regression guard: the ring radius used to equal the box's half-width,
     // which put each node's CENTRE on the edge and clipped half of every disc.
     await showCross();
-    const discs = Array.from(document.querySelectorAll("svg circle"));
+    const discs = Array.from(document.querySelectorAll("svg circle[title]"));
     expect(discs).toHaveLength(5);
     for (const c of discs) {
       const cx = Number(c.getAttribute("cx")), cy = Number(c.getAttribute("cy"));
@@ -188,7 +188,7 @@ describe("WikiNeighbourhood viewport", () => {
   function sizeTheSvg() {
     const svg = document.querySelector("svg.wiki-nbhd") as SVGSVGElement;
     svg.getBoundingClientRect = () => ({
-      x: 0, y: 0, left: 0, top: 0, right: 300, bottom: 250, width: 300, height: 250,
+      x: 0, y: 0, left: 0, top: 0, right: 300, bottom: 300, width: 300, height: 300,
       toJSON: () => ({}),
     }) as DOMRect;
     return svg;
@@ -224,7 +224,7 @@ describe("WikiNeighbourhood viewport", () => {
   it("pans with the pointer, and offers a way back only once moved", async () => {
     await showCross();
     const svg = sizeTheSvg();
-    expect(svg.getAttribute("viewBox")).toBe("0 0 300 250");
+    expect(svg.getAttribute("viewBox")).toBe("0 0 300 300");
     expect(screen.queryByText(/reset view/i)).toBeNull();
 
     fireEvent.pointerDown(svg, { clientX: 100, clientY: 100 });
@@ -233,11 +233,11 @@ describe("WikiNeighbourhood viewport", () => {
 
     // Dragging right brings what is to the LEFT into view: the window moves
     // against the hand. A sign error here makes the pane fight the pointer.
-    await waitFor(() => expect(svg.getAttribute("viewBox")).toBe("-40 -15 300 250"));
+    await waitFor(() => expect(svg.getAttribute("viewBox")).toBe("-40 -15 300 300"));
     expect(screen.getByText(/reset view/i)).toBeTruthy();
 
     fireEvent.click(screen.getByText(/reset view/i));
-    await waitFor(() => expect(svg.getAttribute("viewBox")).toBe("0 0 300 250"));
+    await waitFor(() => expect(svg.getAttribute("viewBox")).toBe("0 0 300 300"));
     expect(screen.queryByText(/reset view/i)).toBeNull();
   });
 
@@ -245,15 +245,15 @@ describe("WikiNeighbourhood viewport", () => {
     await showCross();
     const svg = sizeTheSvg();
     svg.dispatchEvent(new WheelEvent("wheel", {
-      deltaY: -100, clientX: 150, clientY: 125, bubbles: true, cancelable: true,
+      deltaY: -100, clientX: 150, clientY: 150, bubbles: true, cancelable: true,
     }));
     await waitFor(() => {
       const [x, y, w, h] = (svg.getAttribute("viewBox") ?? "").split(" ").map(Number);
       expect(w).toBeLessThan(300);              // zoomed in
-      expect(h).toBeLessThan(250);
+      expect(h).toBeLessThan(300);
       // The middle of the box was under the cursor, so it must still be.
       expect(x + w / 2).toBeCloseTo(150, 5);
-      expect(y + h / 2).toBeCloseTo(125, 5);
+      expect(y + h / 2).toBeCloseTo(150, 5);
     });
   });
 });
@@ -268,7 +268,7 @@ describe("WikiNeighbourhood node dragging", () => {
   const sizedSvg = () => {
     const svg = document.querySelector("svg.wiki-nbhd") as SVGSVGElement;
     svg.getBoundingClientRect = () => ({
-      x: 0, y: 0, left: 0, top: 0, right: 300, bottom: 250, width: 300, height: 250,
+      x: 0, y: 0, left: 0, top: 0, right: 300, bottom: 300, width: 300, height: 300,
       toJSON: () => ({}),
     }) as DOMRect;
     return svg;
@@ -315,7 +315,7 @@ describe("WikiNeighbourhood node dragging", () => {
     fireEvent.pointerMove(svg, { clientX: 160, clientY: 100 });
     fireEvent.pointerUp(svg);
     await waitFor(() => expect(centreOf(N1)).not.toEqual({ x: 0, y: 0 }));
-    expect(svg.getAttribute("viewBox")).toBe("0 0 300 250");
+    expect(svg.getAttribute("viewBox")).toBe("0 0 300 300");
   });
 
   it("drags the node's edges along with it", async () => {
@@ -404,5 +404,62 @@ describe("WikiNeighbourhood node dragging", () => {
     await waitFor(() => expect(centreOf(N1)).not.toEqual(dragged));
     expect(screen.queryByText(/reset view/i)).toBeNull();
     expect(localStorage.getItem("wiki-nbhd-pos:p1::concepts/hub")).toBeNull();
+  });
+});
+
+describe("WikiNeighbourhood at two hops", () => {
+  // hub — n1 — far.  `far` is only reachable in two steps, so it exists at all
+  // only because the pane looks two hops out.
+  const twoHop = {
+    nodes: ["hub", "n1", "n2", "far"].map((s, i) => ({
+      id: `concepts/${s}.md`, slug: s, title: s.toUpperCase(),
+      type: "Concept", status: "draft", trust: "unverified",
+      in_degree: 1, out_degree: i === 0 ? 2 : 1, orphan: false, cluster: 0,
+    })),
+    edges: [["hub", "n1"], ["hub", "n2"], ["n1", "far"]].map(([x, y]) => ({
+      id: `${x}->${y}`, src: `concepts/${x}.md`, dst: `concepts/${y}.md`,
+      type: "refines", confidence: "high", source: "s", typed: true, materialized: false,
+    })),
+  };
+
+  async function showTwoHop() {
+    vi.spyOn(api, "getWikiGraph").mockResolvedValue(twoHop as never);
+    show("concepts/hub");
+    await screen.findByTitle("HUB");
+  }
+
+  const centreOf = (t: string) => {
+    const c = screen.getByTitle(t) as unknown as SVGCircleElement;
+    return { x: Number(c.getAttribute("cx")), y: Number(c.getAttribute("cy")) };
+  };
+  const from = (t: string) => {
+    const p = centreOf(t), h = centreOf("HUB");
+    return Math.hypot(p.x - h.x, p.y - h.y);
+  };
+
+  it("shows a node that is two steps away", async () => {
+    await showTwoHop();
+    // At one hop this node was simply not there.
+    expect(screen.getByTitle("FAR")).toBeTruthy();
+    expect(screen.getAllByTitle(/HUB|N1|N2|FAR/)).toHaveLength(4);
+  });
+
+  it("puts the second hop on an outer ring, so distance is visible", async () => {
+    await showTwoHop();
+    expect(from("FAR")).toBeGreaterThan(from("N1") * 1.5);
+    // ...and the two direct relations share one ring.
+    expect(from("N1")).toBeCloseTo(from("N2"), 5);
+  });
+
+  it("marks the page you are on, and sets the far ring back", async () => {
+    await showTwoHop();
+    const halo = document.querySelector("circle.wiki-nbhd-halo");
+    expect(halo).toBeTruthy();
+    // The halo rings the centre, not some other node.
+    expect(Number(halo!.getAttribute("cx"))).toBeCloseTo(centreOf("HUB").x);
+
+    const groupOf = (t: string) => screen.getByTitle(t).closest("g")!;
+    expect(groupOf("FAR").getAttribute("opacity")).toBe("0.62");
+    expect(groupOf("N1").getAttribute("opacity")).toBe("1");
   });
 });
