@@ -22,7 +22,7 @@ const TRUST_FILL: Record<string, string> = {
 
 export const TENSION_TYPES = new Set(["contradicts", "replaces", "refines"]);
 
-const TENSION_COLOUR: Record<string, string> = {
+export const TENSION_COLOUR: Record<string, string> = {
   contradicts: "#dc2626",
   replaces: "#ea580c",
   refines: "#d97706",

@@ -1,70 +1,124 @@
+import { Group, Text } from "@mantine/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  ReactFlow, Background, Controls, MarkerType, Handle, Position, useStore,
-  type Node, type NodeProps,
+  ReactFlow, Background, BaseEdge, Controls, EdgeLabelRenderer, MarkerType,
+  Handle, Position, useStore,
+  type Node, type NodeProps, type EdgeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { api, type WikiGraphT, type WikiGraphNode } from "../api";
 import { createWikiSim, type WikiSim } from "../components/wikiGraphSim";
+import { rimSegment, segmentPath, toCorner, toCentre } from "../components/discGeometry";
 import { nodeStyle, edgeStyle, nodeSize, TENSION_TYPES, type Lens }
   from "../components/wikiGraphStyle";
-import { applyFilters, emptyFilters, type Filters } from "../components/wikiGraphFilter";
+import {
+  applyFilters, emptyFilters, filterOptions, resolveFilters, toggleOption,
+  type Filters,
+} from "../components/wikiGraphFilter";
+import { GraphFilters } from "../components/WikiGraphControls";
 import { neighbourhood } from "../components/wikiNeighbourhood";
 import { loadPositions, savePositions, clearPositions } from "../components/graphPositions";
+import { BackLink } from "../components/ui";
 
 const EMPTY_GRAPH: WikiGraphT = { nodes: [], edges: [] };
 const LABEL_ZOOM = 0.6;
 
-function toggle(set: Set<string>, v: string): Set<string> {
-  const next = new Set(set);
-  if (next.has(v)) next.delete(v); else next.add(v);
-  return next;
-}
-
 type ConceptData = {
   node: WikiGraphNode;
+  /** Disc diameter, computed once by the view so the node, the edge trimming
+   *  and the drag maths all agree on one number. */
+  r: number;
   lens: Lens;
   inTension: boolean;
   onOpen: () => void;
 };
 
-/** A node is a coloured disc plus its title. The label hides when zoomed out,
- *  the same trick LineageGraph's DotNode uses, so a dense graph stays legible.
- *  The `title` attribute (not a nested <title> element) carries the hover
- *  tooltip and is what tests query by. */
+/** React Flow anchors an edge wherever it measures the handle inside the node
+ *  box. Pinning both handles to the middle of the disc is what makes an edge
+ *  leave the node; left at their defaults they land at the middle of the
+ *  disc-plus-label strip, which is inside the label text. */
+const HANDLE_AT_CENTRE = {
+  left: "50%", top: "50%", right: "auto", bottom: "auto",
+  transform: "translate(-50%, -50%)", visibility: "hidden",
+} as const;
+
+/** A node is a coloured disc. Its title floats beside the disc but is NOT part
+ *  of the node's box — that is what keeps the disc, and so the handles, at the
+ *  node's position. The label hides when zoomed out, the same trick
+ *  LineageGraph's DotNode uses, so a dense graph stays legible. The `title`
+ *  attribute (not a nested <title> element) carries the hover tooltip and is
+ *  what tests query by. */
 function ConceptNode({ data }: NodeProps) {
   const d = data as ConceptData;
   const zoom = useStore((s) => s.transform[2]);
   const st = nodeStyle(d.node, d.lens, d.inTension);
-  const r = nodeSize(d.node);
+  const r = d.r;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, opacity: Number(st.opacity) }}>
-      <Handle type="target" position={Position.Top} style={{ visibility: "hidden" }} />
+    <div style={{ position: "relative", width: r, height: r, opacity: Number(st.opacity) }}>
+      <Handle type="target" position={Position.Top} style={HANDLE_AT_CENTRE} />
       <span
         {...{ title: d.node.title }}
         onClick={d.onOpen}
         style={{
-          width: r, height: r, borderRadius: "50%", flex: "0 0 auto", cursor: "pointer",
+          display: "block", boxSizing: "border-box", width: r, height: r,
+          borderRadius: "50%", cursor: "pointer",
           background: st.background, border: `2px solid ${st.borderColor}`,
           outline: st.outline || undefined, outlineOffset: 2,
         }}
       />
       {zoom >= LABEL_ZOOM && (
         <span style={{
+          position: "absolute", left: r + 6, top: "50%", transform: "translateY(-50%)",
           fontSize: 10, whiteSpace: "nowrap", pointerEvents: "none",
           color: "var(--ink, #222)", textDecoration: st.textDecoration,
         }}>
           {d.node.title}
         </span>
       )}
-      <Handle type="source" position={Position.Bottom} style={{ visibility: "hidden" }} />
+      <Handle type="source" position={Position.Bottom} style={HANDLE_AT_CENTRE} />
     </div>
   );
 }
 
+type RimData = { sourceR: number; targetR: number };
+
+/** A straight line between two discs' rims. The built-in edge types draw a
+ *  bezier between handles, which with centred handles would loop out and back
+ *  and bury its arrowhead under the target disc; this draws the line a force
+ *  graph wants and stops it where the node starts. Geometry lives in
+ *  discGeometry.ts, which is testable — jsdom renders no React Flow edges. */
+function RimEdge(
+  { sourceX, sourceY, targetX, targetY, markerStart, markerEnd, style, label, data }: EdgeProps,
+) {
+  const d = data as RimData | undefined;
+  const seg = rimSegment(sourceX, sourceY, targetX, targetY, d?.sourceR ?? 0, d?.targetR ?? 0);
+  if (!seg) return null;
+  return (
+    <>
+      <BaseEdge path={segmentPath(seg)} markerStart={markerStart} markerEnd={markerEnd}
+                style={style} />
+      {label && (
+        <EdgeLabelRenderer>
+          <div style={{
+            position: "absolute", pointerEvents: "none", fontSize: 9, lineHeight: 1.4,
+            padding: "0 3px", borderRadius: 3, whiteSpace: "nowrap",
+            background: "var(--paper, #f1f4f2)", color: "var(--ink-faint, #8b9a94)",
+            opacity: Number(style?.opacity ?? 1),
+            transform: `translate(-50%, -50%) translate(${(seg.x1 + seg.x2) / 2}px, ${
+              (seg.y1 + seg.y2) / 2}px)`,
+          }}>
+            {label}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+}
+
 const nodeTypes = { concept: ConceptNode };
+const edgeTypes = { rim: RimEdge };
 
 export default function WikiGraphView() {
   const { id = "" } = useParams();
@@ -118,16 +172,14 @@ export default function WikiGraphView() {
     return () => { if (frame) cancelAnimationFrame(frame); sim.stop(); };
   }, [sim]);
 
-  const options = useMemo(() => {
-    const g = q.data ?? EMPTY_GRAPH;
-    return {
-      types: Array.from(new Set(g.nodes.map((n) => n.type))).sort(),
-      trust: Array.from(new Set(g.nodes.map((n) => n.trust))).sort(),
-      relations: Array.from(new Set(g.edges.filter((e) => e.typed && e.type).map((e) => e.type))).sort(),
-    };
-  }, [q.data]);
-
-  const shown = useMemo(() => applyFilters(source ?? EMPTY_GRAPH, filters), [source, filters]);
+  // Options come from the WHOLE graph, not the focused subset, so entering
+  // focus mode never silently drops a control the reader had set.
+  const options = useMemo(() => filterOptions(q.data ?? EMPTY_GRAPH), [q.data]);
+  // An untouched group resolves to "all of it" here, once, and everything
+  // downstream — the chips and the filtering — reads the same resolved sets.
+  // That is what stops the controls disagreeing with the picture.
+  const active = useMemo(() => resolveFilters(filters, options), [filters, options]);
+  const shown = useMemo(() => applyFilters(source ?? EMPTY_GRAPH, active), [source, active]);
 
   // Which nodes touch a tension edge, so the lens can dim the rest.
   const inTension = useMemo(() => {
@@ -141,14 +193,21 @@ export default function WikiGraphView() {
   const pos = sim?.nodes() ?? [];
   const posById = new Map(pos.map((p) => [p.id, p]));
 
+  // The simulation thinks in centres; React Flow places a node by its top-left
+  // corner. Shifting by half the disc keeps the two in the same coordinates —
+  // without it the disc, and so every edge anchored to it, sits down and right
+  // of where the physics put the node.
+  const radius = new Map(shown.nodes.map((n) => [n.id, nodeSize(n) / 2]));
+
   const flowNodes: Node[] = shown.nodes.map((n) => {
     const p = posById.get(n.id);
+    const r = nodeSize(n);
     return {
       id: n.id,
       type: "concept",
-      position: { x: p?.x ?? 0, y: p?.y ?? 0 },
+      position: toCorner({ x: p?.x ?? 0, y: p?.y ?? 0 }, r),
       data: {
-        node: n, lens, inTension: inTension.has(n.id),
+        node: n, r, lens, inTension: inTension.has(n.id),
         onOpen: () => nav(`/programs/${id}/wiki/${n.id.replace(/\.md$/, "")}`),
       } satisfies ConceptData,
     };
@@ -166,6 +225,8 @@ export default function WikiGraphView() {
         id: e.id,
         source: e.src,
         target: e.dst,
+        type: "rim",
+        data: { sourceR: radius.get(e.src) ?? 0, targetR: radius.get(e.dst) ?? 0 } satisfies RimData,
         label: e.typed ? e.type : undefined,
         markerEnd: { type: MarkerType.ArrowClosed, color: s.stroke },
         ...(twoWay ? { markerStart: { type: MarkerType.ArrowClosed, color: s.stroke } } : {}),
@@ -182,7 +243,10 @@ export default function WikiGraphView() {
     simRef.current?.dragStart(n.id);
   }, []);
   const onDrag = useCallback((_: unknown, n: Node) => {
-    simRef.current?.dragTo(n.id, n.position.x, n.position.y);
+    // Undo the half-disc shift applied when placing the node, so the physics
+    // is told where the disc's centre now is, not its corner.
+    const c = toCentre(n.position, (n.data as unknown as ConceptData).r);
+    simRef.current?.dragTo(n.id, c.x, c.y);
   }, []);
   const onDragStop = useCallback((_: unknown, n: Node) => {
     const sim = simRef.current;
@@ -196,74 +260,56 @@ export default function WikiGraphView() {
     simRef.current?.unpinAll();
   }, [id]);
 
+  const setGroup = (g: "types" | "relations" | "trust", v: string) =>
+    setFilters((f) => ({ ...f, [g]: toggleOption(active[g], v) }));
+  const allGroup = (g: "types" | "relations" | "trust") =>
+    setFilters((f) => ({ ...f, [g]: null }));
+
   if (q.isLoading) return <div className="wiki-graph">Loading the graph…</div>;
   if (q.isError) return <div className="wiki-graph">Could not load the graph.</div>;
 
   return (
     <div className="wiki-graph">
-      <p className="eyebrow">
-        showing {shown.nodes.length} of {source?.nodes.length ?? 0} nodes
-        {focus && (
-          <>
-            {" — "}
-            <a href="#" onClick={(e) => {
-              e.preventDefault();
-              setParams((p) => { const next = new URLSearchParams(p); next.delete("focus"); return next; });
-            }}>
-              show whole graph
-            </a>
-          </>
-        )}
-      </p>
-      <fieldset>
-        <legend>Type</legend>
-        {options.types.map((t) => (
-          <label key={t} style={{ marginRight: 12 }}>
-            <input type="checkbox" aria-label={t} checked={filters.types.has(t)}
-                   onChange={() => setFilters((f) => ({ ...f, types: toggle(f.types, t) }))} />
-            {" "}{t}
-          </label>
-        ))}
-      </fieldset>
-      <fieldset>
-        <legend>Relation</legend>
-        {options.relations.map((r) => (
-          <label key={r} style={{ marginRight: 12 }}>
-            <input type="checkbox" aria-label={r} checked={filters.relations.has(r)}
-                   onChange={() => setFilters((f) => ({ ...f, relations: toggle(f.relations, r) }))} />
-            {" "}{r}
-          </label>
-        ))}
-      </fieldset>
-      <fieldset>
-        <legend>Trust</legend>
-        {options.trust.map((t) => (
-          <label key={t} style={{ marginRight: 12 }}>
-            <input type="checkbox" aria-label={t} checked={filters.trust.has(t)}
-                   onChange={() => setFilters((f) => ({ ...f, trust: toggle(f.trust, t) }))} />
-            {" "}{t}
-          </label>
-        ))}
-      </fieldset>
-      <label>
-        <input type="checkbox" aria-label="typed only" checked={filters.typedOnly}
-               onChange={(e) => setFilters((f) => ({ ...f, typedOnly: e.target.checked }))} />
-        {" "}typed only
-      </label>
-      <label>
-        <input type="checkbox" aria-label="tension"
-               checked={lens === "tension"}
-               onChange={(e) => setLens(e.target.checked ? "tension" : "structure")} />
-        {" "}tension
-      </label>
-      <button type="button" onClick={resetLayout} style={{ marginLeft: 12 }}>
-        reset layout
-      </button>
+      {/* The graph is a view OF the wiki, not a place of its own: without this
+          the only way back was the browser's back button. Same idiom as the
+          maintenance log's header. */}
+      <BackLink to={`/programs/${id}/wiki`}>Wiki</BackLink>
+      <Group justify="space-between" align="baseline" wrap="nowrap" mb="xs">
+        <Text fw={600} size="xl">Concept graph</Text>
+        <Text size="xs" c="dimmed">
+          showing {shown.nodes.length} of {source?.nodes.length ?? 0} nodes
+          {focus && (
+            <>
+              {" — "}
+              <a href="#" onClick={(e) => {
+                e.preventDefault();
+                setParams((p) => { const next = new URLSearchParams(p); next.delete("focus"); return next; });
+              }}>
+                show whole graph
+              </a>
+            </>
+          )}
+        </Text>
+      </Group>
+
+      <GraphFilters
+        options={options}
+        shown={active}
+        onToggle={setGroup}
+        onAll={allGroup}
+        typedOnly={filters.typedOnly}
+        onTypedOnly={(v) => setFilters((f) => ({ ...f, typedOnly: v }))}
+        tension={lens === "tension"}
+        onTension={(v) => setLens(v ? "tension" : "structure")}
+        onReset={resetLayout}
+      />
+
       <div role="img" aria-label="concept graph" style={{ width: "100%", height: 640 }}>
         <ReactFlow
           nodes={flowNodes}
           edges={flowEdges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           onNodeDragStart={onDragStart}
           onNodeDrag={onDrag}
           onNodeDragStop={onDragStop}

@@ -52,3 +52,13 @@ if (!(globalThis as unknown as Record<string, unknown>).DOMRect) {
     toJSON() { return this; }
   };
 }
+
+// jsdom has no PointerEvent. Without it, fireEvent.pointerDown/Move fall back
+// to a bare Event and drop clientX/clientY, so any pan test silently measures
+// undefined - undefined = NaN rather than the gesture it wrote. MouseEvent
+// carries the coordinates and is close enough for these.
+if (!("PointerEvent" in globalThis)) {
+  (globalThis as unknown as Record<string, unknown>).PointerEvent = MouseEvent;
+  (globalThis as unknown as { window?: Record<string, unknown> }).window!.PointerEvent =
+    MouseEvent;
+}

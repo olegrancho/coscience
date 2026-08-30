@@ -50,3 +50,40 @@ export function outline(body: string): OutlineItem[] {
   }
   return out;
 }
+
+export interface FootnoteSource { id: string; resource: string; title: string }
+
+// `[^wt-r1]: sources/result-wt-r1.md` — the label, then whatever it points at.
+const FOOTNOTE_DEF = /^(\[\^([^\]\s]+)\]:[ \t]*)(\S.*?)[ \t]*$/;
+
+/**
+ * Make footnote definitions lead somewhere.
+ *
+ * An OKF page cites its sources as GFM footnotes whose *definition* is a bare
+ * bundle path. The marker in the prose jumps to the foot of the page correctly
+ * — and lands on a line of dead text. The page already carries a `sources`
+ * list that knows what each id is called and which bundle page holds it, so
+ * the definition can simply be turned into the link it was always describing.
+ *
+ * A definition that is already a link, or already any other markup, is left
+ * exactly as written: the agent may have had a reason.
+ */
+export function linkFootnotes(body: string, sources: FootnoteSource[]): string {
+  const byId = new Map(sources.map((s) => [s.id, s]));
+  let fenced = false;
+  return (body || "").split("\n").map((line) => {
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; return line; }
+    if (fenced) return line;
+    const m = FOOTNOTE_DEF.exec(line);
+    if (!m) return line;
+    const [, head, id, rest] = m;
+    if (/^[[(<!]/.test(rest)) return line;
+    const src = byId.get(id);
+    // Fall back to the path the definition already names, so a footnote whose
+    // id is missing from `sources` still resolves rather than staying dead.
+    const target = src?.resource || (/\.md$/.test(rest) ? rest : "");
+    if (!target) return line;
+    const text = (src?.title || rest).replace(/([[\]])/g, "\\$1");
+    return `${head}[${text}](${target})`;
+  }).join("\n");
+}

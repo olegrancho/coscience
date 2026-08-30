@@ -96,7 +96,7 @@ export default function WikiLintView() {
     <Stack gap="lg">
       <div>
         <BackLink to={`/programs/${id}/wiki`}>Wiki</BackLink>
-        <Text fw={600} size="xl">Wiki maintenance</Text>
+        <Text fw={600} size="xl">Maintenance log</Text>
       </div>
 
       {nothingHasRun && (

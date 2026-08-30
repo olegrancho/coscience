@@ -37,3 +37,20 @@ export function oidForSourceSlug(slug: string): string {
   }
   return "";
 }
+
+/** The longest prefix of `text` that fits `avail` px, ellipsised when cut.
+ *
+ *  SVG has no text overflow: a `<text>` runs past the viewBox and is simply
+ *  clipped mid-glyph, so a pane this narrow has to decide where to cut before
+ *  it draws. `charPx` is the average advance of the UI sans at the label size
+ *  — an estimate, deliberately: measuring text needs a canvas or a layout
+ *  pass, and being a character out on a rail this wide is not worth either.
+ *  Returns "" when not even two characters fit, so the caller can draw a bare
+ *  disc rather than a lone ellipsis. The untruncated title stays on the disc's
+ *  `title` attribute, so nothing is lost — only deferred to a hover. */
+export function fitLabel(text: string, avail: number, charPx: number): string {
+  const max = Math.floor(avail / charPx);
+  if (max < 2) return "";
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+}

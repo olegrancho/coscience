@@ -74,23 +74,40 @@ describe("WikiView header and tree", () => {
     expect(screen.getByRole("heading", { name: /Entities/i })).toBeTruthy();
   });
 
-  it("offers the wiki model in the header and posts a change", async () => {
+  it("keeps the settings out of the header until they are asked for", async () => {
+    // Two select boxes used to sit loose between the action buttons, which is
+    // what made that row unreadable. The header is actions now.
+    mount();
+    await screen.findByText("Alpha");
+    expect(screen.queryByLabelText("wiki model")).toBeNull();
+    expect(screen.queryByLabelText(/merges/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /wiki settings/i })).toBeTruthy();
+  });
+
+  it("offers the wiki model behind settings and posts a change", async () => {
     // Separate from the planner model on purpose: writing pages and planning
     // experiments are different jobs.
     const set = vi.spyOn(api, "setProgramWikiModel").mockResolvedValue({} as never);
     mount();
+    fireEvent.click(await screen.findByRole("button", { name: /wiki settings/i }));
     const select = await screen.findByLabelText("wiki model") as HTMLSelectElement;
     expect(select.value).toBe("claude-sonnet-5");
     fireEvent.change(select, { target: { value: "claude-opus-5" } });
+    // Batched behind Save, unlike the old save-on-change header control.
+    expect(set).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     await waitFor(() => expect(set).toHaveBeenCalledWith("p1", "claude-opus-5"));
   });
 
-  it("locks the model picker while a run is in flight", async () => {
+  it("locks both dials while a run is in flight", async () => {
+    // Model and policy are read when a run collects, so changing either
+    // mid-run would land somewhere unpredictable inside it.
     vi.spyOn(api, "getWikiSummary")
       .mockResolvedValue({ ...summary, run: { id: "r2", kind: "ingest" } } as never);
     mount();
-    const select = await screen.findByLabelText("wiki model") as HTMLSelectElement;
-    expect(select.disabled).toBe(true);
+    fireEvent.click(await screen.findByRole("button", { name: /wiki settings/i }));
+    expect((await screen.findByLabelText("wiki model") as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByLabelText(/merges/i) as HTMLSelectElement).disabled).toBe(true);
   });
 
   it("says who forced a run in flight, and says nothing when nobody did", async () => {
@@ -159,31 +176,52 @@ describe("WikiView header and tree", () => {
   // The shared `summary` fixture already carries wiki_merge: "propose" (Task 9's
   // default in this suite), so the control starts on "propose" here — not "auto" —
   // and this exercises the other direction of the toggle.
-  it("shows the merge policy and saves a change", async () => {
+  it("shows the merge policy behind settings and saves a change", async () => {
     const set = vi.spyOn(api, "setWikiMergePolicy")
       .mockResolvedValue({ id: "p1", wiki_merge: "auto" } as never);
     mount();
+    fireEvent.click(await screen.findByRole("button", { name: /wiki settings/i }));
     const select = await screen.findByLabelText(/merges/i) as HTMLSelectElement;
     expect(select.value).toBe("propose");
     fireEvent.change(select, { target: { value: "auto" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
     await waitFor(() => expect(set).toHaveBeenCalledWith("p1", "auto"));
   });
 
-  it("locks the merge picker while a run is in flight", async () => {
-    vi.spyOn(api, "getWikiSummary")
-      .mockResolvedValue({ ...summary, run: { id: "r2", kind: "ingest" } } as never);
+  it("sends nothing for a dial nobody touched", async () => {
+    // The header saved on change; this dialog saves on Save, so it has to be
+    // able to tell "unchanged" from "changed to the same value".
+    const model = vi.spyOn(api, "setProgramWikiModel").mockResolvedValue({} as never);
+    const merge = vi.spyOn(api, "setWikiMergePolicy").mockResolvedValue({} as never);
     mount();
-    const select = await screen.findByLabelText(/merges/i) as HTMLSelectElement;
-    expect(select.disabled).toBe(true);
+    fireEvent.click(await screen.findByRole("button", { name: /wiki settings/i }));
+    await screen.findByLabelText("wiki model");
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull());
+    expect(model).not.toHaveBeenCalled();
+    expect(merge).not.toHaveBeenCalled();
   });
 
-  it("links to the maintenance page, badged when proposals are waiting", async () => {
+  it("reaches the maintenance log from settings, and badges waiting proposals", async () => {
+    // The link left the header with the other navigation; the badge did not,
+    // because an unaccepted merge is the one thing back there waiting on a
+    // person.
     vi.spyOn(api, "getWikiSummary").mockResolvedValue(
       { ...summary, wiki_merge: "propose", merge_proposals: 2 } as never);
     mount();
-    const link = await screen.findByRole("link", { name: /maintenance/i });
+    const button = await screen.findByRole("button", { name: /wiki settings/i });
+    expect(button.textContent).toContain("2");
+
+    fireEvent.click(button);
+    const link = await screen.findByRole("link", { name: /maintenance log/i });
     expect(link.getAttribute("href")).toBe("/programs/p1/wiki/lint");
-    expect(link.textContent).toContain("2");
+  });
+
+  it("puts the concept graph with the navigation, not with the actions", async () => {
+    mount();
+    const link = await screen.findByRole("link", { name: /concept graph/i });
+    expect(link.getAttribute("href")).toBe("/programs/p1/wiki/graph");
   });
 });
 
@@ -336,20 +374,59 @@ describe("WikiView right pane", () => {
     const setStatus = vi.spyOn(api, "setWikiPageStatus")
       .mockResolvedValue({ ...sidePage, status: "stable" } as never);
     mount("/programs/p1/wiki/concepts/a");
-    fireEvent.change(await screen.findByLabelText(/status/i),
-                     { target: { value: "stable" } });
+    // A Mantine Select, not a raw browser <select>: it opens a listbox rather
+    // than firing change, so drive it the way a person would.
+    fireEvent.click(await screen.findByLabelText("status"));
+    fireEvent.click(await screen.findByRole("option", { name: "stable" }));
     await waitFor(() =>
       expect(setStatus).toHaveBeenCalledWith("p1", "concepts/a", "stable"));
   });
 
-  it("saves the human notes", async () => {
+  it("calls the notes just notes, and saves them", async () => {
+    // The section is `# Human notes` in the file and stays that way — it is
+    // protected backend-side. What matters to a reader is that the notes
+    // survive every rewrite, not who typed them.
     const save = vi.spyOn(api, "setWikiHumanNotes")
       .mockResolvedValue({ ...sidePage, human_notes: "new note" } as never);
     mount("/programs/p1/wiki/concepts/a");
-    const box = await screen.findByLabelText(/human notes/i);
+    const box = await screen.findByLabelText("notes");
+    expect(screen.queryByText(/human notes/i)).toBeNull();
+
     fireEvent.change(box, { target: { value: "new note" } });
     fireEvent.click(screen.getByRole("button", { name: /save notes/i }));
     await waitFor(() =>
       expect(save).toHaveBeenCalledWith("p1", "concepts/a", "new note"));
+  });
+
+  it("gives a footnote somewhere to lead, both ways", async () => {
+    // OKF pages cite their sources as GFM footnotes whose definition is a bare
+    // bundle path — the marker jumped to the foot of the page and landed on a
+    // line of dead text.
+    vi.spyOn(api, "getWikiPage").mockResolvedValue({
+      ...sidePage,
+      body: "The floor.[^wt-r1]\n\n# References\n\n[^wt-r1]: sources/result-wt-r1.md\n",
+      sources: [{ id: "wt-r1", kind: "result", href: "/programs/p1/results/wt-r1",
+                  resource: "/sources/result-wt-r1.md", title: "Sprint wt1 result" }],
+    } as never);
+    mount("/programs/p1/wiki/concepts/a");
+
+    // The definition is now the link it was always describing, routed into the
+    // wiki rather than left as a path the browser cannot serve.
+    const link = await screen.findByRole("link", { name: "Sprint wt1 result" });
+    expect(link.getAttribute("href")).toBe("/programs/p1/wiki/sources/result-wt-r1");
+
+    // ...and the marker in the prose still reaches that definition.
+    const marker = document.querySelector("sup a") as HTMLAnchorElement;
+    const target = (marker.getAttribute("href") ?? "").slice(1);
+    expect(target).toBeTruthy();
+    expect(document.getElementById(target)).toBeTruthy();
+  });
+
+  it("will not offer to save notes nobody has edited", async () => {
+    mount("/programs/p1/wiki/concepts/a");
+    await screen.findByLabelText("notes");
+    // Reads "Saved" and is inert until the box actually differs from the file.
+    expect((screen.getByRole("button", { name: /saved/i }) as HTMLButtonElement).disabled)
+      .toBe(true);
   });
 });

@@ -11,13 +11,19 @@ const RING = 120;
  *  App -> WikiView). This split is what actually keeps d3-force and dagre
  *  out of that chunk; tree-shaking alone cannot separate two live exports of
  *  the same module. */
-export function radialLayout(centreId: string, nodes: FlowNode[]): FlowNode[] {
+/** `rx`/`ry` make the ring an ellipse. A neighbourhood pane lives in a rail
+ *  that is narrower than it is tall once labels are allowed for, and a circle
+ *  spends its width on the corners; squashing the ring horizontally buys the
+ *  labels their room back. Both default to a circle of `RING`. */
+export function radialLayout(
+  centreId: string, nodes: FlowNode[], rx: number = RING, ry: number = rx,
+): FlowNode[] {
   const others = nodes.filter((nd) => nd.id !== centreId);
   const step = others.length ? (2 * Math.PI) / others.length : 0;
   let i = 0;
   return nodes.map((nd) => {
     if (nd.id === centreId) return { ...nd, position: { x: 0, y: 0 } };
     const a = step * i++ - Math.PI / 2;
-    return { ...nd, position: { x: RING * Math.cos(a), y: RING * Math.sin(a) } };
+    return { ...nd, position: { x: rx * Math.cos(a), y: ry * Math.sin(a) } };
   });
 }

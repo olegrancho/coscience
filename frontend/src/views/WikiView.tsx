@@ -1,15 +1,31 @@
-import { Badge, Button, Card, Group, Loader, Stack, Text, Textarea, TextInput } from "@mantine/core";
+import { Badge, Button, Card, Group, Loader, Select, Stack, Text, Textarea, TextInput } from "@mantine/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import type { Components } from "react-markdown";
 import { Link, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import WikiNeighbourhood from "../components/WikiNeighbourhood";
-import { isInternalLink, outline, wikiHref } from "../components/wikiPage";
-import { BackLink, EmptyState, MergePolicySelect, ModelSelect } from "../components/ui";
+import { isInternalLink, linkFootnotes, outline, wikiHref } from "../components/wikiPage";
+import WikiSettingsModal from "../components/WikiSettingsModal";
+import { AbsTime, BackLink, EmptyState } from "../components/ui";
 import { api, type WikiPageRow } from "../api";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
+
+/* The stored values are the vocabulary's, which is right for the format and
+   terse to the point of opacity in a panel. */
+/* The format's own section name, relabelled for reading. The heading in the
+   file stays `# Human notes` — it is protected backend-side, the merge and the
+   writer prompt both key on it — but nothing about the reader is what makes
+   the section worth having. It is that the notes persist. */
+const SECTION_LABEL: Record<string, string> = { "human notes": "Notes" };
+const relabel = (text: string) => SECTION_LABEL[text.trim().toLowerCase()] ?? text;
+
+const TRUST_LABEL: Record<string, string> = {
+  "unverified": "Unverified",
+  "machine-confirmed": "Machine-confirmed",
+  "human-reviewed": "Reviewed by a person",
+};
 
 const TYPE_ORDER = ["Concept", "Entity", "Synthesis", "Source", "Question"];
 // Above this many pages the tree stops being scannable and the groups start shut.
@@ -31,6 +47,7 @@ export default function WikiView() {
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [notes, setNotes] = useState<string | null>(null);
+  const [settings, setSettings] = useState(false);
 
   const summary = useQuery({ queryKey: ["wiki", id],
                              queryFn: () => api.getWikiSummary(id) });
@@ -57,16 +74,6 @@ export default function WikiView() {
 
   const run = useMutation({ mutationFn: (kind: "ingest" | "lint") => api.runWiki(id, kind),
                             onSuccess: invalidate });
-  // Saves on change, no Save button — same idiom as the page `status` select in the
-  // curation panel. There is nothing to batch it with here.
-  const setWikiModel = useMutation({
-    mutationFn: (model: string) => api.setProgramWikiModel(id, model),
-    onSuccess: invalidate });
-  // Same idiom: saves on change, locks during a run — the policy is read when
-  // a run collects, same reason the model picker locks (spec §11.3).
-  const setMergePolicy = useMutation({
-    mutationFn: (policy: string) => api.setWikiMergePolicy(id, policy),
-    onSuccess: invalidate });
   const unquarantine = useMutation({ mutationFn: () => api.unquarantineWiki(id),
                                      onSuccess: invalidate });
   const verify = useMutation({ mutationFn: () => api.verifyWikiPage(id, slug),
@@ -83,6 +90,11 @@ export default function WikiView() {
   // app does not serve, and the dashboard is gone. index.md is nothing but links,
   // and it is the wiki's landing view — it was the one pane rendering raw <Md>.
   const mdComponents: Components = useMemo(() => ({
+    h1: ({ children, ...rest }) => (
+      <h1 {...rest}>
+        {typeof children === "string" ? relabel(children) : children}
+      </h1>
+    ),
     a: ({ href, children, ...rest }) => {
       const h = String(href ?? "");
       // A same-page anchor stays a plain <a>: the browser jumps natively, whereas
@@ -118,6 +130,16 @@ export default function WikiView() {
   const pageFindings = slug
     ? (lint.data?.findings ?? []).filter((f) => f.path.replace(/\.md$/, "") === slug)
     : [];
+  // Footnote definitions arrive as bare bundle paths, which render as dead
+  // text at the foot of the page — the marker jumps there and the trail stops.
+  const body = useMemo(
+    () => (page.data ? linkFootnotes(page.data.body, page.data.sources) : ""),
+    [page.data]);
+  // Newest signature wins: `verified` is append-only, so the last entry is the
+  // current one.
+  const lastVerified = page.data?.verified?.length
+    ? page.data.verified[page.data.verified.length - 1] : null;
+  const dirty = notes !== null && notes !== (page.data?.human_notes ?? "");
   const grouped = TYPE_ORDER
     .map((t) => [t, (pages.data ?? []).filter((p) => p.type === t)] as const)
     .filter(([, rows]) => rows.length > 0);
@@ -132,42 +154,43 @@ export default function WikiView() {
     <Stack gap="lg">
       <div>
         <BackLink to={`/programs/${id}`}>Program</BackLink>
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Text fw={600} size="xl">Wiki</Text>
-          <Group gap={10} wrap="nowrap">
-            {/* The model that writes these pages belongs next to the button that
-                sets it writing, not only behind program settings. */}
-            {s && (
-              <ModelSelect value={s.wiki_model} label="wiki model"
-                           disabled={!!s.run || setWikiModel.isPending}
-                           onChange={(m) => setWikiModel.mutate(m)} />
-            )}
-            {s && (
-              <MergePolicySelect value={s.wiki_merge}
-                                  disabled={!!s.run || setMergePolicy.isPending}
-                                  onChange={(p) => setMergePolicy.mutate(p)} />
-            )}
+        {/* Three kinds of thing used to share one undifferentiated row: two
+            select boxes, two action buttons and two links, in that order. They
+            are separated now — where you can go, what you can do, and what you
+            can configure — because a "Graph" link reading as a sibling of
+            "Lint now" is what made it look misplaced. */}
+        <Group justify="space-between" align="center" wrap="wrap" gap={12}>
+          <Group gap={14} align="baseline" wrap="nowrap">
+            <Text fw={600} size="xl">Wiki</Text>
+            <Link to={`/programs/${id}/wiki/graph`} className="view" style={{ fontSize: 13 }}>
+              Concept graph ↗
+            </Link>
+          </Group>
+          <Group gap={8} wrap="nowrap">
             <Button size="xs" variant="default" onClick={() => run.mutate("ingest")}
                     disabled={!!s?.run}>Ingest now</Button>
             <Button size="xs" variant="default" onClick={() => run.mutate("lint")}
                     disabled={!!s?.run}>Lint now</Button>
-            {/* Same idiom as ProgramDetail's "open wiki →": the destination
-                answers "is this wiki healthy", and a badge here says whether
-                anything there is waiting on a human. */}
-            <Link to={`/programs/${id}/wiki/lint`} className="view" style={{ fontSize: 13 }}>
-              maintenance
+            {/* The badge stays out here rather than moving into the dialog with
+                everything else: unaccepted merges are the one thing behind
+                settings that is waiting on a person. */}
+            <Button size="xs" variant="default" onClick={() => setSettings(true)}
+                    aria-label="wiki settings">
+              Settings
               {!!s?.merge_proposals && (
                 <Badge size="xs" variant="light" color="machine" ml={6}>
                   {s.merge_proposals}
                 </Badge>
               )}
-            </Link>
-            <Link to={`/programs/${id}/wiki/graph`} className="view" style={{ fontSize: 13 }}>
-              Graph
-            </Link>
+            </Button>
           </Group>
         </Group>
       </div>
+      {s && (
+        <WikiSettingsModal opened={settings} onClose={() => setSettings(false)}
+                           programId={id} summary={s} locked={!!s.run}
+                           onSaved={invalidate} />
+      )}
 
       {s && (
         <Group gap={6} wrap="wrap">
@@ -332,7 +355,7 @@ export default function WikiView() {
               )}
 
               <div className="report-leaf">
-                <Md components={mdComponents}>{page.data.body}</Md>
+                <Md components={mdComponents}>{body}</Md>
               </div>
             </Card>
           )}
@@ -346,7 +369,7 @@ export default function WikiView() {
                 <ul>
                   {outline(page.data.body).map((h) => (
                     <li key={h.id} style={{ marginLeft: (h.level - 1) * 12 }}>
-                      <a href={`#${h.id}`}>{h.text}</a>
+                      <a href={`#${h.id}`}>{relabel(h.text)}</a>
                     </li>
                   ))}
                 </ul>
@@ -383,38 +406,67 @@ export default function WikiView() {
                 </ul>
               </div>
 
+              {/* Three separate things used to be stacked here with no
+                  structure and a raw browser <select> in the middle of them:
+                  what the page's trust IS, how to change it, and the notes.
+                  Same three, given room and a consistent control set. */}
               <Card padding="md" radius="md" style={cardStyle}>
-                <div className="eyebrow" style={{ marginBottom: 8 }}>trust</div>
-                <Group gap={6} mb={8}>
-                  <span className={`wiki-dot wiki-dot--${page.data.trust}`} />
-                  <Text size="sm">{page.data.trust}</Text>
+                <div className="eyebrow" style={{ marginBottom: 10 }}>curation</div>
+
+                <Group justify="space-between" align="center" wrap="nowrap" mb={6}>
+                  <Group gap={7} wrap="nowrap">
+                    <span className={`wiki-dot wiki-dot--${page.data.trust}`} />
+                    <Text size="sm">{TRUST_LABEL[page.data.trust] ?? page.data.trust}</Text>
+                  </Group>
+                  <Button size="compact-xs" variant="light" color="machine"
+                          loading={verify.isPending}
+                          disabled={page.data.trust === "human-reviewed"}
+                          onClick={() => verify.mutate()}>
+                    {page.data.trust === "human-reviewed" ? "Verified" : "Mark verified"}
+                  </Button>
                 </Group>
-                <Button size="xs" variant="default" mb={10}
-                        onClick={() => verify.mutate()}>Mark verified</Button>
+                {/* Verification is a signature, not a flag: it should say who
+                    and when, or the badge is an assertion with nobody behind it. */}
+                {lastVerified ? (
+                  <Text size="xs" c="dimmed" mb="md">
+                    {lastVerified.by} · <AbsTime at={lastVerified.at} />
+                  </Text>
+                ) : (
+                  <Text size="xs" c="dimmed" mb="md">Nobody has checked this page yet.</Text>
+                )}
 
-                {/* A raw select on purpose: ProgramDetail's status filter uses the
-                    same idiom, and Mantine's Select is not a native <select>. */}
-                <label htmlFor="wiki-status" className="eyebrow"
-                       style={{ display: "block", marginBottom: 4 }}>status</label>
-                <select id="wiki-status" className="mono"
-                        value={page.data.status || "draft"}
-                        onChange={(e) => setStatus.mutate(e.currentTarget.value)}>
-                  <option value="draft">draft</option>
-                  <option value="stable">stable</option>
-                  <option value="deprecated">deprecated</option>
-                </select>
+                <Select
+                  size="xs" label="Status" aria-label="status"
+                  value={page.data.status || "draft"}
+                  data={["draft", "stable", "deprecated"]}
+                  allowDeselect={false}
+                  disabled={setStatus.isPending}
+                  onChange={(v) => v && setStatus.mutate(v)}
+                  mb="md"
+                />
 
-                <label htmlFor="wiki-notes" className="eyebrow"
-                       style={{ display: "block", margin: "10px 0 4px" }}>
-                  human notes
-                </label>
-                <Textarea id="wiki-notes" autosize minRows={4} mb={8}
-                          value={notes ?? page.data.human_notes}
-                          onChange={(e) => setNotes(e.currentTarget.value)} />
-                <Button size="xs" variant="default"
-                        onClick={() => saveNotes.mutate(notes ?? page.data.human_notes)}>
-                  Save notes
-                </Button>
+                {/* "Human notes" is the section's name in the file format and
+                    is protected backend-side, but it reads as being about who
+                    typed it. What matters here is that these notes survive
+                    every rewrite the agent makes — so that is what it says. */}
+                <Textarea
+                  id="wiki-notes" size="xs" label="Notes" aria-label="notes"
+                  description="Yours. A wiki run never rewrites or removes them."
+                  autosize minRows={4} mb={8}
+                  value={notes ?? page.data.human_notes}
+                  onChange={(e) => setNotes(e.currentTarget.value)}
+                />
+                <Group justify="flex-end" gap={8}>
+                  {dirty && (
+                    <Button size="compact-xs" variant="subtle" color="gray"
+                            onClick={() => setNotes(null)}>Discard</Button>
+                  )}
+                  <Button size="compact-xs" variant="default"
+                          loading={saveNotes.isPending} disabled={!dirty}
+                          onClick={() => saveNotes.mutate(notes ?? "")}>
+                    {dirty ? "Save notes" : "Saved"}
+                  </Button>
+                </Group>
               </Card>
             </Stack>
           )}

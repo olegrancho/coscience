@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { neighbourhood, oidForSourceSlug } from "./wikiNeighbourhood";
+import { neighbourhood, oidForSourceSlug, fitLabel } from "./wikiNeighbourhood";
 import type { WikiGraphT } from "../api";
 
 // Bundle-shaped ids (a real page's path, e.g. "concepts/a.md"), never the
@@ -52,5 +52,31 @@ describe("oidForSourceSlug", () => {
 
   it("returns empty for a slug that isn't a source page at all", () => {
     expect(oidForSourceSlug("auth-gate")).toBe("");
+  });
+});
+
+describe("fitLabel", () => {
+  it("returns the whole title when it fits", () => {
+    expect(fitLabel("Alpha", 100, 5)).toBe("Alpha");   // 20 chars of room
+    expect(fitLabel("Alpha", 25, 5)).toBe("Alpha");    // exactly 5
+  });
+
+  it("ellipsises a title that does not fit, within the room given", () => {
+    // 4 chars of room: 3 kept plus the ellipsis, never 5 glyphs in 4 slots.
+    expect(fitLabel("Ivywrel correlation", 20, 5)).toBe("Ivy…");
+    expect(fitLabel("Ivywrel correlation", 20, 5)).toHaveLength(4);
+  });
+
+  it("draws nothing rather than a bare ellipsis when there is no room", () => {
+    expect(fitLabel("Alpha", 9, 5)).toBe("");
+    expect(fitLabel("Alpha", 0, 5)).toBe("");
+    expect(fitLabel("Alpha", -40, 5)).toBe("");
+  });
+
+  it("never returns more characters than the room allows, at any width", () => {
+    for (let avail = 0; avail < 200; avail += 1) {
+      expect(fitLabel("a very long concept page title", avail, 5).length)
+        .toBeLessThanOrEqual(Math.max(0, Math.floor(avail / 5)));
+    }
   });
 });

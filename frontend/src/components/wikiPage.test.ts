@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { headingId, isInternalLink, outline, wikiHref } from "./wikiPage";
+import { headingId, isInternalLink, outline, wikiHref, linkFootnotes } from "./wikiPage";
 
 describe("wikiHref", () => {
   it("routes a bundle-absolute page link into the wiki view", () => {
@@ -73,5 +73,56 @@ describe("headingId", () => {
   it("slugifies punctuation and spacing", () => {
     expect(headingId("Auth gate (401 on forged session)"))
       .toBe("auth-gate-401-on-forged-session");
+  });
+});
+
+describe("linkFootnotes", () => {
+  const sources = [
+    { id: "wt-r1", resource: "/sources/result-wt-r1.md",
+      title: "Sprint wt1 result: Baseline regression" },
+  ];
+
+  it("turns a bare-path definition into a link with the source's own title", () => {
+    const out = linkFootnotes("[^wt-r1]: sources/result-wt-r1.md", sources);
+    expect(out).toBe(
+      "[^wt-r1]: [Sprint wt1 result: Baseline regression](/sources/result-wt-r1.md)");
+  });
+
+  it("leaves the prose and its markers untouched", () => {
+    const body = "The floor.[^wt-r1]\n\n# References\n\n[^wt-r1]: sources/result-wt-r1.md\n";
+    const out = linkFootnotes(body, sources);
+    expect(out).toContain("The floor.[^wt-r1]");
+    expect(out).toContain("# References");
+    expect(out.split("\n")).toHaveLength(body.split("\n").length);
+  });
+
+  it("resolves a footnote whose id is missing from sources, using its own path", () => {
+    expect(linkFootnotes("[^x]: sources/result-x.md", sources))
+      .toBe("[^x]: [sources/result-x.md](sources/result-x.md)");
+  });
+
+  it("leaves a definition that is already a link alone", () => {
+    const already = "[^wt-r1]: [already](/sources/result-wt-r1.md)";
+    expect(linkFootnotes(already, sources)).toBe(already);
+  });
+
+  it("leaves a definition that is not a path alone", () => {
+    const prose = "[^note]: measured on a warm afternoon";
+    expect(linkFootnotes(prose, sources)).toBe(prose);
+  });
+
+  it("does not rewrite inside a fenced code block", () => {
+    const body = "```\n[^wt-r1]: sources/result-wt-r1.md\n```\n";
+    expect(linkFootnotes(body, sources)).toBe(body);
+  });
+
+  it("escapes brackets in a title so the link text cannot break the link", () => {
+    const out = linkFootnotes("[^a]: sources/x.md", [
+      { id: "a", resource: "/sources/x.md", title: "Result [draft]" }]);
+    expect(out).toBe("[^a]: [Result \\[draft\\]](/sources/x.md)");
+  });
+
+  it("survives an empty body", () => {
+    expect(linkFootnotes("", sources)).toBe("");
   });
 });

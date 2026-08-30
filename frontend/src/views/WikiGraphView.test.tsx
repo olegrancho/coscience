@@ -154,6 +154,83 @@ describe("WikiGraphView", () => {
     expect(build.mock.calls.length).toBe(builtOnce);
   });
 
+  it("offers a way back to the wiki", async () => {
+    // The graph is a view OF the wiki; without this the browser's back button
+    // was the only way out of it.
+    renderAt("/programs/p1/wiki/graph");
+    const back = await screen.findByRole("link", { name: /wiki/i });
+    expect(back.getAttribute("href")).toBe("/programs/p1/wiki");
+  });
+
+  it("starts with every filter ticked, because everything is shown", async () => {
+    // The reported inconsistency: the controls used to start blank while the
+    // graph showed everything, so "all off" and "all on" looked identical.
+    renderAt("/programs/p1/wiki/graph");
+    await screen.findByText(/showing 2 of 2 nodes/);
+    for (const name of ["Concept", "unverified", "human-reviewed", "refines"]) {
+      expect((screen.getByLabelText(name) as HTMLInputElement).checked).toBe(true);
+    }
+  });
+
+  it("unticking a value hides that value, and only it", async () => {
+    const three = {
+      nodes: [
+        ...graph.nodes,
+        { id: "entities/c.md", slug: "c", title: "Gamma", type: "Entity",
+          status: "draft", trust: "unverified", in_degree: 0, out_degree: 0,
+          orphan: true, cluster: 1 },
+      ],
+      edges: graph.edges,
+    };
+    vi.spyOn(api, "getWikiGraph").mockResolvedValue(three as never);
+    renderAt("/programs/p1/wiki/graph");
+    await screen.findByText(/showing 3 of 3 nodes/);
+
+    fireEvent.click(screen.getByLabelText("Entity"));
+
+    // Two Concepts survive. Under the old model this same click showed ONLY
+    // the Entity — the opposite of what the box said.
+    await waitFor(() => expect(screen.getByText(/showing 2 of 3 nodes/)).toBeTruthy());
+    expect(screen.queryByTitle("Gamma")).toBeNull();
+    expect(screen.getByTitle("Alpha")).toBeTruthy();
+  });
+
+  it("emptying a group shows nothing, rather than everything", async () => {
+    renderAt("/programs/p1/wiki/graph");
+    await screen.findByText(/showing 2 of 2 nodes/);
+    fireEvent.click(screen.getByLabelText("Concept"));
+    // Both fixture nodes are Concepts, so this empties the group. An empty
+    // group used to be read as "untouched" and quietly showed all of them.
+    await waitFor(() => expect(screen.getByText(/showing 0 of 2 nodes/)).toBeTruthy());
+  });
+
+  it("the group label puts a narrowed group back to everything", async () => {
+    renderAt("/programs/p1/wiki/graph");
+    await screen.findByText(/showing 2 of 2 nodes/);
+    // At "all" there is nothing to undo, so the control is inert...
+    expect((screen.getByLabelText("show all type") as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByLabelText("Concept"));
+    await waitFor(() => expect(screen.getByText(/showing 0 of 2 nodes/)).toBeTruthy());
+
+    // ...and once narrowed, it is the one click that restores the group.
+    fireEvent.click(screen.getByLabelText("show all type"));
+    await waitFor(() => expect(screen.getByText(/showing 2 of 2 nodes/)).toBeTruthy());
+    expect((screen.getByLabelText("Concept") as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("explains the encoding behind the legend, not on the canvas", async () => {
+    renderAt("/programs/p1/wiki/graph");
+    await screen.findByText(/showing 2 of 2 nodes/);
+    // Unobtrusive: nothing of the key is on screen until it is asked for.
+    expect(screen.queryByText(/nothing links to or from it/i)).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("legend"));
+
+    expect(await screen.findByText(/nothing links to or from it/i)).toBeTruthy();
+    expect(screen.getByText(/head at each end/i)).toBeTruthy();
+  });
+
   it("the tension lens repaints without rebuilding the simulation", async () => {
     // Previously this compared a <circle>'s cx before and after. Under React
     // Flow there is no cx, so that assertion silently became null === null —
