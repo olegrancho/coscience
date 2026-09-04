@@ -410,3 +410,72 @@ def _file_lint_report(substrate, program_id: str, run_dir: Path, now: float) -> 
     d = wiki_store.state_dir(substrate, program_id) / "lint"
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{day}.md").write_text(text)
+
+
+def reconcile(substrate, program_id: str, *, apply: bool = False,
+              now: float = 0.0) -> dict:
+    """Credit every object the bundle can prove was already ingested.
+
+    `beat`/`_collect` account at RUN granularity while the agent works at OBJECT
+    granularity: credit lands only when a run exits ok and leaves a parseable
+    report. A run killed partway — a rate limit, a deploy, a kill — has already
+    committed its pages, and loses credit for all of them. `_count_failure` then
+    reads that as the batch being bad and quarantines it, so an environmental
+    outage ends up permanently excluding good content from the wiki.
+
+    The repair reads the provenance a Source page already carries: `origin` names
+    the object and `origin_hash` names the bytes it was written from. Equality
+    with the live hash is proof of ingest against current content — the same pair
+    `src/hash-drift` and `src/missing` already rest on, so this adds no new trust
+    assumption. Anything short of that proof credits nothing: a page with no
+    `origin_hash`, or one naming a different object, leaves its object pending.
+
+    Returns {"credited", "drift", "already", "pending"} — sorted oid lists.
+    Reads only; pass apply=True to write the state. Never touches the bundle:
+    drift is REPORTED, never repaired, because only a real run can rewrite a page
+    against moved content."""
+    pages = {}                             # oid -> declared origin_hash
+    for page in wiki_store.iter_pages(substrate, program_id):
+        if page.type != "Source":
+            continue
+        oid = str(page.extra.get("origin") or "")
+        if oid:
+            pages[oid] = str(page.extra.get("origin_hash") or "")
+
+    state = wiki_store.load_state(substrate, program_id)
+    ingested = dict(state.get("ingested") or {})
+    credited, drift, already, pending = [], [], [], []
+
+    for obj in wiki_store.program_objects(substrate, program_id):
+        current = wiki_store.object_hash(obj)
+        if not current:
+            continue                       # the bytes are gone; lint reports src/missing
+        if (ingested.get(obj.oid) or {}).get("hash", "") == current:
+            already.append(obj.oid)
+            continue
+        declared = pages.get(obj.oid, "")
+        if not declared:
+            # No page, or a page that never recorded which bytes it read. Either
+            # way the bundle proves nothing and the object is owed a real run.
+            pending.append(obj.oid)
+        elif declared == current:
+            credited.append(obj.oid)
+        else:
+            drift.append(obj.oid)
+
+    if apply and credited:
+        with wiki_store.state_guard(substrate, program_id) as live:
+            for oid in credited:
+                obj = next((o for o in wiki_store.program_objects(substrate, program_id)
+                            if o.oid == oid), None)
+                live.setdefault("ingested", {})[oid] = {
+                    "hash": wiki_store.object_hash(obj) if obj else "",
+                    "at": now, "run": "reconcile"}
+            # Quarantine is a content verdict; these objects just proved their
+            # content is fine, so the verdict does not survive the evidence.
+            freed = set(credited)
+            live["quarantined"] = [q for q in (live.get("quarantined") or [])
+                                   if q not in freed]
+
+    return {"credited": sorted(credited), "drift": sorted(drift),
+            "already": sorted(already), "pending": sorted(pending)}

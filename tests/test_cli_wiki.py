@@ -66,3 +66,56 @@ def test_wiki_status_lists_each_program(substrate, capsys):
     out = capsys.readouterr().out
     assert "p1" in out
     assert "pending 1" in out
+
+
+def _ingested_source(substrate, pid="p1"):
+    """A Source page carrying proof it was written from the current bytes."""
+    obj = wiki_store.program_objects(substrate, pid)[0]
+    wiki_store.write_page(substrate, pid, wiki_okf.Page(
+        path=obj.slug, type="Source", title="Sprint s1 result", graph_excluded=True,
+        body="# Summary\n\n" + "x" * 400,
+        extra={"origin": obj.oid, "origin_hash": wiki_store.object_hash(obj)}))
+    return obj.oid
+
+
+def test_wiki_reconcile_reports_without_writing(substrate, capsys):
+    _seed(substrate)
+    wiki_store.ensure_bundle(substrate, "p1")
+    oid = _ingested_source(substrate)
+    with wiki_store.state_guard(substrate, "p1") as state:
+        state["quarantined"] = [oid]
+
+    assert main(["wiki", "--repo", str(substrate.repo_root), "--reconcile"]) == 0
+
+    out = capsys.readouterr().out
+    assert "credit 1" in out and "dry run" in out
+    state = wiki_store.load_state(substrate, "p1")
+    assert state["ingested"] == {} and state["quarantined"] == [oid]
+
+
+def test_wiki_reconcile_apply_writes_the_state(substrate, capsys):
+    _seed(substrate)
+    wiki_store.ensure_bundle(substrate, "p1")
+    oid = _ingested_source(substrate)
+    with wiki_store.state_guard(substrate, "p1") as state:
+        state["quarantined"] = [oid]
+
+    assert main(["wiki", "--repo", str(substrate.repo_root),
+                 "--reconcile", "--apply"]) == 0
+
+    state = wiki_store.load_state(substrate, "p1")
+    assert oid in state["ingested"] and state["quarantined"] == []
+
+
+def test_wiki_reconcile_exits_one_on_drift(substrate, capsys):
+    """Drift needs a real re-ingest, so it must not look like a clean run."""
+    _seed(substrate)
+    wiki_store.ensure_bundle(substrate, "p1")
+    obj = wiki_store.program_objects(substrate, "p1")[0]
+    wiki_store.write_page(substrate, "p1", wiki_okf.Page(
+        path=obj.slug, type="Source", title="Sprint s1 result", graph_excluded=True,
+        body="# Summary\n\n" + "x" * 400,
+        extra={"origin": obj.oid, "origin_hash": "sha256:stale"}))
+
+    assert main(["wiki", "--repo", str(substrate.repo_root), "--reconcile"]) == 1
+    assert "drift 1" in capsys.readouterr().out

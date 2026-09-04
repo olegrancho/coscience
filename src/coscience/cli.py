@@ -172,8 +172,12 @@ def main(argv: list[str] | None = None) -> int:
     wkmode.add_argument("--lint", action="store_true",
                         help="run the deterministic lint and print the report")
     wkmode.add_argument("--status", action="store_true")
+    wkmode.add_argument("--reconcile", action="store_true",
+                        help="credit objects the bundle proves were already ingested")
     wk.add_argument("--fix", action="store_true",
                     help="with --lint: apply the mechanical fixes")
+    wk.add_argument("--apply", action="store_true",
+                    help="with --reconcile: write the state (default is a dry run)")
 
     args = parser.parse_args(argv)
 
@@ -285,6 +289,26 @@ def main(argv: list[str] | None = None) -> int:
                       f"quarantined {len(state.get('quarantined') or [])} · "
                       f"{'running ' + run.get('kind', '') if run else 'idle'}", flush=True)
             return 0
+
+        if args.reconcile:
+            # Exits 1 on drift: those pages were written from bytes that have
+            # since moved, and only a real run can fix that — a clean exit would
+            # read as "the wiki is caught up" when it is not.
+            drifted = 0
+            for program in programs:
+                r = wiki.reconcile(substrate, program.id, apply=args.apply, now=time.time())
+                drifted += len(r["drift"])
+                print(f"{program.id}: credit {len(r['credited'])} · "
+                      f"drift {len(r['drift'])} · already {len(r['already'])} · "
+                      f"pending {len(r['pending'])}"
+                      f"{'' if args.apply else '  (dry run)'}", flush=True)
+                for oid in r["credited"]:
+                    print(f"  + {oid}", flush=True)
+                for oid in r["drift"]:
+                    print(f"  ! {oid} — changed since its page was written", flush=True)
+            if args.apply:
+                substrate.commit("wiki: reconcile ledger against bundles")
+            return 1 if drifted else 0
 
         if args.lint:
             worst = 0
