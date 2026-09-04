@@ -37,3 +37,15 @@ def test_build_context_populates_artifact_work_paths(substrate):
     assert entry["aid"] == "doc"
     assert entry["kind"] == "figure"
     assert entry["work_path"].endswith("artifacts/doc/work")
+
+
+def test_instructions_forbid_hand_written_artifact_metadata(tmp_path):
+    """The agent is told the working directory is the whole of its remit. One that
+    wrote meta.md itself put `created_at: null` in it and stopped both loops."""
+    ctx = ExecutionContext(
+        artifacts=[{"aid": "figures", "kind": "figure",
+                    "work_path": "/repo/programs/p/artifacts/figures/work"}])
+    s = Sprint(id="s1", status=SprintStatus.EXECUTING, goals="g")
+    text = build_instructions(s, ctx, tmp_path / "scratchpad.md")
+    assert "meta.md" in text
+    assert "no version directory of your own" in text

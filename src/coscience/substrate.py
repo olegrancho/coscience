@@ -12,6 +12,21 @@ from coscience.models import (Sprint, SprintStatus, ProgressState, Result, Progr
                               ArtifactVersion)
 
 
+def _ts(value, default: float = 0.0) -> float:
+    """A timestamp read from frontmatter, or `default` when it is absent, null or
+    not a number.
+
+    Artifact metadata is the one substrate file an agent may write by hand, and
+    `float(v.get("created_at", 0.0))` only defaults an ABSENT key: a hand-written
+    `created_at: null` reached float() as None and raised. The dispatch cycle loads
+    every artifact of every program, so one such line stopped both loops on every
+    beat."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class Substrate:
     def __init__(self, repo_root: Path):
         self.repo_root = Path(repo_root)
@@ -240,8 +255,8 @@ class Substrate:
             current=str(fm.get("current", "")),
             lock=dict(fm.get("lock") or {}),
             versions=[ArtifactVersion(
-                id=str(v["id"]), parent=str(v.get("parent", "")),
-                created_at=float(v.get("created_at", 0.0)),
+                id=str(v.get("id", "")), parent=str(v.get("parent", "")),
+                created_at=_ts(v.get("created_at")),
                 created_by=str(v.get("created_by", "")),
                 archived=bool(v.get("archived", False)),
                 note=str(v.get("note", "")))

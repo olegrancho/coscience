@@ -56,7 +56,10 @@ def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
                 "Write each artifact's files into its working directory below. The platform "
                 "snapshots each working copy as a new immutable version when this sprint "
                 "completes — you do not manage version numbers yourself; just create and edit "
-                "the current files in place.\n" + alines + figure_note)
+                "the current files in place. Write NOTHING else under the artifact: no "
+                "`meta.md`, no version directory of your own. Those are the platform's to "
+                "write, and a hand-written one carrying an invented or empty `created_at` "
+                "breaks every later read of that artifact.\n" + alines + figure_note)
         if context.assess_reason:
             assess_section = f"""
 ## Resuming to check a detached job ({context.assess_reason})
