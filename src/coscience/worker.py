@@ -10,8 +10,6 @@ import datetime
 import json
 import os
 import re
-import subprocess
-import sys
 import time
 
 from coscience import artifacts, feedback_harvest, usage_meter
@@ -47,6 +45,27 @@ def _read_cost(sprint_dir) -> dict:
         return data if isinstance(data, dict) else {}
     except (OSError, json.JSONDecodeError, ValueError):
         return {}
+
+
+def _usage_ok_from_limits(limits, threshold: float = 100.0,
+                          weekly_threshold: float | None = None) -> bool | None:
+    """Decide launch-safety from `usage_meter.read_limits()`. None means "can't tell
+    from this" — no reading, or one carrying no windows — and the caller falls back.
+
+    A `status` other than "allowed" is decisive on its own: that reading came from a
+    call Claude itself throttled, so nothing we launch would get through."""
+    if not limits:
+        return None
+    status = limits.get("status") or ""
+    if status and status != "allowed":
+        return False
+    windows = limits.get("windows") or {}
+    if not windows:
+        return None
+    if weekly_threshold is None:
+        weekly_threshold = threshold
+    return (windows.get("5h", {}).get("pct", 0) < threshold
+            and windows.get("week", {}).get("pct", 0) < weekly_threshold)
 
 
 def _usage_ok_from_output(out: str, now: "datetime.datetime | None" = None,
@@ -98,7 +117,14 @@ def claude_usage_ok(threshold: float = 100.0, *, weekly_threshold: float | None 
                     fail_open: bool = True, repo_root=None) -> bool:
     """True if it's safe to launch a Claude agent at this threshold — the 5-hour
     window hasn't passed `threshold` and the weekly window hasn't passed
-    `weekly_threshold`. `fail_open` decides what an unreadable usage script means:
+    `weekly_threshold`.
+
+    Answered from the rate-limit reading our own runs recorded whenever there is a
+    recent one, which costs nothing. The usage script is the fallback for a host
+    that hasn't run Claude lately; it hits an endpoint that rate-limits callers, so
+    a gate on a 5-second loop must not reach it every time.
+
+    `fail_open` decides what an unreadable usage script means:
     True for human-triggered work (never block a person on a missing dotfile),
     False for autonomous loops (an unmetered loop is exactly what burns a window
     unattended).
@@ -109,10 +135,12 @@ def claude_usage_ok(threshold: float = 100.0, *, weekly_threshold: float | None 
     that hold no substrate."""
     if repo_root is not None and is_paused(repo_root):
         return False
-    try:
-        out = subprocess.run([sys.executable, usage_meter.usage_script_path()],
-                             capture_output=True, text=True, timeout=10).stdout
-    except Exception:
+    decided = _usage_ok_from_limits(usage_meter.read_limits(), threshold=threshold,
+                                    weekly_threshold=weekly_threshold)
+    if decided is not None:
+        return decided
+    out = usage_meter.usage_output()
+    if out is None:
         return fail_open
     return _usage_ok_from_output(out, threshold=threshold, weekly_threshold=weekly_threshold)
 

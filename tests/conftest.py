@@ -1,8 +1,10 @@
+import os
 from pathlib import Path
 
 import pytest
 
 import coscience.cli as cli_mod
+import coscience.usage_meter as usage_mod
 import coscience.wiki as wiki_mod
 import coscience.worker as worker_mod
 from coscience.frontmatter_io import serialize
@@ -23,6 +25,29 @@ def _permissive_usage(monkeypatch):
     monkeypatch.setattr(worker_mod, "claude_usage_ok", lambda *a, **k: True)
     monkeypatch.setattr(cli_mod, "claude_usage_ok", lambda *a, **k: True)
     monkeypatch.setattr(wiki_mod, "claude_usage_ok", lambda *a, **k: True)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_usage_reading(tmp_path):
+    """Keep the gate away from this host's own state: the recorded rate-limit reading
+    (a real file under ~/.cache once anything has run Claude here) and the throttled
+    usage-script output one test left cached for the next.
+
+    Set directly rather than through `monkeypatch`, because the gate's own tests call
+    `monkeypatch.undo()` to drop the permissive stub above — that would take this
+    isolation with it and let them read the host's real reading, so the gate would
+    answer from it and never reach the script they are asserting on."""
+    prior = os.environ.get("COSCIENCE_LIMITS_CACHE")
+    os.environ["COSCIENCE_LIMITS_CACHE"] = str(tmp_path / "rate-limit.json")
+    usage_mod._output_cache.update(ts=0.0, out=None)
+    try:
+        yield
+    finally:
+        if prior is None:
+            os.environ.pop("COSCIENCE_LIMITS_CACHE", None)
+        else:
+            os.environ["COSCIENCE_LIMITS_CACHE"] = prior
+        usage_mod._output_cache.update(ts=0.0, out=None)
 
 
 class FakeAgent:

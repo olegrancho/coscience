@@ -11,7 +11,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from coscience import usage_meter
+from coscience import agent_stream, usage_meter
 from coscience.models import DEFAULT_MODEL
 from coscience.pm_reasoner import (PMContext, PMCycleOutput, ProposedSprint, coerce_resources,
                                    render_instructions)
@@ -521,6 +521,9 @@ class ClaudeCodeReasoner:
         # Write the feed BEFORE the exit check: a crashed `claude` is exactly the run
         # whose events you want to read, and raising first left it with no transcript.
         self._write_transcript(proc.stdout or "")
+        # The stream states the account's rate-limit standing; record it while we have
+        # it, so the gate and the dashboard read it instead of polling the usage API.
+        usage_meter.record_limits(agent_stream.parse_rate_limit(proc.stdout or ""))
         if proc.returncode != 0:
             raise PMReasonerError(
                 f"claude exited {proc.returncode}: {(proc.stderr or '')[:200]}")

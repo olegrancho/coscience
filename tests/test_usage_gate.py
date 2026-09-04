@@ -1,6 +1,7 @@
 import datetime
 from types import SimpleNamespace
 
+from coscience import usage_meter as usage_mod
 from coscience.worker import _usage_ok_from_output
 
 NOW = datetime.datetime(2026, 7, 2, 14, 40, 0, tzinfo=datetime.timezone.utc)
@@ -59,10 +60,10 @@ def test_the_gate_reads_the_configured_script(monkeypatch, tmp_path):
         calls.append(argv)
         return SimpleNamespace(stdout="5h: 3% (resets Thu 12:30) [live]")
 
-    monkeypatch.setattr(worker_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(usage_mod.subprocess, "run", fake_run)
     result = worker_mod.claude_usage_ok()
 
-    assert calls, "claude_usage_ok() never called subprocess.run"
+    assert calls, "claude_usage_ok() never ran the usage script"
     assert calls[0][-1] == str(fake)     # honoured the configured path, not the default
     assert result is True                # ... and read the controlled stdout correctly
 
@@ -107,7 +108,7 @@ def test_the_pm_loop_gate_stands_down_early_and_fails_closed(monkeypatch, tmp_pa
         return []
 
     monkeypatch.setattr(cli_mod, "pm_run_once", fake_pm_run_once)
-    monkeypatch.setattr(worker_mod.subprocess, "run", _usage_at(85))
+    monkeypatch.setattr(usage_mod.subprocess, "run", _usage_at(85))
     cli_mod.main(["pm", "--repo", str(tmp_path), "--loop",
                   "--max-rounds", "1", "--interval", "0"])
 
@@ -116,7 +117,7 @@ def test_the_pm_loop_gate_stands_down_early_and_fails_closed(monkeypatch, tmp_pa
     # that answers True here is not carrying AUTONOMOUS_THRESHOLD.
     assert gates[0]() is False
     # ...and an unreadable usage script must stop the loop, not wave it through.
-    monkeypatch.setattr(worker_mod.subprocess, "run", _no_usage_script)
+    monkeypatch.setattr(usage_mod.subprocess, "run", _no_usage_script)
     assert gates[0]() is False
 
 
@@ -126,9 +127,9 @@ def test_the_worker_gate_stands_down_early_and_fails_closed(monkeypatch, tmp_pat
     monkeypatch.undo()          # conftest's autouse stub — see test_gate_can_fail_closed
 
     worker = worker_mod.Worker(Substrate(tmp_path), agent=None)
-    monkeypatch.setattr(worker_mod.subprocess, "run", _usage_at(95))
+    monkeypatch.setattr(usage_mod.subprocess, "run", _usage_at(95))
     assert worker._usage_ok() is False       # 95% > WORKER_THRESHOLD, under the human 100
-    monkeypatch.setattr(worker_mod.subprocess, "run", _no_usage_script)
+    monkeypatch.setattr(usage_mod.subprocess, "run", _no_usage_script)
     assert worker._usage_ok() is False       # unreadable script -> hold, don't launch
 
 
@@ -143,7 +144,7 @@ def test_gate_can_fail_closed(monkeypatch):
 
     def _boom(*a, **k):
         raise OSError("no such script")
-    monkeypatch.setattr(worker_mod.subprocess, "run", _boom)
+    monkeypatch.setattr(usage_mod.subprocess, "run", _boom)
     assert worker_mod.claude_usage_ok() is True                    # default: fail open
     assert worker_mod.claude_usage_ok(fail_open=False) is False    # loops: fail closed
 
@@ -152,7 +153,7 @@ def test_the_gate_refuses_while_paused(monkeypatch, tmp_path):
     """Usage wide open, so only the pause can refuse."""
     from coscience import pause, worker as worker_mod
     monkeypatch.undo()                      # drop conftest's autouse stub
-    monkeypatch.setattr(worker_mod.subprocess, "run", lambda *a, **k: SimpleNamespace(
+    monkeypatch.setattr(usage_mod.subprocess, "run", lambda *a, **k: SimpleNamespace(
         stdout=_line(1, 1, "live")))
 
     assert worker_mod.claude_usage_ok(repo_root=tmp_path) is True
@@ -170,7 +171,7 @@ def test_a_paused_gate_never_runs_the_usage_script(monkeypatch, tmp_path):
         calls.append(argv)
         return SimpleNamespace(stdout=_line(1, 1, "live"))
 
-    monkeypatch.setattr(worker_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(usage_mod.subprocess, "run", fake_run)
     pause.set_paused(tmp_path, True)
 
     assert worker_mod.claude_usage_ok(repo_root=tmp_path) is False
@@ -181,7 +182,7 @@ def test_without_a_repo_root_the_gate_ignores_pause(monkeypatch, tmp_path):
     """Existing callers pass no repo_root and must behave exactly as before."""
     from coscience import pause, worker as worker_mod
     monkeypatch.undo()
-    monkeypatch.setattr(worker_mod.subprocess, "run", lambda *a, **k: SimpleNamespace(
+    monkeypatch.setattr(usage_mod.subprocess, "run", lambda *a, **k: SimpleNamespace(
         stdout=_line(1, 1, "live")))
     pause.set_paused(tmp_path, True)
 

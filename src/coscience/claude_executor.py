@@ -280,6 +280,7 @@ class ClaudeAgent:
         message text and write a cost sidecar. If no such event is present (e.g. a
         usage-limit message instead of a stream), return the raw text unchanged so
         the worker's limit detection still fires."""
+        usage_meter.record_limits(agent_stream.parse_rate_limit(raw))
         result = agent_stream.parse_stream(raw)
         if result is None:
             return raw

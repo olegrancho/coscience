@@ -13,7 +13,7 @@ import shlex
 import tempfile
 from pathlib import Path
 
-from coscience import agent_stream
+from coscience import agent_stream, usage_meter
 from coscience.executor import launch_detached
 from coscience.pm_reasoner import render_instructions
 
@@ -174,6 +174,7 @@ def collect_turn(thread_dir: Path) -> tuple[str, str, str]:
         code = int((exitf.read_text().strip() or "1"))
     except (ValueError, OSError):
         code = 1
+    usage_meter.record_limits(agent_stream.parse_rate_limit(raw))
     result = agent_stream.parse_stream(raw, require_text=False)
     status = "ok" if code == 0 else "failed"
     if result is None:
