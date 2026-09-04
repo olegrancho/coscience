@@ -78,3 +78,19 @@ def test_unparseable_timestamp_does_not_raise_either(substrate):
         "---\ntype: artifact\ntitle: A\nkind: md\ncurrent: v1\nlock: {}\n"
         "versions:\n- id: v1\n  created_at: yesterday\n---\n")
     assert substrate.load_artifact("p", "a").versions[0].created_at == 0.0
+
+
+def test_null_timestamps_survive_outside_artifacts_too(substrate):
+    """The same `float(x.get(k, 0.0))` shape covered every timestamp this module
+    reads. One malformed file must not be able to stop a loop, whichever it is."""
+    import re
+
+    from coscience.models import Sprint, SprintStatus
+    substrate.save_sprint(Sprint(id="s1", status=SprintStatus.PROPOSED, goals="g"))
+    p = substrate.sprint_dir("s1") / "sprint.md"
+    # Null out every timestamp the file carries, the nullable and the not.
+    p.write_text(re.sub(r"(created_at|at): [0-9.]+", r"\g<1>: null", p.read_text()))
+
+    s = substrate.load_sprint("s1")
+    assert s.created_at is None                      # nullable: stays unknown
+    assert s.status_history[0]["at"] == 0.0           # not nullable: floors to 0

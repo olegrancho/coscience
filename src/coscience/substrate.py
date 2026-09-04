@@ -16,11 +16,15 @@ def _ts(value, default: float = 0.0) -> float:
     """A timestamp read from frontmatter, or `default` when it is absent, null or
     not a number.
 
-    Artifact metadata is the one substrate file an agent may write by hand, and
-    `float(v.get("created_at", 0.0))` only defaults an ABSENT key: a hand-written
-    `created_at: null` reached float() as None and raised. The dispatch cycle loads
-    every artifact of every program, so one such line stopped both loops on every
-    beat."""
+    Every timestamp this module reads goes through here, because
+    `float(x.get(k, 0.0))` only defaults an ABSENT key: a `created_at: null` an
+    agent hand-wrote into an artifact's meta.md reached float() as None and raised,
+    and since the dispatch cycle loads every artifact of every program, that one
+    line stopped both loops on every beat for seventeen hours.
+
+    Deliberately not applied to `resources_required`: a requirement that silently
+    defaults to 0 would grant a sprint the hardware it asked for and didn't get,
+    which is worse than failing loudly."""
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -46,7 +50,7 @@ class Substrate:
         if "threads" in fm:
             sprint_threads = list(fm.get("threads") or [])
         else:  # back-compat: adapt legacy comments (target defaults to worker)
-            sprint_threads = [_th.adapt_legacy(c, "worker", now=float(c.get("added_at", _t.time())))
+            sprint_threads = [_th.adapt_legacy(c, "worker", now=_ts(c.get("added_at"), _t.time()))
                               for c in fm.get("comments", [])]
         return Sprint(
             id=sprint_id,
@@ -63,14 +67,14 @@ class Substrate:
             rationale=str(fm.get("rationale", "")),
             title=str(fm.get("title", "")),
             summary=str(fm.get("summary", "")),
-            created_at=None if fm.get("created_at") is None else float(fm["created_at"]),
+            created_at=None if fm.get("created_at") is None else _ts(fm["created_at"]),
             threads=sprint_threads,
             model=str(fm.get("model", "")),
-            votes=[{"by": str(v["by"]), "value": int(v["value"]), "at": float(v["at"])}
+            votes=[{"by": str(v["by"]), "value": int(v["value"]), "at": _ts(v.get("at"))}
                    for v in fm.get("votes", [])],
             decisions=[{"by": str(d.get("by", "")), "action": str(d.get("action", "")),
-                        "at": float(d.get("at", 0.0))} for d in fm.get("decisions", [])],
-            status_history=[{"status": str(h.get("status", "")), "at": float(h.get("at", 0.0)),
+                        "at": _ts(d.get("at"))} for d in fm.get("decisions", [])],
+            status_history=[{"status": str(h.get("status", "")), "at": _ts(h.get("at")),
                              "by": str(h.get("by", "")), "action": str(h.get("action", ""))}
                             for h in fm.get("status_history", [])],
             edges=list(fm.get("edges", [])),
@@ -165,16 +169,16 @@ class Substrate:
         return ProgressState(
             sprint_id=sprint_id,
             agent_token=str(fm.get("agent_token", "")),
-            started_at=None if started is None else float(started),
+            started_at=None if started is None else _ts(started),
             failures=int(fm.get("failures", 0)),
             last_error=str(fm.get("last_error", "")),
             job_token=str(fm.get("job_token", "")),
             job_out=str(fm.get("job_out", "")),
             job_note=str(fm.get("job_note", "")),
-            job_started_at=(None if fm.get("job_started_at") is None else float(fm["job_started_at"])),
-            job_expected_seconds=float(fm.get("job_expected_seconds", 0.0)),
-            job_next_wake=float(fm.get("job_next_wake", 0.0)),
-            job_max_seconds=float(fm.get("job_max_seconds", 0.0)),
+            job_started_at=(None if fm.get("job_started_at") is None else _ts(fm["job_started_at"])),
+            job_expected_seconds=_ts(fm.get("job_expected_seconds")),
+            job_next_wake=_ts(fm.get("job_next_wake")),
+            job_max_seconds=_ts(fm.get("job_max_seconds")),
             assess_reason=str(fm.get("assess_reason", "")),
             agent_session_id=str(fm.get("agent_session_id", "")),
             ambiguous_exits=int(fm.get("ambiguous_exits", 0)),
@@ -225,7 +229,7 @@ class Substrate:
             except OSError:
                 completed_at = None
         return Result(id=result_id, sprint=str(fm.get("sprint", "")), summary=body.strip(),
-                      completed_at=None if completed_at is None else float(completed_at))
+                      completed_at=None if completed_at is None else _ts(completed_at))
 
     def delete_result(self, result_id: str) -> None:
         """Remove a result file (no-op if absent). Used when a sprint is re-opened
@@ -441,7 +445,7 @@ class Substrate:
         if "threads" in fm:
             return list(fm.get("threads") or [])
         # back-compat: adapt legacy {id,text,added_at} notes
-        return [_th.adapt_legacy(n, "pm", now=float(n.get("added_at", time.time())))
+        return [_th.adapt_legacy(n, "pm", now=_ts(n.get("added_at"), time.time()))
                 for n in fm.get("notes", [])]
 
     def save_guidance(self, program_id: str, threads_list: list[dict]) -> None:
@@ -457,7 +461,7 @@ class Substrate:
             return []
         fm, _ = parse(path.read_text())
         return [{"role": str(m.get("role", "user")), "text": str(m.get("text", "")),
-                 "at": float(m.get("at", 0.0))} for m in fm.get("messages", [])]
+                 "at": _ts(m.get("at"))} for m in fm.get("messages", [])]
 
     def save_chat(self, program_id: str, messages: list[dict]) -> None:
         d = self.program_dir(program_id)
@@ -492,12 +496,12 @@ class Substrate:
             scope=str(fm.get("scope", "read")),
             announced_scope=str(fm.get("announced_scope", "")),
             session_id=str(fm.get("session_id", "")),
-            created_at=float(fm.get("created_at", 0.0)),
+            created_at=_ts(fm.get("created_at")),
             turns_done=int(fm.get("turns_done", 0)),
             pending=bool(fm.get("pending", False)),
             agent_token=str(fm.get("agent_token", "")),
             messages=[{"role": str(m.get("role", "user")), "text": str(m.get("text", "")),
-                       "at": float(m.get("at", 0.0)), "by": str(m.get("by", ""))}
+                       "at": _ts(m.get("at")), "by": str(m.get("by", ""))}
                       for m in fm.get("messages", [])],
             artifacts=[str(a) for a in fm.get("artifacts", [])],
         )
@@ -531,7 +535,7 @@ class Substrate:
             if "threads" in n:
                 idea_threads = list(n.get("threads") or [])
             else:  # back-compat: adapt legacy comments (idea threads always target the PM)
-                idea_threads = [_th.adapt_legacy(c, "pm", now=float(c.get("added_at", time.time())))
+                idea_threads = [_th.adapt_legacy(c, "pm", now=_ts(c.get("added_at"), time.time()))
                                 for c in n.get("comments", [])]
             ideas.append(Idea(
                 id=str(n["id"]), text=str(n["text"]),
@@ -539,7 +543,7 @@ class Substrate:
                 by=str(n.get("by", "")),
                 pinned=bool(n.get("pinned", False)),
                 threads=idea_threads,
-                created_at=float(n.get("created_at", 0.0)),
+                created_at=_ts(n.get("created_at")),
                 demoted=bool(n.get("demoted", False)),
                 edges=list(n.get("edges", [])),
             ))
