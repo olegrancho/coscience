@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 19
+version: 20
 last_updated: 2026-09-06
 ---
 
@@ -26,17 +26,6 @@ divergence rare rather than routine.
 
 A transient outage costs at most the object in flight, and never excludes good
 content permanently.
-
-### B1. Stop counting rate-limit deaths toward quarantine
-
-Classify 429 / `api_error` terminations as `deferred` rather than `failed`, so
-they skip the quarantine counter.
-
-`_count_failure` shares one counter between exit-nonzero and escaped-writes, on
-the reasoning that a batch which keeps going wrong should stop being retried.
-That holds for content and fails for a rate limit: the batch was fine, the box
-was out of budget. `agent.out` already carries `api_error_status: 429` and
-`terminal_reason`. The last piece of the 08-30 failure loop still live.
 
 ### B2. Record ingest progress per object, not per run
 
@@ -78,6 +67,11 @@ the history is recoverable rather than starting from zero, and it is the only wa
 the 08-30..09-01 wiki spend ever reaches the page.
 
 # Done
+
+### B1. Stop counting rate-limit deaths toward quarantine
+
+A run killed by a 429 is recorded as `deferred`: its batch stays pending for a
+later beat but never counts toward the quarantine threshold.
 
 ### B3. Stop blaming wiki runs for other actors' writes
 
@@ -122,8 +116,3 @@ a real status vocabulary.
 ### A3. Reconcile p3 and p5, commit the corrected state
 
 Both quarantines are empty and every object in p3 and p5 is credited.
-
-### A2. Add `coscience wiki reconcile <program>`
-
-`wiki.reconcile()` and `--reconcile/--apply` credit objects whose source page
-proves ingest, and report drift without touching the bundle.

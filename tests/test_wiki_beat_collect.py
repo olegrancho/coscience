@@ -1,3 +1,4 @@
+import json
 import pytest
 
 from coscience import wiki, wiki_store
@@ -375,3 +376,77 @@ def test_a_reported_escape_no_longer_discards_the_batch(substrate, monkeypatch):
     assert state["ingested"], "work is credited despite the report"
     assert state["failures"] == 0, "an escape must not push the batch to quarantine"
     assert state["quarantined"] == []
+
+
+# --- B1: a rate limit is not evidence the batch is bad ------------------------
+
+def _rate_limited_run(substrate, p, agent, t):
+    """Land what a 429 actually leaves: exit 1, plus a full envelope naming it."""
+    wiki.beat(substrate, p, t, agent)
+    run_dir = agent.launches[-1]["run_dir"]
+    (run_dir / "agent.exit").write_text("1\n")
+    (run_dir / "agent.out").write_text(json.dumps(
+        {"type": "result", "is_error": True, "api_error_status": 429,
+         "total_cost_usd": 2.25,
+         "result": "You've hit your session limit"}) + "\n")
+    agent.alive = False
+    line = wiki.beat(substrate, p, t + 1.0, agent)
+    agent.alive = True
+    return line
+
+
+def test_a_rate_limited_run_does_not_count_as_a_failure(substrate):
+    """The batch was fine; the box was out of budget. Counting it is what emptied
+    p3's ledger — seven 429s quarantined objects whose pages were already good."""
+    agent = FakeWikiAgent()
+    p = _seed(substrate)
+    _rate_limited_run(substrate, p, agent, 100.0)
+
+    state = wiki_store.load_state(substrate, "p1")
+    assert state["failures"] == 0
+    assert state["quarantined"] == []
+
+
+def test_repeated_rate_limits_never_quarantine(substrate, monkeypatch):
+    monkeypatch.setenv("COSCIENCE_WIKI_MAX_FAILURES", "2")
+    agent = FakeWikiAgent()
+    p = _seed(substrate)
+    for i in range(4):
+        _rate_limited_run(substrate, p, agent, 100.0 + i * 10)
+
+    state = wiki_store.load_state(substrate, "p1")
+    assert state["quarantined"] == []
+    assert state["failures"] == 0
+
+
+def test_a_rate_limited_batch_is_still_retried(substrate):
+    """Not counting must not mean forgetting: the objects stay pending so a later
+    beat picks them up once there is budget."""
+    agent = FakeWikiAgent()
+    p = _seed(substrate)
+    _rate_limited_run(substrate, p, agent, 100.0)
+
+    state = wiki_store.load_state(substrate, "p1")
+    pending = wiki_store.pending_objects(substrate, "p1", state["ingested"],
+                                         set(state["quarantined"]))
+    assert [o.oid for o in pending] == ["result:r0"]
+
+
+def test_a_rate_limited_run_is_recorded_as_deferred(substrate):
+    agent = FakeWikiAgent()
+    p = _seed(substrate)
+    _rate_limited_run(substrate, p, agent, 100.0)
+    assert wiki_store.load_state(substrate, "p1")["last_run"]["status"] == "deferred"
+
+
+def test_a_genuine_failure_still_counts(substrate):
+    """The threshold still does its job for a batch that really is bad — an exit
+    with no 429 in the envelope is content going wrong, not budget."""
+    agent = FakeWikiAgent()
+    p = _seed(substrate)
+    wiki.beat(substrate, p, 100.0, agent)
+    (agent.launches[-1]["run_dir"] / "agent.exit").write_text("1\n")
+    agent.alive = False
+    wiki.beat(substrate, p, 101.0, agent)
+
+    assert wiki_store.load_state(substrate, "p1")["failures"] == 1

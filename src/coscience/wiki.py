@@ -203,12 +203,13 @@ def _escaped(substrate, program_id: str, before: list[str], after: list[str]) ->
 
 
 def _count_failure(state: dict, batch: list[str]) -> bool:
-    """Count one failed or escaped run against the shared threshold. True when
-    that pushed the batch into quarantine.
+    """Count one failed run against the shared threshold. True when that pushed the
+    batch into quarantine.
 
-    One counter covers both kinds deliberately: the threshold exists so that a
-    batch which keeps going wrong stops being retried, and it is equally wrong
-    whether the agent exited non-zero or wrote somewhere it should not have."""
+    Only content failures reach here. A run killed by a rate limit is `deferred`
+    and never counted — the batch was fine and the box was out of budget — and an
+    escaped write is reported without counting, since blaming a run for a
+    concurrent actor's write is not evidence about the batch either."""
     state["failures"] = state.get("failures", 0) + 1
     if state["failures"] < max_failures():
         return False
@@ -381,11 +382,19 @@ def _collect(substrate, program, now, agent, state, run) -> str:
     housekeeping.release(substrate.repo_root, f"wiki:{program.id}")
 
     outcome = wiki_agent_outcome(run_dir)
+    envelope_status = outcome.pop("status", None)
+    # A 429 is not the batch going wrong, it is the box running out of budget, and
+    # the exit code is 1 either way — only the envelope tells them apart. Counting
+    # it emptied p3's ledger: seven rate-limit deaths quarantined objects whose
+    # pages were already on disk and good.
+    deferred = envelope_status == "rate-limited"
+    if deferred:
+        status = "deferred"
     if run.get("call"):
         usage_meter.finish_call(
             substrate.repo_root, str(run["call"]), now=now,
             status=("escaped" if (status == "ok" and escaped)
-                    else outcome.pop("status", None) or status),
+                    else envelope_status or status),
             **outcome)
 
     state["run"] = None
@@ -412,6 +421,10 @@ def _collect(substrate, program, now, agent, state, run) -> str:
             _file_lint_report(substrate, program.id, run_dir, now)
         state["failures"] = 0
         merged = _handle_merges(substrate, program, state, report, run_id, now)
+    elif deferred:
+        # Not counted, but not forgotten either: the batch stays out of `ingested`,
+        # so `pending_objects` hands it back once there is budget to try again.
+        line = f"wiki: {kind} deferred — out of budget, will retry"
     elif _count_failure(state, batch):
         line = f"wiki: {kind} quarantined {len(batch)}"
 
