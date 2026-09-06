@@ -5,10 +5,12 @@ import { MemoryRouter } from "react-router-dom";
 import { MantineProvider } from "@mantine/core";
 
 const ledger = vi.fn();
+const callLog = vi.fn();
 vi.mock("../api", () => ({
   api: {
     getLedger: () => ledger(),
     getUsage: () => Promise.resolve(null),
+    getCallLog: () => callLog(),
     setCapacity: vi.fn().mockResolvedValue({ capacity: {}, used: {}, available: {}, leases: [], paused: false }),
     setPause: vi.fn().mockResolvedValue({ capacity: {}, used: {}, available: {}, leases: [], paused: true }),
   },
@@ -51,6 +53,48 @@ describe("Compute page", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText(/capacity in use/i)).toBeTruthy());
     expect(screen.queryByText(/no worker cap/i)).toBeNull();
+  });
+
+  it("warns that housekeeping is unbounded when no housekeepers cap is set", async () => {
+    ledger.mockResolvedValue({
+      capacity: { cpu: 16, workers: 1 }, used: {}, available: {}, leases: [], paused: false,
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/no housekeeping cap/i)).toBeTruthy());
+  });
+
+  it("does not warn once a housekeepers cap exists", async () => {
+    ledger.mockResolvedValue({
+      capacity: { cpu: 16, workers: 1, housekeepers: 1 },
+      used: { housekeepers: 1 }, available: { housekeepers: 0 }, leases: [], paused: false,
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/capacity in use/i)).toBeTruthy());
+    expect(screen.queryByText(/no housekeeping cap/i)).toBeNull();
+  });
+
+  it("lists Claude calls with what they cost and how they ended", async () => {
+    ledger.mockResolvedValue({ capacity: {}, used: {}, available: {}, leases: [], paused: false });
+    callLog.mockResolvedValue({ calls: [{
+      id: "a1", kind: "wiki-ingest", program: "p3", sprint: "", model: "claude-opus-4-6",
+      status: "rate-limited", cost: 2.25, started_at: 1788560000, ended_at: 1788560394,
+      duration: 394, limits_before: { pct: 61, resets: "Fri 21:19" },
+      limits_after: { pct: 116, resets: "Fri 21:19" },
+    }] });
+    renderPage();
+    // "wiki-ingest" appears twice: once as a row cell, once as a filter option.
+    await waitFor(() => expect(screen.getAllByText("wiki-ingest").length).toBeGreaterThan(0));
+    expect(screen.getByText("rate-limited")).toBeTruthy();
+    expect(screen.getByText("claude-opus-4-6")).toBeTruthy();
+    expect(screen.getByText("$2.25")).toBeTruthy();
+    expect(screen.getByText("61% → 116%")).toBeTruthy();
+  });
+
+  it("says so when no call has been recorded yet", async () => {
+    ledger.mockResolvedValue({ capacity: {}, used: {}, available: {}, leases: [], paused: false });
+    callLog.mockResolvedValue({ calls: [] });
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/no claude calls recorded yet/i)).toBeTruthy());
   });
 
   it("opens the edit modal", async () => {

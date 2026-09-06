@@ -4,6 +4,7 @@ import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import { useMe, UserChip } from "./auth";
+import LiveAgents from "./components/LiveAgents";
 import { Heartbeat } from "./components/ui";
 import Overview from "./views/Overview";
 import Programs from "./views/ProgramsOverview";
@@ -88,6 +89,7 @@ function Pulse() {
           <b className="mono">{waiting}</b> awaiting you
         </span>
       </Row>
+      <LiveAgents />
       <UsageBars />
     </div>
   );

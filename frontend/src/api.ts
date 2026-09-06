@@ -55,7 +55,28 @@ export interface RunAgg {
 }
 export interface Usage {
   budget: { windows: Record<string, UsageWindow>; live: boolean } | null;
-  runs: { pm: RunAgg; worker: RunAgg };
+  // Keyed by kind — pm, worker, wiki-ingest, wiki-lint, chat. `pm` and `worker`
+  // are always present; the rest appear once they have a call.
+  runs: Record<string, RunAgg>;
+}
+
+/** One Claude call, folded from its launch and collect events. */
+export interface CallRow {
+  id: string;
+  kind: string;
+  program: string;
+  sprint: string;
+  model: string;
+  status: string;          // ok | failed | rate-limited | escaped | lost | running
+  cost: number | null;
+  turns?: number | null;
+  started_at: number | null;
+  ended_at: number | null;
+  duration: number | null;
+  // What the 5h window read either side of the call. Not a measure of what THIS
+  // call consumed — calls overlap — but of where the budget stood around it.
+  limits_before: UsageWindow | null;
+  limits_after: UsageWindow | null;
 }
 export interface Sprint {
   id: string; status: string; title: string; summary: string;
@@ -423,6 +444,8 @@ export const api = {
       body: JSON.stringify({ paused }),
     }).then(j<Ledger>),
   getUsage: () => fetch("/api/usage").then(j<Usage>),
+  getCallLog: (limit = 200) =>
+    fetch(`/api/usage/calls?limit=${limit}`).then(j<{ calls: CallRow[] }>),
   listArtifacts: (pid: string, includeArchived = false) =>
     fetch(`/api/programs/${pid}/artifacts${includeArchived ? "?include_archived=true" : ""}`).then(j<ArtifactRow[]>),
   getArtifact: (pid: string, aid: string) =>

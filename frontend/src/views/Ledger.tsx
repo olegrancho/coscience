@@ -3,11 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
+import CallLog from "../components/CallLog";
 import CapacityModal from "../components/CapacityModal";
 import { EmptyState, Gauge, UsagePanel } from "../components/ui";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 const WORKER_KEY = "workers";
+const HOUSEKEEPER_KEY = "housekeepers";
 /** One save per adjustment, not one per click — each save is also a substrate commit. */
 const SAVE_DEBOUNCE_MS = 1000;
 
@@ -110,6 +112,15 @@ export default function Ledger() {
           </Text>
         )}
 
+        {!(HOUSEKEEPER_KEY in l.capacity) && (
+          <Text size="sm" c="dimmed" style={{ marginBottom: 16 }}>
+            No housekeeping cap — PM and wiki agents start whenever they are due,
+            however many are already running. Add a{" "}
+            <code>{HOUSEKEEPER_KEY}</code> limit to bound how many spend Claude
+            budget at once.
+          </Text>
+        )}
+
         {keys.length ? (
           <Stack gap={16}>
             {keys.map((k) => (
@@ -148,6 +159,14 @@ export default function Ledger() {
             </Table.Tbody>
           </Table>
         )}
+      </Card>
+
+      <Card padding="lg" radius="md" style={cardStyle}>
+        <div className="eyebrow" style={{ marginBottom: 4 }}>claude calls</div>
+        <Text size="xs" c="dimmed" style={{ marginBottom: 16 }}>
+          Every call the platform has made on this host — PM, workers, wiki and chat.
+        </Text>
+        <CallLog />
       </Card>
 
       <CapacityModal opened={editing} onClose={() => setEditing(false)}
