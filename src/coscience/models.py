@@ -108,6 +108,7 @@ class ChatThread:
     turns_done: int = 0                # completed turns (0 => first turn sets the session)
     pending: bool = False              # a turn is in flight (streaming into turn.out)
     agent_token: str = ""              # detached turn's process token
+    agent_call: str = ""               # open call-log id for the turn in flight; "" = none
     messages: list[dict] = field(default_factory=list)  # [{role, text, at}]
     artifacts: list[str] = field(default_factory=list)  # bound artifact ids (chat edits their work/); sized 1 for now
 
@@ -164,6 +165,7 @@ class ProgressState:
     job_next_wake: float = 0.0         # absolute ts; wake the agent when now >= this
     job_max_seconds: float = 0.0       # clamped watchdog cap
     assess_reason: str = ""            # "" normal; else "finished"/"timed out"/"wake" -> next launch is an assess run
+    agent_call: str = ""               # open call-log id for the running agent; "" = none
     agent_session_id: str = ""         # claude session id of the current/last run, for --resume
     ambiguous_exits: int = 0           # consecutive no-progress clean exits with no completion signal
     scratch_size: int = 0              # scratchpad bytes at the last ambiguous exit (progress marker)

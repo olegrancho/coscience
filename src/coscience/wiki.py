@@ -12,7 +12,7 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
-from coscience import wiki_store
+from coscience import housekeeping, usage_meter, wiki_store
 from coscience.models import ProgramStatus
 from coscience.pause import is_paused
 from coscience.worker import WEEKLY_WORKER_THRESHOLD, claude_usage_ok
@@ -103,6 +103,13 @@ def beat(substrate, program, now: float, agent, *,
         if not due_for_lint and not pending:
             return ""
 
+        # Admission control, after the budget gate and before any work: the gate
+        # only knows what has already been billed, so it cannot see a run another
+        # program started seconds ago. The slot can.
+        holder = f"wiki:{program.id}"
+        if not housekeeping.acquire(substrate.repo_root, holder, now):
+            return ""
+
         wiki_store.ensure_bundle(substrate, program.id)
         run_id = _next_run_id(state)
         run_dir = wiki_store.run_dir(substrate, program.id, run_id)
@@ -126,11 +133,17 @@ def beat(substrate, program, now: float, agent, *,
         token = agent.launch(kind=kind, program=program, bundle=bundle,
                              run_dir=run_dir, objects=objects, report=report,
                              model=program.wiki_model)
+        # Opened here, not at collect: a run killed outright never reaches collect,
+        # and those are the runs the log most needs to show. `calls()` infers `lost`
+        # for a start that never gets an end.
+        call_id = usage_meter.start_call(
+            substrate.repo_root, f"wiki-{kind}", program=program.id,
+            model=program.wiki_model, limits=usage_meter.current_window(), now=now)
         # ingests_since_lint is NOT reset here: it resets when a lint run collects
         # ok, so a lint run that fails is still owed.
         state["run"] = {"id": run_id, "kind": kind, "batch": batch, "token": token,
                         "started_at": now, "model": program.wiki_model,
-                        "dirty_before": dirty_before}
+                        "dirty_before": dirty_before, "call": call_id}
         if forced_by:
             state["run"]["forced_by"] = forced_by
         return f"wiki: launched {kind} {run_id}" + (
@@ -165,15 +178,28 @@ def _dirty_paths(substrate) -> list[str]:
     return paths
 
 
+# Written continuously by the dispatcher and by workers. A wiki run overlapping
+# either is normal, and `_dirty_paths` cannot tell whose write it saw — so a path
+# under these can never be evidence about the wiki agent. Every false escape
+# observed in production (p3 r0002, p5 r0012, p5 r0014, p3 r0015) was one of
+# these: a lease file, a sprint's agent.out, another program's worker log.
+_OTHERS_WRITE = (".coscience/", "sprints/")
+
+
 def _escaped(substrate, program_id: str, before: list[str], after: list[str]) -> list[str]:
-    """Paths that became dirty during the run and lie outside the program's wiki.
+    """Paths that became dirty during the run, lie outside the program's wiki, and
+    could not plausibly have been written by anyone else.
 
     Runs use --dangerously-skip-permissions, so cwd is a convention rather than a
-    sandbox. We detect rather than revert: reverting would risk destroying a
-    concurrent sprint's legitimate work, and a wiki run is never worth that."""
+    sandbox, and this is the only check on where a run writes. But it compares two
+    snapshots of the WHOLE substrate, so it sees every concurrent actor's writes
+    too and has no way to attribute them. Excluding the areas other subsystems own
+    is what keeps the signal about the wiki agent rather than about how busy the
+    platform happened to be."""
     allowed = (f"programs/{program_id}/wiki/", f"programs/{program_id}/.wiki/")
     new = [p for p in after if p not in set(before)]
-    return sorted(p for p in new if not p.startswith(allowed))
+    return sorted(p for p in new
+                  if not p.startswith(allowed) and not p.startswith(_OTHERS_WRITE))
 
 
 def _count_failure(state: dict, batch: list[str]) -> bool:
@@ -346,6 +372,22 @@ def _collect(substrate, program, now, agent, state, run) -> str:
         escaped = _escaped(substrate, program.id,
                            list(run.get("dirty_before") or []), _dirty_paths(substrate))
 
+    # Close the call before the branches below return, so every exit from here is
+    # accounted for. The envelope, not the exit code, decides between `failed` and
+    # `rate-limited` — the exit code is 1 either way.
+    # Released before the branches below return. A slot leaked on the failure path
+    # would stop the wiki permanently after enough 429s — worse than the problem
+    # this pool was added to fix.
+    housekeeping.release(substrate.repo_root, f"wiki:{program.id}")
+
+    outcome = wiki_agent_outcome(run_dir)
+    if run.get("call"):
+        usage_meter.finish_call(
+            substrate.repo_root, str(run["call"]), now=now,
+            status=("escaped" if (status == "ok" and escaped)
+                    else outcome.pop("status", None) or status),
+            **outcome)
+
     state["run"] = None
     state["last_run"] = {
         "id": run_id, "kind": kind, "status": status, "at": now,
@@ -354,22 +396,6 @@ def _collect(substrate, program, now, agent, state, run) -> str:
         "notes": str(report.get("notes") or ""),
         "escaped": escaped,
     }
-
-    if status == "ok" and escaped:
-        # The batch is deliberately NOT recorded: an agent that wrote outside its
-        # bundle may equally have written the wrong thing inside it. It does count
-        # against the failure threshold, though — otherwise a batch that escapes
-        # deterministically is relaunched every eligible beat, forever.
-        state["last_run"]["status"] = "escaped"
-        _count_failure(state, batch)
-        state["runs"] = ([{"id": run_id, "kind": kind,
-                          "status": state["last_run"]["status"], "at": now,
-                          "pages_created": state["last_run"]["pages_created"],
-                          "pages_updated": state["last_run"]["pages_updated"],
-                          "merged": merged}]
-                         + list(state.get("runs") or []))[:RUNS_KEPT]
-        substrate.commit(f"wiki {program.id}: {kind} {run_id} wrote outside the bundle")
-        return f"wiki: {kind} ESCAPED — batch not recorded"
 
     line = f"wiki: {kind} {status}"
     if status == "ok":
@@ -397,6 +423,12 @@ def _collect(substrate, program, now, agent, state, run) -> str:
                      + list(state.get("runs") or []))[:RUNS_KEPT]
     substrate.commit(f"wiki {program.id}: {kind} {run_id} {status}")
     return line
+
+
+def wiki_agent_outcome(run_dir: Path) -> dict:
+    """Cost and status from the run's stream; {} when it left none."""
+    from coscience import wiki_agent
+    return wiki_agent.read_outcome(run_dir)
 
 
 def _file_lint_report(substrate, program_id: str, run_dir: Path, now: float) -> None:

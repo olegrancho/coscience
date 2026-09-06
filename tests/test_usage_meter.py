@@ -92,7 +92,7 @@ def test_run_stats_sums_cost_and_tokens(tmp_path):
 
 def test_record_run_is_best_effort(tmp_path):
     # bad lines in the log are skipped, not fatal
-    p = usage_meter._runs_path(tmp_path)
+    p = usage_meter.runs_path(tmp_path)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text('{"ts": 1, "kind": "pm"}\nnot json\n')
     assert usage_meter.run_stats(tmp_path, now=10**12)["pm"]["total"] == 1

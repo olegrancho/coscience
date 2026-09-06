@@ -11,7 +11,7 @@ import re
 import time
 from dataclasses import dataclass
 
-from coscience import artifacts, graph, threads, usage_meter
+from coscience import artifacts, graph, housekeeping, threads, usage_meter
 from coscience.models import Sprint, SprintStatus, Idea, set_status
 from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
 
@@ -577,14 +577,34 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         # About to reason -> capture what changed since the last reasoned cycle.
         new_signals = context_signals(context)
         trigger_labels = _triggers(pm.last_signals, new_signals, force)
+        # One housekeeping slot, same pool the wiki draws from: on 09-04 two PM
+        # cycles and two wiki runs started within seconds of each other, each
+        # having checked a budget that could not see the others.
+        holder = f"pm:{program_id}"
+        if not housekeeping.acquire(substrate.repo_root, holder, now or time.time()):
+            # Same shape as every other skip out of this function. Returning a bare
+            # string here made the loop die with "string indices must be integers"
+            # on the first refusal in production (2026-09-04).
+            return {"program": program_id, "cycle": pm.cycle, "submitted": [],
+                    "proposed": [], "skipped": True, "housekeeping_busy": True}
+
+        # Opened before the call, closed after it either way. The reasoner runs
+        # in-process, so a loop killed mid-cycle leaves only the start — which is
+        # exactly the trace that says a window was spent with nothing to show.
+        call_id = usage_meter.start_call(
+            substrate.repo_root, "pm", program=program_id, model=context.model,
+            limits=usage_meter.current_window())
+
         def _record(ok: bool) -> None:
+            housekeeping.release(substrate.repo_root, holder)
             lc = getattr(reasoner, "last_cost", None) or {}
-            usage_meter.record_run(substrate.repo_root, "pm", program_id,
-                                   cost=lc.get("cost"), tokens=lc.get("tokens"),
-                                   turns=lc.get("turns"), usage=lc.get("usage"),
-                                   model=context.model,
-                                   prompt_bytes=getattr(reasoner, "last_prompt_bytes", None),
-                                   ok=ok)
+            usage_meter.finish_call(substrate.repo_root, call_id,
+                                    status="ok" if ok else "failed",
+                                    cost=lc.get("cost"), tokens=lc.get("tokens"),
+                                    turns=lc.get("turns"), usage=lc.get("usage"),
+                                    model=context.model,
+                                    prompt_bytes=getattr(reasoner, "last_prompt_bytes", None),
+                                    limits=usage_meter.current_window())
         try:
             output = reasoner.run(context)             # the ONE reasoner call
         except Exception:

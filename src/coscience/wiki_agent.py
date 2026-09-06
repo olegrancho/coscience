@@ -81,3 +81,67 @@ def read_lint_report(run_dir: Path) -> str:
         return (run_dir / "lint-report.md").read_text()
     except OSError:
         return ""
+
+
+def read_outcome(run_dir: Path) -> dict:
+    """What the run's own stream says it cost and how it ended.
+
+    A sprint gets this from a cost sidecar the executor writes; a wiki run has no
+    sidecar, so the numbers live in the final `result` envelope of `agent.out`.
+    Reading them is what puts wiki spend in the call log at all — before this the
+    wiki was the platform's busiest Claude consumer and reported nothing.
+
+    Returns {} when there is no parseable result. Keys are those `finish_call`
+    takes: status, cost, tokens, usage, turns, model, limits."""
+    from coscience import agent_stream, usage_meter
+    try:
+        raw = (run_dir / "agent.out").read_text()
+    except OSError:
+        return {}
+
+    envelope = None
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)          # a torn final line simply never parses
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(ev, dict) and ev.get("type") == "result":
+            envelope = ev                  # last complete result wins
+    if envelope is None:
+        return {}
+
+    out: dict = {}
+    if envelope.get("total_cost_usd") is not None:
+        try:
+            out["cost"] = float(envelope["total_cost_usd"])
+        except (TypeError, ValueError):
+            pass
+    if envelope.get("num_turns") is not None:
+        try:
+            out["turns"] = int(envelope["num_turns"])
+        except (TypeError, ValueError):
+            pass
+    usage = usage_meter.token_breakdown(envelope.get("usage"))
+    if usage:
+        out["usage"] = usage
+        out["tokens"] = usage.get("tokens")
+    models = envelope.get("modelUsage")
+    if isinstance(models, dict) and models:
+        out["model"] = next(iter(models))
+    # 429 is not a plain failure: the agent ran, spent real money and exited with a
+    # full envelope. B1 turns on telling the two apart, so the log must too.
+    if envelope.get("is_error"):
+        out["status"] = ("rate-limited" if envelope.get("api_error_status") == 429
+                         else "failed")
+    info = agent_stream.parse_rate_limit(raw)
+    # Feed the host cache too, not just this row. Chat, worker and PM all do this;
+    # the wiki did not, so the box's busiest Claude consumer refreshed nothing and
+    # every budget check fell back to shelling out to usage.py (F3).
+    usage_meter.record_limits(info)
+    limits = usage_meter.five_hour_window(info)
+    if limits:
+        out["limits"] = limits
+    return out

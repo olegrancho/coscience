@@ -357,6 +357,13 @@ class Service:
         return {"budget": usage_meter.read_budget(),
                 "runs": usage_meter.run_stats(self.repo_root)}
 
+    def call_log(self, limit: int = 200) -> dict:
+        """Every Claude call this host has made for this substrate, newest first —
+        what the Compute log renders. Bounded, because the log grows one row per
+        call forever and a table cannot render an unbounded history."""
+        from coscience import usage_meter
+        return {"calls": usage_meter.recent_calls(self.repo_root, limit=limit)}
+
     def add_sprint_comment(self, sprint_id: str, text: str, target: str = "worker",
                            by: str = "", thread_id: str = "") -> dict:
         """Start or continue a feedback thread on a sprint. Allowed in any
@@ -707,7 +714,7 @@ class Service:
         the PM reply, capture the session id, clear busy). Lazy — driven by polling."""
         if not thread.pending:
             return thread
-        from coscience import chat_agent
+        from coscience import chat_agent, usage_meter
         from coscience.executor import is_running
         tdir = self.substrate.chat_thread_dir(program_id, thread.id)
         text, sid, status = chat_agent.collect_turn(tdir)
@@ -715,14 +722,21 @@ class Service:
             if thread.agent_token and not is_running(thread.agent_token):  # died, no exit
                 thread.messages.append({"role": "pm", "at": time.time(),
                     "text": "_(The chat agent stopped before replying — send the message again.)_"})
-                thread.pending, thread.agent_token = False, ""
+                if thread.agent_call:
+                    usage_meter.finish_call(self.substrate.repo_root, thread.agent_call,
+                                            status="interrupted",
+                                            limits=usage_meter.current_window())
+                thread.pending, thread.agent_token, thread.agent_call = False, "", ""
                 thread.messages = thread.messages[-200:]
                 self.substrate.save_chat_thread(program_id, thread)
                 self.substrate.commit(f"program {program_id}: chat {thread.id} interrupted")
             return thread
         reply = text if status == "ok" else (text or "_(The agent exited with an error.)_")
         thread.messages.append({"role": "pm", "text": reply, "at": time.time()})
-        thread.pending, thread.agent_token = False, ""
+        if thread.agent_call:
+            usage_meter.finish_call(self.substrate.repo_root, thread.agent_call,
+                                    status=status, limits=usage_meter.current_window())
+        thread.pending, thread.agent_token, thread.agent_call = False, "", ""
         thread.turns_done += 1
         if sid:
             thread.session_id = sid
@@ -914,7 +928,13 @@ class Service:
         token = launch(thread_dir=self.substrate.chat_thread_dir(program_id, thread_id),
                        workdir=workdir, prompt=prompt, scope=thread.scope,
                        session_id=thread.session_id, resume=resume, model=program.pm_model)
+        from coscience import usage_meter
         thread.pending, thread.agent_token = True, str(token)
+        # A guidance/chat turn is a Claude call like any other and was the one
+        # spender that reached the ledger not at all.
+        thread.agent_call = usage_meter.start_call(
+            self.substrate.repo_root, "chat", program=program_id,
+            model=program.pm_model, limits=usage_meter.current_window())
         thread.messages = thread.messages[-200:]
         self.substrate.save_chat_thread(program_id, thread)
         self.substrate.commit(f"program {program_id}: chat {thread_id} message")

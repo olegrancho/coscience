@@ -12,6 +12,19 @@ from coscience.substrate import Substrate
 
 
 @pytest.fixture(autouse=True)
+def _isolated_cache(tmp_path_factory, monkeypatch):
+    """Point the host-local cache at a fresh dir per test. Without it every test
+    would append to the developer's real ~/.cache/coscience and read back another
+    test's rows.
+
+    Deliberately NOT under `tmp_path`: that is the substrate root, and a call log
+    written inside the substrate makes every wiki run look like an out-of-bundle
+    write to `_escaped`. The same trap exists in production if COSCIENCE_CACHE_DIR
+    is ever pointed inside a substrate."""
+    monkeypatch.setenv("COSCIENCE_CACHE_DIR", str(tmp_path_factory.mktemp("cache")))
+
+
+@pytest.fixture(autouse=True)
 def _permissive_usage(monkeypatch):
     """Default the usage gate to 'ok' so worker/dispatcher/cli tests don't shell out
     to the real usage script. Tests that exercise the gate pass usage_gate=... .

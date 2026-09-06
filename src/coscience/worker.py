@@ -389,6 +389,12 @@ class Worker:
             ctx = self._build_context(sprint)
             token = self.agent.start(sprint, ctx, sprint_dir, ctx.repo_root)
             progress.agent_token = token
+            # Opened at launch so a killed agent still leaves a row; `calls()`
+            # infers `lost` for a start that never gets an end.
+            progress.agent_call = usage_meter.start_call(
+                self.substrate.repo_root, "worker", program=sprint.program or "",
+                sprint=sprint.id, model=sprint.model,
+                limits=usage_meter.current_window())
             progress.started_at = time.time()
             self.substrate.save_progress(progress)
             self.substrate.commit(f"sprint {sprint.id}: agent launched")
@@ -414,13 +420,25 @@ class Worker:
         except Exception:
             pass
         progress.agent_token = ""
-        # One Claude invocation just ended (clean, failed, or interrupted) — record it
-        # with whatever cost/tokens the agent reported, so the dashboard can show spend.
+        # One Claude invocation just ended (clean, failed, or interrupted) — close its
+        # row with whatever cost/tokens the agent reported, so Compute shows the spend.
         sidecar = _read_cost(sprint_dir)
-        usage_meter.record_run(self.substrate.repo_root, "worker", sprint.id,
-                               cost=sidecar.get("cost"), tokens=sidecar.get("tokens"),
-                               turns=sidecar.get("turns"), usage=sidecar.get("usage"),
-                               model=sprint.model)
+        hit_limit = bool(_USAGE_LIMIT_RE.search(text or ""))
+        call_status = ("interrupted" if status == "interrupted"
+                       else "rate-limited" if (status == "failed" and hit_limit)
+                       else status)
+        if progress.agent_call:
+            usage_meter.finish_call(
+                self.substrate.repo_root, progress.agent_call, status=call_status,
+                cost=sidecar.get("cost"), tokens=sidecar.get("tokens"),
+                turns=sidecar.get("turns"), usage=sidecar.get("usage"),
+                model=sprint.model, limits=usage_meter.current_window())
+            progress.agent_call = ""
+        else:
+            usage_meter.record_run(self.substrate.repo_root, "worker", sprint.id,
+                                   cost=sidecar.get("cost"), tokens=sidecar.get("tokens"),
+                                   turns=sidecar.get("turns"), usage=sidecar.get("usage"),
+                                   model=sprint.model, ok=(status == "ok"))
         if status == "interrupted" or (status == "failed" and _USAGE_LIMIT_RE.search(text or "")):
             # Transient: a kill/crash mid-run (resume from scratchpad) or a usage
             # limit (the usage gate holds relaunches). Don't count it; retry later.
@@ -553,6 +571,12 @@ class Worker:
                                   self._nudge(sprint_dir), sprint.model,
                                   self._sprint_cwd(sprint))
         progress.agent_token = token
+        # A resume is its own Claude call and its own row: it spends a window
+        # exactly like a fresh launch does.
+        progress.agent_call = usage_meter.start_call(
+            self.substrate.repo_root, "worker", program=sprint.program or "",
+            sprint=sprint.id, model=sprint.model,
+            limits=usage_meter.current_window())
         progress.started_at = time.time()
         self.substrate.save_progress(progress)
         self.substrate.commit(

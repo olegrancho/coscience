@@ -14,12 +14,14 @@ much of the rolling budget is left.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 def usage_script_path() -> str:
@@ -39,7 +41,41 @@ _DAY = 86400
 _output_cache: dict = {"ts": 0.0, "out": None}
 
 
-def _runs_path(repo_root) -> Path:
+def cache_root() -> Path:
+    """This host's cache directory. One env override so tests (and a box with an
+    unusual HOME) can move it without every caller learning the path."""
+    return Path(os.environ.get("COSCIENCE_CACHE_DIR",
+                               os.path.expanduser("~/.cache/coscience")))
+
+
+def _substrate_key(repo_root) -> str:
+    """A stable per-substrate filename. The basename alone will not do: both real
+    substrates are directories named `coscience`, so keying on it would merge one
+    program's spend into another's. The hash disambiguates, the name keeps the
+    file identifiable by eye."""
+    resolved = str(Path(repo_root).expanduser().resolve())
+    digest = hashlib.sha256(resolved.encode()).hexdigest()[:12]
+    return f"{Path(resolved).name}-{digest}"
+
+
+def runs_path(repo_root) -> Path:
+    """Where this host records Claude calls for one substrate.
+
+    Host-local, NOT in the substrate: the old location was git-tracked, so every
+    dispatch commit churned it (121 commits for 234 rows) and the rate would only
+    rise as more call sites started recording. Safe to keep out of git because the
+    run directories stay in the substrate — the log is an index over them, not the
+    system of record, and can be rebuilt from the agent envelopes on disk."""
+    return cache_root() / "runs" / f"{_substrate_key(repo_root)}.jsonl"
+
+
+def legacy_runs_path(repo_root) -> Path:
+    """The pre-2026-09 location, inside the substrate and git-tracked.
+
+    Read but never written. Treating it as a frozen archive rather than something
+    to migrate means nothing is moved and nothing can be lost in the moving; a
+    `git rm --cached` becomes an independent tidy-up rather than a step that has
+    to happen in the right order."""
     return Path(repo_root) / ".coscience" / "runs.jsonl"
 
 
@@ -110,55 +146,225 @@ def record_run(repo_root, kind: str, ref: str = "", *, cost=None, tokens=None,
             rec["turns"] = int(turns)
         if not ok:
             rec["ok"] = False          # absent == succeeded, so existing rows still read correctly
-        path = _runs_path(repo_root)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a") as f:
-            f.write(json.dumps(rec) + "\n")
+        _append(repo_root, rec)
+    except OSError:
+        pass
+
+
+CALL_GRACE = 900.0      # a start older than this with no end is a dead process
+
+
+def _append(repo_root, rec: dict) -> None:
+    """One line, one write. Small records in O_APPEND are atomic on Linux, so
+    concurrent loops interleave rows rather than corrupting them — and `load_runs`
+    already drops a line it cannot parse, so even a torn write costs one row
+    instead of the log."""
+    path = runs_path(repo_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as f:
+        f.write(json.dumps(rec) + "\n")
+
+
+def start_call(repo_root, kind: str, *, program: str = "", sprint: str = "",
+               model: str = "", limits=None, now: float | None = None) -> str:
+    """Record that a Claude call is beginning; returns the id to finish it with.
+
+    The launch half exists so a call that never comes back still leaves a trace.
+    An end-only row cannot describe a killed process, and killed processes are
+    most of what the log is for. Best-effort: an id is returned even if the write
+    failed, so a caller never has to handle logging errors."""
+    rid = uuid.uuid4().hex[:16]
+    try:
+        rec = {"ev": "start", "rid": rid, "ts": time.time() if now is None else now,
+               "kind": kind}
+        for key, val in (("program", program), ("sprint", sprint), ("model", model)):
+            if val:
+                rec[key] = val
+        if limits:
+            rec["limits"] = limits
+        _append(repo_root, rec)
+    except OSError:
+        pass
+    return rid
+
+
+def finish_call(repo_root, rid: str, *, status: str = "ok", cost=None, tokens=None,
+                usage=None, turns=None, prompt_bytes=None, model: str = "",
+                limits=None, now: float | None = None) -> None:
+    """Close the call `rid` opened. `status` is one of ok / failed / rate-limited /
+    escaped — `lost` and `running` are never written, only inferred on read."""
+    try:
+        rec = {"ev": "end", "rid": rid, "ts": time.time() if now is None else now,
+               "status": status}
+        if cost is not None:
+            rec["cost"] = float(cost)
+        if tokens is not None:
+            rec["tokens"] = int(tokens)
+        if usage:
+            rec.update(usage)
+        if turns is not None:
+            rec["turns"] = int(turns)
+        if prompt_bytes is not None:
+            rec["prompt_bytes"] = int(prompt_bytes)
+        if model:
+            rec["model"] = model
+        if limits:
+            rec["limits"] = limits
+        _append(repo_root, rec)
     except OSError:
         pass
 
 
 def load_runs(repo_root) -> list[dict]:
-    path = _runs_path(repo_root)
-    if not path.is_file():
-        return []
+    """Every event for this substrate, archive first then live. A line that will
+    not parse is dropped rather than raised on — one torn row must not cost the
+    whole log."""
     out: list[dict] = []
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    for path in (legacy_runs_path(repo_root), runs_path(repo_root)):
         try:
-            out.append(json.loads(line))
-        except json.JSONDecodeError:
+            if not path.is_file():
+                continue
+            text = path.read_text()
+        except OSError:
             continue
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(rec, dict):
+                out.append(rec)
+    return out
+
+
+# A legacy row carries `ref`, which meant program for a PM call and sprint for a
+# worker call. Nothing else can be recovered, so the mapping is by kind.
+_REF_IS_SPRINT = {"worker"}
+
+
+def _legacy_call(rec: dict) -> dict:
+    """A pre-split row: written at the END of a call, so complete on its own."""
+    ts = float(rec.get("ts") or 0.0)
+    ref = str(rec.get("ref") or "")
+    kind = str(rec.get("kind") or "")
+    call = {k: v for k, v in rec.items()
+            if k not in ("ts", "ref", "kind", "ok", "ev", "rid", "limits")}
+    call.update({
+        "id": f"legacy:{kind}:{ts}", "kind": kind,
+        "program": "" if kind in _REF_IS_SPRINT else ref,
+        "sprint": ref if kind in _REF_IS_SPRINT else "",
+        "started_at": None, "ended_at": ts, "duration": None,
+        "status": "failed" if rec.get("ok") is False else "ok",
+        "limits_before": None, "limits_after": None,
+    })
+    call.setdefault("cost", None)
+    call.setdefault("model", "")
+    return call
+
+
+def calls(repo_root, now: float | None = None,
+          grace: float = CALL_GRACE) -> list[dict]:
+    """Every Claude call as one row, newest first — what the Compute log renders.
+
+    Two events fold into one row. A start with no end is `running` inside `grace`
+    and `lost` beyond it: that verdict is INFERRED here rather than written by
+    anyone, because the process that would have written it is the one that died.
+    A 429 is not that case — the agent exits with a full envelope, so those arrive
+    as `rate-limited` with their cost intact."""
+    now = time.time() if now is None else now
+    folded: dict[str, dict] = {}
+    order: list[str] = []
+    out: list[dict] = []
+
+    for rec in load_runs(repo_root):
+        ev = rec.get("ev")
+        if ev not in ("start", "end"):
+            out.append(_legacy_call(rec))
+            continue
+        rid = str(rec.get("rid") or "")
+        if not rid:
+            continue
+        call = folded.get(rid)
+        if call is None:
+            call = folded[rid] = {"id": rid, "kind": "", "program": "", "sprint": "",
+                                  "model": "", "cost": None, "started_at": None,
+                                  "ended_at": None, "duration": None, "status": "",
+                                  "limits_before": None, "limits_after": None}
+            order.append(rid)
+        ts = float(rec.get("ts") or 0.0)
+        if ev == "start":
+            call["started_at"] = ts
+            call["limits_before"] = rec.get("limits")
+            for k in ("kind", "program", "sprint", "model"):
+                if rec.get(k):
+                    call[k] = rec[k]
+        else:
+            call["ended_at"] = ts
+            call["limits_after"] = rec.get("limits")
+            call["status"] = str(rec.get("status") or "ok")
+            for k, v in rec.items():
+                if k not in ("ev", "rid", "ts", "status", "limits"):
+                    call[k] = v
+
+    for rid in order:
+        call = folded[rid]
+        if call["started_at"] is not None and call["ended_at"] is not None:
+            call["duration"] = round(call["ended_at"] - call["started_at"], 3)
+        elif not call["status"]:
+            # Never written, always derived — see the docstring.
+            age = now - (call["started_at"] or 0.0)
+            call["status"] = "lost" if age > grace else "running"
+        out.append(call)
+
+    out.sort(key=lambda c: (c.get("ended_at") or c.get("started_at") or 0.0),
+             reverse=True)
     return out
 
 
 def run_stats(repo_root, now: float | None = None) -> dict:
+    """Per-kind totals for the Compute tiles, computed over folded CALLS rather
+    than raw events — a start and its end are one call, not two, and the cost
+    only lands on the end.
+
+    `pm` and `worker` are always present so the panel keeps its shape on an empty
+    substrate; any other kind appears once it has a call."""
     now = time.time() if now is None else now
-    runs = load_runs(repo_root)
+    rows = calls(repo_root, now=now)
+    kinds = {"pm", "worker"} | {str(c.get("kind") or "") for c in rows}
 
     def agg(kind: str) -> dict:
-        rs = [r for r in runs if r.get("kind") == kind]
-        ts = [float(r.get("ts", 0)) for r in rs]
+        rs = [c for c in rows if c.get("kind") == kind]
+        ts = [float(c.get("ended_at") or c.get("started_at") or 0.0) for c in rs]
         return {
-            "total": len(ts),
+            "total": len(rs),
             "last_hour": sum(1 for t in ts if now - t <= _HOUR),
             "last_day": sum(1 for t in ts if now - t <= _DAY),
             "last": max(ts) if ts else None,
-            "cost": round(sum(float(r.get("cost", 0) or 0) for r in rs), 4),
-            "cost_day": round(sum(float(r.get("cost", 0) or 0) for r in rs
-                                  if now - float(r.get("ts", 0)) <= _DAY), 4),
-            "tokens": sum(int(r.get("tokens", 0) or 0) for r in rs),
-            # Per-component totals. Rows written before the split existed contribute
-            # 0 here while still counting in `tokens`, so a partial split is expected
-            # on a substrate with history.
-            **{k: sum(int(r.get(k, 0) or 0) for r in rs)
+            "cost": round(sum(float(c.get("cost") or 0) for c in rs), 4),
+            "cost_day": round(sum(float(c.get("cost") or 0) for c, t in zip(rs, ts)
+                                  if now - t <= _DAY), 4),
+            "tokens": sum(int(c.get("tokens") or 0) for c in rs),
+            # Rows written before the per-component split contribute 0 here while
+            # still counting in `tokens`, so a partial split is expected on a
+            # substrate with history.
+            **{k: sum(int(c.get(k) or 0) for c in rs)
                for k in (*TOKEN_FIELDS, "thinking_tokens")},
-            "failed": sum(1 for r in rs if r.get("ok") is False),
+            "failed": sum(1 for c in rs
+                          if c.get("status") in ("failed", "rate-limited",
+                                                 "escaped", "lost")),
         }
 
-    return {"pm": agg("pm"), "worker": agg("worker")}
+    return {kind: agg(kind) for kind in sorted(kinds) if kind}
+
+
+def recent_calls(repo_root, limit: int = 200, now: float | None = None) -> list[dict]:
+    """The newest `limit` calls, for the Compute log. `calls()` already sorts
+    newest-first; this is the bounded read the HTTP layer serves so a substrate
+    with years of history cannot render an unbounded table."""
+    return calls(repo_root, now=now)[:max(0, int(limit))]
 
 
 def _stale_reading(out: str, now: float) -> bool:
@@ -224,6 +430,33 @@ def _window(w) -> dict | None:
         except (TypeError, ValueError, OSError):
             resets = "?"
     return {"pct": pct, "resets": resets}
+
+
+def five_hour_window(info) -> dict | None:
+    """The 5h window as {pct, resets} out of a raw `rate_limit_info`, or None.
+
+    Public because a run's own stream is the authoritative "after" reading for
+    that call — cheaper and more accurate than asking the usage API once the run
+    has already told us."""
+    if not isinstance(info, dict):
+        return None
+    unified = info.get("unifiedWindows")
+    if not isinstance(unified, dict):
+        return None
+    return _window(unified.get("five_hour"))
+
+
+def current_window() -> dict | None:
+    """The 5h reading to stamp on a call as it opens.
+
+    Goes through `read_budget`, not `read_limits`. The latter returns None past
+    `_LIMITS_MAX_AGE` — correct for the budget panel, where a percentage from a
+    window that may have reset is worse than a blank — but a launch stamp then
+    never lands at all, because a launch happens long after the previous call
+    refreshed the cache. In production that left `limits_before` empty on six of
+    seven wiki calls. `read_budget` prefers the recorded reading and falls back
+    to the usage script under its own 300s throttle, so this stays cheap."""
+    return ((read_budget() or {}).get("windows") or {}).get("5h")
 
 
 def read_limits(max_age: float = _LIMITS_MAX_AGE, now: float | None = None) -> dict | None:

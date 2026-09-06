@@ -216,11 +216,13 @@ def test_failed_reasoner_call_is_recorded_in_the_ledger(substrate):
     with pytest.raises(PMReasonerError):
         pm_beat(substrate, "p1", Boom())
 
-    rows = usage_meter.load_runs(substrate.repo_root)
+    # Two events on disk (start + end) fold to one call in the ledger.
+    rows = usage_meter.calls(substrate.repo_root)
     assert len(rows) == 1
-    assert rows[0]["ok"] is False
+    assert rows[0]["status"] == "failed"
     assert rows[0]["tokens"] == 1234          # the session burned these before it raised
     assert rows[0]["prompt_bytes"] == 4096
+    assert rows[0]["started_at"] is not None  # opened before the call that raised
 
 
 def test_repeated_reasoner_failures_back_off(substrate):
@@ -249,7 +251,7 @@ def test_repeated_reasoner_failures_back_off(substrate):
     # burning a full agentic session every beat.
     assert len(calls) == 3
     assert substrate.load_pm_state("p1").consecutive_failures == 3
-    assert len(usage_meter.load_runs(substrate.repo_root)) == 3
+    assert len(usage_meter.calls(substrate.repo_root)) == 3
 
 
 def test_a_forced_beat_ignores_the_backoff(substrate):

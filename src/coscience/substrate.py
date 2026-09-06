@@ -169,6 +169,7 @@ class Substrate:
         return ProgressState(
             sprint_id=sprint_id,
             agent_token=str(fm.get("agent_token", "")),
+            agent_call=str(fm.get("agent_call", "")),
             started_at=None if started is None else _ts(started),
             failures=int(fm.get("failures", 0)),
             last_error=str(fm.get("last_error", "")),
@@ -188,6 +189,7 @@ class Substrate:
     def save_progress(self, progress: ProgressState) -> None:
         fm = {
             "agent_token": progress.agent_token,
+            "agent_call": progress.agent_call,
             "started_at": progress.started_at,
             "failures": progress.failures,
             "last_error": progress.last_error,
@@ -500,6 +502,7 @@ class Substrate:
             turns_done=int(fm.get("turns_done", 0)),
             pending=bool(fm.get("pending", False)),
             agent_token=str(fm.get("agent_token", "")),
+            agent_call=str(fm.get("agent_call", "")),
             messages=[{"role": str(m.get("role", "user")), "text": str(m.get("text", "")),
                        "at": _ts(m.get("at")), "by": str(m.get("by", ""))}
                       for m in fm.get("messages", [])],
@@ -513,7 +516,8 @@ class Substrate:
               "announced_scope": thread.announced_scope,
               "session_id": thread.session_id, "created_at": thread.created_at,
               "turns_done": thread.turns_done, "pending": thread.pending,
-              "agent_token": thread.agent_token, "artifacts": list(thread.artifacts),
+              "agent_token": thread.agent_token, "agent_call": thread.agent_call,
+              "artifacts": list(thread.artifacts),
               "messages": thread.messages}
         (d / "thread.md").write_text(serialize(fm, f"# Chat {thread.id}\n"))
 

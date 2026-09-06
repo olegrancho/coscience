@@ -200,22 +200,24 @@ def test_report_counts_land_in_last_run(substrate):
     assert last["notes"] == "two pages"
 
 
-def test_writes_outside_the_bundle_block_recording(substrate, monkeypatch):
+def test_writes_outside_the_bundle_are_reported_not_punished(substrate, monkeypatch):
+    """Was `test_writes_outside_the_bundle_block_recording`. The batch used to be
+    discarded and counted toward quarantine; B3 keeps the report and drops both,
+    because the write has already happened and losing the run's pages does not
+    unwrite it. `sprints/` no longer counts at all — see the sibling test."""
     agent = FakeWikiAgent()
     p = _seed(substrate)
     wiki.beat(substrate, p, 100.0, agent)
     (agent.launches[0]["run_dir"] / "agent.exit").write_text("0\n")
     agent.alive = False
     monkeypatch.setattr(wiki, "_dirty_paths",
-                        lambda s: ["sprints/s0/sprint.md", "programs/p1/wiki/index.md"])
+                        lambda s: ["results/r9.md", "programs/p1/wiki/index.md"])
     line = wiki.beat(substrate, p, 200.0, agent)
-    assert line == "wiki: ingest ESCAPED — batch not recorded"
+    assert "ESCAPED" not in line
     state = wiki_store.load_state(substrate, "p1")
-    assert state["ingested"] == {}
-    assert state["last_run"]["escaped"] == ["sprints/s0/sprint.md"]
-    # An escape counts against the shared threshold like any other bad run;
-    # without that the batch stays pending and relaunches forever.
-    assert state["failures"] == 1
+    assert state["last_run"]["escaped"] == ["results/r9.md"]
+    assert state["ingested"], "the pages it did write are still credited"
+    assert state["failures"] == 0
 
 
 def _escape_cycle(substrate, p, agent, dirty, t):
@@ -228,34 +230,28 @@ def _escape_cycle(substrate, p, agent, dirty, t):
     wiki.beat(substrate, p, t, agent)
     (agent.launches[-1]["run_dir"] / "agent.exit").write_text("0\n")
     agent.alive = False
-    dirty["paths"] = ["sprints/s0/sprint.md", "programs/p1/wiki/index.md"]
+    dirty["paths"] = ["results/r9.md", "programs/p1/wiki/index.md"]
     return wiki.beat(substrate, p, t + 1.0, agent)
 
 
-def test_consecutive_escapes_keep_counting(substrate, monkeypatch):
-    agent = FakeWikiAgent()
-    p = _seed(substrate)
-    dirty = {"paths": []}
-    monkeypatch.setattr(wiki, "_dirty_paths", lambda s: list(dirty["paths"]))
-    _escape_cycle(substrate, p, agent, dirty, 100.0)
-    assert wiki_store.load_state(substrate, "p1")["failures"] == 1
-    _escape_cycle(substrate, p, agent, dirty, 200.0)
-    assert wiki_store.load_state(substrate, "p1")["failures"] == 2
+def test_repeated_escapes_never_quarantine(substrate, monkeypatch):
+    """Replaces `test_consecutive_escapes_keep_counting` and
+    `test_escapes_quarantine_the_batch_at_the_threshold`.
 
-
-def test_escapes_quarantine_the_batch_at_the_threshold(substrate, monkeypatch):
+    Counting escapes was justified by "a batch that escapes deterministically is
+    relaunched every eligible beat, forever". That no longer applies: an escaped
+    run now records its batch, so it does not come back. Quarantining on this
+    signal is what cost p3 eight objects to writes it never made."""
     monkeypatch.setenv("COSCIENCE_WIKI_MAX_FAILURES", "2")
     agent = FakeWikiAgent()
     p = _seed(substrate)
     dirty = {"paths": []}
     monkeypatch.setattr(wiki, "_dirty_paths", lambda s: list(dirty["paths"]))
     _escape_cycle(substrate, p, agent, dirty, 100.0)
-    line = _escape_cycle(substrate, p, agent, dirty, 200.0)
-    assert line == "wiki: ingest ESCAPED — batch not recorded"
+    _escape_cycle(substrate, p, agent, dirty, 200.0)
     state = wiki_store.load_state(substrate, "p1")
-    assert state["quarantined"] == ["result:r0"]
+    assert state["quarantined"] == []
     assert state["failures"] == 0
-    assert state["ingested"] == {}
 
 
 def _collect_with_report(substrate, p, agent, report_text, n=4):
@@ -319,3 +315,63 @@ def test_an_empty_objects_list_ingests_nothing_and_is_still_ok(substrate):
     # Honest "I covered nothing" is not an error; fix 1 bounds the stuck cases.
     assert state["failures"] == 0
     assert len(wiki_store.pending_objects(substrate, "p1", state["ingested"])) == 4
+
+
+# --- B3: an escape is a report, not a punishment ------------------------------
+
+def test_a_concurrent_sprint_write_is_not_an_escape(substrate, monkeypatch):
+    """The production failure, four times over. `_dirty_paths` diffs the whole
+    substrate around the run, so a worker or the dispatcher writing during the
+    window is indistinguishable from the wiki agent wandering. p3 r0015 was
+    downgraded for `sprints/p5-c0-atom-kernel-honest-cv/work/kernel_pricing.log`
+    — a different program's worker log."""
+    agent = FakeWikiAgent()
+    p = _seed(substrate)
+    wiki.beat(substrate, p, 100.0, agent)
+    (agent.launches[0]["run_dir"] / "agent.exit").write_text("0\n")
+    agent.alive = False
+    monkeypatch.setattr(wiki, "_dirty_paths", lambda s: [
+        "sprints/p5-c0-atom-kernel-honest-cv/work/kernel_pricing.log",
+        ".coscience/leases.json",
+        "programs/p1/wiki/index.md",
+    ])
+    line = wiki.beat(substrate, p, 200.0, agent)
+
+    assert "ESCAPED" not in line
+    state = wiki_store.load_state(substrate, "p1")
+    assert state["last_run"]["status"] == "ok"
+    assert state["failures"] == 0
+    assert state["ingested"], "the run's work must still be credited"
+
+
+def test_a_write_into_another_programs_wiki_is_still_reported(substrate, monkeypatch):
+    """Detection is kept. Only the penalty goes."""
+    agent = FakeWikiAgent()
+    p = _seed(substrate)
+    wiki.beat(substrate, p, 100.0, agent)
+    (agent.launches[0]["run_dir"] / "agent.exit").write_text("0\n")
+    agent.alive = False
+    monkeypatch.setattr(wiki, "_dirty_paths",
+                        lambda s: ["programs/p2/wiki/concepts/x.md"])
+    wiki.beat(substrate, p, 200.0, agent)
+
+    state = wiki_store.load_state(substrate, "p1")
+    assert state["last_run"]["escaped"] == ["programs/p2/wiki/concepts/x.md"]
+
+
+def test_a_reported_escape_no_longer_discards_the_batch(substrate, monkeypatch):
+    """The write already happened; throwing the run's work away does not unwrite
+    it, it only loses good pages. Report, credit, move on."""
+    agent = FakeWikiAgent()
+    p = _seed(substrate)
+    wiki.beat(substrate, p, 100.0, agent)
+    (agent.launches[0]["run_dir"] / "agent.exit").write_text("0\n")
+    agent.alive = False
+    monkeypatch.setattr(wiki, "_dirty_paths",
+                        lambda s: ["programs/p2/wiki/concepts/x.md"])
+    wiki.beat(substrate, p, 200.0, agent)
+
+    state = wiki_store.load_state(substrate, "p1")
+    assert state["ingested"], "work is credited despite the report"
+    assert state["failures"] == 0, "an escape must not push the batch to quarantine"
+    assert state["quarantined"] == []

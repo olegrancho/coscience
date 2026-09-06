@@ -859,6 +859,10 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def usage_stats() -> dict:
         return service.usage_stats()
 
+    @api.get("/usage/calls")
+    def call_log(limit: int = 200) -> dict:
+        return service.call_log(limit=max(1, min(int(limit), 1000)))
+
     @api.get("/fs/dirs")
     def browse_dirs(path: str | None = Query(default=None)) -> dict:
         try:
