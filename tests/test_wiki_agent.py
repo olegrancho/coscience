@@ -108,3 +108,23 @@ def test_collect_lint_run_report_text_is_available(tmp_path):
     (run / "agent.exit").write_text("0\n")
     (run / "lint-report.md").write_text("# what I changed\n")
     assert "what I changed" in wiki_agent.read_lint_report(run)
+
+
+def test_launch_carries_only_the_tools_a_wiki_run_uses(tmp_path, captured):
+    """Every token in the prefix is paid once per turn, and a wiki run takes 35 of
+    them. `--tools` drops the schemas of the built-ins the agent never calls:
+    across 40 real runs it used Read, Edit, Write and Bash and nothing else, and
+    measuring the launch prefix showed 21,615 tokens with the full set against
+    14,096 with these four.
+
+    `--allowedTools` is NOT the flag for this — it gates permissions and leaves
+    every schema in the prompt (21,617 tokens, measured the same way). The Monitor
+    deny stays even though this list excludes it: it is the flag that stops a run
+    outliving its turn, and it should not depend on how `--tools` is read."""
+    run = tmp_path / "runs" / "r0001"
+    wiki_agent.WikiAgent().launch(kind="ingest", program=PROGRAM,
+                                  bundle=tmp_path / "wiki", run_dir=run,
+                                  objects=[OBJ], model="claude-haiku-4-5-20251001")
+    cmd = captured["command"]
+    assert "--tools Read,Edit,Write,Bash" in cmd
+    assert "--disallowedTools Monitor" in cmd

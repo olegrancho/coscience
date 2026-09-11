@@ -16,6 +16,15 @@ from coscience.wiki_store import WikiObject
 _LEFTOVERS = ("agent.out", "agent.exit", "report.json", "lint-report.md")
 
 
+#: The built-ins a wiki run actually uses — Read, Edit, Write and Bash, and nothing
+#: else across 40 real runs. Named explicitly because the prefix is re-read on every
+#: turn and a 35-turn ingest pays for every unused tool schema 35 times: the launch
+#: prefix measures 21,615 tokens with the full built-in set and 14,096 with these
+#: four. `--tools` is what does that; `--allowedTools` only gates permissions and
+#: leaves the schemas in the prompt.
+_TOOLS = "Read,Edit,Write,Bash"
+
+
 class WikiAgent:
     """The real agent. Tests inject a double with the same three methods."""
 
@@ -44,6 +53,7 @@ class WikiAgent:
         model_flag = f"--model {shlex.quote(model)} " if model else ""
         return (f"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 {self.claude_bin} -p "
                 f"{shlex.quote(wiki_prompts.kickoff(kind, run_dir))} {model_flag}"
+                f"--tools {_TOOLS} "
                 f"--disallowedTools Monitor "
                 f"--dangerously-skip-permissions --output-format stream-json --verbose "
                 f"> {shlex.quote(str(out))} 2>&1; echo $? > {shlex.quote(str(exitf))}")
