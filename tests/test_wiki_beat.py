@@ -149,3 +149,129 @@ def test_run_ids_increment(substrate, agent2):
     first = wiki_store.load_state(substrate, "p1")["run"]["id"]
     assert first == "r0001"
     assert (wiki_store.state_dir(substrate, "p1") / "runs" / first).is_dir()
+
+
+# --- J3: holding a short batch so the fixed prefix is amortised --------------
+#
+# A run re-reads its ~14k-token prefix on every one of its ~35 turns, so the
+# fixed cost is paid per RUN and the marginal cost per object is small: measured
+# across 14 real runs, an object costs $1.38 when it is ingested alone and $0.73
+# when it rides in a batch of four. Holding a lone object for company is the
+# lever. The hold is OFF unless a max-wait is set, because results on this
+# substrate land a median of 5.5-24.6h apart — a hold long enough to fill a
+# batch of four would leave the wiki days stale, which is the opposite of what
+# I1 (ingest when a sprint finishes) is for.
+
+def test_the_hold_is_off_unless_a_max_wait_is_configured(substrate, agent2):
+    """The default must not delay anything. At the real arrival rate a hold long
+    enough to fill a batch costs days of staleness to save cents, so waiting is
+    opt-in and today's behaviour is what you get when the knob is unset."""
+    p = Program(id="p1", title="P", goals="g")
+    substrate.save_program(p)
+    _seed_result(substrate, "r1", "s1", "p1", 1.0)
+    assert wiki.beat(substrate, p, 100.0, agent2).startswith("wiki: launched ingest")
+
+
+def test_a_lone_object_waits_for_company_while_the_deadline_holds(substrate, agent2, monkeypatch):
+    monkeypatch.setenv("COSCIENCE_WIKI_BATCH", "4")
+    monkeypatch.setenv("COSCIENCE_WIKI_MAX_WAIT", "600")
+    p = Program(id="p1", title="P", goals="g")
+    substrate.save_program(p)
+    _seed_result(substrate, "r1", "s1", "p1", 1.0)
+
+    line = wiki.beat(substrate, p, 100.0, agent2)
+    assert agent2.launches == []
+    assert "holding" in line and "1/4" in line
+    # Armed once, and the clock runs from the first beat that saw the object.
+    assert wiki_store.load_state(substrate, "p1")["batch_armed_at"] == 100.0
+    # Quiet from here: the dispatcher commits the substrate on any cycle a wiki
+    # beat speaks, and it beats every few seconds — an hours-long hold that
+    # announced itself each time would commit every few seconds for hours.
+    assert wiki.beat(substrate, p, 200.0, agent2) == ""
+    assert wiki_store.load_state(substrate, "p1")["batch_armed_at"] == 100.0
+    assert agent2.launches == []
+
+
+def test_a_held_batch_launches_when_the_deadline_passes(substrate, agent2, monkeypatch):
+    monkeypatch.setenv("COSCIENCE_WIKI_BATCH", "4")
+    monkeypatch.setenv("COSCIENCE_WIKI_MAX_WAIT", "600")
+    p = Program(id="p1", title="P", goals="g")
+    substrate.save_program(p)
+    _seed_result(substrate, "r1", "s1", "p1", 1.0)
+
+    wiki.beat(substrate, p, 100.0, agent2)
+    assert wiki.beat(substrate, p, 701.0, agent2).startswith("wiki: launched ingest")
+    assert agent2.launches[0]["objects"] == ["result:r1"]
+    # The arm is spent, so the next batch starts its own clock.
+    assert "batch_armed_at" not in wiki_store.load_state(substrate, "p1")
+
+
+def test_a_full_batch_never_waits(substrate, agent2, monkeypatch):
+    """The hold exists to fill a batch. Once it is full there is nothing to wait
+    for, and waiting would be pure staleness."""
+    monkeypatch.setenv("COSCIENCE_WIKI_BATCH", "2")
+    monkeypatch.setenv("COSCIENCE_WIKI_MAX_WAIT", "99999")
+    p = Program(id="p1", title="P", goals="g")
+    substrate.save_program(p)
+    _seed_result(substrate, "r1", "s1", "p1", 10.0)
+    _seed_result(substrate, "r2", "s2", "p1", 20.0)
+
+    assert wiki.beat(substrate, p, 100.0, agent2).startswith("wiki: launched ingest")
+    assert agent2.launches[0]["objects"] == ["result:r1", "result:r2"]
+
+
+def test_a_human_forced_run_is_never_held(substrate, agent2, monkeypatch):
+    """Someone pressed the button and is watching. A hold there reads as the
+    button being broken."""
+    monkeypatch.setenv("COSCIENCE_WIKI_BATCH", "4")
+    monkeypatch.setenv("COSCIENCE_WIKI_MAX_WAIT", "99999")
+    p = Program(id="p1", title="P", goals="g")
+    substrate.save_program(p)
+    _seed_result(substrate, "r1", "s1", "p1", 1.0)
+
+    line = wiki.beat(substrate, p, 100.0, agent2, forced_by="oleg")
+    assert line.startswith("wiki: launched ingest")
+    assert wiki_store.load_state(substrate, "p1")["run"]["forced_by"] == "oleg"
+
+
+def test_a_batch_that_drains_without_running_forgets_it_was_armed(substrate, agent2, monkeypatch):
+    """A held object can leave the queue without a run — reconciled, or
+    quarantined. If the arm outlived it, the NEXT object would inherit an already
+    expired deadline and launch alone: the exact batch-of-one this prevents."""
+    monkeypatch.setenv("COSCIENCE_WIKI_BATCH", "4")
+    monkeypatch.setenv("COSCIENCE_WIKI_MAX_WAIT", "600")
+    p = Program(id="p1", title="P", goals="g")
+    substrate.save_program(p)
+    _seed_result(substrate, "r1", "s1", "p1", 1.0)
+
+    wiki.beat(substrate, p, 100.0, agent2)
+    state = wiki_store.load_state(substrate, "p1")
+    assert state["batch_armed_at"] == 100.0
+    state["quarantined"] = ["result:r1"]
+    wiki_store.save_state(substrate, "p1", state)
+
+    assert wiki.beat(substrate, p, 200.0, agent2) == ""
+    assert "batch_armed_at" not in wiki_store.load_state(substrate, "p1")
+
+    _seed_result(substrate, "r2", "s2", "p1", 300.0)
+    wiki.beat(substrate, p, 400.0, agent2)
+    assert agent2.launches == []                       # armed afresh, not expired
+    assert wiki_store.load_state(substrate, "p1")["batch_armed_at"] == 400.0
+
+
+def test_a_due_lint_is_never_held(substrate, agent2, monkeypatch):
+    """A lint run has no batch to fill — its input is the whole bundle."""
+    monkeypatch.setenv("COSCIENCE_WIKI_BATCH", "4")
+    monkeypatch.setenv("COSCIENCE_WIKI_MAX_WAIT", "99999")
+    monkeypatch.setenv("COSCIENCE_WIKI_LINT_EVERY", "1")
+    p = Program(id="p1", title="P", goals="g")
+    substrate.save_program(p)
+    _seed_result(substrate, "r1", "s1", "p1", 1.0)
+    wiki_store.ensure_bundle(substrate, "p1")
+    (wiki_store.bundle_dir(substrate, "p1") / "concepts").mkdir(exist_ok=True)
+    (wiki_store.bundle_dir(substrate, "p1") / "concepts" / "c.md").write_text("---\ntype: Concept\n---\n# C\n")
+    state = wiki_store.load_state(substrate, "p1")
+    state["ingests_since_lint"] = 5
+    wiki_store.save_state(substrate, "p1", state)
+
+    assert wiki.beat(substrate, p, 100.0, agent2).startswith("wiki: launched lint")

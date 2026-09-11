@@ -53,6 +53,24 @@ def collect_grace() -> float:
     return _env_float("COSCIENCE_WIKI_COLLECT_GRACE", 60.0)
 
 
+def batch_max_wait() -> float:
+    """How long a short batch may be held, hoping for company. 0 disables the hold.
+
+    A run pays its ~14k-token prefix on every one of its ~35 turns, so cost is
+    per RUN and an object is far cheaper with company: $1.38 ingested alone
+    against $0.73 in a batch of four, measured over 14 real runs. The hold is what
+    turns the first into the second.
+
+    It defaults OFF because on this substrate results land a median of 5.5-24.6h
+    apart, so a wait long enough to actually fill a batch would leave the wiki
+    days stale to save cents — and a wiki that lags the work it describes is the
+    problem, not the budget. Where it earns its keep is a burst: several sprints
+    landing together, which is exactly what a sprint-completion trigger produces.
+    Set it to the width of a burst you want collapsed, not to the gap between
+    results."""
+    return _env_float("COSCIENCE_WIKI_MAX_WAIT", 0.0)
+
+
 def default_usage_gate(substrate) -> Callable[[], bool]:
     """fail_open=False on purpose: an unmetered autonomous loop is exactly what
     burns a usage window unattended, and a wiki run is never urgent enough to be
@@ -60,6 +78,34 @@ def default_usage_gate(substrate) -> Callable[[], bool]:
     return lambda: claude_usage_ok(WIKI_THRESHOLD,
                                    weekly_threshold=WEEKLY_WORKER_THRESHOLD,
                                    fail_open=False, repo_root=substrate.repo_root)
+
+
+def _hold_batch(state: dict, pending: int, now: float) -> str | None:
+    """None to launch now; otherwise the line to report, which is empty on every
+    beat after the first.
+
+    It announces the hold once and then goes quiet on purpose. The dispatcher
+    commits the substrate on any cycle a wiki beat says something, and it beats
+    every few seconds — so a hold that speaks every beat would drive a "dispatch
+    cycle" commit every few seconds for as long as it lasts, which for this
+    feature is hours rather than the minutes a run takes.
+
+    The clock starts at the first beat that saw the object rather than at the
+    object's own timestamp: the dispatcher beats every few seconds, so the two
+    are the same number in practice, and this one cannot be moved by a result
+    being back-dated."""
+    wanted = wiki_batch()
+    if pending >= wanted:
+        return None
+    armed = state.get("batch_armed_at")
+    first = armed is None
+    if first:
+        armed = now                      # arm and test in one beat, so a zero
+    if now - float(armed) >= batch_max_wait():   # max-wait never holds anything
+        state.pop("batch_armed_at", None)
+        return None
+    state["batch_armed_at"] = armed
+    return f"wiki: holding {pending}/{wanted}" if first else ""
 
 
 def _next_run_id(state: dict) -> str:
@@ -100,8 +146,22 @@ def beat(substrate, program, now: float, agent, *,
             substrate, program.id, state.get("ingested") or {}, quarantined)
         due_for_lint = (state.get("ingests_since_lint", 0) >= lint_every()
                         and not wiki_store.is_empty(substrate, program.id))
+        # An armed batch that emptied without ever running — reconciled, or
+        # quarantined — must disarm. Left set, the next object to arrive would
+        # inherit an already-expired deadline and launch alone, which is the
+        # batch-of-one the hold exists to prevent.
+        if not pending:
+            state.pop("batch_armed_at", None)
         if not due_for_lint and not pending:
             return ""
+
+        # Hold a short batch for company. Not for a lint, which has no batch to
+        # fill, and never for a human who pressed the button and is watching.
+        if pending and not due_for_lint and forced_by is None:
+            held = _hold_batch(state, len(pending), now)
+            if held is not None:
+                return held
+        state.pop("batch_armed_at", None)
 
         # Admission control, after the budget gate and before any work: the gate
         # only knows what has already been billed, so it cannot see a run another
