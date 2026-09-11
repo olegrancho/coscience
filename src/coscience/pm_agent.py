@@ -598,13 +598,15 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         def _record(ok: bool) -> None:
             housekeeping.release(substrate.repo_root, holder)
             lc = getattr(reasoner, "last_cost", None) or {}
+            opened, closed = getattr(reasoner, "last_limits", None) or (None, None)
             usage_meter.finish_call(substrate.repo_root, call_id,
                                     status="ok" if ok else "failed",
                                     cost=lc.get("cost"), tokens=lc.get("tokens"),
                                     turns=lc.get("turns"), usage=lc.get("usage"),
                                     model=context.model,
                                     prompt_bytes=getattr(reasoner, "last_prompt_bytes", None),
-                                    limits=usage_meter.current_window())
+                                    limits=closed or usage_meter.current_window(),
+                                    limits_before=opened)
         try:
             output = reasoner.run(context)             # the ONE reasoner call
         except Exception:

@@ -1,6 +1,6 @@
 import json
 
-from coscience.agent_stream import parse_stream
+from coscience.agent_stream import parse_rate_limit, parse_rate_limits, parse_stream
 
 
 def _line(**kw) -> str:
@@ -41,3 +41,43 @@ def test_parse_stream_require_text_false_accepts_bare_result():
     assert got is not None
     assert got.text == ""
     assert got.session_id == "s-9"
+
+
+def _rl(util: float) -> str:
+    return _line(type="rate_limit_event",
+                 rate_limit_info={"status": "allowed",
+                                  "unifiedWindows": {"five_hour": {"utilization": util,
+                                                                   "resetsAt": 1789030200}}})
+
+
+def test_the_rate_limit_span_brackets_the_run():
+    """A run's own stream answers "where was the budget when this started".
+
+    The launch stamp could not: it goes through the usage script, which needs a
+    live OAuth token and serves a stale cache when the box has been idle — the
+    exact case a launch is. Claude reports the window in the stream itself within
+    the first few events, before the run has spent anything worth counting, so
+    the first reading is the honest `before` and needs no credentials at all."""
+    raw = "\n".join([
+        _line(type="system", session_id="s-1"),
+        _rl(0.0),
+        _line(type="assistant"),
+        _rl(0.03),
+        _rl(0.24),
+        _line(type="result", result="done"),
+    ])
+    first, last = parse_rate_limits(raw)
+    assert first["unifiedWindows"]["five_hour"]["utilization"] == 0.0
+    assert last["unifiedWindows"]["five_hour"]["utilization"] == 0.24
+    # The existing single-reading accessor keeps meaning "the last one".
+    assert parse_rate_limit(raw) == last
+
+
+def test_a_stream_with_one_reading_reports_it_as_both_ends():
+    raw = "\n".join([_rl(0.4), _line(type="result", result="done")])
+    first, last = parse_rate_limits(raw)
+    assert first is last is not None
+
+
+def test_a_stream_with_no_reading_reports_neither():
+    assert parse_rate_limits(_line(type="result", result="done")) == (None, None)

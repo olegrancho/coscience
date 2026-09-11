@@ -496,6 +496,8 @@ class ClaudeCodeReasoner:
         self.claude_bin = claude_bin
         self._invoke = invoke or self._default_invoke
         self.last_cost: dict | None = None     # {cost, tokens} of the most recent call
+        # (before, after) 5h windows of the most recent call, from its own stream.
+        self.last_limits: tuple = (None, None)
         self.last_prompt_bytes: int | None = None   # size of the prompt that call sent
         # Where to keep each program's last transcript. Both production callers pass
         # one — the PM loop and the http service's human-triggered beats — so None
@@ -523,7 +525,14 @@ class ClaudeCodeReasoner:
         self._write_transcript(proc.stdout or "")
         # The stream states the account's rate-limit standing; record it while we have
         # it, so the gate and the dashboard read it instead of polling the usage API.
-        usage_meter.record_limits(agent_stream.parse_rate_limit(proc.stdout or ""))
+        opened, info = agent_stream.parse_rate_limits(proc.stdout or "")
+        usage_meter.record_limits(info)
+        # Both ends of the window this beat spent, kept for the call row. The
+        # launch stamp cannot be relied on for the `before`: it goes through the
+        # usage script, and an idle box's OAuth token has expired by the time a
+        # beat fires. The stream's opening reading is free and cannot go stale.
+        self.last_limits = (usage_meter.five_hour_window(opened),
+                            usage_meter.five_hour_window(info))
         if proc.returncode != 0:
             raise PMReasonerError(
                 f"claude exited {proc.returncode}: {(proc.stderr or '')[:200]}")
@@ -558,6 +567,7 @@ class ClaudeCodeReasoner:
         # call's numbers.
         self.last_prompt_bytes = len(prompt)
         self.last_cost = None
+        self.last_limits = (None, None)
         # One transcript per program, beside that program's pm lock.
         self._transcript_path = (self.transcript_dir / f"pm-{context.program_id}.out"
                                  if self.transcript_dir else None)

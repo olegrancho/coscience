@@ -92,7 +92,7 @@ def read_outcome(run_dir: Path) -> dict:
     wiki was the platform's busiest Claude consumer and reported nothing.
 
     Returns {} when there is no parseable result. Keys are those `finish_call`
-    takes: status, cost, tokens, usage, turns, model, limits."""
+    takes: status, cost, tokens, usage, turns, model, limits, limits_before."""
     from coscience import agent_stream, usage_meter
     try:
         raw = (run_dir / "agent.out").read_text()
@@ -136,7 +136,7 @@ def read_outcome(run_dir: Path) -> dict:
     if envelope.get("is_error"):
         out["status"] = ("rate-limited" if envelope.get("api_error_status") == 429
                          else "failed")
-    info = agent_stream.parse_rate_limit(raw)
+    opened, info = agent_stream.parse_rate_limits(raw)
     # Feed the host cache too, not just this row. Chat, worker and PM all do this;
     # the wiki did not, so the box's busiest Claude consumer refreshed nothing and
     # every budget check fell back to shelling out to usage.py (F3).
@@ -144,4 +144,11 @@ def read_outcome(run_dir: Path) -> dict:
     limits = usage_meter.five_hour_window(info)
     if limits:
         out["limits"] = limits
+    # Where the window stood as the run opened. The launch stamp asks the usage
+    # script, which needs an OAuth token that has expired by the time an idle box
+    # launches anything; the stream's first reading costs nothing and cannot be
+    # stale, so it is what fills the `5h before` column.
+    before = usage_meter.five_hour_window(opened)
+    if before:
+        out["limits_before"] = before
     return out

@@ -432,7 +432,12 @@ class Worker:
                 self.substrate.repo_root, progress.agent_call, status=call_status,
                 cost=sidecar.get("cost"), tokens=sidecar.get("tokens"),
                 turns=sidecar.get("turns"), usage=sidecar.get("usage"),
-                model=sprint.model, limits=usage_meter.current_window())
+                model=sprint.model,
+                # The run's own stream over the usage script: exact, free, and it
+                # cannot be a stale cache. `current_window` stays as the fallback
+                # for a run that ended without ever reporting a window.
+                limits=sidecar.get("limits") or usage_meter.current_window(),
+                limits_before=sidecar.get("limits_before"))
             progress.agent_call = ""
         else:
             usage_meter.record_run(self.substrate.repo_root, "worker", sprint.id,

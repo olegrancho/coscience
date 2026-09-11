@@ -283,7 +283,8 @@ class ClaudeAgent:
         message text and write a cost sidecar. If no such event is present (e.g. a
         usage-limit message instead of a stream), return the raw text unchanged so
         the worker's limit detection still fires."""
-        usage_meter.record_limits(agent_stream.parse_rate_limit(raw))
+        opened, info = agent_stream.parse_rate_limits(raw)
+        usage_meter.record_limits(info)
         result = agent_stream.parse_stream(raw)
         if result is None:
             return raw
@@ -291,7 +292,13 @@ class ClaudeAgent:
         sidecar = {"cost": result.cost,
                    "tokens": breakdown.get("tokens"),
                    "usage": breakdown,
-                   "turns": result.turns, "duration_ms": result.duration_ms}
+                   "turns": result.turns, "duration_ms": result.duration_ms,
+                   # Both ends of the window this run spent. Carried here because
+                   # the worker's collect half has no other route to them, and the
+                   # launch stamp they replace needs an OAuth token an idle box
+                   # cannot produce.
+                   "limits": usage_meter.five_hour_window(info),
+                   "limits_before": usage_meter.five_hour_window(opened)}
         try:
             (sprint_dir / "agent.cost.json").write_text(json.dumps(sidecar))
         except OSError:

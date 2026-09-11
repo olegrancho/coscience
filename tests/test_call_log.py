@@ -248,3 +248,37 @@ def test_the_window_stamp_falls_back_when_the_recorded_reading_is_stale(monkeypa
     assert usage_meter.read_limits() is None          # nothing recorded at all
     got = usage_meter.current_window()
     assert got and got["pct"] == 44
+
+
+def test_the_run_s_own_first_reading_beats_the_launch_stamp(tmp_path):
+    """`limits_before` was empty on the 09-09 wiki ingest, and on every other call
+    that opened after an idle stretch.
+
+    The launch stamp goes through the usage script, which needs a live OAuth token;
+    on a box idle since the previous run that token has expired, the script serves
+    its own stale cache, and `read_budget` correctly refuses to report a number
+    from a window that may have reset. So the stamp lands only when something
+    warmed the cache in the last 15 minutes — the opposite of a launch. The run's
+    own stream carries the reading a few events in, needs no credentials, and
+    cannot be stale, so it wins wherever both exist."""
+    rid = usage_meter.start_call(tmp_path, "wiki-ingest", now=100.0)   # cold: no stamp
+    usage_meter.finish_call(tmp_path, rid, now=200.0, cost=1.46,
+                            limits_before={"pct": 0, "resets": "Thu 1:50"},
+                            limits={"pct": 24, "resets": "Thu 1:50"})
+
+    (call,) = usage_meter.calls(tmp_path, now=300.0)
+    assert call["limits_before"] == {"pct": 0, "resets": "Thu 1:50"}
+    assert call["limits_after"] == {"pct": 24, "resets": "Thu 1:50"}
+    # It is a reading, not a stray field copied onto the row.
+    assert "limits_before" not in _events(tmp_path)[0]
+
+
+def test_a_launch_stamp_survives_a_run_that_reports_no_reading(tmp_path):
+    """A warm launch still stamps. An end event with nothing to say about the
+    window must not blank what the launch knew."""
+    rid = usage_meter.start_call(tmp_path, "pm", now=100.0,
+                                 limits={"pct": 9, "resets": "Mon 17:10"})
+    usage_meter.finish_call(tmp_path, rid, now=200.0, cost=0.74)
+
+    (call,) = usage_meter.calls(tmp_path, now=300.0)
+    assert call["limits_before"] == {"pct": 9, "resets": "Mon 17:10"}

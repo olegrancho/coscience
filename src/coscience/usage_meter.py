@@ -190,9 +190,14 @@ def start_call(repo_root, kind: str, *, program: str = "", sprint: str = "",
 
 def finish_call(repo_root, rid: str, *, status: str = "ok", cost=None, tokens=None,
                 usage=None, turns=None, prompt_bytes=None, model: str = "",
-                limits=None, now: float | None = None) -> None:
+                limits=None, limits_before=None, now: float | None = None) -> None:
     """Close the call `rid` opened. `status` is one of ok / failed / rate-limited /
-    escaped — `lost` and `running` are never written, only inferred on read."""
+    escaped — `lost` and `running` are never written, only inferred on read.
+
+    `limits` is where the budget ended up; `limits_before` is where it stood when
+    the run began, read from the run's own stream. The launch stamp cannot be
+    trusted to land — it needs a live OAuth token the box lacks after an idle
+    stretch — so the authoritative `before` arrives here, at the end."""
     try:
         rec = {"ev": "end", "rid": rid, "ts": time.time() if now is None else now,
                "status": status}
@@ -210,6 +215,8 @@ def finish_call(repo_root, rid: str, *, status: str = "ok", cost=None, tokens=No
             rec["model"] = model
         if limits:
             rec["limits"] = limits
+        if limits_before:
+            rec["limits_before"] = limits_before
         _append(repo_root, rec)
     except OSError:
         pass
@@ -304,9 +311,14 @@ def calls(repo_root, now: float | None = None,
         else:
             call["ended_at"] = ts
             call["limits_after"] = rec.get("limits")
+            # The run's own opening reading, when it left one, outranks the launch
+            # stamp: it is Claude's own number and cannot be a stale cache. Absent,
+            # whatever the launch managed to record stands.
+            if rec.get("limits_before"):
+                call["limits_before"] = rec["limits_before"]
             call["status"] = str(rec.get("status") or "ok")
             for k, v in rec.items():
-                if k not in ("ev", "rid", "ts", "status", "limits"):
+                if k not in ("ev", "rid", "ts", "status", "limits", "limits_before"):
                     call[k] = v
 
     for rid in order:

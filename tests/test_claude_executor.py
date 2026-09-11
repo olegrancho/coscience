@@ -219,3 +219,40 @@ def test_instructions_dont_ask_a_report_for_a_description(tmp_path):
         {"aid": "report", "kind": "md", "work_path": str(tmp_path / "w")}])
     text = build_instructions(_sprint(), ctx, tmp_path / "scratchpad.md")
     assert "description.md" not in text
+
+
+def test_cost_sidecar_carries_both_ends_of_the_window(tmp_path):
+    """Worker rows had the same blank `5h before` as the wiki's, for the same
+    reason: the launch stamp needs a live OAuth token and a box that has been idle
+    does not have one. The stream brackets the run for free, and the sidecar is
+    how the worker's collect half reaches its finish_call."""
+    sprint_dir = tmp_path / "sprints" / "sp3"
+    sprint_dir.mkdir(parents=True)
+    (sprint_dir / "agent.out").write_text(_stream(
+        {"type": "rate_limit_event", "rate_limit_info": {
+            "status": "allowed",
+            "unifiedWindows": {"five_hour": {"utilization": 0.02}}}},
+        {"type": "rate_limit_event", "rate_limit_info": {
+            "status": "allowed",
+            "unifiedWindows": {"five_hour": {"utilization": 0.37}}}},
+        {"type": "result", "subtype": "success", "result": "done",
+         "total_cost_usd": 1.1, "num_turns": 4},
+    ))
+    (sprint_dir / "agent.exit").write_text("0\n")
+    ClaudeAgent().collect(sprint_dir)
+
+    cost = json.loads((sprint_dir / "agent.cost.json").read_text())
+    assert cost["limits_before"]["pct"] == 2
+    assert cost["limits"]["pct"] == 37
+
+
+def test_a_stream_with_no_window_reading_leaves_the_sidecar_keys_out(tmp_path):
+    sprint_dir = tmp_path / "sprints" / "sp4"
+    sprint_dir.mkdir(parents=True)
+    (sprint_dir / "agent.out").write_text(_stream(
+        {"type": "result", "subtype": "success", "result": "done", "total_cost_usd": 0.1}))
+    (sprint_dir / "agent.exit").write_text("0\n")
+    ClaudeAgent().collect(sprint_dir)
+
+    cost = json.loads((sprint_dir / "agent.cost.json").read_text())
+    assert cost.get("limits") is None and cost.get("limits_before") is None

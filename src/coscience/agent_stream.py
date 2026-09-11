@@ -4,7 +4,7 @@ Pure — no IO. Three callers scan the same JSONL feed for the final `result`
 event (the sprint agent, the chat agent, the wiki agent) and each wants a
 different thing from it, so this returns the whole record and leaves status
 handling to them. The same feed also carries the account's rate-limit standing,
-which `parse_rate_limit` picks out."""
+which `parse_rate_limits` picks out."""
 from __future__ import annotations
 
 import json
@@ -21,15 +21,19 @@ class StreamResult:
     duration_ms: int | None = None
 
 
-def parse_rate_limit(raw: str) -> dict | None:
-    """The `rate_limit_info` of the last `rate_limit_event` in `raw`, or None.
+def parse_rate_limits(raw: str) -> tuple[dict | None, dict | None]:
+    """The first and last `rate_limit_info` in `raw`, either or both None.
 
     Claude Code reports the account's usage windows in the stream itself, so a run
     we already capture tells us where the budget stands without asking the usage
-    API for it. Emitted about once per session, and older payloads carry only
-    `status` and no `unifiedWindows` — the caller decides what an absent window
-    means."""
-    found = None
+    API for it. Both ends matter: the last reading is where the budget ended up,
+    and the FIRST — emitted within the opening events, before the run has spent
+    anything worth counting — is where it stood when the run began. That is the
+    only `before` reading available without credentials, and the launch stamp it
+    replaces needs a live OAuth token the box does not have when it has been idle.
+    Older payloads carry only `status` and no `unifiedWindows` — the caller decides
+    what an absent window means."""
+    first = last = None
     for line in raw.splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -42,8 +46,16 @@ def parse_rate_limit(raw: str) -> dict | None:
             continue
         info = ev.get("rate_limit_info")
         if isinstance(info, dict):
-            found = info                            # keep the last one
-    return found
+            if first is None:
+                first = info
+            last = info
+    return first, last
+
+
+def parse_rate_limit(raw: str) -> dict | None:
+    """The `rate_limit_info` of the last `rate_limit_event` in `raw`, or None —
+    where the budget stood when the run finished. `parse_rate_limits` for both ends."""
+    return parse_rate_limits(raw)[1]
 
 
 def parse_stream(raw: str, *, require_text: bool = True) -> StreamResult | None:

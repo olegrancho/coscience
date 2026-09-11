@@ -175,3 +175,63 @@ def test_a_wiki_run_refreshes_the_host_rate_limit_cache(substrate, agent2, monke
 
     got = usage_meter.read_limits(now=160.0)
     assert got and got["windows"]["5h"]["pct"] == 42
+
+
+def test_the_run_stamps_both_ends_of_the_window_it_spent(substrate, agent2):
+    """The 09-09 ingest logged `limits_after: 24%` and no `before` at all.
+
+    Nothing was wrong with the run: the launch stamp asks the usage script, that
+    script needs a live OAuth token, and on a box idle for two days the token had
+    expired — so it served its own two-day-old cache, which `read_budget` rightly
+    refuses. Meanwhile the run's stream had carried `utilization: 0` five lines
+    in. Read both ends of the stream and the column fills itself, with no
+    credentials and nothing that can go stale."""
+    _seed(substrate)
+    program = substrate.load_program("p1")
+    wiki.beat(substrate, program, 100.0, agent2)
+    run_dir = agent2.launches[0]["run_dir"]
+    (run_dir / "agent.exit").write_text("0")
+    (run_dir / "report.json").write_text(json.dumps({"objects": ["result:r1"]}))
+    (run_dir / "agent.out").write_text("\n".join([
+        json.dumps({"type": "system", "session_id": "s-1"}),
+        json.dumps({"type": "rate_limit_event", "rate_limit_info": {
+            "status": "allowed",
+            "unifiedWindows": {"five_hour": {"utilization": 0.0,
+                                             "resetsAt": 1789030200}}}}),
+        json.dumps({"type": "rate_limit_event", "rate_limit_info": {
+            "status": "allowed",
+            "unifiedWindows": {"five_hour": {"utilization": 0.24,
+                                             "resetsAt": 1789030200}}}}),
+        json.dumps({"type": "result", "total_cost_usd": 1.46}),
+    ]) + "\n")
+    agent2.alive = False
+    wiki.beat(substrate, program, 160.0, agent2)
+
+    (call,) = usage_meter.calls(substrate.repo_root)
+    assert call["limits_before"]["pct"] == 0
+    assert call["limits_after"]["pct"] == 24
+
+
+def test_outcome_reports_the_opening_reading_separately(tmp_path):
+    (tmp_path / "agent.out").write_text("\n".join([
+        json.dumps({"type": "rate_limit_event", "rate_limit_info": {
+            "unifiedWindows": {"five_hour": {"utilization": 0.05}}}}),
+        json.dumps({"type": "rate_limit_event", "rate_limit_info": {
+            "unifiedWindows": {"five_hour": {"utilization": 0.61}}}}),
+        json.dumps({"type": "result", "total_cost_usd": 1.0}),
+    ]) + "\n")
+    got = wiki_agent.read_outcome(tmp_path)
+    assert got["limits_before"]["pct"] == 5
+    assert got["limits"]["pct"] == 61
+
+
+def test_a_single_reading_is_not_pretended_to_be_two(tmp_path):
+    """One reading means the run ended where it started as far as we can tell —
+    stamping it on both ends is honest; inventing a zero is not."""
+    (tmp_path / "agent.out").write_text("\n".join([
+        json.dumps({"type": "rate_limit_event", "rate_limit_info": {
+            "unifiedWindows": {"five_hour": {"utilization": 0.61}}}}),
+        json.dumps({"type": "result", "total_cost_usd": 1.0}),
+    ]) + "\n")
+    got = wiki_agent.read_outcome(tmp_path)
+    assert got["limits_before"] == got["limits"] == {"pct": 61, "resets": "?"}

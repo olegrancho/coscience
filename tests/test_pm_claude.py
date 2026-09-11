@@ -484,3 +484,40 @@ def test_transcripts_are_kept_out_of_the_substrates_git_history(monkeypatch, tmp
     ClaudeCodeReasoner(transcript_dir=tmp_path).run(_ctx())
 
     assert "*.out" in (tmp_path / ".gitignore").read_text()
+
+
+def test_the_beat_records_both_ends_of_the_window_from_its_own_stream(tmp_path, monkeypatch):
+    """PM rows had the same blank `5h before` as the wiki's. The launch stamp goes
+    through the usage script, which needs an OAuth token an idle box no longer has;
+    the beat's own stream states the window twice and costs nothing to read."""
+    monkeypatch.setenv("COSCIENCE_LIMITS_CACHE", str(tmp_path / "rl.json"))
+    fake = tmp_path / "claude"
+    events = [
+        {"type": "rate_limit_event", "rate_limit_info": {
+            "status": "allowed", "unifiedWindows": {"five_hour": {"utilization": 0.12}}}},
+        {"type": "rate_limit_event", "rate_limit_info": {
+            "status": "allowed", "unifiedWindows": {"five_hour": {"utilization": 0.55}}}},
+        {"type": "result", "result": "{}", "usage": {}, "total_cost_usd": 0.7},
+    ]
+    feed = tmp_path / "feed.jsonl"
+    feed.write_text("\n".join(json.dumps(e) for e in events) + "\n")
+    fake.write_text(f"#!/usr/bin/env bash\ncat {feed}\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+
+    r = ClaudeCodeReasoner(claude_bin=str(fake))
+    r._default_invoke("prompt")
+    assert r.last_limits == ({"pct": 12, "resets": "?"}, {"pct": 55, "resets": "?"})
+
+
+def test_a_raising_beat_reports_no_window_rather_than_the_previous_one():
+    """The same rule `last_cost` already follows. A stamp from a window that has
+    since moved is exactly what the `before` column must never show."""
+    r = ClaudeCodeReasoner(invoke=lambda p, m="", c="": '{"report": "ok"}')
+    r.last_limits = ({"pct": 3, "resets": "?"}, {"pct": 9, "resets": "?"})
+
+    def _boom(p, m="", c=""):
+        raise PMReasonerError("claude exited 1")
+    r._invoke = _boom
+    with pytest.raises(PMReasonerError):
+        r.run(_ctx())
+    assert r.last_limits == (None, None)
