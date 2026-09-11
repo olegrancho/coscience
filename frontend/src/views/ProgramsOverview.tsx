@@ -14,6 +14,7 @@ function progOf(s: SprintRow) {
 
 export default function ProgramsOverview() {
   const [newOpen, setNewOpen] = useState(false);
+  const [closedOpen, setClosedOpen] = useState(false);
   const programs = useQuery({ queryKey: ["programs"], queryFn: api.listPrograms });
   const sprints = useQuery({ queryKey: ["sprints"], queryFn: api.listSprints });
   if (programs.isLoading || sprints.isLoading) return <Loader color="machine" />;
@@ -24,10 +25,8 @@ export default function ProgramsOverview() {
     const pid = progOf(s);
     (counts[pid] ??= {})[s.status] = (counts[pid]?.[s.status] ?? 0) + 1;
   }
-  // Active programs first; paused/closed sink to the bottom so they don't distract
-  // from running work. Stable sort keeps each group's existing order.
-  const rank = (s: string) => (s === "active" ? 0 : s === "paused" ? 1 : 2);
-  const progs = [...(programs.data ?? [])].sort((a, b) => rank(a.status) - rank(b.status));
+  const progs = programs.data ?? [];
+  const group = (status: string) => progs.filter((p) => p.status === status);
 
   return (
     <>
@@ -44,42 +43,63 @@ export default function ProgramsOverview() {
           <Button onClick={() => setNewOpen(true)}>New Program</Button>
         </Stack>
       ) : (
-        <SimpleGrid cols={{ base: 1, sm: 2 }}>
-          {progs.map((p) => {
-            const c = counts[p.id] ?? {};
-            const total = Object.values(c).reduce((a, b) => a + b, 0);
-            const waiting = p.status === "active" ? (c.proposed ?? 0) : 0;
-            const paused = p.status === "paused";
+        <Stack gap={26}>
+          {(["active", "paused", "closed"] as const).map((status) => {
+            const inGroup = group(status);
+            if (inGroup.length === 0) return null;
+            const folded = status === "closed" && !closedOpen;
             return (
-              <Card key={p.id} component={Link} to={`/programs/${p.id}`} padding="lg" radius="md"
-                style={{ border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)",
-                  textDecoration: "none", color: "inherit",
-                  // paused programs go quiet: dimmed + desaturated so active ones stand out
-                  background: paused ? "var(--paper)" : undefined,
-                  opacity: paused ? 0.6 : 1,
-                  filter: paused ? "grayscale(1)" : undefined }}>
-                <Group justify="space-between" mb={7} wrap="nowrap">
-                  <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
-                    {p.status === "active" && <Heartbeat />}
-                    <Text fw={600} truncate style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{p.title || p.id}</Text>
-                  </Group>
-                  <StatusBadge status={p.status} />
-                </Group>
-                <Text size="sm" c="dimmed" lineClamp={2} mb="md" style={{ minHeight: 40 }}>{p.goals || "—"}</Text>
-                <StateBar counts={c} />
-                <Group justify="space-between" mt={11}>
-                  <Text size="xs" c="dimmed">{total} {total === 1 ? "experiment" : "experiments"}</Text>
-                  {waiting > 0 && (
-                    <span className="pill" style={{ "--st": "var(--signal)" } as React.CSSProperties & Record<string, string>}>
-                      <span className="dot" />{waiting} awaiting you
-                    </span>
-                  )}
-                </Group>
-              </Card>
+              <div key={status}>
+                {status === "closed" ? (
+                  <button className="eyebrow" onClick={() => setClosedOpen(!closedOpen)}
+                          style={{ background: "none", border: "none", padding: 0, marginBottom: 12,
+                                   cursor: "pointer", font: "inherit", letterSpacing: "0.14em",
+                                   textTransform: "uppercase", color: "var(--ink-faint)" }}>
+                    {closedOpen ? "▾" : "▸"} closed · {inGroup.length}
+                  </button>
+                ) : (
+                  <div className="eyebrow" style={{ marginBottom: 12 }}>{status} · {inGroup.length}</div>
+                )}
+                {!folded && <SimpleGrid cols={{ base: 1, sm: 2 }}>{inGroup.map(renderCard)}</SimpleGrid>}
+              </div>
             );
           })}
-        </SimpleGrid>
+        </Stack>
       )}
     </>
   );
+
+  function renderCard(p: (typeof progs)[number]) {
+    const c = counts[p.id] ?? {};
+    const total = Object.values(c).reduce((a, b) => a + b, 0);
+    const waiting = p.status === "active" ? (c.proposed ?? 0) : 0;
+    const quiet = p.status !== "active";
+    return (
+      <Card key={p.id} component={Link} to={`/programs/${p.id}`} padding="lg" radius="md"
+        style={{ border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)",
+          textDecoration: "none", color: "inherit",
+          // Anything not active goes quiet, so the running work carries the page.
+          background: quiet ? "var(--paper)" : undefined,
+          opacity: quiet ? 0.6 : 1,
+          filter: quiet ? "grayscale(1)" : undefined }}>
+        <Group justify="space-between" mb={7} wrap="nowrap">
+          <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+            {p.status === "active" && <Heartbeat />}
+            <Text fw={600} truncate style={{ fontFamily: "'Space Grotesk', sans-serif" }}>{p.title || p.id}</Text>
+          </Group>
+          <StatusBadge status={p.status} />
+        </Group>
+        <Text size="sm" c="dimmed" lineClamp={2} mb="md" style={{ minHeight: 40 }}>{p.goals || "—"}</Text>
+        <StateBar counts={c} />
+        <Group justify="space-between" mt={11}>
+          <Text size="xs" c="dimmed">{total} {total === 1 ? "experiment" : "experiments"}</Text>
+          {waiting > 0 && (
+            <span className="pill" style={{ "--st": "var(--signal)" } as React.CSSProperties & Record<string, string>}>
+              <span className="dot" />{waiting} awaiting you
+            </span>
+          )}
+        </Group>
+      </Card>
+    );
+  }
 }
