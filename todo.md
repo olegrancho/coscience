@@ -1,7 +1,7 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 23
-last_updated: 2026-09-10
+version: 25
+last_updated: 2026-09-11
 ---
 
 # To Do
@@ -39,7 +39,8 @@ loses objects 1–2 despite their pages being committed. Needs a prompt clause i
 
 ## D. Wiki content health
 
-Every program wiki passes lint with no errors.
+Every program wiki is accurate about itself: it passes lint, and a run's report
+matches what that run actually changed.
 
 ### D1. Fix the 29 dangling relations across p2, p3 and p5
 
@@ -50,6 +51,17 @@ the prose.
 0 in wikitest. Everything else is info-level and expected. That p2 carries the
 most while being the healthiest wiki suggests the agent declares relations in
 frontmatter and forgets the prose link — a prompt fix rather than 29 hand edits.
+
+### D2. Stop reporting pages as created when they already existed
+
+Have the ingest report name what the run changed, not what it believes it wrote.
+
+r0017 reported 4 pages created and 9 updated; diffing the bundle against the
+pre-run commit shows 6 files changed, and all four "created" pages already
+existed with the right `origin_hash`. The counts reach `last_run.pages_created`
+and the dashboard, so a run that mostly confirmed existing work reads as a
+productive one. The run already computes `dirty_before` for the containment
+check, so the honest numbers are a diff away rather than the agent's own account.
 
 ## F. LLM call metrics
 
@@ -117,6 +129,63 @@ state, not a lever, and the existing code already batches whatever is pending.
 Where a hold does pay is a burst of sprints finishing together, which is what I1
 will produce — so this is worth revisiting once I1 lands, sized to a burst.
 
+## L. Wiki quality improvement
+
+The wiki answers the questions actually brought to it, and we know that from
+evidence rather than impression.
+
+### L1. Write the question set, a few per program
+
+Collect the questions and requests Oleg wants a program's wiki to answer, and
+keep them next to the program.
+
+This is the half only Oleg can supply and it blocks the rest of the block. The
+motivating complaint is that the wiki reads "relatively okay, but in some ways
+not quite what I need" — an impression formed while working, and one he expects
+to be biased. Questions written down BEFORE any agent runs are what convert that
+into something falsifiable: a wiki either answers them or it does not. One-off
+for now, not a standing suite; making them re-runnable is a later decision.
+
+### L2. Answer each question with a traced agent
+
+Run one subagent per question against the program's bundle, and keep its stream.
+
+No API and no wiki engine are needed: the bundle is markdown on disk, so an agent
+with Read and Glob already does "get page, follow its links", and `ls concepts/`
+is the concept listing. The retrieval trace is free — every `Read` with its path
+and size is already in `agent.out`, which is how r0017's 18 reads and 127KB of
+context were reconstructed. What each run yields is an answer, the pages it
+reached, the order it reached them in, and what it did with them.
+
+### L3. Debrief each agent after it answers
+
+Ask the agent, in a second turn, what it could not find and what misled it.
+
+The trace shows what an agent read; only the agent can say what it went looking
+for and failed to find, which page it expected to exist, or where two pages
+disagreed and it had to guess. Absence is the defect class a wiki hides best and
+the one that matters most here. Cheap — the session is already open, so the
+debrief costs one more turn on a context that is already paid for.
+
+### L4. Read the traces against Oleg's own account
+
+Compare what the agents struggled with to where Oleg finds the wiki lacking.
+
+The point of the exercise is the delta: where the traces confirm the impression,
+where they contradict it, and where they surface problems nobody had noticed.
+Agreement between an independent trace and a held opinion is worth more than
+either alone, and disagreement is where the bias was.
+
+### L5. Fix what L4 justifies
+
+Make the wiki changes the evidence supports, and nothing it does not.
+
+Deliberately unspecified: the whole point is that the work is chosen by findings
+rather than by intuition. The likely surfaces are the ingest and lint prompts in
+`wiki_prompts.py`, the page schema and relation vocabulary in the bundle's
+`CLAUDE.md`, and `index.md` as a retrieval entry point — but committing to any of
+those now would be the same guessing this block exists to replace.
+
 ## H. Agent backends and models
 
 Agent work is not locked to one CLI or one model, so the platform can follow
@@ -149,6 +218,11 @@ an unlisted value as-is, so nothing needs to change server-side — this is one
 entry, its label, and a run that proves the flag is accepted end to end.
 
 # Done
+
+### K1. Group the programs overview by state
+
+Active, paused and closed each head their own section with a count, and closed is
+folded until asked — closed previously had no visual treatment at all.
 
 ### F7. Stamp the 5h window from the run's own stream
 
@@ -194,8 +268,3 @@ on the live substrate.
 
 All five sites — `pm`, `worker`, `wiki-ingest`, `wiki-lint`, `chat` — now open a
 call at launch and close it at collect.
-
-### F6. Move the call log out of git, keyed per substrate
-
-New rows go to `~/.cache/coscience/runs/<name>-<hash>.jsonl`; the old in-substrate
-file is read as a frozen archive and never written again.
