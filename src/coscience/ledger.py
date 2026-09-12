@@ -87,6 +87,38 @@ class Ledger:
             del self._leases[sprint_id]
             self.save()
 
+    def release_key(self, sprint_id: str, key: str) -> None:
+        """Hand back ONE resource without giving up the lease.
+
+        A sprint asleep on a detached job still holds the cpu and gpu that job is
+        using, but not the worker slot, which exists to bound how many agent
+        processes run at once and so belongs to the agent, not to the lease.
+        Dropping the whole lease instead would be wrong twice: the job's real
+        resource use would vanish from the ledger, and the dispatcher's
+        no-lease-means-no-running-job reconcile would kill the job."""
+        lease = self._leases.get(sprint_id)
+        if lease is not None and key in lease.amounts:
+            del lease.amounts[key]
+            self.save()
+
+    def acquire_key(self, sprint_id: str, key: str, amount: float) -> bool:
+        """Take a released key back, or False when it no longer fits.
+
+        False is a normal outcome, not an error: it means someone else took the
+        slot while this sprint slept, and the sprint waits for it exactly as a
+        queued sprint waits."""
+        lease = self._leases.get(sprint_id)
+        if lease is None:
+            return False
+        if key in lease.amounts:
+            return True                       # already ours; never charge twice
+        if not self.can_fit({key: float(amount)}):
+            return False
+        lease.amounts[key] = float(amount)
+        self._keys_ever_leased.add(key)
+        self.save()
+        return True
+
     def renew(self, sprint_id, now, ttl, priority=None) -> None:
         lease = self._leases.get(sprint_id)
         if lease is not None:

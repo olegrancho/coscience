@@ -9,7 +9,7 @@ from pathlib import Path
 from coscience.ledger import Ledger
 from coscience.models import BeatOutcome, ProgramStatus, SprintStatus, set_status
 from coscience.pause import is_paused
-from coscience.resources import ResourcePool, effective_requirement
+from coscience.resources import WORKER_KEY, ResourcePool, effective_requirement
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
 from coscience.worker import Worker
@@ -30,6 +30,30 @@ class CycleReport:
     wiki: list[str] = field(default_factory=list)   # non-empty wiki beat lines this cycle
 
 
+class _WorkerSlots:
+    """The worker slot, lent to the Worker so a sleeping sprint can hand it back.
+
+    `effective_requirement` charges one slot per sprint to bound how many agent
+    processes run at once, but a sprint asleep on a detached job runs none — and
+    used to hold the slot for the job's whole duration anyway. A pool that
+    declares no `workers` cap is uncapped, so this is a no-op there."""
+
+    def __init__(self, ledger: Ledger):
+        self.ledger = ledger
+
+    def _capped(self) -> bool:
+        return WORKER_KEY in self.ledger.pool.capacity
+
+    def release(self, sprint_id: str) -> None:
+        if self._capped():
+            self.ledger.release_key(sprint_id, WORKER_KEY)
+
+    def acquire(self, sprint_id: str) -> bool:
+        if not self._capped():
+            return True
+        return self.ledger.acquire_key(sprint_id, WORKER_KEY, 1.0)
+
+
 class Dispatcher:
     def __init__(self, substrate: Substrate, agent,
                  pool: ResourcePool, policy: SchedulerPolicy | None = None,
@@ -38,9 +62,10 @@ class Dispatcher:
         self.agent = agent
         self.policy = policy or SchedulerPolicy()
         self._usage_gate = usage_gate
-        self.worker = Worker(substrate, agent, usage_gate=usage_gate)
         cos = substrate.repo_root / ".coscience"
         self.ledger = Ledger(pool, cos / "leases.json")
+        self.worker = Worker(substrate, agent, usage_gate=usage_gate,
+                             slots=_WorkerSlots(self.ledger))
         self._queue_path = cos / "queue.json"
         self._wiki_agent = wiki_agent      # None -> built lazily on first use
 

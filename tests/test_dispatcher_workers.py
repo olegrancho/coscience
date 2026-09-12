@@ -90,3 +90,41 @@ def test_a_granted_lease_records_one_worker_slot(substrate):
     disp.run_one_cycle(now=0.0)
     disp.ledger.load()
     assert disp.ledger.lease_for("a").amounts[WORKER_KEY] == 1.0
+
+
+def test_a_sprint_asleep_on_a_job_does_not_block_the_next_one(substrate):
+    """p5-c26 held the substrate's only worker slot for 15 hours while a detached
+    GPU job trained and no agent process existed, so nothing else could be
+    dispatched. The slot bounds agent processes; a sleeping sprint runs none.
+
+    Its lease stays — the job really is using the cpu/gpu, and the dispatcher's
+    no-lease-means-no-running-job reconcile would otherwise kill the job."""
+    import time
+
+    substrate.save_sprint(_queued("sleeper", req={"cpu": 2.0}))
+    disp = _dispatcher(substrate, {"cpu": 16.0, WORKER_KEY: 1.0})
+    disp.run_one_cycle(now=0.0)
+    assert disp.ledger.lease_for("sleeper") is not None
+
+    # Put it to sleep on a live job the way a real worker would, then beat it.
+    prog = substrate.load_progress("sleeper")
+    prog.agent_token = ""
+    prog.job_token, prog.job_out, prog.job_note = "1:1", "j.out", "train"
+    prog.job_started_at = time.time()
+    prog.job_next_wake = time.time() + 9999
+    prog.job_max_seconds = 9e9
+    substrate.save_progress(prog)
+    disp.worker._job_alive = lambda t: True
+
+    substrate.save_sprint(_queued("newcomer", req={"cpu": 1.0}))
+    # Grants are evaluated before beats within a cycle, so the slot the sleeper
+    # hands back lands one cycle later — five seconds on the live loop.
+    assert disp.run_one_cycle(now=1.0).granted == 0
+    report = disp.run_one_cycle(now=2.0)
+
+    assert report.granted == 1                                  # newcomer got in
+    assert disp.ledger.lease_for("newcomer") is not None
+    assert disp.ledger.lease_for("sleeper") is not None          # still holds its cpu
+    assert WORKER_KEY not in disp.ledger.lease_for("sleeper").amounts
+    assert disp.ledger.used()["cpu"] == 3.0                      # 2 sleeping + 1 new
+    assert substrate.load_progress("sleeper").job_token == "1:1"  # job untouched

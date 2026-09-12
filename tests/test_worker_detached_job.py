@@ -131,3 +131,94 @@ def test_stale_job_json_cleared_on_launch(tmp_path):
     sp = sub.load_sprint("s1")
     assert sp.status == SprintStatus.DONE
     assert "real result" in sub.load_result(sp.results[0]).summary
+
+
+# --- the worker slot a sleeping sprint must not hold ----------------------------
+#
+# `effective_requirement` charges every sprint one worker slot for the whole life
+# of its lease, and its docstring says that "bounds the number of agent processes
+# running at once". It does not — it bounds LEASES. p5-c26 held the substrate's
+# only slot (`workers: 1.0`) for 15 hours while a detached GPU job ran and no
+# agent process existed, so nothing else could be dispatched. The slot has to be
+# charged for the agent, not for the lease.
+
+class FakeSlots:
+    """The dispatcher's worker-slot handle, as the Worker sees it."""
+
+    def __init__(self, free=1):
+        self.free, self.held, self.calls = free, set(), []
+
+    def release(self, sprint_id):
+        self.calls.append(("release", sprint_id))
+        if sprint_id in self.held:
+            self.held.discard(sprint_id)
+            self.free += 1
+
+    def acquire(self, sprint_id):
+        self.calls.append(("acquire", sprint_id))
+        if sprint_id in self.held:
+            return True                       # idempotent: already ours
+        if self.free <= 0:
+            return False
+        self.free -= 1
+        self.held.add(sprint_id)
+        return True
+
+
+def _sleeping(sub, sid="s1", *, next_wake):
+    s = sub.load_sprint(sid); s.status = SprintStatus.EXECUTING; sub.save_sprint(s)
+    prog = sub.load_progress(sid)
+    prog.job_token, prog.job_out, prog.job_note = "1:1", "j.out", "train"
+    prog.job_started_at = time.time(); prog.job_max_seconds = 9e9
+    prog.job_next_wake = next_wake
+    sub.save_progress(prog)
+
+
+def test_a_sprint_sleeping_on_a_job_gives_up_its_worker_slot(tmp_path):
+    """15 hours of GPU training with no agent alive must not block dispatch."""
+    sub = Substrate(tmp_path); _queued(sub)
+    _sleeping(sub, next_wake=time.time() + 9999)      # not due yet
+    slots = FakeSlots(free=0)
+    slots.held.add("s1")                              # granted with the slot
+    w = Worker(sub, FakeAgent(), job_alive=lambda t: True, slots=slots)
+
+    assert w.run_sprint_beat(sub.load_sprint("s1")) == BeatOutcome.PROGRESSED
+    assert slots.free == 1                            # handed back
+    assert sub.load_sprint("s1").status == SprintStatus.EXECUTING   # still holds the GPU
+
+
+def test_a_sprint_due_to_wake_takes_a_slot_back_before_launching(tmp_path):
+    sub = Substrate(tmp_path); _queued(sub)
+    _sleeping(sub, next_wake=time.time() - 1)         # due
+    slots = FakeSlots(free=1)
+    agent = FakeAgent(collect_result=("findings", "ok"))
+    w = Worker(sub, agent, job_alive=lambda t: True, slots=slots)
+
+    w.run_sprint_beat(sub.load_sprint("s1"))
+    assert agent.started == ["s1"]                    # the assess agent ran
+    assert slots.free == 0 and "s1" in slots.held
+
+
+def test_a_woken_sprint_with_no_free_slot_waits_instead_of_launching(tmp_path):
+    """This is the "treat it as queued" half. The job keeps running and the sprint
+    keeps its lease; it just cannot start an agent until a slot frees, exactly as a
+    queued sprint cannot."""
+    sub = Substrate(tmp_path); _queued(sub)
+    _sleeping(sub, next_wake=time.time() - 1)         # due
+    slots = FakeSlots(free=0)                         # someone else has it
+    agent = FakeAgent()
+    w = Worker(sub, agent, job_alive=lambda t: True, slots=slots)
+
+    assert w.run_sprint_beat(sub.load_sprint("s1")) == BeatOutcome.PROGRESSED
+    assert agent.started == []                        # did NOT launch
+    assert sub.load_sprint("s1").status == SprintStatus.EXECUTING
+    assert sub.load_progress("s1").job_token == "1:1"  # job untouched
+
+
+def test_without_a_slot_handle_nothing_changes(tmp_path):
+    """The Worker is constructed directly in tests and by non-dispatcher callers;
+    absent a handle it must behave exactly as before."""
+    sub = Substrate(tmp_path); _queued(sub)
+    _sleeping(sub, next_wake=time.time() + 9999)
+    w = Worker(sub, FakeAgent(), job_alive=lambda t: True)
+    assert w.run_sprint_beat(sub.load_sprint("s1")) == BeatOutcome.PROGRESSED

@@ -145,11 +145,30 @@ def claude_usage_ok(threshold: float = 100.0, *, weekly_threshold: float | None 
     return _usage_ok_from_output(out, threshold=threshold, weekly_threshold=weekly_threshold)
 
 
+class _NoSlots:
+    """Uncapped: every acquire succeeds and releases are forgotten."""
+
+    def release(self, sprint_id: str) -> None:
+        pass
+
+    def acquire(self, sprint_id: str) -> bool:
+        return True
+
+
+_NO_SLOTS = _NoSlots()
+
+
 class Worker:
     def __init__(self, substrate: Substrate, agent, usage_gate=None,
-                 job_alive=None, terminate=None):
+                 job_alive=None, terminate=None, slots=None):
         self.substrate = substrate
         self.agent = agent
+        # The dispatcher's worker-slot handle: .release(id) / .acquire(id) -> bool.
+        # A sprint asleep on a detached job runs no agent process, so it must not
+        # hold the slot that bounds how many agents run at once — p5-c26 held the
+        # substrate's only one for 15h while a GPU job ran. None (tests, and any
+        # non-dispatcher caller) means uncapped, exactly as before.
+        self._slots = slots or _NO_SLOTS
         # callable () -> bool; True = ok to launch. Default checks real usage.
         self._usage_gate = usage_gate
         # callable (token) -> bool; True = the detached job is still alive.
@@ -369,6 +388,10 @@ class Worker:
                 # job, the done/failed path reaps it (below) so it can't be orphaned.
                 progress.assess_reason = "wake"
             else:
+                # Waiting on the job, not on Claude. Keep the lease (it holds the
+                # cpu/gpu the job is really using) but give back the worker slot,
+                # which is charged for an agent process that is not running.
+                self._slots.release(sprint.id)
                 return BeatOutcome.PROGRESSED            # keep waiting; lease held
             self.substrate.save_progress(progress)
             self.substrate.commit(f"sprint {sprint.id}: job ended ({progress.assess_reason}), assessing")
@@ -381,6 +404,13 @@ class Worker:
                 # arrival and print a limit message. Leave the sprint claimed; a
                 # later beat retries once usage frees up.
                 return BeatOutcome.IDLE
+            # Same shape, for compute rather than budget: a sprint that slept
+            # through a detached job gave its worker slot back, and launching is
+            # what needs it again. If another sprint took it meanwhile this one
+            # waits exactly as a queued sprint waits — job still running, lease
+            # still held, next beat tries again.
+            if not self._slots.acquire(sprint.id):
+                return BeatOutcome.PROGRESSED
             # Drop any stale job.json / finished.json left by a prior crashed or
             # interrupted attempt, so only a signal written DURING this run's clean
             # exit is honored (else a leftover file gets misattributed to this run).
