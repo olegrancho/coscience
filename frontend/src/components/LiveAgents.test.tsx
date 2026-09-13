@@ -3,7 +3,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const callLog = vi.fn();
-vi.mock("../api", () => ({ api: { getCallLog: () => callLog() } }));
+const programs = vi.fn();
+vi.mock("../api", () => ({ api: { getCallLog: () => callLog(), listPrograms: () => programs() } }));
 
 import LiveAgents from "./LiveAgents";
 
@@ -24,7 +25,11 @@ function renderIt() {
   );
 }
 
-beforeEach(() => callLog.mockReset());
+beforeEach(() => {
+  callLog.mockReset();
+  programs.mockReset();
+  programs.mockResolvedValue([]);
+});
 
 describe("LiveAgents in the rail", () => {
   it("lists each agent actually calling Claude right now", async () => {
@@ -74,6 +79,19 @@ describe("LiveAgents in the rail", () => {
     callLog.mockResolvedValue({ calls: [row({ kind: "pm", program: "p5", sprint: "" })] });
     renderIt();
     await waitFor(() => expect(screen.getByText("p5")).toBeTruthy());
+  });
+
+  it("names the program and model on hover", async () => {
+    programs.mockResolvedValue([{ id: "p2", title: "Lead Finder optimization", status: "active", goals: "" }]);
+    callLog.mockResolvedValue({ calls: [row({ program: "p2", model: "claude-sonnet-5" })] });
+    renderIt();
+    await waitFor(() => expect(screen.getByTitle("Lead Finder optimization · Sonnet 5")).toBeTruthy());
+  });
+
+  it("falls back to the slug and raw model id when it cannot name them", async () => {
+    callLog.mockResolvedValue({ calls: [row({ program: "p9", model: "claude-new-9" })] });
+    renderIt();
+    await waitFor(() => expect(screen.getByTitle("p9 · claude-new-9")).toBeTruthy());
   });
 
   it("renders nothing until the log has loaded, so the rail never flickers", async () => {

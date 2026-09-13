@@ -1,5 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type CallRow } from "../api";
+import { MODEL_OPTIONS } from "./ui";
+
+function modelLabel(model: string): string {
+  return MODEL_OPTIONS.find((o) => o.value === model)?.label ?? model;
+}
 
 /** `wiki-ingest` and `wiki-lint` both read as "wiki" in a rail this narrow; the
  *  Compute log carries the precise kind for anyone who needs it. */
@@ -26,8 +31,14 @@ export default function LiveAgents() {
     queryFn: () => api.getCallLog(50),
     refetchInterval: 10_000,
   });
+  // Same key the rest of the app uses, so the rail reads the cached list.
+  const programs = useQuery({ queryKey: ["programs"], queryFn: api.listPrograms });
 
   if (log.isError || !log.data) return null;
+
+  const titles = new Map((programs.data ?? []).map((p) => [p.id, p.title || p.id]));
+  const hover = (c: CallRow) =>
+    [titles.get(c.program) ?? c.program, c.model && modelLabel(c.model)].filter(Boolean).join(" · ");
 
   const live: CallRow[] = (log.data.calls ?? [])
     .filter((c) => c.status === "running")
@@ -52,8 +63,8 @@ export default function LiveAgents() {
       </div>
 
       {live.map((c) => (
-        <div key={c.id}
-             style={{ display: "flex", justifyContent: "space-between", gap: 8,
+        <div key={c.id} title={hover(c)}
+             style={{ display: "flex", justifyContent: "space-between", gap: 8, cursor: "default",
                       fontSize: 11, paddingLeft: 17, color: "var(--ink-muted)" }}>
           <span className="mono" style={{ color: "var(--ink)" }}>{shortKind(c.kind)}</span>
           <span className="mono" style={{ flex: 1, overflow: "hidden",
