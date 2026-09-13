@@ -1,34 +1,21 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 46
+version: 49
 last_updated: 2026-09-13
 ---
 
 # To QC
 
-### F9. Label a wiki call by the model that did the work
+### F10. Declare a dead call lost without waiting out the grace
 
-`read_outcome` takes the model with the largest `costUSD` in `modelUsage`
-(`0c48111`, deployed 09-13 00:12).
+The dispatcher collects finished chat turns every cycle, and a call whose process
+is gone reads `lost` at once instead of after 15 minutes (uncommitted, not deployed).
 
-**Check:** the first wiki-ingest row on Compute after the deploy names Opus 4.6,
-not Haiku. Rows already logged keep their old label; nothing rewrites history.
-None has run yet — the wiki is gated until the 5h window resets at 01:50.
-
-### K5. Let a human promote an idea into a sprint
-
-Each idea on the ideas page has a → button that opens the proposal form pre-filled
-from the idea, with a "Draft with AI" button that has the planner fill in id, title,
-summary, goals, steps, priority and rationale; submitting creates the sprint, moves
-the idea's lineage edges onto it and removes the idea from the pool (`91f1924`
-deployed; the draft button uncommitted, not deployed).
-
-**Check:** on a program's ideas page, promote an idea that has a lineage edge and
-press Draft with AI — the fields fill in within a minute or two, and a `pm-draft`
-row with its cost appears on Compute. After submit the sprint is proposed with
-that title and summary, the idea is gone from the pool, and the lineage graph
-shows the edge on the sprint. The draft leaves model and resources unset: the
-sprint takes the program's worker model and requests nothing.
+**Check:** after deploy, send a chat message and reply nothing else — its row on
+Compute turns `ok` within a few seconds of the reply finishing, without opening
+the thread again. A run that ends normally can read `lost` for up to one dispatcher
+cycle before its collect writes the end; a row that stays `lost` is a real death.
+On a dashboard-only host with no dispatcher, chat turns still wait for a read.
 
 # To Do
 
@@ -103,18 +90,6 @@ Every wiki run dir holds a result envelope with `total_cost_usd`, `modelUsage`,
 `duration_ms` and a `rate_limit_event`; sprint dirs hold the worker sidecars. So
 the history is recoverable rather than starting from zero, and it is the only way
 the 08-30..09-01 wiki spend ever reaches the page.
-
-### F10. Declare a dead call lost without waiting out the grace
-
-Mark a call `lost` as soon as its process is gone and no end can still arrive,
-instead of after 15 minutes.
-
-F8 made a live process read `running` at any age, but a dead one still reads
-`running` for 15 minutes. It could not be declared lost at once because a chat
-turn's end is only written when its thread is next read (`_collect_if_ready`), so
-a finished turn would read `lost`. The fix is to collect chat turns without a
-reader — from the dispatcher beat, say — after which a dead token with no end
-really does mean lost.
 
 ## I. Wiki responsiveness
 
@@ -229,6 +204,19 @@ those now would be the same guessing this block exists to replace.
 The state of the work reads at a glance — without opening a page, counting cards
 or decoding a slug.
 
+### K6. Count the experiments waiting to run
+
+Show on the dashboard how many experiments are approved or queued, as one number
+labelled "waiting".
+
+The rail's pulse counts `running` (executing) and "awaiting you" (proposed, in
+active programs), but nothing counts work that is cleared and simply has not
+started: approved sprints the PM has not released yet, and queued ones waiting on
+a slot or on usage. The overview lists approved ones only. Frontend-only —
+`listSprints` already carries each status. Mind the name: `Pulse` already has a
+variable `waiting` holding the proposed count, and `CycleReport.waiting` counts
+leaseless sprints, so rename those rather than overload the word.
+
 ## M. Delegated approval
 
 Work does not stall waiting on human review: the PM can hold approval authority
@@ -302,6 +290,16 @@ are the cheap ones before wiring it.
 
 # Done
 
+### F9. Label a wiki call by the model that did the work
+
+A wiki call is labelled with the model that cost the most in its run, so a Haiku
+side call no longer names an Opus ingest.
+
+### K5. Let a human promote an idea into a sprint
+
+An idea's → button opens the proposal form, which the planner can draft in full;
+submitting creates the sprint, moves the idea's lineage onto it and drops the idea.
+
 ### F8. Decide a call is lost by its process, not its age
 
 Every call records its process token, and a call stays `running` for as long as
@@ -341,13 +339,3 @@ with closed folded until expanded.
 
 Wiki runs launch with only `Bash, Edit, Read, Write`, cutting every turn's prefix
 from ~21.6k to ~14.1k tokens; p2 cost per turn fell from $0.053–0.056 to $0.042–0.046.
-
-### F7. Stamp the 5h window from the run's own stream
-
-Every call's "5h before" is taken from the run's first `rate_limit_event`, so the
-Compute column fills even after an idle stretch with no OAuth token.
-
-### H2. Add Fable 5.1 to the model picker
-
-`MODEL_OPTIONS` offers Fable 5.1, and a run on `claude-fable-5-1` is accepted end
-to end.
