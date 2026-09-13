@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 
-import { Gauge, ZoomableImg, tokenTitle } from "./ui";
+import { Gauge, MODEL_OPTIONS, ZoomableImg, tokenTitle } from "./ui";
 
 // jsdom has no matchMedia; MantineProvider's color-scheme effect needs it.
 beforeAll(() => {
@@ -127,5 +127,15 @@ describe("tokenTitle", () => {
       cache_creation_input_tokens: 0, cache_read_input_tokens: 0, thinking_tokens: 0,
     });
     expect(t).toBe("16,650 tokens total");
+  });
+});
+
+describe("MODEL_OPTIONS", () => {
+  it("offers Fable 5.1", () => {
+    // The pickers for pm, wiki and sprint models all read this one list, so a
+    // model missing here can only be set by typing its id as free text.
+    const fable = MODEL_OPTIONS.find((o) => o.value === "claude-fable-5-1");
+    expect(fable).toBeTruthy();
+    expect(fable!.label).toBe("Fable 5.1");
   });
 });

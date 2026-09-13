@@ -143,6 +143,12 @@ export default function WikiGraphView() {
   const focus = params.get("focus") ?? "";
   const [lens, setLens] = useState<Lens>("structure");
   const [filters, setFilters] = useState<Filters>(emptyFilters());
+  // The breadcrumb names the program, not its slug: "p5" is meaningless to read
+  // and the title is what you think in. Same shape as SprintDetail, including the
+  // fallback to the id while the query is in flight.
+  const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id),
+                             enabled: !!id });
+  const progTitle = program.data?.title || id;
   const q = useQuery({ queryKey: ["wiki-graph", id], queryFn: () => api.getWikiGraph(id) });
 
   // Focus mode reduces to a neighbourhood around one node before anything else
@@ -340,7 +346,7 @@ export default function WikiGraphView() {
       {/* The graph is a view OF the wiki, not a place of its own — so the
           header is the wiki's header with Graph selected, and "up" goes to the
           program, exactly as it does from the page list. */}
-      <BackLink to={`/programs/${id}`}>Program</BackLink>
+      <BackLink to={`/programs/${id}`}>{progTitle}</BackLink>
       <Group justify="space-between" align="center" wrap="nowrap" mb="xs">
         <Group gap={14} align="center" wrap="nowrap">
           <Text fw={600} size="xl">Wiki</Text>

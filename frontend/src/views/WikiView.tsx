@@ -50,6 +50,12 @@ export default function WikiView() {
   const [notes, setNotes] = useState<string | null>(null);
   const [settings, setSettings] = useState(false);
 
+  // The breadcrumb names the program, not its slug: "p5" is meaningless to read
+  // and the title is what you think in. Same shape as SprintDetail, including the
+  // fallback to the id while the query is in flight.
+  const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id),
+                             enabled: !!id });
+  const progTitle = program.data?.title || id;
   const summary = useQuery({ queryKey: ["wiki", id],
                              queryFn: () => api.getWikiSummary(id) });
   const pages = useQuery({ queryKey: ["wiki-pages", id],
@@ -154,7 +160,7 @@ export default function WikiView() {
   return (
     <Stack gap="lg">
       <div>
-        <BackLink to={`/programs/${id}`}>Program</BackLink>
+        <BackLink to={`/programs/${id}`}>{progTitle}</BackLink>
         {/* Three kinds of thing used to share one undifferentiated row: two
             select boxes, two action buttons and two links, in that order. They
             are separated now — where you can go, what you can do, and what you

@@ -475,3 +475,28 @@ describe("WikiView right pane", () => {
       .toBe(true);
   });
 });
+
+describe("WikiView breadcrumb", () => {
+  beforeEach(() => {
+    vi.spyOn(api, "getWikiSummary").mockResolvedValue(summary as never);
+    vi.spyOn(api, "listWikiPages").mockResolvedValue(rows as never);
+    vi.spyOn(api, "getWikiLint").mockResolvedValue(
+      { counts: {}, findings: [], reports: [] } as never);
+  });
+
+  it("names the program rather than saying 'Program'", async () => {
+    vi.spyOn(api, "getProgram").mockResolvedValue(
+      { id: "p1", title: "GCN", status: "active", goals: "g" } as never);
+    mount();
+    expect(await screen.findByText("GCN")).toBeTruthy();
+    expect(screen.queryByText("Program")).toBeNull();
+  });
+
+  it("falls back to the slug while the program is still loading", async () => {
+    // A breadcrumb that renders empty until a second request lands is worse than
+    // one that shows the slug for a moment, so the fallback is the id.
+    vi.spyOn(api, "getProgram").mockReturnValue(new Promise(() => {}) as never);
+    mount();
+    expect(await screen.findByText("p1")).toBeTruthy();
+  });
+});
