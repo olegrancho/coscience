@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 41
+version: 42
 last_updated: 2026-09-13
 ---
 
@@ -27,28 +27,6 @@ key and live jobs, and peak concurrent worker calls since the commit was 3.
 **Check:** the first wiki-ingest row on Compute after the deploy names Opus 4.6,
 not Haiku. Rows already logged keep their old label; nothing rewrites history.
 None has run yet — the wiki is gated until the 5h window resets at 01:50.
-
-### H5. Give chat its own model
-
-A program's `chat_model` sets the model chat turns run on, and is edited in
-program settings beside the planner model (uncommitted, not deployed).
-
-**Check:** in program settings on p2, set chat to a model different from the
-planner, send a chat message, and the new chat row on Compute names the chat
-model. An existing program with no `chat_model` in `program.md` still chats on
-its planner model — unset resolves to `pm_model`, not `DEFAULT_MODEL`.
-
-### H4. Give a program a default worker model
-
-A program's `worker_model` is the model its new sprints take when proposed —
-human proposals, PM proposals that name no model, and PM artifact tasks
-(uncommitted, not deployed).
-
-**Check:** set p5's worker model in program settings, then the next sprint the PM
-proposes for p5 without its own model shows that model on its page, while every
-sprint that existed before keeps its model. Clearing a sprint's model in its edit
-dialog returns it to the program default, not the platform one. The PM prompt no
-longer promises `DEFAULT_MODEL` for an omitted model.
 
 # To Do
 
@@ -341,6 +319,16 @@ are the cheap ones before wiring it.
 
 # Done
 
+### H5. Give chat its own model
+
+Each program has a chat model of its own, set in program settings, and an unset
+one keeps chatting on the planner's model.
+
+### H4. Give a program a default worker model
+
+Each program has a worker model that new sprints take when proposed, shown with
+the other three in a Models grid in program settings.
+
 ### K4. Mark how far into the window we are on the usage bars
 
 Both usage bars carry a tick at the elapsed fraction of the 5h and weekly windows,
@@ -380,13 +368,3 @@ saying "Program".
 
 A run killed by a 429 is recorded as `deferred`: its batch stays pending for a
 later beat but never counts toward the quarantine threshold.
-
-### B3. Stop blaming wiki runs for other actors' writes
-
-`_escaped` ignores the areas other subsystems write, and an escape is now
-reported without discarding the batch or counting toward quarantine.
-
-### F3. Record the 5h window either side of each call
-
-`wiki_agent` feeds `record_limits` like the other call sites, and the launch
-stamp falls back through `read_budget` instead of going blank after 15 minutes.
