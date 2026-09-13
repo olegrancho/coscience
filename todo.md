@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 39
+version: 41
 last_updated: 2026-09-13
 ---
 
@@ -19,35 +19,36 @@ sprint has no priority over fresh work, so waiting on its own results is expecte
 Already passed on 09-12 23:10: four sleeping sprints held leases with no `workers`
 key and live jobs, and peak concurrent worker calls since the commit was 3.
 
-### K2. Give the program wiki card something to say
-
-The wiki card shows a page-type bar in the graph's hues, a count per type, the
-pending count, and the kind and age of the last run (uncommitted, not deployed).
-
-**Check:** after deploy and a hard reload, the Wiki card on `/programs/p2` and
-`/programs/p5` — counts match the wiki's own page listing, colours match the
-graph view, and "last ingest … ago" matches the newest run on Compute. An empty
-wiki still shows the old one-line description.
-
-### K4. Mark how far into the window we are on the usage bars
-
-Both usage bars — the rail's and Compute's — carry a thin tick at the elapsed
-fraction of the 5h and weekly windows; readings now keep `resets_at` as an epoch
-(uncommitted, not deployed).
-
-**Check:** after deploy, the 5h tick sits at `1 − (time to reset) / 5h` — e.g. 2h
-before a reset it is at 60% — and the weekly tick moves about 0.6% an hour. An
-idle host reading through the usage script still shows ticks; that path takes the
-epoch from `~/.claude/statusline-usage-cache.json`, and shows no tick if that file
-is unreadable.
-
 ### F9. Label a wiki call by the model that did the work
 
 `read_outcome` takes the model with the largest `costUSD` in `modelUsage`
+(`0c48111`, deployed 09-13 00:12).
+
+**Check:** the first wiki-ingest row on Compute after the deploy names Opus 4.6,
+not Haiku. Rows already logged keep their old label; nothing rewrites history.
+None has run yet — the wiki is gated until the 5h window resets at 01:50.
+
+### H5. Give chat its own model
+
+A program's `chat_model` sets the model chat turns run on, and is edited in
+program settings beside the planner model (uncommitted, not deployed).
+
+**Check:** in program settings on p2, set chat to a model different from the
+planner, send a chat message, and the new chat row on Compute names the chat
+model. An existing program with no `chat_model` in `program.md` still chats on
+its planner model — unset resolves to `pm_model`, not `DEFAULT_MODEL`.
+
+### H4. Give a program a default worker model
+
+A program's `worker_model` is the model its new sprints take when proposed —
+human proposals, PM proposals that name no model, and PM artifact tasks
 (uncommitted, not deployed).
 
-**Check:** the first wiki-ingest row on Compute after deploy names Opus 4.6, not
-Haiku. Rows already logged keep their old label; nothing rewrites history.
+**Check:** set p5's worker model in program settings, then the next sprint the PM
+proposes for p5 without its own model shows that model on its page, while every
+sprint that existed before keeps its model. Clearing a sprint's model in its edit
+dialog returns it to the program default, not the platform one. The PM prompt no
+longer promises `DEFAULT_MODEL` for an omitted model.
 
 # To Do
 
@@ -338,42 +339,17 @@ model; a sprint status change, an idea comment or a feedback reply is mundane an
 does not. Worth confirming against the call log that the mundane triggers really
 are the cheap ones before wiring it.
 
-### H4. Give a program a default worker model
-
-Add `worker_model` beside `pm_model` and `wiki_model`, so sprints inherit a
-program's choice instead of a global constant.
-
-Two of the three agent kinds are already configurable per program; the worker is
-not. `Sprint.model` falls back to `DEFAULT_MODEL` (`claude-sonnet-5`,
-`models.py:37`), so every sprint in every program starts from the same hardcoded
-value and has to be overridden one sprint at a time — awkward for a program like
-p5, whose work is heavier than the default assumes.
-
-The shape already exists twice: `Program.__post_init__` resolves an empty
-`pm_model`/`wiki_model` to `DEFAULT_MODEL`, `substrate.py` round-trips both, and
-`ModelSelect` renders the picker. Two things to decide — the precedence (a
-sprint's own model over the program default over `DEFAULT_MODEL`), and whether
-changing the program default touches sprints already proposed. It probably should
-not: those were reviewed and approved with a model attached, and moving them
-underneath a human who has already looked at them is a surprise.
-
-### H5. Give chat its own model
-
-Add `chat_model` so a conversation is not silently bound to whatever the PM
-reasoner is set to.
-
-Chat borrows `program.pm_model` (`service.py:930`), which means changing the
-PM's model to tune autonomous planning also changes what you are talking to, and
-neither choice can be made without moving the other. Chat is also the one agent
-with a human waiting on it — it fails open on usage where the autonomous three
-fail closed — so its tradeoff is genuinely different: latency matters, and so does
-wanting the strongest model precisely because someone is thinking with it.
-
-With this and H4 all four agent kinds — pm, wiki, worker, chat — have their own
-model, which is the point at which four scattered fields want collecting into one
-"models" group in `ProgramSettingsModal` rather than being added one at a time.
-
 # Done
+
+### K4. Mark how far into the window we are on the usage bars
+
+Both usage bars carry a tick at the elapsed fraction of the 5h and weekly windows,
+fed by a `resets_at` epoch on every usage reading.
+
+### K2. Give the program wiki card something to say
+
+The program's wiki card shows page counts by type as a coloured bar, the pending
+count, and when the last run landed.
 
 ### K1. Group the programs overview by state
 
@@ -414,13 +390,3 @@ reported without discarding the batch or counting toward quarantine.
 
 `wiki_agent` feeds `record_limits` like the other call sites, and the launch
 stamp falls back through `read_budget` instead of going blank after 15 minutes.
-
-### F4. Add the call log to the Compute page
-
-`/api/usage/calls` and the `CallLog` table on `/ledger`, with all ten columns,
-filters, pagination, and a live-agent readout in the rail's Pulse.
-
-### G1. Give housekeeping agents a slot pool
-
-PM and wiki runs now take a `housekeepers` lease before launching, so the six-way
-pile-up that drove the 5h window from 26% to 116% cannot recur.
