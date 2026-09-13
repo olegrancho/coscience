@@ -20,6 +20,10 @@ interface NewArtifactRow { aid: string; title: string; kind: string }
 export default function ProposeSprintModal({ programId, opened, onClose, onDone, fromIdea }: Props) {
   const [id, setId] = useState("");
   const [goals, setGoals] = useState("");
+  const [title, setTitle] = useState("");
+  const [summary, setSummary] = useState("");
+  const [rationale, setRationale] = useState("");
+  const [drafting, setDrafting] = useState(false);
 
   // Seed from the idea each time the dialog opens for it; typing afterwards wins.
   useEffect(() => {
@@ -49,6 +53,19 @@ export default function ProposeSprintModal({ programId, opened, onClose, onDone,
     setNewArtifacts((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
   const removeRow = (i: number) => setNewArtifacts((rows) => rows.filter((_, idx) => idx !== i));
 
+  // The planner drafts every field a PM proposal carries; the human edits, then submits.
+  const draft = async () => {
+    if (!fromIdea) return;
+    setError("");
+    setDrafting(true);
+    try {
+      const d = await api.draftSprintFromIdea(programId, fromIdea.id);
+      setId(d.id); setTitle(d.title); setSummary(d.summary); setGoals(d.goals);
+      setSteps(d.plan.join("\n")); setPriority(d.priority); setRationale(d.rationale);
+    } catch (e) { setError(String(e)); }
+    finally { setDrafting(false); }
+  };
+
   const submit = async () => {
     setError("");
     try {
@@ -62,6 +79,9 @@ export default function ProposeSprintModal({ programId, opened, onClose, onDone,
         ...(boundIds.length ? { artifacts_bound: boundIds } : {}),
         ...(artifactsCreate.length ? { artifacts_create: artifactsCreate } : {}),
         ...(fromIdea ? { from_idea: fromIdea.id } : {}),
+        ...(title.trim() ? { title: title.trim() } : {}),
+        ...(summary.trim() ? { summary: summary.trim() } : {}),
+        ...(rationale.trim() ? { rationale: rationale.trim() } : {}),
       });
       onDone(); onClose();
     } catch (e) { setError(String(e)); }
@@ -70,10 +90,23 @@ export default function ProposeSprintModal({ programId, opened, onClose, onDone,
   return (
     <Modal opened={opened} onClose={onClose} title={fromIdea ? "Make a sprint from this idea" : "Propose sprint"}>
       <Stack>
+        {fromIdea && (
+          <Group justify="space-between" wrap="nowrap" gap={8}>
+            <Text size="xs" c="dimmed">Let the planner fill this in from the idea, then edit it.</Text>
+            <Button variant="light" color="machine" size="xs" loading={drafting} onClick={draft}>
+              Draft with AI
+            </Button>
+          </Group>
+        )}
         <TextInput label="Sprint id" value={id} onChange={(e) => setId(e.currentTarget.value)} />
-        <Textarea label="Goals" value={goals} onChange={(e) => setGoals(e.currentTarget.value)} />
+        <TextInput label="Title" value={title} onChange={(e) => setTitle(e.currentTarget.value)} />
+        <Textarea label="Summary" value={summary} autosize minRows={1}
+                  onChange={(e) => setSummary(e.currentTarget.value)} />
+        <Textarea label="Goals" value={goals} autosize minRows={2} onChange={(e) => setGoals(e.currentTarget.value)} />
         <Textarea label="Suggested steps (one per line — guidance for the agent)" value={steps}
                   autosize minRows={2} onChange={(e) => setSteps(e.currentTarget.value)} />
+        <Textarea label="Rationale" value={rationale} autosize minRows={1}
+                  onChange={(e) => setRationale(e.currentTarget.value)} />
         <NumberInput label="Priority" value={priority}
                      onChange={(v) => setPriority(Number(v) || 0)} />
 

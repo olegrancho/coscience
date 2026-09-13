@@ -71,7 +71,8 @@ class Service:
                       preemptible: bool = True, resources_required: dict | None = None,
                       artifacts_bound: list | None = None,
                       artifacts_create: list | None = None,
-                      status: str = "proposed", from_idea: str = "") -> str:
+                      status: str = "proposed", from_idea: str = "",
+                      title: str = "", summary: str = "", rationale: str = "") -> str:
         if not plan:
             raise ValueError("plan must have at least one suggested step")
         if (self.substrate.sprint_dir(id) / "sprint.md").is_file():
@@ -94,6 +95,7 @@ class Service:
             artifacts_bound=[str(a) for a in (artifacts_bound or [])],
             artifacts_create=[dict(c) for c in (artifacts_create or [])],
             model=self._worker_default(program),
+            title=str(title or ""), summary=str(summary or ""), rationale=str(rationale or ""),
         )
         self.substrate.save_sprint(sprint)
         if from_idea:
@@ -113,6 +115,37 @@ class Service:
                 self.substrate.save_sprint(sprint_by_id[nid])
         self.substrate.save_ideas(program_id, summary, [i for i in ideas if i.id != idea_id])
         self.substrate.commit(f"program {program_id}: idea {idea_id} promoted to sprint {sprint_id}")
+
+    def draft_sprint_from_idea(self, program_id: str, idea_id: str, drafter=None) -> dict:
+        """The planner drafts a proposal from a pool idea — the fields a PM proposal
+        carries — for a human to review in the proposal form. Nothing is written but
+        the call's row: submitting the form is still what creates the sprint."""
+        self._require_program(program_id)
+        _summary, ideas = self.substrate.load_ideas(program_id)
+        idea = next((i for i in ideas if i.id == idea_id), None)
+        if idea is None:
+            raise NotFoundError(idea_id)
+        from coscience import usage_meter
+        from coscience.executor import process_token
+        from coscience.pm_agent import gather_context
+        from coscience.pm_claude import draft_sprint
+        ctx = gather_context(self.substrate, program_id)
+        # The call runs inside this server process, so that process is its token.
+        call = usage_meter.start_call(self.substrate.repo_root, "pm-draft", program=program_id,
+                                      model=ctx.model, limits=usage_meter.current_window(),
+                                      token=process_token(os.getpid()))
+        try:
+            draft, env = (drafter or draft_sprint)(ctx, idea.text)
+        except Exception:
+            usage_meter.finish_call(self.substrate.repo_root, call, status="failed", model=ctx.model)
+            raise
+        before, after = env.get("limits") or (None, None)
+        usage_meter.finish_call(self.substrate.repo_root, call, status="ok", model=ctx.model,
+                                cost=env.get("total_cost_usd"), turns=env.get("num_turns"),
+                                limits=after, limits_before=before)
+        suffix = "".join(ch if ch.isalnum() else "-" for ch in str(draft.pop("suffix", "")).lower())
+        suffix = "-".join(part for part in suffix.split("-") if part) or f"idea-{idea_id}"
+        return {"id": f"{program_id}-{suffix}", **draft}
 
     def approve_sprint(self, sprint_id: str, by: str = "") -> None:
         """Human authorization: proposed -> approved. Cleared to run, but held

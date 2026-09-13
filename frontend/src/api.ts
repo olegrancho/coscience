@@ -410,11 +410,16 @@ export const api = {
                          priority?: number; resources_required?: Record<string, number>;
                          artifacts_bound?: string[];
                          artifacts_create?: { aid: string; title: string; kind: string }[];
-                         from_idea?: string }) =>
+                         from_idea?: string; title?: string; summary?: string;
+                         rationale?: string }) =>
     fetch("/api/sprints", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then(j<Sprint>),
+  draftSprintFromIdea: (programId: string, ideaId: string) =>
+    fetch(`/api/programs/${programId}/ideas/${ideaId}/draft-sprint`, { method: "POST" })
+      .then(j<{ id: string; title: string; summary: string; goals: string; plan: string[];
+                priority: number; rationale: string }>),
   approveSprint: (id: string) =>
     fetch(`/api/sprints/${id}/approve`, { method: "POST" }).then(j<Sprint>),
   runSprint: (id: string) =>

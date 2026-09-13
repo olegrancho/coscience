@@ -56,6 +56,9 @@ class SprintSubmit(BaseModel):
     artifacts_bound: list[str] | None = None
     artifacts_create: list[dict] | None = None
     from_idea: str = ""                     # promote this pool idea into the sprint
+    title: str = ""
+    summary: str = ""
+    rationale: str = ""
 
 
 class ArtifactAdoptIn(BaseModel):
@@ -296,10 +299,21 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
                 artifacts_bound=body.artifacts_bound,
                 artifacts_create=body.artifacts_create,
                 from_idea=body.from_idea,
+                title=body.title, summary=body.summary, rationale=body.rationale,
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
         return service.get_sprint(body.id)
+
+    @api.post("/programs/{program_id}/ideas/{idea_id}/draft-sprint")
+    def draft_sprint_from_idea(program_id: str, idea_id: str) -> dict:
+        from coscience.pm_claude import PMReasonerError
+        try:
+            return service.draft_sprint_from_idea(program_id, idea_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"not found: {exc}")
+        except PMReasonerError as exc:
+            raise HTTPException(status_code=502, detail=str(exc))
 
     @api.get("/sprints/{sprint_id}")
     def get_sprint(sprint_id: str, viewer: str = "") -> dict:

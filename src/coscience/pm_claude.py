@@ -638,3 +638,73 @@ def chat_reply(context: PMContext, history: list[dict], message: str,
     if proc.returncode != 0:
         raise PMReasonerError(f"claude exited {proc.returncode}: {(proc.stderr or '')[:200]}")
     return (proc.stdout or "").strip()
+
+
+def render_draft_prompt(context: PMContext, idea_text: str) -> str:
+    """The planner drafting ONE proposal from a pool idea a human picked. Same fields
+    and the same writing rules as a proposal in its own cycle, without the rest of
+    the cycle: no pool curation, no report, no edits."""
+    def _lines(items, fmt):
+        return "\n".join(fmt(i) for i in items) or "(none)"
+    open_block = _lines(context.open_sprints, lambda s: f"- {s['id']} [{s['status']}]: {s['goals']}")
+    done_block = _lines(context.completed, lambda s: f"- {s['id']}: {s['goals']} -> {s['result']}")
+    return f"""You are the PM (planning) agent for a research program. A human picked an idea from
+the pool and wants it turned into ONE sprint proposal. Draft it as you would draft a proposal
+of your own; the human reviews and edits it before submitting, so do not ask questions.
+
+Your session runs in this program's working directory; look there only if the idea needs it.
+Full results live in {context.results_dir or "(not given)"}.
+
+PROGRAM GOALS:
+{context.goals}{render_instructions(context.instructions)}
+
+OPEN SPRINTS (proposed / approved / running):
+{open_block}
+
+COMPLETED SPRINTS AND RESULTS:
+{done_block}
+
+THE IDEA TO PROMOTE:
+{idea_text}
+
+Reply with ONLY this JSON object and nothing else:
+{{"suffix": "<short-slug>",
+  "title": "<=8 words naming the experiment>",
+  "summary": "one or two plain sentences a reviewer can skim to decide",
+  "goals": "<the full objective as STRUCTURED markdown: 2-4 SHORT paragraphs separated by a blank line (\\n\\n), and '-' bullets for any list of conditions/probes/sub-questions>",
+  "plan": ["<suggested step in plain language>", "<another>", "..."],
+  "priority": <int>,
+  "rationale": "<why this experiment next; 1-3 sentences>"}}"""
+
+
+def draft_sprint(context: PMContext, idea_text: str,
+                 claude_bin: str = "claude") -> tuple[dict, dict]:
+    """One planner call drafting a sprint from a pool idea. Returns (draft, envelope):
+    the proposal fields, and the run's final envelope with `limits` set to the
+    (before, after) 5h windows so the caller can log the call.
+
+    Read-only tools: a draft may look at the program's files, never change them."""
+    cmd = [claude_bin, "-p", "--output-format", "stream-json", "--verbose",
+           "--tools", "Read,Glob,Grep"]
+    if context.model:
+        cmd += ["--model", context.model]
+    # Prompt on STDIN — see _default_invoke.
+    proc = subprocess.run(cmd, input=render_draft_prompt(context, idea_text),
+                          capture_output=True, text=True, cwd=context.workdir or None)
+    opened, info = agent_stream.parse_rate_limits(proc.stdout or "")
+    usage_meter.record_limits(info)
+    if proc.returncode != 0:
+        raise PMReasonerError(f"claude exited {proc.returncode}: {(proc.stderr or '')[:200]}")
+    env = _final_envelope(proc.stdout or "") or {}
+    data = _decode_json_object(str(env.get("result") or proc.stdout or ""))
+    plan = data.get("plan")
+    try:
+        priority = int(data.get("priority", 0))
+    except (TypeError, ValueError):
+        priority = 0
+    draft = {"suffix": str(data.get("suffix") or ""), "title": str(data.get("title") or ""),
+             "summary": str(data.get("summary") or ""), "goals": str(data.get("goals") or ""),
+             "plan": [str(s) for s in plan] if isinstance(plan, list) else [],
+             "priority": priority, "rationale": str(data.get("rationale") or "")}
+    env["limits"] = (usage_meter.five_hour_window(opened), usage_meter.five_hour_window(info))
+    return draft, env

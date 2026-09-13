@@ -90,3 +90,28 @@ describe("promote an idea", () => {
       expect.objectContaining({ id: "p-idea-i1", program: "p", from_idea: "i1" })));
   });
 });
+
+describe("draft a promotion with the planner", () => {
+  it("fills the proposal from the planner's draft", async () => {
+    window.ResizeObserver = window.ResizeObserver || (class {
+      observe() {} unobserve() {} disconnect() {}
+    } as any);
+    vi.spyOn(api, "listIdeas").mockResolvedValue({ summary: "", ideas: [
+      { id: "i1", text: "Try rescoring with waters", source: "human", by: "", pinned: true,
+        protected: true, threads: [], created_at: 0, demoted: false },
+    ] } as any);
+    const draft = vi.spyOn(api, "draftSprintFromIdea").mockResolvedValue({
+      id: "p-waters", title: "Rescore with waters", summary: "S", goals: "G",
+      plan: ["a", "b"], priority: 3, rationale: "R" });
+    renderAt();
+
+    fireEvent.click(await screen.findByLabelText("make a sprint"));
+    fireEvent.click(await screen.findByText("Draft with AI"));
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Rescore with waters"));
+    expect(draft).toHaveBeenCalledWith("p", "i1");
+    expect((screen.getByLabelText("Goals") as HTMLTextAreaElement).value).toBe("G");
+    expect((screen.getByLabelText("Sprint id") as HTMLInputElement).value).toBe("p-waters");
+  });
+});
