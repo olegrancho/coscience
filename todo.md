@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 42
+version: 43
 last_updated: 2026-09-13
 ---
 
@@ -27,6 +27,18 @@ key and live jobs, and peak concurrent worker calls since the commit was 3.
 **Check:** the first wiki-ingest row on Compute after the deploy names Opus 4.6,
 not Haiku. Rows already logged keep their old label; nothing rewrites history.
 None has run yet — the wiki is gated until the 5h window resets at 01:50.
+
+### F8. Decide a call is lost by its process, not its age
+
+Every call's start event carries its process token, and `calls()` keeps a call
+`running` for as long as that process is alive (uncommitted, not deployed).
+
+**Check:** after deploy, while a worker run passes 15 minutes, the rail's live
+agents still count it and its Compute row reads `running`, not `lost`. Only half
+of F8 landed: a dead process still reads `running` until the 15-minute grace,
+because a finished chat turn has no end event until its thread is next opened,
+and declaring it lost at once would mislabel it. Rows started before the deploy
+carry no token and keep the old age rule.
 
 # To Do
 
@@ -101,19 +113,6 @@ Every wiki run dir holds a result envelope with `total_cost_usd`, `modelUsage`,
 `duration_ms` and a `rate_limit_event`; sprint dirs hold the worker sidecars. So
 the history is recoverable rather than starting from zero, and it is the only way
 the 08-30..09-01 wiki spend ever reaches the page.
-
-### F8. Decide a call is lost by its process, not its age
-
-Record the agent's process token on the call's start event and infer `running` or
-`lost` from whether that process is alive.
-
-`calls()` marks any start older than `CALL_GRACE` (15 min) with no end as `lost`,
-so healthy workers vanish from the rail's live-agent count and read as failures on
-Compute — on 09-12 two p2 workers at 35 and 40 min showed `lost` while running, and
-8 of 27 finished worker calls ran past 15 min (longest 67). It fails the other way
-too: an agent that dies at minute 2 shows `running` until minute 15. The token is
-`pid:starttime` and the dispatcher's reconcile already checks it against `/proc`
-with a pid-reuse guard; keep the age rule only for calls started without a token.
 
 ## I. Wiki responsiveness
 
