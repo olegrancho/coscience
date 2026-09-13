@@ -202,6 +202,9 @@ class Dispatcher:
         # version), so a walked-away editing session frees the artifact.
         reaped = 0
         for program in self.substrate.iter_programs():
+            # Before the reaper: a collected turn is no longer busy, so its lock
+            # can be judged on idleness like any other.
+            self._collect_chats(program.id)
             reaped += len(artifacts.reap_stale_chat_locks(
                 self.substrate, program.id, now, holder_busy=self._chat_busy(program.id)))
             if program.status == ProgramStatus.ACTIVE:
@@ -226,6 +229,18 @@ class Dispatcher:
             return wiki.beat(self.substrate, program, now, self._wiki_agent)
         except Exception as exc:
             return f"wiki: error — {exc}"[:200]
+
+    def _collect_chats(self, program_id: str) -> None:
+        """Collect finished chat turns without waiting for someone to open the thread,
+        so every Claude call gets its end within a cycle of finishing. Like the wiki
+        beat, never allowed to break sprint supervision."""
+        from coscience import chat_agent
+        try:
+            for thread in self.substrate.list_chat_threads(program_id):
+                if thread.pending:
+                    chat_agent.collect_thread(self.substrate, program_id, thread)
+        except Exception:
+            pass
 
     def _chat_busy(self, program_id: str):
         """Predicate for the reaper: a lock holder id 'chat:<tid>' is 'busy' (protect

@@ -297,10 +297,10 @@ def test_an_unfinished_call_whose_process_is_alive_stays_running_past_the_grace(
     assert call["status"] == "running"
 
 
-def test_a_dead_process_is_lost_once_the_grace_passes(tmp_path):
+def test_a_dead_process_is_lost_at_once_not_after_the_grace(tmp_path):
+    """F10: an agent that died at minute 2 read `running` until minute 15."""
     usage_meter.start_call(tmp_path, "worker", now=100.0, token="999999999:1")
-    assert usage_meter.calls(tmp_path, now=110.0, grace=60.0)[0]["status"] == "running"
-    assert usage_meter.calls(tmp_path, now=100_000.0, grace=60.0)[0]["status"] == "lost"
+    assert usage_meter.calls(tmp_path, now=110.0, grace=60.0)[0]["status"] == "lost"
 
 
 def test_a_token_that_is_not_a_process_falls_back_to_age(tmp_path):

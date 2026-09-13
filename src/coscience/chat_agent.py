@@ -180,3 +180,46 @@ def collect_turn(thread_dir: Path) -> tuple[str, str, str]:
     if result is None:
         return (raw or "(no output)"), "", status
     return result.text, result.session_id, status
+
+
+def collect_thread(substrate, program_id: str, thread):
+    """Collect a thread's in-flight turn once its exit sentinel appears (append the
+    PM reply, capture the session id, clear busy, close the call), or close it as
+    interrupted when the agent died without one. Returns the thread.
+
+    Called both when a thread is read and from every dispatcher cycle. Collection
+    used to happen only on a read, so a finished turn had no end event until
+    someone opened the thread — which is what kept `calls()` from treating a dead
+    process as lost."""
+    if not thread.pending:
+        return thread
+    import time
+    from coscience.executor import is_running
+    tdir = substrate.chat_thread_dir(program_id, thread.id)
+    text, sid, status = collect_turn(tdir)
+    if status == "running":
+        if thread.agent_token and not is_running(thread.agent_token):  # died, no exit
+            thread.messages.append({"role": "pm", "at": time.time(),
+                "text": "_(The chat agent stopped before replying — send the message again.)_"})
+            if thread.agent_call:
+                usage_meter.finish_call(substrate.repo_root, thread.agent_call,
+                                        status="interrupted",
+                                        limits=usage_meter.current_window())
+            thread.pending, thread.agent_token, thread.agent_call = False, "", ""
+            thread.messages = thread.messages[-200:]
+            substrate.save_chat_thread(program_id, thread)
+            substrate.commit(f"program {program_id}: chat {thread.id} interrupted")
+        return thread
+    reply = text if status == "ok" else (text or "_(The agent exited with an error.)_")
+    thread.messages.append({"role": "pm", "text": reply, "at": time.time()})
+    if thread.agent_call:
+        usage_meter.finish_call(substrate.repo_root, thread.agent_call,
+                                status=status, limits=usage_meter.current_window())
+    thread.pending, thread.agent_token, thread.agent_call = False, "", ""
+    thread.turns_done += 1
+    if sid:
+        thread.session_id = sid
+    thread.messages = thread.messages[-200:]
+    substrate.save_chat_thread(program_id, thread)
+    substrate.commit(f"program {program_id}: chat {thread.id} reply")
+    return thread

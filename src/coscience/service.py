@@ -799,39 +799,10 @@ class Service:
 
     def _collect_if_ready(self, program_id: str, thread: ChatThread) -> ChatThread:
         """If a turn is in flight, collect it once its exit sentinel appears (append
-        the PM reply, capture the session id, clear busy). Lazy — driven by polling."""
-        if not thread.pending:
-            return thread
-        from coscience import chat_agent, usage_meter
-        from coscience.executor import is_running
-        tdir = self.substrate.chat_thread_dir(program_id, thread.id)
-        text, sid, status = chat_agent.collect_turn(tdir)
-        if status == "running":
-            if thread.agent_token and not is_running(thread.agent_token):  # died, no exit
-                thread.messages.append({"role": "pm", "at": time.time(),
-                    "text": "_(The chat agent stopped before replying — send the message again.)_"})
-                if thread.agent_call:
-                    usage_meter.finish_call(self.substrate.repo_root, thread.agent_call,
-                                            status="interrupted",
-                                            limits=usage_meter.current_window())
-                thread.pending, thread.agent_token, thread.agent_call = False, "", ""
-                thread.messages = thread.messages[-200:]
-                self.substrate.save_chat_thread(program_id, thread)
-                self.substrate.commit(f"program {program_id}: chat {thread.id} interrupted")
-            return thread
-        reply = text if status == "ok" else (text or "_(The agent exited with an error.)_")
-        thread.messages.append({"role": "pm", "text": reply, "at": time.time()})
-        if thread.agent_call:
-            usage_meter.finish_call(self.substrate.repo_root, thread.agent_call,
-                                    status=status, limits=usage_meter.current_window())
-        thread.pending, thread.agent_token, thread.agent_call = False, "", ""
-        thread.turns_done += 1
-        if sid:
-            thread.session_id = sid
-        thread.messages = thread.messages[-200:]
-        self.substrate.save_chat_thread(program_id, thread)
-        self.substrate.commit(f"program {program_id}: chat {thread.id} reply")
-        return thread
+        the PM reply, capture the session id, clear busy). On a read; the dispatcher
+        also collects every pending thread each cycle."""
+        from coscience import chat_agent
+        return chat_agent.collect_thread(self.substrate, program_id, thread)
 
     def list_chats(self, program_id: str) -> list[dict]:
         self._require_program(program_id)

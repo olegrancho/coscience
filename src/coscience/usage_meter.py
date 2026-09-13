@@ -283,13 +283,16 @@ def calls(repo_root, now: float | None = None,
 
     Two events fold into one row. A start with no end is `running` while the
     process named by its token is alive, whatever its age — a worker run of an
-    hour is normal, and age alone had shown healthy ones as `lost`. Without a live
-    process it is `running` inside `grace` and `lost` beyond it. A dead process
-    is not declared lost at once, because some ends are written late: a chat turn
-    is collected only when its thread is next read. Either verdict is INFERRED
-    here rather than written by anyone, because the process that would have
-    written it is the one that died. A 429 is not that case — the agent exits
-    with a full envelope, so those arrive as `rate-limited` with their cost intact."""
+    hour is normal, and age alone had shown healthy ones as `lost` — and `lost`
+    as soon as that process is gone. Every site closes its call within a
+    dispatcher cycle of the process exiting (chat turns included, since the
+    dispatcher collects them), so a run that finished normally can read `lost`
+    only for that moment. A start with no process token (older rows, test fakes)
+    keeps the age rule: `running` inside `grace`, `lost` beyond it. Either verdict
+    is INFERRED here rather than written by anyone, because the process that
+    would have written it is the one that died. A 429 is not that case — the
+    agent exits with a full envelope, so those arrive as `rate-limited` with
+    their cost intact."""
     now = time.time() if now is None else now
     folded: dict[str, dict] = {}
     order: list[str] = []
@@ -339,16 +342,22 @@ def calls(repo_root, now: float | None = None,
             call["duration"] = round(call["ended_at"] - call["started_at"], 3)
         elif not call["status"]:
             # Never written, always derived — see the docstring.
-            age = now - (call["started_at"] or 0.0)
-            if _process_alive(tokens.get(rid, "")):
-                call["status"] = "running"
+            token = tokens.get(rid, "")
+            if _is_pid_token(token):
+                call["status"] = "running" if _process_alive(token) else "lost"
             else:
+                age = now - (call["started_at"] or 0.0)
                 call["status"] = "lost" if age > grace else "running"
         out.append(call)
 
     out.sort(key=lambda c: (c.get("ended_at") or c.get("started_at") or 0.0),
              reverse=True)
     return out
+
+
+def _is_pid_token(token: str) -> bool:
+    """A '<pid>:<starttime>' token this host can check, as opposed to none or a fake."""
+    return bool(token) and token.partition(":")[0].isdigit()
 
 
 def _process_alive(token: str) -> bool:
