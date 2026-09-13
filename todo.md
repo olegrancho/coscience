@@ -1,23 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 43
+version: 44
 last_updated: 2026-09-13
 ---
 
 # To QC
-
-### G3. Charge the worker slot to the agent, not to the lease
-
-A sprint asleep on a detached job keeps its lease but hands back `workers`, and
-takes it back at the point it launches an agent (`584d13b`).
-
-**Check:** once a sleeping sprint wakes — p5-c35 at 09-13 02:01, p2-c54 at 02:22 —
-it either shows `workers: 1` in `.coscience/leases.json` with a new worker row on
-Compute, or, with all three slots busy, waits with its job finished. A woken
-sprint has no priority over fresh work, so waiting on its own results is expected.
-
-Already passed on 09-12 23:10: four sleeping sprints held leases with no `workers`
-key and live jobs, and peak concurrent worker calls since the commit was 3.
 
 ### F9. Label a wiki call by the model that did the work
 
@@ -27,18 +14,6 @@ key and live jobs, and peak concurrent worker calls since the commit was 3.
 **Check:** the first wiki-ingest row on Compute after the deploy names Opus 4.6,
 not Haiku. Rows already logged keep their old label; nothing rewrites history.
 None has run yet — the wiki is gated until the 5h window resets at 01:50.
-
-### F8. Decide a call is lost by its process, not its age
-
-Every call's start event carries its process token, and `calls()` keeps a call
-`running` for as long as that process is alive (uncommitted, not deployed).
-
-**Check:** after deploy, while a worker run passes 15 minutes, the rail's live
-agents still count it and its Compute row reads `running`, not `lost`. Only half
-of F8 landed: a dead process still reads `running` until the 15-minute grace,
-because a finished chat turn has no end event until its thread is next opened,
-and declaring it lost at once would mislabel it. Rows started before the deploy
-carry no token and keep the old age rule.
 
 # To Do
 
@@ -113,6 +88,18 @@ Every wiki run dir holds a result envelope with `total_cost_usd`, `modelUsage`,
 `duration_ms` and a `rate_limit_event`; sprint dirs hold the worker sidecars. So
 the history is recoverable rather than starting from zero, and it is the only way
 the 08-30..09-01 wiki spend ever reaches the page.
+
+### F10. Declare a dead call lost without waiting out the grace
+
+Mark a call `lost` as soon as its process is gone and no end can still arrive,
+instead of after 15 minutes.
+
+F8 made a live process read `running` at any age, but a dead one still reads
+`running` for 15 minutes. It could not be declared lost at once because a chat
+turn's end is only written when its thread is next read (`_collect_if_ready`), so
+a finished turn would read `lost`. The fix is to collect chat turns without a
+reader — from the dispatcher beat, say — after which a dead token with no end
+really does mean lost.
 
 ## I. Wiki responsiveness
 
@@ -318,6 +305,16 @@ are the cheap ones before wiring it.
 
 # Done
 
+### F8. Decide a call is lost by its process, not its age
+
+Every call records its process token, and a call stays `running` for as long as
+that process is alive; a dead one still waits out the grace, which F10 tracks.
+
+### G3. Charge the worker slot to the agent, not to the lease
+
+A sprint asleep on a detached job holds its lease without a `workers` slot and
+takes one back when it launches an agent, as p2-c54 did on waking at 01:11.
+
 ### H5. Give chat its own model
 
 Each program has a chat model of its own, set in program settings, and an unset
@@ -357,13 +354,3 @@ Compute column fills even after an idle stretch with no OAuth token.
 
 `MODEL_OPTIONS` offers Fable 5.1, and a run on `claude-fable-5-1` is accepted end
 to end.
-
-### K3. Show the program's name in the wiki, not its slug
-
-The wiki pages and graph views name the program in their back link instead of
-saying "Program".
-
-### B1. Stop counting rate-limit deaths toward quarantine
-
-A run killed by a 429 is recorded as `deferred`: its batch stays pending for a
-later beat but never counts toward the quarantine threshold.
