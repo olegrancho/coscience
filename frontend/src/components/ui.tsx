@@ -443,21 +443,25 @@ export const MODEL_OPTIONS = [
 
 /** A compact model picker. Shows a free-text value not in the list as-is. */
 export function ModelSelect(
-  { value, onChange, disabled, label }:
-  { value: string; onChange: (m: string) => void; disabled?: boolean; label?: string },
+  { value, onChange, disabled, label, ariaLabel, fullWidth }:
+  { value: string; onChange: (m: string) => void; disabled?: boolean; label?: string;
+    ariaLabel?: string;     // accessible name when the visible title lives outside
+    fullWidth?: boolean },
 ) {
   const opts = MODEL_OPTIONS.some((o) => o.value === value)
     ? MODEL_OPTIONS : [...MODEL_OPTIONS, { value, label: value }];
   return (
-    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+    <label style={{ display: fullWidth ? "flex" : "inline-flex", alignItems: "center", gap: 6, fontSize: 12 }}>
       {label && <span style={{ color: "var(--ink-muted)" }}>{label}</span>}
       <select
         className="mono"
         value={value}
         disabled={disabled}
+        aria-label={ariaLabel}
         onChange={(e) => onChange(e.target.value)}
-        style={{ fontSize: 12, padding: "3px 6px", background: "var(--surface)",
-                 color: "var(--ink)", border: "1px solid var(--hairline)", borderRadius: 6 }}
+        style={{ fontSize: 12, padding: fullWidth ? "5px 8px" : "3px 6px", background: "var(--surface)",
+                 color: "var(--ink)", border: "1px solid var(--hairline)", borderRadius: 6,
+                 width: fullWidth ? "100%" : undefined, opacity: disabled ? 0.5 : 1 }}
       >
         {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>

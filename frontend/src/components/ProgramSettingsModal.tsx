@@ -1,6 +1,6 @@
 import { ActionIcon, Button, Checkbox, Group, Modal, NumberInput, Stack, Text, Textarea, TextInput, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type Program } from "../api";
 import DirectoryPickerModal from "./DirectoryPickerModal";
 import { MergePolicySelect, ModelSelect } from "./ui";
@@ -118,17 +118,29 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
             propose experiments; the wiki reads finished results and writes prose
             about them; chat has a human waiting on it. They reward different
             models, so none of them is "the model for this program". */}
-        <Stack gap={6}>
-          <Group gap={8} align="center">
-            <ModelSelect value={model} onChange={setModel} label="planner model" />
-            <ModelSelect value={chatModel} onChange={setChatModel} label="chat model" />
-            <ModelSelect value={workerModel} onChange={setWorkerModel} label="worker model" />
-          </Group>
-          <Group gap={8} align="center">
-            <ModelSelect value={wikiModel} onChange={setWikiModel} label="wiki model"
-                         disabled={!wikiEnabled} />
-            <MergePolicySelect value={wikiMerge} onChange={setWikiMerge}
-                                disabled={!wikiEnabled} />
+        <div>
+          <Text size="sm" fw={500}>Models</Text>
+          <Text size="xs" c="dimmed" mb={8}>Each job runs on its own model.</Text>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+            <ModelCard title="Planner" hint="Proposes experiments each cycle">
+              <ModelSelect fullWidth value={model} onChange={setModel} ariaLabel="planner model" />
+            </ModelCard>
+            <ModelCard title="Chat" hint="Answers you in program chat">
+              <ModelSelect fullWidth value={chatModel} onChange={setChatModel} ariaLabel="chat model" />
+            </ModelCard>
+            <ModelCard title="Workers" hint="Runs new experiments, unless one names its own">
+              <ModelSelect fullWidth value={workerModel} onChange={setWorkerModel} ariaLabel="worker model" />
+            </ModelCard>
+            <ModelCard title="Wiki" hint="Writes up finished results">
+              <ModelSelect fullWidth value={wikiModel} onChange={setWikiModel} ariaLabel="wiki model"
+                           disabled={!wikiEnabled} />
+            </ModelCard>
+          </div>
+        </div>
+
+        <div>
+          <Text size="sm" fw={500} mb={6}>Wiki</Text>
+          <Group gap={16} align="center">
             <Checkbox
               size="xs"
               label="build a wiki for this program"
@@ -136,14 +148,14 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
               checked={wikiEnabled}
               onChange={(e) => setWikiEnabled(e.currentTarget.checked)}
             />
+            <MergePolicySelect value={wikiMerge} onChange={setWikiMerge}
+                                disabled={!wikiEnabled} />
           </Group>
-          <Text size="xs" c="dimmed">
-            The planner proposes experiments; new experiments run on the worker model
-            unless they name their own; the wiki reads finished results and writes
-            them up. Unchecking stops wiki runs for this program entirely —
-            no ingest is launched and no quota is spent on it.
+          <Text size="xs" c="dimmed" mt={4}>
+            Unchecking stops wiki runs for this program entirely — no ingest is
+            launched and no quota is spent on it.
           </Text>
-        </Stack>
+        </div>
 
         <TextInput
           label="Project folder"
@@ -195,5 +207,19 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
         onPick={(picked) => setWorkdir(picked)}
       />
     </Modal>
+  );
+}
+
+/** One agent job and the model it runs on, as a small titled tile. */
+function ModelCard({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+  return (
+    <div style={{ border: "1px solid var(--hairline)", borderRadius: 8, padding: "8px 10px",
+                  display: "grid", gap: 6 }}>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 500 }}>{title}</div>
+        <div style={{ fontSize: 11, color: "var(--ink-muted)" }}>{hint}</div>
+      </div>
+      {children}
+    </div>
   );
 }
