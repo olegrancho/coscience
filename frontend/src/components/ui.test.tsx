@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 
-import { Gauge, MODEL_OPTIONS, ZoomableImg, tokenTitle } from "./ui";
+import { Gauge, MODEL_OPTIONS, UsageBar, ZoomableImg, tokenTitle, windowElapsed } from "./ui";
 
 // jsdom has no matchMedia; MantineProvider's color-scheme effect needs it.
 beforeAll(() => {
@@ -137,5 +137,33 @@ describe("MODEL_OPTIONS", () => {
     const fable = MODEL_OPTIONS.find((o) => o.value === "claude-fable-5-1");
     expect(fable).toBeTruthy();
     expect(fable!.label).toBe("Fable 5.1");
+  });
+});
+
+describe("windowElapsed", () => {
+  it("places a reading in its window from the reset epoch", () => {
+    expect(windowElapsed("5h", 1000 + 3600, 1000)).toBeCloseTo(0.8);   // 1h left of 5h
+    expect(windowElapsed("week", 1000 + 7 * 86400, 1000)).toBe(0);     // just reset
+    expect(windowElapsed("5h", 900, 1000)).toBe(1);                    // reset already passed
+  });
+
+  it("gives nothing to draw without an epoch", () => {
+    expect(windowElapsed("5h", undefined, 1000)).toBeNull();
+  });
+});
+
+describe("UsageBar", () => {
+  const bar = (elapsed?: number | null) => (
+    <MantineProvider><UsageBar label="5-hour" pct={60} resets="Sun 1:50" elapsed={elapsed} /></MantineProvider>
+  );
+
+  it("marks how far into the window we are", () => {
+    render(bar(0.25));
+    expect(screen.getByTestId("window-tick").style.left).toBe("25%");
+  });
+
+  it("draws no mark when the window position is unknown", () => {
+    render(bar());
+    expect(screen.queryByTestId("window-tick")).toBeNull();
   });
 });

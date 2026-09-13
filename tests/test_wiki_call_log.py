@@ -143,6 +143,16 @@ def test_outcome_reads_cost_and_status_from_the_envelope(tmp_path):
     assert got["usage"]["thinking_tokens"] == 3
 
 
+def test_outcome_names_the_model_that_did_the_work_not_the_first_listed(tmp_path):
+    """F9: p2 r0012 listed Haiku ($0.001, a Claude Code side call) ahead of Opus
+    ($2.32), and Compute labelled the whole run Haiku."""
+    (tmp_path / "agent.out").write_text(json.dumps(
+        {"type": "result", "total_cost_usd": 2.323,
+         "modelUsage": {"claude-haiku-4-5-20251001": {"costUSD": 0.001},
+                        "claude-opus-4-6": {"costUSD": 2.322}}}) + "\n")
+    assert wiki_agent.read_outcome(tmp_path)["model"] == "claude-opus-4-6"
+
+
 def test_outcome_of_a_missing_stream_is_empty_not_an_error(tmp_path):
     assert wiki_agent.read_outcome(tmp_path) == {}
 

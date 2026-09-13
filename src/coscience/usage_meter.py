@@ -423,25 +423,26 @@ def record_limits(info: dict | None) -> None:
 
 
 def _window(w) -> dict | None:
-    """One `unifiedWindows` entry as {pct, resets}. `utilization` there is a
-    FRACTION (0.57 == 57%), unlike the usage API's 0-100 — the two feed the same
-    dashboard field, so the conversion belongs in one place."""
+    """One `unifiedWindows` entry as {pct, resets, resets_at?}. `utilization` there
+    is a FRACTION (0.57 == 57%), unlike the usage API's 0-100 — the two feed the
+    same dashboard field, so the conversion belongs in one place. `resets_at` is the
+    epoch, kept so the dashboard can place how far into the window we are."""
     if not isinstance(w, dict) or w.get("utilization") is None:
         return None
     try:
         pct = round(float(w["utilization"]) * 100)
     except (TypeError, ValueError):
         return None
-    resets = "?"
+    out: dict = {"pct": pct, "resets": "?"}
     if w.get("resetsAt") is not None:
         try:
-            dt = (datetime.datetime.fromtimestamp(int(w["resetsAt"]),
-                                                  datetime.timezone.utc)
-                  .astimezone())
-            resets = f"{dt.strftime('%a')} {dt.hour}:{dt.strftime('%M')}"
+            at = int(w["resetsAt"])
+            dt = datetime.datetime.fromtimestamp(at, datetime.timezone.utc).astimezone()
+            out.update(resets=f"{dt.strftime('%a')} {dt.hour}:{dt.strftime('%M')}",
+                       resets_at=at)
         except (TypeError, ValueError, OSError):
-            resets = "?"
-    return {"pct": pct, "resets": resets}
+            pass
+    return out
 
 
 def five_hour_window(info) -> dict | None:
@@ -536,9 +537,37 @@ def read_budget(ttl: float = 300.0) -> dict | None:
     if out is None or _stale_reading(out, now):
         return None
     windows: dict[str, dict] = {}
+    epochs = _script_reset_epochs()
     for label, pct, reset in _USAGE_RE.findall(out):
         key = "week" if label.lower().startswith("week") else label.lower()
         windows[key] = {"pct": int(pct), "resets": reset.strip()}
+        if key in epochs:
+            windows[key]["resets_at"] = epochs[key]
     if not windows:
         return None
     return {"windows": windows, "live": "[live]" in out}
+
+
+def usage_script_cache_path() -> Path:
+    """Where the usage skill caches the API payload it printed from."""
+    override = os.environ.get("COSCIENCE_USAGE_SCRIPT_CACHE")
+    return Path(override) if override else (
+        Path.home() / ".claude" / "statusline-usage-cache.json")
+
+
+def _script_reset_epochs() -> dict[str, int]:
+    """{"5h"/"week": reset epoch} from the usage skill's cache. Its printed line
+    carries only "Sun 1:50", which the dashboard cannot place in time; the payload
+    it cached alongside has the ISO timestamp. Empty when unreadable."""
+    try:
+        data = json.loads(usage_script_cache_path().read_text())["data"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return {}
+    out = {}
+    for key, src in (("5h", "five_hour"), ("week", "seven_day")):
+        try:
+            iso = (data.get(src) or {})["resets_at"]
+            out[key] = int(datetime.datetime.fromisoformat(iso).timestamp())
+        except (AttributeError, KeyError, TypeError, ValueError):
+            continue
+    return out

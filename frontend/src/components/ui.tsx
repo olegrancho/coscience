@@ -279,8 +279,31 @@ export function formatReset(resets: string): string {
   return `${wd[1]} ${date}${tm ? " · " + tm[1] : ""}`;
 }
 
+const WINDOW_SPAN: Record<string, number> = { "5h": 5 * 3600, week: 7 * 86400 };
+
+/** How far into its window a usage reading is, 0..1 — null without a reset epoch. */
+export function windowElapsed(key: string, resetsAt?: number | null,
+                              now = Date.now() / 1000): number | null {
+  const span = WINDOW_SPAN[key];
+  if (!span || !resetsAt) return null;
+  return Math.max(0, Math.min(1, 1 - (resetsAt - now) / span));
+}
+
+/** A thin mark at the elapsed fraction of a usage window: fill ahead of it is spend
+ *  outrunning the clock. Sits in a `position: relative` box around the track. */
+export function WindowTick({ elapsed }: { elapsed: number | null }) {
+  if (elapsed == null) return null;
+  return (
+    <span data-testid="window-tick" title={`${Math.round(elapsed * 100)}% of the window elapsed`}
+      style={{ position: "absolute", left: `${elapsed * 100}%`, top: -3, bottom: -3, width: 2,
+        marginLeft: -1, borderRadius: 1, background: "var(--ink)" }} />
+  );
+}
+
 /** One Claude-usage window bar (5-hour / weekly), tinted by pressure. */
-export function UsageBar({ label, pct, resets }: { label: string; pct: number; resets: string }) {
+export function UsageBar({ label, pct, resets, elapsed = null }: {
+  label: string; pct: number; resets: string; elapsed?: number | null;
+}) {
   const color = pct >= 85 ? "var(--signal)" : pct >= 60 ? "#caa12a" : "var(--machine)";
   return (
     <div>
@@ -288,8 +311,11 @@ export function UsageBar({ label, pct, resets }: { label: string; pct: number; r
         <span className="mono" style={{ fontSize: 12, color: "var(--ink-muted)" }}>{label}</span>
         <span className="mono" style={{ fontSize: 12 }}>{pct}% · resets {formatReset(resets)}</span>
       </div>
-      <div style={{ height: 8, borderRadius: 999, background: "var(--paper-2)", overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${Math.min(100, pct)}%`, background: color }} />
+      <div style={{ position: "relative" }}>
+        <div style={{ height: 8, borderRadius: 999, background: "var(--paper-2)", overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${Math.min(100, pct)}%`, background: color }} />
+        </div>
+        <WindowTick elapsed={elapsed} />
       </div>
     </div>
   );
@@ -477,8 +503,10 @@ export function UsagePanel({ usage }: { usage: Usage }) {
     <Stack gap={16}>
       {usage.budget ? (
         <Stack gap={10}>
-          {w["5h"] && <UsageBar label="5-hour" pct={w["5h"].pct} resets={w["5h"].resets} />}
-          {w["week"] && <UsageBar label="weekly" pct={w["week"].pct} resets={w["week"].resets} />}
+          {w["5h"] && <UsageBar label="5-hour" pct={w["5h"].pct} resets={w["5h"].resets}
+            elapsed={windowElapsed("5h", w["5h"].resets_at)} />}
+          {w["week"] && <UsageBar label="weekly" pct={w["week"].pct} resets={w["week"].resets}
+            elapsed={windowElapsed("week", w["week"].resets_at)} />}
           {!usage.budget.live && <Text size="xs" c="dimmed">showing last cached reading</Text>}
         </Stack>
       ) : <Text size="sm" c="dimmed">Usage reading unavailable.</Text>}

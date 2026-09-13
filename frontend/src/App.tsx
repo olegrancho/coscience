@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import { useMe, UserChip } from "./auth";
 import LiveAgents from "./components/LiveAgents";
-import { Heartbeat } from "./components/ui";
+import { Heartbeat, WindowTick, windowElapsed } from "./components/ui";
 import Overview from "./views/Overview";
 import Programs from "./views/ProgramsOverview";
 import ProgramDetail from "./views/ProgramDetail";
@@ -121,9 +121,12 @@ function UsageBars() {
               <span>{label}</span>
               <span className="mono" style={{ color: hot ? "var(--signal)" : "var(--ink)" }}>{pct}%</span>
             </div>
-            <div style={{ height: 6, borderRadius: 6, background: "var(--hairline)", overflow: "hidden" }}>
-              <div style={{ width: `${pct}%`, height: "100%", borderRadius: 6,
-                background: hot ? "var(--signal)" : "var(--machine)", transition: "width .3s ease" }} />
+            <div style={{ position: "relative" }}>
+              <div style={{ height: 6, borderRadius: 6, background: "var(--hairline)", overflow: "hidden" }}>
+                <div style={{ width: `${pct}%`, height: "100%", borderRadius: 6,
+                  background: hot ? "var(--signal)" : "var(--machine)", transition: "width .3s ease" }} />
+              </div>
+              <WindowTick elapsed={windowElapsed(key, w.resets_at)} />
             </div>
             <div style={{ fontSize: 10, color: "var(--ink-faint)" }}>resets {w.resets}</div>
           </div>

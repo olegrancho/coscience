@@ -12,7 +12,8 @@ import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteC
 import ProposeSprintModal from "../components/ProposeSprintModal";
 import ProgramSettingsModal from "../components/ProgramSettingsModal";
 import LineageCard from "../components/LineageCard";
-import type { ArtifactRow } from "../api";
+import type { ArtifactRow, WikiSummary } from "../api";
+import { TYPE_HUE } from "../components/wikiGraphStyle";
 import { isUnseen, seedIfNew } from "../sprintSeen";
 import PageToc, { type TocEntry } from "../components/PageToc";
 
@@ -485,15 +486,54 @@ export default function ProgramDetail() {
               : null}
           </Link>
         </Group>
-        <Text size="sm" c="dimmed" mt={6}>
-          Concepts and entities compiled from this program's results and artifacts,
-          with every claim cited back to the object it came from.
-        </Text>
+        {wiki.data && (wiki.data.pages > 0 || wiki.data.pending > 0) ? <WikiStats s={wiki.data} /> : (
+          <Text size="sm" c="dimmed" mt={6}>
+            Concepts and entities compiled from this program's results and artifacts,
+            with every claim cited back to the object it came from.
+          </Text>
+        )}
       </Card>
 
       <div id="sec-lineage"><LineageCard programId={id} /></div>
 
       <ProposeSprintModal programId={id} opened={proposing} onClose={() => setProposing(false)} onDone={refresh} />
+    </Stack>
+  );
+}
+
+const WIKI_TYPES: [type: string, one: string, many: string][] = [
+  ["Concept", "concept", "concepts"], ["Entity", "entity", "entities"],
+  ["Synthesis", "synthesis", "syntheses"], ["Source", "source", "sources"],
+];
+
+/** What the wiki holds and how fresh it is: page types as a bar in the graph's hues,
+ *  then the pending backlog and when the last run landed. */
+function WikiStats({ s }: { s: WikiSummary }) {
+  const counts = s.counts ?? {};
+  const types = WIKI_TYPES.filter(([t]) => counts[t]);
+  const total = types.reduce((n, [t]) => n + counts[t], 0);
+  const hue = (t: string) => TYPE_HUE[t] ?? "var(--ink-faint)";
+  return (
+    <Stack gap={8} mt={12}>
+      {total > 0 && (
+        <div className="statebar" aria-hidden>
+          {types.map(([t]) => (
+            <span key={t} style={{ width: `${(counts[t] / total) * 100}%`, background: hue(t) }} />
+          ))}
+        </div>
+      )}
+      <Group gap={14}>
+        {types.map(([t, one, many]) => (
+          <span key={t} className="mono" style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: hue(t) }} />
+            {counts[t]} {counts[t] === 1 ? one : many}
+          </span>
+        ))}
+      </Group>
+      <Text size="xs" c="dimmed">
+        {s.pending} pending
+        {s.last_run && <> · last {s.last_run.kind} <RelTime at={s.last_run.at} /></>}
+      </Text>
     </Stack>
   );
 }

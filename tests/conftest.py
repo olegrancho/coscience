@@ -50,16 +50,19 @@ def _isolate_usage_reading(tmp_path):
     `monkeypatch.undo()` to drop the permissive stub above — that would take this
     isolation with it and let them read the host's real reading, so the gate would
     answer from it and never reach the script they are asserting on."""
-    prior = os.environ.get("COSCIENCE_LIMITS_CACHE")
-    os.environ["COSCIENCE_LIMITS_CACHE"] = str(tmp_path / "rate-limit.json")
+    isolated = {"COSCIENCE_LIMITS_CACHE": tmp_path / "rate-limit.json",
+                "COSCIENCE_USAGE_SCRIPT_CACHE": tmp_path / "usage-script-cache.json"}
+    prior = {k: os.environ.get(k) for k in isolated}
+    os.environ.update({k: str(v) for k, v in isolated.items()})
     usage_mod._output_cache.update(ts=0.0, out=None)
     try:
         yield
     finally:
-        if prior is None:
-            os.environ.pop("COSCIENCE_LIMITS_CACHE", None)
-        else:
-            os.environ["COSCIENCE_LIMITS_CACHE"] = prior
+        for k, v in prior.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
         usage_mod._output_cache.update(ts=0.0, out=None)
 
 

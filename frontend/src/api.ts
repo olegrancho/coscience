@@ -41,7 +41,7 @@ export interface SprintRow {
   model: string; activity: SprintActivity | null;
   votes: VoteTally;
 }
-export interface UsageWindow { pct: number; resets: string }
+export interface UsageWindow { pct: number; resets: string; resets_at?: number }
 export interface RunAgg {
   total: number; last_hour: number; last_day: number; last: number | null;
   cost: number; cost_day: number; tokens: number;

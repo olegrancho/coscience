@@ -140,7 +140,14 @@ def read_outcome(run_dir: Path) -> dict:
         out["tokens"] = usage.get("tokens")
     models = envelope.get("modelUsage")
     if isinstance(models, dict) and models:
-        out["model"] = next(iter(models))
+        # The costliest, not the first: Claude Code's own side calls (Haiku) can be
+        # listed ahead of the model that did the run.
+        def spent(name):
+            try:
+                return float((models[name] or {}).get("costUSD") or 0)
+            except (AttributeError, TypeError, ValueError):
+                return 0.0
+        out["model"] = max(models, key=spent)
     # 429 is not a plain failure: the agent ran, spent real money and exited with a
     # full envelope. B1 turns on telling the two apart, so the log must too.
     if envelope.get("is_error"):

@@ -110,3 +110,32 @@ def test_a_stale_usage_script_cache_reports_nothing_rather_than_a_frozen_number(
                             f"5h: 100% (resets Fri 6:40) | week: 52% (resets Sat 6:00) "
                             f"[cached {stamp}]")})())
     assert usage_meter.read_budget() is None
+
+
+def test_the_reading_keeps_each_reset_as_an_epoch():
+    # "Sun 1:50" cannot be placed in time; the dashboard's elapsed tick needs the epoch.
+    usage_meter.record_limits(EVENT["rate_limit_info"])
+    windows = usage_meter.read_limits()["windows"]
+    assert windows["5h"]["resets_at"] == 1788550200
+    assert windows["week"]["resets_at"] == 1788588000
+
+
+def test_the_script_fallback_takes_reset_epochs_from_the_skill_cache(monkeypatch, tmp_path):
+    cache = tmp_path / "skill-cache.json"
+    cache.write_text(json.dumps({"fetchedAtUtc": "2026-09-13T06:00:00Z", "data": {
+        "five_hour": {"utilization": 40.0, "resets_at": "2026-09-13T08:50:00+00:00"},
+        "seven_day": {"utilization": 7.0, "resets_at": "2026-09-14T06:00:00+00:00"}}}))
+    monkeypatch.setenv("COSCIENCE_USAGE_SCRIPT_CACHE", str(cache))
+    monkeypatch.setattr(usage_meter.subprocess, "run",
+                        lambda *a, **k: type("P", (), {"stdout": (
+                            "5h: 40% (resets Sun 1:50) | week: 7% (resets Sun 23:00) [live]")})())
+    windows = usage_meter.read_budget()["windows"]
+    assert windows["5h"] == {"pct": 40, "resets": "Sun 1:50", "resets_at": 1789289400}
+    assert windows["week"]["resets_at"] == 1789365600
+
+
+def test_the_script_fallback_still_reads_without_the_skill_cache(monkeypatch):
+    monkeypatch.setattr(usage_meter.subprocess, "run",
+                        lambda *a, **k: type("P", (), {"stdout": (
+                            "5h: 40% (resets Sun 1:50) | week: 7% (resets Sun 23:00) [live]")})())
+    assert usage_meter.read_budget()["windows"]["5h"] == {"pct": 40, "resets": "Sun 1:50"}

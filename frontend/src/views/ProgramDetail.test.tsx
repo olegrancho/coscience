@@ -124,6 +124,20 @@ describe("wiki link", () => {
     const link = await screen.findByRole("link", { name: /open wiki/i });
     expect(link.textContent).not.toMatch(/\d/);
   });
+
+  it("says what the wiki holds and when it last ran", async () => {
+    mockProgram("");
+    vi.spyOn(api, "getWikiSummary").mockResolvedValue({
+      pending: 2, pages: 30, counts: { Concept: 24, Entity: 5, Synthesis: 1 },
+      last_run: { id: "r1", kind: "ingest", status: "ok", at: Date.now() / 1000 - 3 * 3600 },
+    } as any);
+    renderAt();
+    expect(await screen.findByText(/24 concepts/)).toBeTruthy();
+    expect(screen.getByText(/1 synthesis$/)).toBeTruthy();
+    expect(screen.getByText(/2 pending/)).toBeTruthy();
+    expect(screen.getByText(/last ingest/)).toBeTruthy();
+    expect(screen.getByText("3h ago")).toBeTruthy();
+  });
 });
 
 describe("a transient fetch failure", () => {
