@@ -282,3 +282,29 @@ def test_a_launch_stamp_survives_a_run_that_reports_no_reading(tmp_path):
 
     (call,) = usage_meter.calls(tmp_path, now=300.0)
     assert call["limits_before"] == {"pct": 9, "resets": "Mon 17:10"}
+
+
+# --- F8: a live process is running whatever its age -------------------------
+
+def test_an_unfinished_call_whose_process_is_alive_stays_running_past_the_grace(tmp_path):
+    """Worker runs of 35-67 min showed `lost` while healthy, and dropped out of the
+    rail's live-agent count, because age alone decided."""
+    import os
+    from coscience.executor import process_token
+    usage_meter.start_call(tmp_path, "worker", sprint="p2-c28", now=100.0,
+                           token=process_token(os.getpid()))
+    (call,) = usage_meter.calls(tmp_path, now=100_000.0, grace=60.0)
+    assert call["status"] == "running"
+
+
+def test_a_dead_process_is_lost_once_the_grace_passes(tmp_path):
+    usage_meter.start_call(tmp_path, "worker", now=100.0, token="999999999:1")
+    assert usage_meter.calls(tmp_path, now=110.0, grace=60.0)[0]["status"] == "running"
+    assert usage_meter.calls(tmp_path, now=100_000.0, grace=60.0)[0]["status"] == "lost"
+
+
+def test_a_token_that_is_not_a_process_falls_back_to_age(tmp_path):
+    usage_meter.start_call(tmp_path, "worker", now=100.0, token="fake:1")
+    (call,) = usage_meter.calls(tmp_path, now=100_000.0, grace=60.0)
+    assert call["status"] == "lost"
+    assert "token" not in call

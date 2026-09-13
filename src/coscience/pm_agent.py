@@ -591,9 +591,11 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         # Opened before the call, closed after it either way. The reasoner runs
         # in-process, so a loop killed mid-cycle leaves only the start — which is
         # exactly the trace that says a window was spent with nothing to show.
+        from coscience.executor import process_token
         call_id = usage_meter.start_call(
             substrate.repo_root, "pm", program=program_id, model=context.model,
-            limits=usage_meter.current_window())
+            limits=usage_meter.current_window(),
+            token=process_token(os.getpid()))   # this loop IS the process doing the call
 
         def _record(ok: bool) -> None:
             housekeeping.release(substrate.repo_root, holder)

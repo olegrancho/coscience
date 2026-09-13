@@ -967,7 +967,7 @@ class Service:
         # spender that reached the ledger not at all.
         thread.agent_call = usage_meter.start_call(
             self.substrate.repo_root, "chat", program=program_id,
-            model=program.chat_model, limits=usage_meter.current_window())
+            model=program.chat_model, limits=usage_meter.current_window(), token=str(token))
         thread.messages = thread.messages[-200:]
         self.substrate.save_chat_thread(program_id, thread)
         self.substrate.commit(f"program {program_id}: chat {thread_id} message")

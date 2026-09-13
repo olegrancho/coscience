@@ -166,18 +166,23 @@ def _append(repo_root, rec: dict) -> None:
 
 
 def start_call(repo_root, kind: str, *, program: str = "", sprint: str = "",
-               model: str = "", limits=None, now: float | None = None) -> str:
+               model: str = "", limits=None, token: str = "",
+               now: float | None = None) -> str:
     """Record that a Claude call is beginning; returns the id to finish it with.
 
     The launch half exists so a call that never comes back still leaves a trace.
     An end-only row cannot describe a killed process, and killed processes are
     most of what the log is for. Best-effort: an id is returned even if the write
-    failed, so a caller never has to handle logging errors."""
+    failed, so a caller never has to handle logging errors.
+
+    `token` is the '<pid>:<starttime>' of the process doing the call, so `calls()`
+    can tell a long run from a dead one."""
     rid = uuid.uuid4().hex[:16]
     try:
         rec = {"ev": "start", "rid": rid, "ts": time.time() if now is None else now,
                "kind": kind}
-        for key, val in (("program", program), ("sprint", sprint), ("model", model)):
+        for key, val in (("program", program), ("sprint", sprint), ("model", model),
+                         ("token", token)):
             if val:
                 rec[key] = val
         if limits:
@@ -276,15 +281,20 @@ def calls(repo_root, now: float | None = None,
           grace: float = CALL_GRACE) -> list[dict]:
     """Every Claude call as one row, newest first — what the Compute log renders.
 
-    Two events fold into one row. A start with no end is `running` inside `grace`
-    and `lost` beyond it: that verdict is INFERRED here rather than written by
-    anyone, because the process that would have written it is the one that died.
-    A 429 is not that case — the agent exits with a full envelope, so those arrive
-    as `rate-limited` with their cost intact."""
+    Two events fold into one row. A start with no end is `running` while the
+    process named by its token is alive, whatever its age — a worker run of an
+    hour is normal, and age alone had shown healthy ones as `lost`. Without a live
+    process it is `running` inside `grace` and `lost` beyond it. A dead process
+    is not declared lost at once, because some ends are written late: a chat turn
+    is collected only when its thread is next read. Either verdict is INFERRED
+    here rather than written by anyone, because the process that would have
+    written it is the one that died. A 429 is not that case — the agent exits
+    with a full envelope, so those arrive as `rate-limited` with their cost intact."""
     now = time.time() if now is None else now
     folded: dict[str, dict] = {}
     order: list[str] = []
     out: list[dict] = []
+    tokens: dict[str, str] = {}
 
     for rec in load_runs(repo_root):
         ev = rec.get("ev")
@@ -305,6 +315,8 @@ def calls(repo_root, now: float | None = None,
         if ev == "start":
             call["started_at"] = ts
             call["limits_before"] = rec.get("limits")
+            if rec.get("token"):
+                tokens[rid] = str(rec["token"])
             for k in ("kind", "program", "sprint", "model"):
                 if rec.get(k):
                     call[k] = rec[k]
@@ -328,12 +340,28 @@ def calls(repo_root, now: float | None = None,
         elif not call["status"]:
             # Never written, always derived — see the docstring.
             age = now - (call["started_at"] or 0.0)
-            call["status"] = "lost" if age > grace else "running"
+            if _process_alive(tokens.get(rid, "")):
+                call["status"] = "running"
+            else:
+                call["status"] = "lost" if age > grace else "running"
         out.append(call)
 
     out.sort(key=lambda c: (c.get("ended_at") or c.get("started_at") or 0.0),
              reverse=True)
     return out
+
+
+def _process_alive(token: str) -> bool:
+    """Whether the '<pid>:<starttime>' process is still this host's live process.
+    False for no token or one that is not a pid token (test fakes), which leaves
+    the call to the age rule."""
+    if not token:
+        return False
+    from coscience.executor import is_running
+    try:
+        return is_running(token)
+    except (ValueError, OverflowError, OSError):
+        return False
 
 
 def run_stats(repo_root, now: float | None = None) -> dict:

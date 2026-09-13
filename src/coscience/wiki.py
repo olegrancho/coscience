@@ -198,7 +198,8 @@ def beat(substrate, program, now: float, agent, *,
         # for a start that never gets an end.
         call_id = usage_meter.start_call(
             substrate.repo_root, f"wiki-{kind}", program=program.id,
-            model=program.wiki_model, limits=usage_meter.current_window(), now=now)
+            model=program.wiki_model, limits=usage_meter.current_window(),
+            token=str(token or ""), now=now)
         # ingests_since_lint is NOT reset here: it resets when a lint run collects
         # ok, so a lint run that fails is still owed.
         state["run"] = {"id": run_id, "kind": kind, "batch": batch, "token": token,

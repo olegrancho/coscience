@@ -424,7 +424,7 @@ class Worker:
             progress.agent_call = usage_meter.start_call(
                 self.substrate.repo_root, "worker", program=sprint.program or "",
                 sprint=sprint.id, model=sprint.model,
-                limits=usage_meter.current_window())
+                limits=usage_meter.current_window(), token=str(token))
             progress.started_at = time.time()
             self.substrate.save_progress(progress)
             self.substrate.commit(f"sprint {sprint.id}: agent launched")
@@ -611,7 +611,7 @@ class Worker:
         progress.agent_call = usage_meter.start_call(
             self.substrate.repo_root, "worker", program=sprint.program or "",
             sprint=sprint.id, model=sprint.model,
-            limits=usage_meter.current_window())
+            limits=usage_meter.current_window(), token=str(token))
         progress.started_at = time.time()
         self.substrate.save_progress(progress)
         self.substrate.commit(
