@@ -68,3 +68,25 @@ describe("compress / brainstorm", () => {
     expect(String(n.message)).toMatch(/Nothing to do/i);
   });
 });
+
+describe("promote an idea", () => {
+  it("opens the proposal pre-filled and submits it as a promotion", async () => {
+    window.ResizeObserver = window.ResizeObserver || (class {
+      observe() {} unobserve() {} disconnect() {}
+    } as any);
+    vi.spyOn(api, "listIdeas").mockResolvedValue({ summary: "", ideas: [
+      { id: "i1", text: "Try rescoring with waters", source: "human", by: "", pinned: true,
+        protected: true, threads: [], created_at: 0, demoted: false },
+    ] } as any);
+    const submit = vi.spyOn(api, "submitSprint").mockResolvedValue({} as any);
+    renderAt();
+
+    fireEvent.click(await screen.findByLabelText("make a sprint"));
+    const goals = (await screen.findByLabelText("Goals")) as HTMLTextAreaElement;
+    expect(goals.value).toBe("Try rescoring with waters");
+    fireEvent.click(screen.getByText("Submit proposal"));
+
+    await waitFor(() => expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "p-idea-i1", program: "p", from_idea: "i1" })));
+  });
+});

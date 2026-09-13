@@ -55,6 +55,7 @@ class SprintSubmit(BaseModel):
     resources_required: dict[str, float] | None = None
     artifacts_bound: list[str] | None = None
     artifacts_create: list[dict] | None = None
+    from_idea: str = ""                     # promote this pool idea into the sprint
 
 
 class ArtifactAdoptIn(BaseModel):
@@ -294,6 +295,7 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
                 resources_required=body.resources_required,
                 artifacts_bound=body.artifacts_bound,
                 artifacts_create=body.artifacts_create,
+                from_idea=body.from_idea,
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc))

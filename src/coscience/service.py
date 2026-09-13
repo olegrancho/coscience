@@ -71,11 +71,17 @@ class Service:
                       preemptible: bool = True, resources_required: dict | None = None,
                       artifacts_bound: list | None = None,
                       artifacts_create: list | None = None,
-                      status: str = "proposed") -> str:
+                      status: str = "proposed", from_idea: str = "") -> str:
         if not plan:
             raise ValueError("plan must have at least one suggested step")
         if (self.substrate.sprint_dir(id) / "sprint.md").is_file():
             raise ValueError(f"sprint {id} already exists")
+        if from_idea:
+            # Checked before anything is written: a promotion of an idea that is not
+            # in the pool must not leave a sprint behind.
+            _summary, pool = self.substrate.load_ideas(program) if program else ("", [])
+            if not any(i.id == from_idea for i in pool):
+                raise ValueError(f"idea {from_idea} is not in {program or 'any'} program's pool")
         sprint = Sprint(
             id=id,
             status=SprintStatus(status),
@@ -90,7 +96,23 @@ class Service:
             model=self._worker_default(program),
         )
         self.substrate.save_sprint(sprint)
+        if from_idea:
+            self._promote_idea(program, from_idea, id)
         return id
+
+    def _promote_idea(self, program_id: str, idea_id: str, sprint_id: str) -> None:
+        """A human's promotion, ending the way the PM's does: the idea's edges (both
+        directions) move onto the sprint it became, and it leaves the pool — the
+        sprint now carries the lineage, so keeping the idea would read as a duplicate."""
+        summary, ideas = self.substrate.load_ideas(program_id)
+        sprints = [s for s in self.substrate.iter_sprints() if s.program == program_id]
+        changed = graph.repoint_edges(idea_id, sprint_id, list(ideas) + sprints)
+        sprint_by_id = {s.id: s for s in sprints}
+        for nid in changed:
+            if nid in sprint_by_id:
+                self.substrate.save_sprint(sprint_by_id[nid])
+        self.substrate.save_ideas(program_id, summary, [i for i in ideas if i.id != idea_id])
+        self.substrate.commit(f"program {program_id}: idea {idea_id} promoted to sprint {sprint_id}")
 
     def approve_sprint(self, sprint_id: str, by: str = "") -> None:
         """Human authorization: proposed -> approved. Cleared to run, but held

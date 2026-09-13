@@ -7,6 +7,7 @@ import Md from "../components/Md";
 import { api, type Idea, type IdeaPool } from "../api";
 import { AbsTime, BackLink, EmptyState } from "../components/ui";
 import { FeedbackThread } from "../components/FeedbackThread";
+import ProposeSprintModal from "../components/ProposeSprintModal";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
@@ -36,6 +37,7 @@ function PersonChip({ username }: { username?: string }) {
 function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea; onChange: () => void }) {
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState("");
+  const [promoting, setPromoting] = useState(false);
 
   const qc = useQueryClient();
   const act = async (fn: () => Promise<unknown>, fail: string) => {
@@ -115,6 +117,8 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
           </Group>
         </div>
         <Group gap={4} wrap="nowrap">
+          <ActionIcon variant="subtle" color="machine" onClick={() => setPromoting(true)}
+            aria-label="make a sprint" title="Make a sprint from this idea">→</ActionIcon>
           {idea.demoted && (
             <ActionIcon variant="subtle" color="teal" onClick={liftDemote} aria-label="lift demotion"
               title="Lift demotion — let the AI promote it to a sprint again">↑</ActionIcon>
@@ -150,6 +154,9 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
           </Group>
         </div>
       )}
+      <ProposeSprintModal programId={programId} fromIdea={{ id: idea.id, text: idea.text }}
+        opened={promoting} onClose={() => setPromoting(false)}
+        onDone={() => { onChange(); qc.invalidateQueries({ queryKey: ["program", programId] }); }} />
     </div>
   );
 }

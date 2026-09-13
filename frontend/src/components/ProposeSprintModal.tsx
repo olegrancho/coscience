@@ -1,9 +1,12 @@
 import { ActionIcon, Button, Group, Modal, MultiSelect, NumberInput, Select, Stack, Text, Textarea, TextInput } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 
-interface Props { programId: string; opened: boolean; onClose: () => void; onDone: () => void }
+interface Props {
+  programId: string; opened: boolean; onClose: () => void; onDone: () => void;
+  fromIdea?: { id: string; text: string };   // promoting this pool idea: pre-fills the form
+}
 
 const ARTIFACT_KINDS = [
   { value: "md", label: "Markdown" },
@@ -14,9 +17,17 @@ const ARTIFACT_KINDS = [
 
 interface NewArtifactRow { aid: string; title: string; kind: string }
 
-export default function ProposeSprintModal({ programId, opened, onClose, onDone }: Props) {
+export default function ProposeSprintModal({ programId, opened, onClose, onDone, fromIdea }: Props) {
   const [id, setId] = useState("");
   const [goals, setGoals] = useState("");
+
+  // Seed from the idea each time the dialog opens for it; typing afterwards wins.
+  useEffect(() => {
+    if (opened && fromIdea) {
+      setGoals(fromIdea.text);
+      setId((prev) => prev || `${programId}-idea-${fromIdea.id}`);
+    }
+  }, [opened, fromIdea?.id]);
   const [steps, setSteps] = useState("");
   const [priority, setPriority] = useState<number>(0);
   const [error, setError] = useState("");
@@ -50,13 +61,14 @@ export default function ProposeSprintModal({ programId, opened, onClose, onDone 
         plan: plan.length ? plan : [goals],
         ...(boundIds.length ? { artifacts_bound: boundIds } : {}),
         ...(artifactsCreate.length ? { artifacts_create: artifactsCreate } : {}),
+        ...(fromIdea ? { from_idea: fromIdea.id } : {}),
       });
       onDone(); onClose();
     } catch (e) { setError(String(e)); }
   };
 
   return (
-    <Modal opened={opened} onClose={onClose} title="Propose sprint">
+    <Modal opened={opened} onClose={onClose} title={fromIdea ? "Make a sprint from this idea" : "Propose sprint"}>
       <Stack>
         <TextInput label="Sprint id" value={id} onChange={(e) => setId(e.currentTarget.value)} />
         <Textarea label="Goals" value={goals} onChange={(e) => setGoals(e.currentTarget.value)} />

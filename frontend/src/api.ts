@@ -409,7 +409,8 @@ export const api = {
   submitSprint: (body: { id: string; goals: string; plan: string[]; program?: string;
                          priority?: number; resources_required?: Record<string, number>;
                          artifacts_bound?: string[];
-                         artifacts_create?: { aid: string; title: string; kind: string }[] }) =>
+                         artifacts_create?: { aid: string; title: string; kind: string }[];
+                         from_idea?: string }) =>
     fetch("/api/sprints", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
