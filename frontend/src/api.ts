@@ -6,6 +6,8 @@ export interface PMActivation { at: number; cycle: number; triggers: string[]; s
 export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
   wiki_model: string;     // model for this program's wiki runs; separate from pm_model
+  chat_model: string;     // model chat turns run on; defaults to pm_model until set
+  worker_model: string;   // model new sprints inherit when proposed
   wiki_enabled: boolean;  // false opts the program out of wiki ingest entirely
   wiki_merge: "auto" | "propose";  // auto = merge duplicates unattended; propose = queue for a human
   instructions: string;   // standing house rules, in every PM prompt
@@ -253,6 +255,16 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model }),
     }).then(j<{ id: string; wiki_model: string }>),
+  setProgramChatModel: (id: string, model: string) =>
+    fetch(`/api/programs/${id}/chat-model`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    }).then(j<{ id: string; chat_model: string }>),
+  setProgramWorkerModel: (id: string, model: string) =>
+    fetch(`/api/programs/${id}/worker-model`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    }).then(j<{ id: string; worker_model: string }>),
   setProgramWikiEnabled: (id: string, enabled: boolean) =>
     fetch(`/api/programs/${id}/wiki-enabled`, {
       method: "POST", headers: { "Content-Type": "application/json" },

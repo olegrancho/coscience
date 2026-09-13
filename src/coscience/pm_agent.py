@@ -639,6 +639,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     open_proposed = sum(1 for s in substrate.iter_sprints(status=SprintStatus.PROPOSED)
                         if s.program == program_id)
     slots = program_cap(substrate.load_program(program_id)) - open_proposed
+    # A proposal that names no model inherits the program's default worker model.
+    worker_model = substrate.load_program(program_id).worker_model
     for prop in staged.output.proposals:
         # A demoted idea is a human "do not pursue as a sprint" — the PM may not
         # promote it back, whatever the reasoner returns.
@@ -660,7 +662,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 rationale=prop.rationale,
                 title=prop.title,
                 summary=prop.summary,
-                model=prop.model,
+                model=prop.model or worker_model,
             ))
             slots -= 1
         proposed.append(sid)
@@ -698,7 +700,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         substrate.save_sprint(Sprint(
             id=sid, status=SprintStatus.PROPOSED, title=title,
             goals=str(task.get("instructions") or "Update the artifact."),
-            plan=[], program=program_id,
+            plan=[], program=program_id, model=worker_model,
             artifacts_bound=bound, artifacts_create=create))
         slots -= 1
         proposed.append(sid)

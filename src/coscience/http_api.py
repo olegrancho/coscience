@@ -939,6 +939,20 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
 
+    @api.post("/programs/{program_id}/chat-model")
+    def set_program_chat_model(program_id: str, body: ProgramModelIn) -> dict:
+        try:
+            return service.set_program_chat_model(program_id, body.model)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.post("/programs/{program_id}/worker-model")
+    def set_program_worker_model(program_id: str, body: ProgramModelIn) -> dict:
+        try:
+            return service.set_program_worker_model(program_id, body.model)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
     @api.post("/programs/{program_id}/wiki-enabled")
     def set_program_wiki_enabled(program_id: str, body: ProgramWikiEnabledIn) -> dict:
         try:

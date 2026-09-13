@@ -207,12 +207,20 @@ class Program:
     wiki_model: str = ""               # Claude model for this program's wiki runs; "" resolves to DEFAULT_MODEL
     wiki_enabled: bool = True          # False opts the program out of wiki ingest entirely
     wiki_merge: str = "auto"           # auto = merge duplicates unattended; propose = queue for a human
+    chat_model: str = ""               # Claude model chat turns run on; "" resolves to pm_model
+    worker_model: str = ""             # model new sprints inherit when proposed; "" resolves to DEFAULT_MODEL
 
     def __post_init__(self) -> None:
         if not self.pm_model:
             self.pm_model = DEFAULT_MODEL
         if not self.wiki_model:
             self.wiki_model = DEFAULT_MODEL
+        if not self.worker_model:
+            self.worker_model = DEFAULT_MODEL
+        if not self.chat_model:
+            # pm_model, not DEFAULT_MODEL: chat borrowed the planner's model before it
+            # had its own, so an unset program keeps talking to the same model.
+            self.chat_model = self.pm_model
 
 
 @dataclass

@@ -323,6 +323,8 @@ class Substrate:
             wiki_model=str(fm.get("wiki_model", "")),
             wiki_enabled=bool(fm.get("wiki_enabled", True)),
             wiki_merge=str(fm.get("wiki_merge", "auto")),
+            chat_model=str(fm.get("chat_model", "")),
+            worker_model=str(fm.get("worker_model", "")),
         )
 
     def save_program(self, program: Program) -> None:
@@ -335,6 +337,10 @@ class Substrate:
             fm["max_proposed"] = program.max_proposed
         if program.wiki_model:
             fm["wiki_model"] = program.wiki_model
+        if program.chat_model:
+            fm["chat_model"] = program.chat_model
+        if program.worker_model:
+            fm["worker_model"] = program.worker_model
         if not program.wiki_enabled:
             # written only when opting out, so existing program.md files are untouched
             fm["wiki_enabled"] = False

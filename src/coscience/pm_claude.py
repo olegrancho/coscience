@@ -12,7 +12,6 @@ import subprocess
 from pathlib import Path
 
 from coscience import agent_stream, usage_meter
-from coscience.models import DEFAULT_MODEL
 from coscience.pm_reasoner import (PMContext, PMCycleOutput, ProposedSprint, coerce_resources,
                                    render_instructions)
 
@@ -329,7 +328,7 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
       "priority": <int>, "resources_required": {{}} or null,
       "rationale": "<why this experiment next; short — 1-3 sentences, a blank line (\\n\\n) between distinct points if more than one>",
       "from_idea": "<id of the pool idea this promotes, or omit>",
-      "model": "<optional: a Claude model slug to run this sprint's worker on, e.g. 'claude-sonnet-4-6' for cheap/routine work or 'claude-opus-5' for hard reasoning; omit to use {DEFAULT_MODEL}>"}}
+      "model": "<optional: a Claude model slug to run this sprint's worker on, e.g. 'claude-sonnet-4-6' for cheap/routine work or 'claude-opus-5' for hard reasoning; omit to use the program's default worker model>"}}
   ]}}
 Propose 0 proposals if nothing new is warranted, or you are at the cap.
 

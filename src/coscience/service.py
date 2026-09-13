@@ -87,6 +87,7 @@ class Service:
             preemptible=preemptible,
             artifacts_bound=[str(a) for a in (artifacts_bound or [])],
             artifacts_create=[dict(c) for c in (artifacts_create or [])],
+            model=self._worker_default(program),
         )
         self.substrate.save_sprint(sprint)
         return id
@@ -226,11 +227,11 @@ class Service:
             sprint.resources_required = {k: float(v) for k, v in resources_required.items()}
         if preemptible is not None:
             sprint.preemptible = preemptible
-        if model is not None and str(model or DEFAULT_MODEL) != sprint.model:
+        if model is not None and str(model or self._worker_default(sprint.program)) != sprint.model:
             # The model is switchable at any time. A detached agent can't change model
             # mid-process, so if one is already running we stop it; the next dispatch
             # beat relaunches on the new model and resumes from the scratchpad.
-            sprint.model = str(model or DEFAULT_MODEL)
+            sprint.model = str(model or self._worker_default(sprint.program))
             self._restart_agent_for_model(sprint_id)
         self.substrate.save_sprint(sprint)
 
@@ -533,7 +534,8 @@ class Service:
             "id": p.id, "title": p.title, "status": p.status.value, "goals": p.goals,
             "pm_model": p.pm_model, "workdir": p.workdir,
             "wiki_model": p.wiki_model, "wiki_enabled": p.wiki_enabled,
-            "wiki_merge": p.wiki_merge,
+            "wiki_merge": p.wiki_merge, "chat_model": p.chat_model,
+            "worker_model": p.worker_model,
             "max_proposed": p.max_proposed,
             "instructions": self.substrate.load_instructions(program_id),
             "report": self.substrate.load_report(program_id),
@@ -577,6 +579,37 @@ class Service:
         program.wiki_model = str(model or DEFAULT_MODEL)
         self.substrate.save_program(program)
         return {"id": program_id, "wiki_model": program.wiki_model}
+
+    def set_program_chat_model(self, program_id: str, model: str) -> dict:
+        """Set the Claude model this program's chat turns run on ("" = its pm_model).
+
+        Separate from `pm_model` so tuning autonomous planning does not also change
+        what a human is talking to — chat is the one agent someone waits on."""
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        program = self.substrate.load_program(program_id)
+        program.chat_model = str(model or program.pm_model)
+        self.substrate.save_program(program)
+        return {"id": program_id, "chat_model": program.chat_model}
+
+    def set_program_worker_model(self, program_id: str, model: str) -> dict:
+        """Set the model this program's NEW sprints inherit ("" = DEFAULT_MODEL).
+
+        Applied when a sprint is proposed, never to sprints that already exist: those
+        were reviewed with a model attached, and moving them under a human who has
+        already looked at them would be a surprise."""
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        program = self.substrate.load_program(program_id)
+        program.worker_model = str(model or DEFAULT_MODEL)
+        self.substrate.save_program(program)
+        return {"id": program_id, "worker_model": program.worker_model}
+
+    def _worker_default(self, program_id: str | None) -> str:
+        """The model a sprint of `program_id` runs on when it names none."""
+        if program_id and (self.substrate.program_dir(program_id) / "program.md").is_file():
+            return self.substrate.load_program(program_id).worker_model
+        return DEFAULT_MODEL
 
     def set_program_wiki_enabled(self, program_id: str, enabled: bool) -> dict:
         """Opt a program in or out of wiki ingest entirely. False makes the wiki
@@ -927,14 +960,14 @@ class Service:
         launch = launch or chat_agent.launch_turn
         token = launch(thread_dir=self.substrate.chat_thread_dir(program_id, thread_id),
                        workdir=workdir, prompt=prompt, scope=thread.scope,
-                       session_id=thread.session_id, resume=resume, model=program.pm_model)
+                       session_id=thread.session_id, resume=resume, model=program.chat_model)
         from coscience import usage_meter
         thread.pending, thread.agent_token = True, str(token)
         # A guidance/chat turn is a Claude call like any other and was the one
         # spender that reached the ledger not at all.
         thread.agent_call = usage_meter.start_call(
             self.substrate.repo_root, "chat", program=program_id,
-            model=program.pm_model, limits=usage_meter.current_window())
+            model=program.chat_model, limits=usage_meter.current_window())
         thread.messages = thread.messages[-200:]
         self.substrate.save_chat_thread(program_id, thread)
         self.substrate.commit(f"program {program_id}: chat {thread_id} message")

@@ -18,6 +18,8 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
   const [goals, setGoals] = useState("");
   const [model, setModel] = useState("");
   const [wikiModel, setWikiModel] = useState("");
+  const [chatModel, setChatModel] = useState("");
+  const [workerModel, setWorkerModel] = useState("");
   const [wikiEnabled, setWikiEnabled] = useState(true);
   const [wikiMerge, setWikiMerge] = useState("auto");
   const [workdir, setWorkdir] = useState("");
@@ -25,7 +27,8 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
   const [instructions, setInstructions] = useState("");
   const [saving, setSaving] = useState(false);
   const [browsing, setBrowsing] = useState(false);
-  const seeded = useRef({ goals: "", model: "", wikiModel: "", wikiEnabled: true,
+  const seeded = useRef({ goals: "", model: "", wikiModel: "", chatModel: "", workerModel: "",
+                          wikiEnabled: true,
                           wikiMerge: "auto", workdir: "", maxProposed: 0, instructions: "" });
   const wasOpened = useRef(false);
 
@@ -37,6 +40,8 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
       setGoals(program.goals);
       setModel(program.pm_model);
       setWikiModel(program.wiki_model);
+      setChatModel(program.chat_model);
+      setWorkerModel(program.worker_model);
       setWikiEnabled(program.wiki_enabled);
       setWikiMerge(program.wiki_merge || "auto");
       setWorkdir(program.workdir);
@@ -44,8 +49,9 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
       setInstructions(program.instructions);
       seeded.current = {
         goals: program.goals, model: program.pm_model, workdir: program.workdir,
-        wikiModel: program.wiki_model, wikiEnabled: program.wiki_enabled,
-        wikiMerge: program.wiki_merge || "auto",
+        wikiModel: program.wiki_model, chatModel: program.chat_model,
+        workerModel: program.worker_model,
+        wikiEnabled: program.wiki_enabled, wikiMerge: program.wiki_merge || "auto",
         maxProposed: program.max_proposed, instructions: program.instructions,
       };
     }
@@ -69,6 +75,8 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
       if (goals.trim() !== was.goals) await api.setProgramGoals(program.id, goals.trim());
       if (model !== was.model) await api.setProgramModel(program.id, model);
       if (wikiModel !== was.wikiModel) await api.setProgramWikiModel(program.id, wikiModel);
+      if (chatModel !== was.chatModel) await api.setProgramChatModel(program.id, chatModel);
+      if (workerModel !== was.workerModel) await api.setProgramWorkerModel(program.id, workerModel);
       if (wikiEnabled !== was.wikiEnabled) {
         await api.setProgramWikiEnabled(program.id, wikiEnabled);
       }
@@ -106,13 +114,15 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
           onChange={(e) => setGoals(e.currentTarget.value)}
         />
 
-        {/* Two jobs, two models. The planner reasons over the program's state to
+        {/* One dial per job. The planner reasons over the program's state to
             propose experiments; the wiki reads finished results and writes prose
-            about them. They reward different models, so they get separate dials
-            rather than one "the model for this program". */}
+            about them; chat has a human waiting on it. They reward different
+            models, so none of them is "the model for this program". */}
         <Stack gap={6}>
           <Group gap={8} align="center">
             <ModelSelect value={model} onChange={setModel} label="planner model" />
+            <ModelSelect value={chatModel} onChange={setChatModel} label="chat model" />
+            <ModelSelect value={workerModel} onChange={setWorkerModel} label="worker model" />
           </Group>
           <Group gap={8} align="center">
             <ModelSelect value={wikiModel} onChange={setWikiModel} label="wiki model"
@@ -128,8 +138,9 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
             />
           </Group>
           <Text size="xs" c="dimmed">
-            The planner proposes experiments; the wiki reads finished results and
-            writes them up. Unchecking stops wiki runs for this program entirely —
+            The planner proposes experiments; new experiments run on the worker model
+            unless they name their own; the wiki reads finished results and writes
+            them up. Unchecking stops wiki runs for this program entirely —
             no ingest is launched and no quota is spent on it.
           </Text>
         </Stack>

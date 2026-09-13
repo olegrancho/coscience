@@ -7,6 +7,8 @@ vi.mock("../api", () => ({
   api: {
     setProgramModel: vi.fn().mockResolvedValue({}),
     setProgramWikiModel: vi.fn().mockResolvedValue({}),
+    setProgramChatModel: vi.fn().mockResolvedValue({}),
+    setProgramWorkerModel: vi.fn().mockResolvedValue({}),
     setProgramWikiEnabled: vi.fn().mockResolvedValue({}),
     setWikiMergePolicy: vi.fn().mockResolvedValue({ id: "p1", wiki_merge: "propose" }),
     setProgramWorkdir: vi.fn().mockResolvedValue({ id: "p1", workdir: "/tmp/proj2", exists: true }),
@@ -40,7 +42,8 @@ beforeAll(() => {
 const program = {
   id: "p1", title: "A", status: "active", goals: "x",
   report: "", cycle: 0, sprints: [], pm_model: "claude-opus-5",
-  wiki_model: "claude-sonnet-5", wiki_enabled: true, wiki_merge: "auto",
+  wiki_model: "claude-sonnet-5", chat_model: "claude-fable-5-1", worker_model: "claude-sonnet-5",
+  wiki_enabled: true, wiki_merge: "auto",
   workdir: "/tmp/proj", instructions: "be careful", max_proposed: 6,
   activations: [], last_run: null,
 };
@@ -105,6 +108,28 @@ describe("ProgramSettingsModal", () => {
     await waitFor(() =>
       expect(api.setProgramWikiModel).toHaveBeenCalledWith("p1", "claude-opus-5"));
     expect(api.setProgramModel).not.toHaveBeenCalled();
+  });
+
+  it("posts the chat model without touching the planner model", async () => {
+    // H5: chat used to borrow the planner's model, so tuning one moved the other.
+    renderModal();
+    expect((screen.getByLabelText("chat model") as HTMLSelectElement).value).toBe("claude-fable-5-1");
+    fireEvent.change(screen.getByLabelText("chat model"), { target: { value: "claude-opus-5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(api.setProgramChatModel).toHaveBeenCalledWith("p1", "claude-opus-5"));
+    expect(api.setProgramModel).not.toHaveBeenCalled();
+  });
+
+  it("posts the default worker model on its own", async () => {
+    renderModal();
+    expect((screen.getByLabelText("worker model") as HTMLSelectElement).value).toBe("claude-sonnet-5");
+    fireEvent.change(screen.getByLabelText("worker model"), { target: { value: "claude-opus-5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(api.setProgramWorkerModel).toHaveBeenCalledWith("p1", "claude-opus-5"));
+    expect(api.setProgramModel).not.toHaveBeenCalled();
+    expect(api.setProgramChatModel).not.toHaveBeenCalled();
   });
 
   it("saves the wiki merge policy", async () => {
