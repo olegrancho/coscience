@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 45
+version: 46
 last_updated: 2026-09-13
 ---
 
@@ -18,14 +18,17 @@ None has run yet — the wiki is gated until the 5h window resets at 01:50.
 ### K5. Let a human promote an idea into a sprint
 
 Each idea on the ideas page has a → button that opens the proposal form pre-filled
-from the idea; submitting creates the sprint, moves the idea's lineage edges onto
-it and removes the idea from the pool (uncommitted, not deployed).
+from the idea, with a "Draft with AI" button that has the planner fill in id, title,
+summary, goals, steps, priority and rationale; submitting creates the sprint, moves
+the idea's lineage edges onto it and removes the idea from the pool (`91f1924`
+deployed; the draft button uncommitted, not deployed).
 
-**Check:** on a program's ideas page, promote an idea that has a lineage edge —
-the form opens with its text as goals and id `<program>-idea-<idea id>`; after
-submit the sprint is proposed, the idea is gone from the pool, and the lineage
-graph shows the edge on the sprint. It mirrors the PM's promotion, so the idea is
-removed rather than marked `demoted`.
+**Check:** on a program's ideas page, promote an idea that has a lineage edge and
+press Draft with AI — the fields fill in within a minute or two, and a `pm-draft`
+row with its cost appears on Compute. After submit the sprint is proposed with
+that title and summary, the idea is gone from the pool, and the lineage graph
+shows the edge on the sprint. The draft leaves model and resources unset: the
+sprint takes the program's worker model and requests nothing.
 
 # To Do
 
