@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 44
+version: 45
 last_updated: 2026-09-13
 ---
 
@@ -14,6 +14,18 @@ last_updated: 2026-09-13
 **Check:** the first wiki-ingest row on Compute after the deploy names Opus 4.6,
 not Haiku. Rows already logged keep their old label; nothing rewrites history.
 None has run yet — the wiki is gated until the 5h window resets at 01:50.
+
+### K5. Let a human promote an idea into a sprint
+
+Each idea on the ideas page has a → button that opens the proposal form pre-filled
+from the idea; submitting creates the sprint, moves the idea's lineage edges onto
+it and removes the idea from the pool (uncommitted, not deployed).
+
+**Check:** on a program's ideas page, promote an idea that has a lineage edge —
+the form opens with its text as goals and id `<program>-idea-<idea id>`; after
+submit the sprint is proposed, the idea is gone from the pool, and the lineage
+graph shows the edge on the sprint. It mirrors the PM's promotion, so the idea is
+removed rather than marked `demoted`.
 
 # To Do
 
@@ -213,24 +225,6 @@ those now would be the same guessing this block exists to replace.
 
 The state of the work reads at a glance — without opening a page, counting cards
 or decoding a slug.
-
-### K5. Let a human promote an idea into a sprint
-
-Add a promote button on an idea that opens the sprint proposal form, pre-filled
-from the idea.
-
-The loop is currently one-way: `POST /ideas/{id}/demote` turns a sprint back into
-an idea and sets `demoted` so the PM cannot re-promote it, but there is no
-promote — `Idea`'s own docstring says the PM "promotes promising ones into
-sprints", and only the PM can. A human reading the pool has to retype the idea
-into `ProposeSprintModal` by hand.
-
-Most of the parts exist: the modal already collects id, goals, steps, priority and
-artifacts, so promote is a pre-filled open plus an endpoint. Two things need
-deciding — what becomes of the idea afterwards (`demoted` is the shape the reverse
-direction already uses), and that the sprint records where it came from, since
-`Idea.edges` carries outbound lineage and losing the link would make the pool
-look like it grew a duplicate.
 
 ## M. Delegated approval
 
