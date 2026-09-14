@@ -17,6 +17,12 @@ from coscience.models import ProgramStatus
 from coscience.pause import is_paused
 from coscience.worker import WEEKLY_WORKER_THRESHOLD, claude_usage_ok
 
+# This, not the beat cadence, is what decides how soon a finished sprint reaches
+# its wiki. The dispatcher beats every few seconds, so an ingest launches within a
+# beat of a result landing — unless the 5h window is above 70%. Every wait of 3h+
+# on p2 and p5 from 09-11 to 09-13 was exactly that, launching within 3 minutes of
+# the reset. Kept on purpose (todo I1, closed 09-13): when the window is tight,
+# workers go first and the wiki catches up after the reset.
 WIKI_THRESHOLD = 70.0
 RUNS_KEPT = 500
 
@@ -527,6 +533,9 @@ def _collect(substrate, program, now, agent, state, run) -> str:
 
     state["run"] = None
     created, updated = _page_counts(substrate, program.id, run_dir, report)
+    if kind == "ingest":
+        # After the counts, so the fix is not reported as the agent's work.
+        _link_relations(substrate, program.id)
     state["last_run"] = {
         "id": run_id, "kind": kind, "status": status, "at": now,
         "pages_created": created,
@@ -570,6 +579,20 @@ def _collect(substrate, program, now, agent, state, run) -> str:
                      + list(state.get("runs") or []))[:RUNS_KEPT]
     substrate.commit(f"wiki {program.id}: {kind} {run_id} {status}")
     return line
+
+
+def _link_relations(substrate, program_id: str) -> int:
+    """Apply lint's mechanical fixes after an ingest, not only before a lint.
+
+    The ingest prompt asks for every relation to be linked from the body and the
+    agent still misses some: 29 `rel/no-link` errors sat across p2, p3 and p5 on
+    09-13, each waiting up to five ingests for the lint run whose preflight fixes
+    them. Pages the run wrote are the ones it touches, and the fix is idempotent."""
+    from coscience import wiki_lint
+    changed, _ = wiki_lint.autofix(wiki_store.iter_pages(substrate, program_id))
+    for page in changed:
+        wiki_store.write_page(substrate, program_id, page)
+    return len(changed)
 
 
 def wiki_agent_outcome(run_dir: Path) -> dict:

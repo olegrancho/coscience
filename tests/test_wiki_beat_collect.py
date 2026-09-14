@@ -210,6 +210,56 @@ def test_page_counts_are_measured_from_the_bundle_not_taken_from_the_report(subs
     assert last["notes"] == "n"
 
 
+def test_an_ingest_links_the_relations_its_pages_declare(substrate):
+    """D1: the agent declares a relation and forgets the body link. Collect fixes
+    it without waiting for a lint run, and without counting the fix as the run's."""
+    from coscience import wiki_okf
+    agent = FakeWikiAgent()
+    p = _seed(substrate)
+    wiki_store.ensure_bundle(substrate, "p1")
+    rel = [wiki_okf.Relation(type="requires", target="/concepts/b.md", source="c1")]
+    old = wiki_okf.Page(path="concepts/old.md", type="Concept", title="Old",
+                        body="# Definition\n\nold\n", relations=rel)
+    wiki_store.write_page(substrate, "p1", old)
+    wiki.beat(substrate, p, 100.0, agent)
+    run_dir = agent.launches[0]["run_dir"]
+    wiki_store.write_page(substrate, "p1", wiki_okf.Page(
+        path="concepts/b.md", type="Concept", title="B", body="# Definition\n\nb\n"))
+    wiki_store.write_page(substrate, "p1", wiki_okf.Page(
+        path="concepts/a.md", type="Concept", title="A", relations=rel,
+        body="# Definition\n\na\n\n# Human notes\n"))
+    (run_dir / "agent.exit").write_text("0\n")
+    agent.alive = False
+
+    assert wiki.beat(substrate, p, 200.0, agent) == "wiki: ingest ok"
+
+    for path in ("concepts/a.md", "concepts/old.md"):
+        page = wiki_store.read_page(substrate, "p1", path)
+        assert "(/concepts/b.md)" in page.body
+    a = wiki_store.read_page(substrate, "p1", "concepts/a.md").body
+    assert a.index("# Related") < a.index("# Human notes")
+    last = wiki_store.load_state(substrate, "p1")["last_run"]
+    assert (last["pages_created"], last["pages_updated"]) == (2, 0)
+
+
+def test_a_lint_run_is_not_fixed_again_at_collect(substrate, monkeypatch):
+    calls = []
+    monkeypatch.setattr(wiki, "_link_relations", lambda s, pid: calls.append(pid))
+    agent = FakeWikiAgent()
+    p = _seed(substrate)
+    wiki_store.ensure_bundle(substrate, "p1")
+    (wiki_store.bundle_dir(substrate, "p1") / "concepts" / "x.md").write_text(
+        "---\ntype: Concept\n---\nx\n")
+    with wiki_store.state_guard(substrate, "p1") as state:
+        state["ingests_since_lint"] = wiki.lint_every()
+    wiki.beat(substrate, p, 100.0, agent)
+    assert agent.launches[0]["kind"] == "lint"
+    (agent.launches[0]["run_dir"] / "agent.exit").write_text("0\n")
+    agent.alive = False
+    wiki.beat(substrate, p, 200.0, agent)
+    assert calls == []
+
+
 def test_a_run_without_a_page_snapshot_keeps_its_report_counts(substrate):
     agent = FakeWikiAgent()
     p = _seed(substrate)

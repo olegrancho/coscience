@@ -355,7 +355,7 @@ def autofix(pages: list[wiki_okf.Page]) -> tuple[list[wiki_okf.Page], list[Findi
             lines = [f"- `{r.type}` [{_title(pages, rel)}](/{rel})"
                      for r, rel in ((r, _resolve(r.target)) for r in p.relations)
                      if rel in missing]
-            body = body.rstrip("\n") + "\n\n# Related\n\n" + "\n".join(dict.fromkeys(lines)) + "\n"
+            body = _add_related(body, "\n".join(dict.fromkeys(lines)))
             for rel in missing:
                 fixed.append(Finding("rel/no-link", "error", p.path,
                                      f"linked `{rel}` from the body to satisfy containment"))
@@ -363,6 +363,23 @@ def autofix(pages: list[wiki_okf.Page]) -> tuple[list[wiki_okf.Page], list[Findi
             p.body = body
             changed.append(p)
     return changed, fixed
+
+
+_HUMAN_NOTES_HEADING = re.compile(r"^# Human notes[ \t]*$", re.MULTILINE | re.IGNORECASE)
+
+
+def _add_related(body: str, lines: str) -> str:
+    """A `# Related` section, placed before `# Human notes` when the page has one.
+
+    The template keeps the human's section last. Appending at the end put all 23
+    of these sections below it on p2, p3 and p5 — parsed as their own section, so
+    no note was touched, but no longer the page the template describes."""
+    section = "# Related\n\n" + lines + "\n"
+    m = _HUMAN_NOTES_HEADING.search(body)
+    if not m:
+        return body.rstrip("\n") + "\n\n" + section
+    head = body[:m.start()].rstrip("\n")
+    return head + "\n\n" + section + "\n" + body[m.start():]
 
 
 def _title(pages: list[wiki_okf.Page], path: str) -> str:

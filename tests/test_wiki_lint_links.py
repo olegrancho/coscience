@@ -159,6 +159,18 @@ def test_autofix_appends_a_relation_link_to_satisfy_containment():
     assert "rel/no-link" not in {f.rule for f in wiki_lint.lint(changed + [b])}
 
 
+def test_autofix_puts_the_related_section_before_human_notes():
+    a = _page("concepts/a.md",
+              body="# Definition\n\n" + "x" * 400 + "\n\n# Human notes\n\nmine\n",
+              relations=[{"type": "requires", "target": "/concepts/b.md", "source": "c1"}])
+    b = _page("concepts/b.md", title="B")
+    changed, _ = wiki_lint.autofix([a, b])
+    body = changed[0].body
+    assert body.index("# Related") < body.index("# Human notes")
+    assert body.rstrip().endswith("# Human notes\n\nmine")
+    assert changed[0].section("Human notes") == "mine"
+
+
 def test_autofix_is_idempotent():
     a = _page("concepts/a.md", body="see [[b]] " + "x" * 400)
     b = _page("concepts/b.md")
