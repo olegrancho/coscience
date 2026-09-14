@@ -4,11 +4,14 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from pathlib import Path
+from typing import Iterable
 
 from coscience.models import Lease
-from coscience.resources import ResourcePool
+from coscience.resources import LOCAL, PLATFORM_KEYS, ResourcePool
+
+_LEASE_FIELDS = {f.name for f in fields(Lease)}
 
 
 class Ledger:
@@ -22,7 +25,9 @@ class Ledger:
     def load(self) -> None:
         if self.path.is_file():
             data = json.loads(self.path.read_text())
-            self._leases = {d["sprint_id"]: Lease(**d) for d in data}
+            self._leases = {d["sprint_id"]: Lease(**{k: v for k, v in d.items()
+                                                      if k in _LEASE_FIELDS})
+                            for d in data}
         else:
             self._leases = {}
         # Rebuild the set of keys that have been leased
@@ -32,9 +37,14 @@ class Ledger:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        data = [asdict(lease) for lease in self._leases.values()]
+        rows = []
+        for lease in self._leases.values():
+            row = asdict(lease)
+            if row.get("host") == LOCAL:
+                del row["host"]
+            rows.append(row)
         tmp = self.path.with_name(self.path.name + ".tmp")
-        tmp.write_text(json.dumps(data, indent=2))
+        tmp.write_text(json.dumps(rows, indent=2))
         os.replace(tmp, self.path)
 
     # --- queries ---
@@ -44,28 +54,58 @@ class Ledger:
     def lease_for(self, sprint_id: str) -> Lease | None:
         return self._leases.get(sprint_id)
 
-    def used(self) -> dict[str, float]:
-        # Return all keys that have been part of any lease (past or current)
+    def used(self, host: str | None = None) -> dict[str, float]:
+        """Amounts held — across the pool, or on one host. Platform keys count on
+        every host, since they bound agents on the dispatcher's machine."""
         out = {k: 0.0 for k in self._keys_ever_leased}
         for lease in self._leases.values():
             for k, v in lease.amounts.items():
+                if host is not None and k not in PLATFORM_KEYS and lease.host != host:
+                    continue
                 out[k] = out.get(k, 0.0) + v
         return out
 
-    def available(self) -> dict[str, float]:
-        used = self.used()
-        return {k: cap - used.get(k, 0.0) for k, cap in self.pool.capacity.items()}
+    def available(self, host: str | None = None) -> dict[str, float]:
+        if host is None:
+            used = self.used()
+            return {k: cap - used.get(k, 0.0) for k, cap in self.pool.capacity.items()}
+        h = self.pool.host(host)
+        if h is None:
+            return {}
+        used = self.used(host)
+        out = {k: cap - used.get(k, 0.0) for k, cap in self.pool.capacity.items()
+               if k in PLATFORM_KEYS}
+        out.update({k: cap - used.get(k, 0.0) for k, cap in h.capacity.items()})
+        return out
 
-    def can_fit(self, amounts: dict[str, float]) -> bool:
-        avail = self.available()
+    def can_fit(self, amounts: dict[str, float], host: str | None = None) -> bool:
+        avail = self.available(host)
         return all(avail.get(k, 0.0) >= v for k, v in amounts.items())
 
+    def fit_host(self, amounts: dict[str, float], program: str | None = None,
+                 pending: Iterable[tuple[str, dict[str, float]]] = ()) -> str | None:
+        """The first placeable host `program` may use that holds ALL of `amounts`,
+        or None. `pending` is (host, amounts) granted this cycle but not yet
+        acquired, so one pass of grants never books the same room twice."""
+        pending = list(pending)
+        for h in self.pool.placeable_hosts(program):
+            avail = self.available(h.name)
+            for p_host, p_amounts in pending:
+                for k, v in p_amounts.items():
+                    if k in PLATFORM_KEYS or p_host == h.name:
+                        avail[k] = avail.get(k, 0.0) - v
+            if all(avail.get(k, 0.0) >= v for k, v in amounts.items()):
+                return h.name
+        return None
+
     # --- mutations ---
-    def acquire(self, sprint_id, amounts, now, ttl, priority=0, preemptible=True):
+    def acquire(self, sprint_id, amounts, now, ttl, priority=0, preemptible=True,
+                program=None):
         existing = self._leases.get(sprint_id)
         if existing is not None:
             return existing
-        if not self.can_fit(amounts):
+        host = self.fit_host(amounts, program)
+        if host is None:
             return None
         lease = Lease(
             id=uuid.uuid4().hex[:12],
@@ -75,6 +115,7 @@ class Ledger:
             expires_at=float(now) + float(ttl),
             priority=int(priority),
             preemptible=bool(preemptible),
+            host=host,
         )
         # Track that these keys have been leased
         self._keys_ever_leased.update(lease.amounts.keys())
@@ -112,7 +153,7 @@ class Ledger:
             return False
         if key in lease.amounts:
             return True                       # already ours; never charge twice
-        if not self.can_fit({key: float(amount)}):
+        if not self.can_fit({key: float(amount)}, lease.host):
             return False
         lease.amounts[key] = float(amount)
         self._keys_ever_leased.add(key)

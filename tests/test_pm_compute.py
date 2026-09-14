@@ -36,3 +36,24 @@ def test_the_prompt_states_the_pool_and_the_sizing_rule():
 
 def test_an_undeclared_pool_still_gets_the_sizing_rule():
     assert "Request only what" in render_compute(PMContext(program_id="p1", goals="g", cycle=0))
+
+
+def test_a_program_is_told_only_the_hosts_it_may_use(substrate, every_host_placeable):
+    substrate.save_program(Program(id="p2", title="P2", goals="g"))
+    substrate.save_program(Program(id="p5", title="P5", goals="g"))
+    cos = substrate.repo_root / ".coscience"
+    cos.mkdir(parents=True, exist_ok=True)
+    (cos / "resources.yaml").write_text(
+        "cpu: 24\ngpu: 1\nworkers: 3\n"
+        "hosts:\n  remote1:\n    ssh: remote1\n    programs: [p2]\n    capacity: {cpu: 28}\n")
+    (cos / "leases.json").write_text(json.dumps([{
+        "id": "l1", "sprint_id": "p2-c1", "amounts": {"cpu": 28.0, "workers": 1.0},
+        "granted_at": 0.0, "expires_at": 1e12, "priority": 0, "preemptible": True,
+        "host": "remote1"}]))
+
+    p2, p5 = gather_context(substrate, "p2"), gather_context(substrate, "p5")
+
+    assert p2.compute_capacity == {"cpu": 52.0, "gpu": 1.0}
+    assert p2.compute_leased == {"cpu": 28.0}
+    assert p5.compute_capacity == {"cpu": 24.0, "gpu": 1.0}
+    assert p5.compute_leased == {}          # remote1's lease is on a host p5 never gets

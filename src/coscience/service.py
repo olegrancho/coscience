@@ -352,7 +352,8 @@ class Service:
         if sprint.status in (SprintStatus.DONE, SprintStatus.CANCELED, SprintStatus.FAILED):
             return ""
         from coscience.resources import describe_over_capacity, over_capacity
-        return describe_over_capacity(over_capacity(sprint.resources_required, pool))
+        return describe_over_capacity(over_capacity(sprint.resources_required, pool,
+                                                    sprint.program))
 
     def get_sprint(self, sprint_id: str, viewer: str = "") -> dict:
         sprint = self._load_sprint(sprint_id)
@@ -1606,14 +1607,24 @@ class Service:
         from coscience.pause import is_paused
         ledger = self._ledger()
         return {
-            "capacity": dict(self.pool.capacity),
+            "capacity": dict(ledger.pool.capacity),
             "used": ledger.used(),
             "available": ledger.available(),
             "paused": is_paused(self.substrate.repo_root),
+            "host_errors": list(ledger.pool.host_errors),
+            "hosts": [
+                {"name": h.name, "ssh": h.ssh, "placeable": h.placeable,
+                 "programs": list(h.programs), "run_root": h.run_root,
+                 "capacity": dict(h.capacity),
+                 # A host that cannot take work has nothing available to grant.
+                 "available": ledger.available(h.name) if h.placeable else {}}
+                for h in ledger.pool.hosts
+            ],
             "leases": [
                 {"id": l.id, "sprint_id": l.sprint_id, "amounts": l.amounts,
                  "granted_at": l.granted_at, "expires_at": l.expires_at,
-                 "priority": l.priority, "preemptible": l.preemptible}
+                 "priority": l.priority, "preemptible": l.preemptible,
+                 "host": l.host}
                 for l in ledger.all_leases()
             ],
         }
@@ -1641,6 +1652,8 @@ class Service:
                 # ResourcePool.from_dict treats a top-level `resources:` mapping as
                 # the wrapper, so a resource actually named that would vanish.
                 raise ValueError("'resources' is reserved and can't be a resource name")
+            if key == "hosts":
+                raise ValueError("'hosts' is reserved for remote machines and can't be a resource name")
             if key in clean:
                 raise ValueError(f"duplicate resource name: {key}")
             if isinstance(raw_val, bool) or not isinstance(raw_val, (int, float)):
@@ -1654,13 +1667,24 @@ class Service:
 
         path = self.repo_root / ".coscience" / "resources.yaml"
         path.parent.mkdir(parents=True, exist_ok=True)
+        # The editor edits this machine's amounts and the platform keys; remote
+        # hosts are declared by hand and must survive the edit untouched.
+        out: dict = dict(clean)
+        if path.is_file():
+            loaded = yaml.safe_load(path.read_text()) or {}
+            if isinstance(loaded, dict):
+                wrapped = loaded.get("resources")
+                hosts = (wrapped.get("hosts") if isinstance(wrapped, dict) else None) \
+                    or loaded.get("hosts")
+                if hosts:
+                    out["hosts"] = hosts
         # Unique per call: PUT /api/capacity is a sync route, so FastAPI runs it
         # in a threadpool and concurrent calls are genuinely concurrent. A shared
         # tmp name lets one thread's os.replace pull the file out from under
         # another thread's write/replace.
         tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
         try:
-            tmp.write_text(yaml.safe_dump(clean, sort_keys=True))
+            tmp.write_text(yaml.safe_dump(out, sort_keys=True))
             os.replace(tmp, path)  # atomic: a dispatcher reading it never sees a partial file
         finally:
             tmp.unlink(missing_ok=True)

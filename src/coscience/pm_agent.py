@@ -271,7 +271,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
         if i.id in shown_ids and i.edges:
             rel = "; ".join(f"{e['type']} {e['dst']}" for e in i.edges)
             graph_lines.append(f"{i.id}: {rel}")
-    capacity, leased = _compute(substrate)
+    capacity, leased = _compute(substrate, program_id)
     return PMContext(
         program_id=program_id, goals=program.goals, cycle=pm.cycle,
         instructions=substrate.load_instructions(program_id),
@@ -290,25 +290,29 @@ def gather_context(substrate, program_id: str) -> PMContext:
     )
 
 
-# Pool keys a sprint never requests itself: the platform charges them (a worker slot
-# per sprint, housekeeping slots for PM/wiki), so showing them would only invite
-# the PM to ask for them.
-_PLATFORM_KEYS = {"workers", "housekeepers"}
-
-
-def _compute(substrate) -> tuple[dict, dict]:
-    """(capacity, currently leased) of the resources a sprint can request."""
+def _compute(substrate, program_id: str) -> tuple[dict, dict]:
+    """(capacity, currently leased) of the resources a sprint in this program can
+    request — only the hosts it may be placed on, so a reserved machine is never
+    planned around by a program that will not get it."""
     from coscience.ledger import Ledger
-    from coscience.resources import load_pool
+    from coscience.resources import PLATFORM_KEYS, load_pool
     pool = load_pool(substrate.repo_root)
-    capacity = {k: v for k, v in pool.capacity.items() if k not in _PLATFORM_KEYS}
+    hosts = pool.placeable_hosts(program_id)
+    capacity: dict[str, float] = {}
+    for h in hosts:
+        for k, v in h.capacity.items():
+            capacity[k] = capacity.get(k, 0.0) + v
+    leased: dict[str, float] = {}
     try:
         ledger = Ledger(pool, substrate.repo_root / ".coscience" / "leases.json")
         ledger.load()
-        used = ledger.used()
+        for h in hosts:
+            for k, v in ledger.used(h.name).items():
+                if k not in PLATFORM_KEYS:
+                    leased[k] = leased.get(k, 0.0) + v
     except (OSError, ValueError, TypeError, KeyError):
-        used = {}
-    leased = {k: v for k, v in used.items() if k in capacity and v}
+        leased = {}
+    leased = {k: v for k, v in leased.items() if k in capacity and v}
     return capacity, leased
 
 

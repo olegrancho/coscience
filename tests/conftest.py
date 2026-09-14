@@ -155,3 +155,11 @@ def wiki_bundle(substrate):
     substrate.save_program(Program(id="p1", title="P1", goals="goals"))
     wiki_store.ensure_bundle(substrate, "p1")
     return substrate, "p1"
+
+
+@pytest.fixture
+def every_host_placeable(monkeypatch):
+    """Remote launch is O6; until then only `local` is placeable. The accounting is
+    host-aware already, so tests exercise it as if remote hosts were live."""
+    from coscience.resources import Host
+    monkeypatch.setattr(Host, "placeable", property(lambda self: True))

@@ -45,3 +45,34 @@ def test_the_sprint_page_says_why_it_can_never_start(substrate):
     assert svc.get_sprint("old")["unrunnable"] == ""
     rows = {r["id"]: r["unrunnable"] for r in svc.list_sprints()}
     assert rows == {"big": "needs cpu 24 but capacity is 16", "old": ""}
+
+
+def test_the_cycle_places_a_sprint_only_on_a_host_its_program_may_use(substrate, every_host_placeable):
+    pool = ResourcePool.from_dict({"cpu": 4, "hosts": {
+        "big": {"ssh": "big", "programs": ["p2"], "capacity": {"cpu": 16}}}})
+    substrate.save_sprint(Sprint(id="p5-big", status=SprintStatus.QUEUED, goals="g", plan=["x"],
+                                 resources_required={"cpu": 16.0}, program="p5"))
+    substrate.save_sprint(Sprint(id="p2-big", status=SprintStatus.QUEUED, goals="g", plan=["x"],
+                                 resources_required={"cpu": 16.0}, program="p2"))
+    disp = Dispatcher(substrate, FakeAgent(linger=50, finished=False), pool,
+                      SchedulerPolicy(aging_interval=0.0))
+
+    report = disp.run_one_cycle(now=0.0)
+
+    assert report.unrunnable == ["p5-big"]
+    assert disp.ledger.lease_for("p2-big").host == "big"
+
+
+def test_the_sprint_page_judges_capacity_by_the_hosts_its_program_may_use(substrate, every_host_placeable):
+    from coscience.service import Service
+    cos = substrate.repo_root / ".coscience"
+    cos.mkdir(parents=True, exist_ok=True)
+    (cos / "resources.yaml").write_text(
+        "cpu: 4\nhosts:\n  big:\n    ssh: big\n    programs: [p2]\n    capacity: {cpu: 16}\n")
+    substrate.save_sprint(Sprint(id="p5-big", status=SprintStatus.QUEUED, goals="g", plan=["x"],
+                                 resources_required={"cpu": 16.0}, program="p5"))
+    substrate.save_sprint(Sprint(id="p2-big", status=SprintStatus.QUEUED, goals="g", plan=["x"],
+                                 resources_required={"cpu": 16.0}, program="p2"))
+    svc = Service(substrate.repo_root)
+    assert svc.get_sprint("p5-big")["unrunnable"] == "needs cpu 16 but capacity is 4"
+    assert svc.get_sprint("p2-big")["unrunnable"] == ""

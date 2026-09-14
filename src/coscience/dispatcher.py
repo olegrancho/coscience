@@ -121,7 +121,8 @@ class Dispatcher:
                                    effective_requirement(sprint.resources_required,
                                                          self.ledger.pool),
                                    now, ttl,
-                                   priority=eff, preemptible=sprint.preemptible):
+                                   priority=eff, preemptible=sprint.preemptible,
+                                   program=sprint.program):
                 # Acquire the sprint's artifact locks (instantiating create-targets).
                 # If a same-cycle race lost the atomic acquire, give the lease back
                 # and leave the sprint queued for a later cycle.
@@ -201,7 +202,7 @@ class Dispatcher:
         for s in eligible:
             if self.ledger.lease_for(s.id) is not None:
                 continue
-            if over_capacity(s.resources_required, self.ledger.pool):
+            if over_capacity(s.resources_required, self.ledger.pool, s.program):
                 report.unrunnable.append(s.id)
             else:
                 report.waiting += 1

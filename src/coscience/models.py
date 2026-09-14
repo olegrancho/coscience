@@ -46,6 +46,7 @@ class Lease:
     expires_at: float
     priority: int = 0
     preemptible: bool = True
+    host: str = "local"              # the machine these amounts are on; platform keys are pool-wide
 
 
 @dataclass

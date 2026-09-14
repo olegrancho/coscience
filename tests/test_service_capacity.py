@@ -126,3 +126,55 @@ def test_concurrent_writes_never_race_on_the_shared_tmp_file(tmp_path):
     assert list(path.parent.glob("resources.yaml.*.tmp")) == []
     final = yaml.safe_load(path.read_text())
     assert final in written_values
+
+
+HOSTS_YAML = ("cpu: 24\nworkers: 3\n"
+              "hosts:\n  remote1:\n    ssh: remote1\n    programs: [p2]\n"
+              "    run_root: ~/coscience-runs\n    capacity: {cpu: 28}\n")
+
+
+def _write(tmp_path, text):
+    cos = tmp_path / ".coscience"
+    cos.mkdir(parents=True, exist_ok=True)
+    (cos / "resources.yaml").write_text(text)
+
+
+def test_ledger_status_lists_every_host(tmp_path):
+    _write(tmp_path, HOSTS_YAML)
+    status = Service(tmp_path).ledger_status()
+    assert status["hosts"] == [
+        {"name": "local", "ssh": "", "placeable": True, "programs": [], "run_root": "",
+         "capacity": {"cpu": 24.0}, "available": {"cpu": 24.0, "workers": 3.0}},
+        {"name": "remote1", "ssh": "remote1", "placeable": False, "programs": ["p2"],
+         "run_root": "~/coscience-runs", "capacity": {"cpu": 28.0}, "available": {}},
+    ]
+
+
+def test_ledger_status_names_each_leases_host(tmp_path):
+    from coscience.ledger import Ledger
+    from coscience.resources import ResourcePool
+    led = Ledger(ResourcePool({"cpu": 4.0}), tmp_path / ".coscience" / "leases.json")
+    led.load()
+    led.acquire("sp1", {"cpu": 1.0}, now=0.0, ttl=60.0)
+    assert Service(tmp_path).ledger_status()["leases"][0]["host"] == "local"
+
+
+def test_set_capacity_keeps_the_hosts_section(tmp_path):
+    _write(tmp_path, HOSTS_YAML)
+    Service(tmp_path).set_capacity({"cpu": 16, "workers": 2})
+    written = yaml.safe_load((tmp_path / ".coscience" / "resources.yaml").read_text())
+    assert written["cpu"] == 16.0 and written["workers"] == 2.0
+    assert written["hosts"]["remote1"]["capacity"] == {"cpu": 28}
+
+
+def test_set_capacity_refuses_a_resource_named_hosts(tmp_path):
+    with pytest.raises(ValueError, match="'hosts' is reserved"):
+        Service(tmp_path).set_capacity({"hosts": 1})
+
+
+def test_ledger_status_reports_a_malformed_host_and_keeps_serving(tmp_path):
+    _write(tmp_path, "cpu: 4\nhosts:\n  typo:\n    capacity: {cpu: 8}\n")
+    status = Service(tmp_path).ledger_status()
+    assert [h["name"] for h in status["hosts"]] == ["local"]
+    assert status["capacity"] == {"cpu": 4.0}
+    assert status["host_errors"] == ["hosts.typo: needs ssh (an ssh alias or user@host)"]
