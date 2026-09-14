@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import { useMe, UserChip } from "./auth";
 import LiveAgents from "./components/LiveAgents";
+import { pulseCounts } from "./components/pulseCounts";
 import { Heartbeat, WindowTick, windowElapsed } from "./components/ui";
 import Overview from "./views/Overview";
 import Programs from "./views/ProgramsOverview";
@@ -57,14 +58,8 @@ function railLinkStyle({ isActive }: { isActive: boolean }) {
 function Pulse() {
   const programs = useQuery({ queryKey: ["programs"], queryFn: api.listPrograms });
   const sprints = useQuery({ queryKey: ["sprints"], queryFn: api.listSprints });
-  const st: Record<string, string> = {};
-  for (const p of programs.data ?? []) st[p.id] = p.status;
-  const progOf = (s: { id: string; program: string | null }) =>
-    s.program ?? (s.id.includes("-") ? s.id.slice(0, s.id.indexOf("-")) : s.id);
-  const active = (programs.data ?? []).filter((p) => p.status === "active").length;
-  const running = (sprints.data ?? []).filter((s) => s.status === "executing").length;
-  const waiting = (sprints.data ?? [])
-    .filter((s) => s.status === "proposed" && (st[progOf(s)] ?? "active") === "active").length;
+  const { active, running, awaitingYou, waiting, cantStart } =
+    pulseCounts(programs.data ?? [], sprints.data ?? []);
 
   const Row = ({ children }: { children: ReactNode }) => (
     <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-muted)" }}>
@@ -84,9 +79,21 @@ function Pulse() {
         <span><b className="mono" style={{ color: "var(--ink)" }}>{running}</b> running</span>
       </Row>
       <Row>
-        <span style={{ width: 9, textAlign: "center", color: waiting ? "var(--signal)" : "var(--ink-faint)" }}>●</span>
-        <span style={{ color: waiting ? "var(--signal)" : "var(--ink-muted)", fontWeight: waiting ? 600 : 400 }}>
-          <b className="mono">{waiting}</b> awaiting you
+        <span style={{ width: 9, textAlign: "center", color: "var(--st-approved)" }}>◷</span>
+        <span title="Approved or queued — cleared to run, not started yet">
+          <b className="mono" style={{ color: "var(--ink)" }}>{waiting}</b> waiting
+          {cantStart > 0 && (
+            <span style={{ color: "var(--signal)" }}
+                  title="Asking for more compute than this environment has — they can never start">
+              {" "}· {cantStart} can't start
+            </span>
+          )}
+        </span>
+      </Row>
+      <Row>
+        <span style={{ width: 9, textAlign: "center", color: awaitingYou ? "var(--signal)" : "var(--ink-faint)" }}>●</span>
+        <span style={{ color: awaitingYou ? "var(--signal)" : "var(--ink-muted)", fontWeight: awaitingYou ? 600 : 400 }}>
+          <b className="mono">{awaitingYou}</b> awaiting you
         </span>
       </Row>
       <LiveAgents />
