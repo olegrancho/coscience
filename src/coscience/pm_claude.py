@@ -244,6 +244,8 @@ SPRINT CAP: at most {context.max_proposed} sprints may await review. {context.pr
 pending now, so you have {context.free_slots} free slot(s). Propose/promote AT MOST {context.free_slots};
 if that is 0, propose nothing and instead curate the idea pool.
 
+{render_compute(context)}
+
 HOW TO ACT — read this before you write anything. You act ONLY by filling fields in the
 JSON object below. Prose is not an action: "report" is stored verbatim for a human to read
 and is NEVER parsed, so describing a change there does not perform it. Each thing you can
@@ -389,7 +391,9 @@ the work itself. So:
   good result looks like; let the agent figure out how. Never put `python3 -c`,
   `printf`, file redirects, or any executable command in `plan`.
 `resources_required` maps a resource name to a NUMBER only (e.g. {{"cpu": 1}} or {{"gpu": 2}}),
-or {{}} — never put notes or prose in it; put caveats in `rationale`.
+or {{}} — never put notes or prose in it; put caveats in `rationale`. Size it to what the
+sprint's heaviest step actually uses at once, never to the machine, and never above the
+COMPUTE totals (see COMPUTE above).
 You may also change an editable sprint's resources_required (compute) here in response to
 feedback — e.g. drop a gpu the environment can't provide and run on cpu.
 `title` is a short headline; `summary` is the skimmable gist; `goals` is the full objective
@@ -413,6 +417,27 @@ def _decode_json_object(text: str) -> dict:
     if not isinstance(obj, dict):
         raise PMReasonerError("reasoner JSON is not an object")
     return obj
+
+
+def _amounts(d: dict) -> str:
+    return ", ".join(f"{k} {v:g}" for k, v in sorted(d.items())) or "nothing"
+
+
+def render_compute(context: PMContext) -> str:
+    """The pool a proposal's `resources_required` draws on, and the rule for sizing it.
+
+    Over-asking is the failure this exists for: on 09-13 the PM gave four p2 sprints
+    `cpu: 24` against a capacity of 16, so they could never start; once capacity
+    was raised, one of them reserved all 24 CPUs while using under 2% of one."""
+    if not context.compute_capacity:
+        return ("COMPUTE: no capacity is declared for this environment. Request only what a "
+                "sprint's heaviest step actually uses at once.")
+    return f"""COMPUTE: this environment has {_amounts(context.compute_capacity)} in total; running
+sprints hold {_amounts(context.compute_leased)} of it right now. A sprint's resources_required
+is RESERVED for as long as the sprint runs — other sprints cannot use it, even while this one
+sits idle between steps. Request only what the work actually needs: the cores or GPUs its
+heaviest step uses at once, not the size of the machine. Never request more than the total
+above — a request larger than the total can never be granted, and the sprint waits forever."""
 
 
 def parse_response(text: str) -> PMCycleOutput:

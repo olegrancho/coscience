@@ -271,6 +271,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
         if i.id in shown_ids and i.edges:
             rel = "; ".join(f"{e['type']} {e['dst']}" for e in i.edges)
             graph_lines.append(f"{i.id}: {rel}")
+    capacity, leased = _compute(substrate)
     return PMContext(
         program_id=program_id, goals=program.goals, cycle=pm.cycle,
         instructions=substrate.load_instructions(program_id),
@@ -285,7 +286,30 @@ def gather_context(substrate, program_id: str) -> PMContext:
         results_dir=str(substrate.repo_root / "results"),
         graph_lines=graph_lines,
         artifacts=artifact_dicts, artifact_feedback=artifact_feedback,
+        compute_capacity=capacity, compute_leased=leased,
     )
+
+
+# Pool keys a sprint never requests itself: the platform charges them (a worker slot
+# per sprint, housekeeping slots for PM/wiki), so showing them would only invite
+# the PM to ask for them.
+_PLATFORM_KEYS = {"workers", "housekeepers"}
+
+
+def _compute(substrate) -> tuple[dict, dict]:
+    """(capacity, currently leased) of the resources a sprint can request."""
+    from coscience.ledger import Ledger
+    from coscience.resources import load_pool
+    pool = load_pool(substrate.repo_root)
+    capacity = {k: v for k, v in pool.capacity.items() if k not in _PLATFORM_KEYS}
+    try:
+        ledger = Ledger(pool, substrate.repo_root / ".coscience" / "leases.json")
+        ledger.load()
+        used = ledger.used()
+    except (OSError, ValueError, TypeError, KeyError):
+        used = {}
+    leased = {k: v for k, v in used.items() if k in capacity and v}
+    return capacity, leased
 
 
 def _resolve_workdir(substrate, workdir: str) -> str:

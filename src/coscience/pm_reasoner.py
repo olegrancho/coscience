@@ -67,6 +67,11 @@ class PMContext:
     graph_lines: list[str] = field(default_factory=list)  # windowed lineage-graph adjacency, one line per node with edges
     artifacts: list[dict] = field(default_factory=list)          # program artifacts: [{id, title, kind}]
     artifact_feedback: list[dict] = field(default_factory=list)  # open human-last threads on artifacts (target "pm")
+    # Declared compute and what running sprints hold of it, so proposals are sized to
+    # the pool. Deliberately NOT fingerprint inputs: a capacity edit or a lease turning
+    # over is not new information about the program, and would wake every PM at once.
+    compute_capacity: dict = field(default_factory=dict)         # {"cpu": 24.0, "gpu": 1.0}
+    compute_leased: dict = field(default_factory=dict)           # {"cpu": 24.0}
 
     @property
     def free_slots(self) -> int:
