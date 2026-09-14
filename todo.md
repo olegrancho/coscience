@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 51
+version: 53
 last_updated: 2026-09-13
 ---
 
@@ -16,6 +16,35 @@ Compute turns `ok` within a few seconds of the reply finishing, without opening
 the thread again. A run that ends normally can read `lost` for up to one dispatcher
 cycle before its collect writes the end; a row that stays `lost` is a real death.
 On a dashboard-only host with no dispatcher, chat turns still wait for a read.
+
+### N1. Tell the PM what compute exists
+
+The PM prompt carries a COMPUTE block — declared capacity, what running sprints
+hold, and the rule to request only what a sprint's heaviest step uses (`0f6ae89`).
+
+**Check:** the next p2 PM transcript (`.coscience/pm-p2.out`) shows the COMPUTE
+block with the real totals, and the next sprints it proposes ask for no more CPU
+than their work needs — none above capacity. Capacity is deliberately not a
+fingerprint input, so raising it does not wake a PM by itself.
+
+### N2. Flag a request larger than total capacity
+
+The dispatcher reports sprints asking for more than the pool's total as
+unrunnable instead of waiting, and the sprint page says why (`73a683d`).
+
+**Check:** with capacity below a queued sprint's request, the dispatch log reads
+`… · waiting N · unrunnable 1 (<id>)` and that sprint's page shows "Can't ever
+start: needs cpu 24 but capacity is 16" under its compute. The sprint is only
+flagged — never parked or edited.
+
+### K6. Count the experiments waiting to run
+
+The rail's pulse has a "waiting" row counting approved and queued sprints in
+active programs, with any that can never start shown apart as "N can't start".
+
+**Check:** the rail's waiting number matches the approved plus queued sprints of
+active programs on the board, and a sprint made unrunnable (N2) moves from
+"waiting" to "can't start". "awaiting you" still counts proposed sprints only.
 
 # To Do
 
@@ -208,19 +237,6 @@ those now would be the same guessing this block exists to replace.
 The state of the work reads at a glance — without opening a page, counting cards
 or decoding a slug.
 
-### K6. Count the experiments waiting to run
-
-Show on the dashboard how many experiments are approved or queued, as one number
-labelled "waiting".
-
-The rail's pulse counts `running` (executing) and "awaiting you" (proposed, in
-active programs), but nothing counts work that is cleared and simply has not
-started: approved sprints the PM has not released yet, and queued ones waiting on
-a slot or on usage. The overview lists approved ones only. Frontend-only —
-`listSprints` already carries each status. Mind the name: `Pulse` already has a
-variable `waiting` holding the proposed count, and `CycleReport.waiting` counts
-leaseless sprints, so rename those rather than overload the word.
-
 ## M. Delegated approval
 
 Work does not stall waiting on human review: the PM can hold approval authority
@@ -296,29 +312,6 @@ are the cheap ones before wiring it.
 
 No sprint waits on a resource request the platform can never grant, and the PM
 proposes work sized to the compute it actually has.
-
-### N1. Tell the PM what compute exists
-
-Put the declared capacity (and what is currently leased) into the PM prompt, so
-`resources_required` in its proposals fits.
-
-On 09-13 four p2 sprints (c60 ×2, c62, c63) sat `queued` asking for `cpu: 24`
-against a capacity of 16, and nothing in p2's instructions or guidance asked for
-24 — the PM chose it, plausibly for a 32-core box, because the prompt's proposal
-schema offers `resources_required` with no sense of the pool. The capacity is in
-`.coscience/resources.yaml`; `gather_context` is where it would join `PMContext`.
-
-### N2. Flag a request larger than total capacity
-
-Mark a sprint whose request exceeds a declared capacity as unrunnable — on its
-page and in the dispatch log — instead of counting it as waiting.
-
-`select_grants` skips a sprint whose need exceeds what is available, and a need
-above the pool's total can never become available, so such a sprint is silently
-counted in "waiting N" forever: on 09-13 the log read `granted 0 · waiting 5` for
-hours with four of the five impossible. `Ledger.pool.capacity` already has the
-totals. Worth deciding whether the sprint page shows it only, or the rail's
-waiting count (K6) excludes it too.
 
 # Done
 
