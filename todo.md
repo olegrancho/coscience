@@ -1,12 +1,37 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 66
+version: 68
 last_updated: 2026-09-13
 ---
 
 # To QC
 
+### D1. Fix the 29 dangling relations across p2, p3 and p5
+
+Lint reports no `rel/no-link` on any wiki, and every ingest now links the relations
+its pages declare at collect instead of waiting for the next lint run.
+
+**Check:** `coscience wiki --repo $COSCIENCE_REPO --lint` after the next p2, p3 or p5
+ingest shows no `rel/no-link`, and any `# Related` that run adds sits above
+`# Human notes`.
+
+Only 6 were left (p2 3, p3 3), fixed by `--lint --fix` in substrate commits 67bda7a35
+and 68d7e6c47; the 23 older `# Related` sections still sit below `# Human notes`.
+
 # To Do (sprint)
+
+### I1. Ingest a result when its sprint finishes
+
+Have sprint completion wake the wiki for that program instead of leaving the
+object to the next scheduled beat.
+
+Ingest is currently pull-only: `wiki.beat` finds pending objects whenever the
+dispatcher gets to it, so a result can sit uningested for hours and the wiki
+reads as stale exactly when someone has just looked at the sprint. The hook
+belongs where the sprint lands its result, and the housekeeping lease plus the
+`wiki:<program>` slot already serialise what it would trigger. Note the tension
+with J3: firing per sprint makes batches smaller, so the fixed prefix is
+amortised over less material.
 
 # To Do (backlog)
 
@@ -25,38 +50,21 @@ content permanently.
 Every program wiki is accurate about itself: it passes lint, and a run's report
 matches what that run actually changed.
 
-### D1. Fix the 29 dangling relations across p2, p3 and p5
+### D3. Retire the source page of a superseded artifact version
 
-Add body links for every relation lint reports as declared but never linked from
-the prose.
+Decide what happens to a source page when its artifact moves to a new version, so
+lint stops reporting it as `src/missing`.
 
-`rel/no-link` is the only error rule firing anywhere: 21 in p2, 5 in p5, 3 in p3,
-0 in wikitest. Everything else is info-level and expected. That p2 carries the
-most while being the healthiest wiki suggests the agent declares relations in
-frontmatter and forgets the prose link — a prompt fix rather than 29 hand edits.
+p5's only lint error is `sources/artifact-gcn-hit-rate-vs-training-set-size-honest-vs-leaked-split-v1.md`:
+the artifact moved to v2 on 09-12 and v2 was ingested, but only an artifact's current
+version counts as an object, so v1's page reads as pointing at nothing. Every future
+revision will do the same. The choices are to retire or merge the old page on
+ingest, or to have lint accept an origin that is a superseded version.
 
 ## F. LLM call metrics
 
 Every Claude call the platform makes is visible on Compute with what it cost,
 what it was for, and how it ended.
-
-## I. Wiki responsiveness
-
-A finished sprint reaches its program's wiki while the result still matters,
-without anyone waiting on a heartbeat or asking for it.
-
-### I1. Ingest a result when its sprint finishes
-
-Have sprint completion wake the wiki for that program instead of leaving the
-object to the next scheduled beat.
-
-Ingest is currently pull-only: `wiki.beat` finds pending objects whenever the
-dispatcher gets to it, so a result can sit uningested for hours and the wiki
-reads as stale exactly when someone has just looked at the sprint. The hook
-belongs where the sprint lands its result, and the housekeeping lease plus the
-`wiki:<program>` slot already serialise what it would trigger. Note the tension
-with J3: firing per sprint makes batches smaller, so the fixed prefix is
-amortised over less material.
 
 ## J. Wiki run cost
 
@@ -371,6 +379,11 @@ to pilot is a decision.
 
 # Done
 
+### I1. Ingest a result when its sprint finishes
+
+Closed as not a problem: an ingest already launches within a 5s beat, and the 3h+
+waits were the wiki's 70% usage cutoff, recorded at `WIKI_THRESHOLD` in `wiki.py`.
+
 ### H1. Work out what a Codex backend would take
 
 `docs/codex-backend.md` maps every `claude` coupling to `codex exec`, with a real run's
@@ -415,8 +428,3 @@ dispatch log and on its page, not counted as waiting.
 
 The rail counts approved and queued experiments as "waiting", with any that can
 never start shown beside it.
-
-### F9. Label a wiki call by the model that did the work
-
-A wiki call is labelled with the model that cost the most in its run, so a Haiku
-side call no longer names an Opus ingest.
