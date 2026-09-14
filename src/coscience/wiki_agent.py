@@ -13,7 +13,7 @@ from pathlib import Path
 from coscience import executor, wiki_prompts
 from coscience.wiki_store import WikiObject
 
-_LEFTOVERS = ("agent.out", "agent.exit", "report.json", "lint-report.md")
+_LEFTOVERS = ("agent.out", "agent.exit", "report.json", "lint-report.md", "progress.jsonl")
 
 
 #: The built-ins a wiki run actually uses — Read, Edit, Write and Bash, and nothing

@@ -105,7 +105,22 @@ _PROHIBITIONS = """## Prohibitions
   human marks a page verified.
 """
 
-_HOUSEKEEPING = """## Before you finish
+_HOUSEKEEPING = """## As you go
+
+When you finish an object — its source page and every page it creates or
+extends — append one line for it to `{run_dir}/progress.jsonl` before you start
+the next:
+
+```json
+{{"object": "result:r1"}}
+```
+
+The run can be cut off at any moment (a rate limit, a restart). Objects recorded
+here are kept even if the run never reaches its report; the rest come back in a
+later run. Record an object only once its pages are fully written, and only ids
+you were given.
+
+## Before you finish
 
 1. Update `index.md` so every page you created is reachable from it.
 2. Prepend one line per object to `log.md` (newest first): the date, the object

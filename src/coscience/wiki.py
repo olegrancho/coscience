@@ -317,6 +317,39 @@ def _count_failure(state: dict, batch: list[str]) -> bool:
     return True
 
 
+def _credit(substrate, program_id: str, state: dict, oids: list[str], now: float,
+            run_id: str) -> None:
+    """Mark `oids` ingested against their current bytes."""
+    if not oids:
+        return
+    objects = {o.oid: o for o in wiki_store.program_objects(substrate, program_id)}
+    ingested = state.setdefault("ingested", {})
+    for oid in oids:
+        obj = objects.get(oid)
+        ingested[oid] = {"hash": wiki_store.object_hash(obj) if obj else "",
+                         "at": now, "run": run_id}
+
+
+def _progressed(batch: list[str], run_dir: Path) -> list[str]:
+    """The batch objects the agent recorded finishing in `progress.jsonl`, in batch
+    order. Like `_reconciled`, an id outside the batch is ignored — the agent does
+    not get to widen its own mandate — and a torn last line costs only that line."""
+    import json
+    try:
+        lines = (run_dir / "progress.jsonl").read_text().splitlines()
+    except OSError:
+        return []
+    done: set[str] = set()
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict) and isinstance(rec.get("object"), str):
+            done.add(rec["object"])
+    return [oid for oid in batch if oid in done]
+
+
 def _reconciled(batch: list[str], report: dict) -> list[str]:
     """The objects a run is allowed to mark ingested: dispatched AND reported as
     covered.
@@ -504,12 +537,7 @@ def _collect(substrate, program, now, agent, state, run) -> str:
 
     line = f"wiki: {kind} {status}"
     if status == "ok":
-        objects = {o.oid: o for o in wiki_store.program_objects(substrate, program.id)}
-        for oid in _reconciled(batch, report):
-            obj = objects.get(oid)
-            state["ingested"][oid] = {
-                "hash": wiki_store.object_hash(obj) if obj else "",
-                "at": now, "run": run_id}
+        _credit(substrate, program.id, state, _reconciled(batch, report), now, run_id)
         if kind == "ingest":
             state["ingests_since_lint"] = state.get("ingests_since_lint", 0) + 1
         else:
@@ -517,12 +545,22 @@ def _collect(substrate, program, now, agent, state, run) -> str:
             _file_lint_report(substrate, program.id, run_dir, now)
         state["failures"] = 0
         merged = _handle_merges(substrate, program, state, report, run_id, now)
-    elif deferred:
-        # Not counted, but not forgotten either: the batch stays out of `ingested`,
-        # so `pending_objects` hands it back once there is budget to try again.
-        line = f"wiki: {kind} deferred — out of budget, will retry"
-    elif _count_failure(state, batch):
-        line = f"wiki: {kind} quarantined {len(batch)}"
+    else:
+        # A run cut off partway already wrote the pages of the objects it finished.
+        # Accounting per run threw those away, and the failure then counted against
+        # objects whose pages were good; the agent's per-object progress keeps them.
+        kept = _progressed(batch, run_dir)
+        _credit(substrate, program.id, state, kept, now, run_id)
+        remaining = [oid for oid in batch if oid not in set(kept)]
+        kept_note = f" (kept {len(kept)} of {len(batch)})" if kept else ""
+        if deferred:
+            # Not counted, but not forgotten either: the rest stays out of `ingested`,
+            # so `pending_objects` hands it back once there is budget to try again.
+            line = f"wiki: {kind} deferred — out of budget, will retry{kept_note}"
+        elif (remaining or not batch) and _count_failure(state, remaining):
+            line = f"wiki: {kind} quarantined {len(remaining)}{kept_note}"
+        else:
+            line += kept_note
 
     state["runs"] = ([{"id": run_id, "kind": kind, "status": state["last_run"]["status"],
                        "at": now,

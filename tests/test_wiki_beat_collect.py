@@ -478,3 +478,49 @@ def test_a_genuine_failure_still_counts(substrate):
     wiki.beat(substrate, p, 101.0, agent)
 
     assert wiki_store.load_state(substrate, "p1")["failures"] == 1
+
+
+def test_a_failed_run_keeps_the_objects_it_recorded_finishing(substrate):
+    """B2: a run killed at object 3 of 4 used to lose objects 1-2, whose pages were
+    already written, and count the failure against them too."""
+    agent = FakeWikiAgent()
+    p = _seed(substrate, n=2)
+    wiki.beat(substrate, p, 100.0, agent)
+    run_dir = agent.launches[0]["run_dir"]
+    assert set(agent.launches[0]["objects"]) == {"result:r0", "result:r1"}
+    (run_dir / "progress.jsonl").write_text(
+        '{"object": "result:r0"}\n{"object": "result:not-in-batch"}\n{"obj')
+    (run_dir / "agent.exit").write_text("3\n")
+    agent.alive = False
+
+    assert wiki.beat(substrate, p, 200.0, agent) == "wiki: ingest failed (kept 1 of 2)"
+
+    state = wiki_store.load_state(substrate, "p1")
+    assert set(state["ingested"]) == {"result:r0"}
+    assert state["failures"] == 1                   # counted against r1 alone
+
+
+def test_a_failed_run_that_finished_every_object_counts_no_failure(substrate):
+    agent = FakeWikiAgent()
+    p = _seed(substrate, n=2)
+    wiki.beat(substrate, p, 100.0, agent)
+    run_dir = agent.launches[0]["run_dir"]
+    (run_dir / "progress.jsonl").write_text('{"object": "result:r0"}\n{"object": "result:r1"}\n')
+    (run_dir / "agent.exit").write_text("3\n")
+    agent.alive = False
+
+    assert wiki.beat(substrate, p, 200.0, agent) == "wiki: ingest failed (kept 2 of 2)"
+
+    state = wiki_store.load_state(substrate, "p1")
+    assert set(state["ingested"]) == {"result:r0", "result:r1"}
+    assert state["failures"] == 0
+
+
+def test_the_ingest_prompt_asks_for_progress_per_object(substrate):
+    from coscience import wiki_prompts
+    p = _seed(substrate)
+    obj = wiki_store.program_objects(substrate, "p1")[0]
+    text = wiki_prompts.render_ingest(p, substrate.repo_root / "bundle",
+                                      [(obj, wiki_store.object_hash(obj))],
+                                      substrate.repo_root / "run")
+    assert "progress.jsonl" in text and '{"object": "result:r1"}' in text
