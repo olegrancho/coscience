@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 56
+version: 57
 last_updated: 2026-09-13
 ---
 
@@ -77,6 +77,17 @@ r0001–r0013 now appear, most `rate-limited` (spot-checked against their envelo
 429 "session limit"). Rows carry `backfilled: true`, and a second run adds nothing.
 The pre-backfill log is kept beside the live one as `*.pre-backfill-20260913`.
 
+### B2. Record ingest progress per object, not per run
+
+The ingest prompt has the agent append each finished object to `progress.jsonl`;
+a failed or rate-limited run keeps those objects and counts the failure only
+against the rest (`6e5ee11`).
+
+**Check:** the next ingest run dir on p2 or p5 holds a `progress.jsonl` with one
+line per object it finished. When a run is cut off (a 429 or a restart), the wiki
+beat line reads `wiki: ingest deferred … (kept N of M)` and those N objects are in
+the ledger's `ingested` while the rest stay pending.
+
 # To Do
 
 ## A. Wiki ledger integrity
@@ -88,16 +99,6 @@ result is silently missing from its program's wiki.
 
 A transient outage costs at most the object in flight, and never excludes good
 content permanently.
-
-### B2. Record ingest progress per object, not per run
-
-Have the agent append each finished object to `progress.jsonl`, and read it in
-`_collect` on failed runs.
-
-`wiki.py` accounts per run but works per object, so a run killed at object 3 of 4
-loses objects 1–2 despite their pages being committed. Needs a prompt clause in
-`wiki_prompts.py` and a fallback branch in `_collect`, fed through the existing
-`_reconciled` intersection so the agent still cannot widen its own mandate.
 
 ## D. Wiki content health
 
