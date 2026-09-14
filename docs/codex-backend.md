@@ -9,9 +9,10 @@ An adapter, not a rewrite — but the seam has to be cut first. Every agent kind
 builds its own `claude` command line and parses Claude Code's stream itself, so
 there is no single place a second backend plugs in today. Codex's non-interactive
 mode (`codex exec`) covers launch, model, working directory, permissions, JSONL
-events, a final-message file and resume by id. What it does not give the platform
-for free is the two things Claude Code's stream is load-bearing for: **dollar
-cost** per call and the **5h / weekly usage windows** that gate every launch.
+events, a final-message file and resume by id. Of the two things Claude Code's
+stream is load-bearing for, Codex has one in a different place and lacks the other:
+its **5h / weekly usage windows** exist but live in its session file, and there is
+no **dollar cost** per call, only tokens.
 
 ## Where the platform assumes `claude`
 
@@ -43,17 +44,17 @@ cost** per call and the **5h / weekly usage windows** that gate every launch.
 | structured final output | parse JSON out of text | `--output-schema <file>` — could replace the PM's JSON decoding |
 | no background work outliving the run | env var + `--disallowedTools Monitor` | not needed as far as the help shows; confirm on a real run |
 
-## The two real gaps
+## The gaps
 
-1. **Cost.** Every call row, the Compute tiles and the per-run numbers come from
-   `total_cost_usd` in Claude's envelope. A Codex run on a ChatGPT plan is not
-   billed per call; at best its events carry token counts, so cost would have to
-   be computed from a price table or shown as tokens only.
-2. **Usage windows.** The launch gates and the rail's bars read Claude's
-   `unifiedWindows` (5h and weekly utilization) from the stream or the usage API.
-   Codex draws on a separate quota, so the gate has to become per-backend — and
-   whether `codex exec --json` reports any quota reading at all is unknown until a
-   real run.
+1. **Cost — real.** Every call row, the Compute tiles and the per-run numbers come
+   from `total_cost_usd` in Claude's envelope. A Codex run on a ChatGPT plan is not
+   billed per call and its events carry token counts only, so Compute would show
+   tokens, or a cost computed from a price table.
+2. **Usage windows — smaller than feared, but per-backend.** The launch gates and
+   the rail's bars read Claude's `unifiedWindows`. Codex keeps its own 5h and weekly
+   windows (`used_percent`, `resets_at`) — the same shape — but only in its session
+   file, not in the `--json` stream. The gate has to read the right quota for the
+   agent it is about to launch.
 
 ## Suggested seam
 
@@ -72,13 +73,25 @@ kind per program, matching H4/H5). Rough size: the seam is a day or two touching
 six modules and their tests; the Codex implementation is small once the event
 schema below is known.
 
-## Open until a logged-in run
+## What a real run showed (2026-09-13 22:29, ChatGPT Plus login)
 
-Needs `codex login` on Avatar, then one `codex exec --json -o last.txt` and one
-`codex exec resume` on a throwaway prompt:
+`echo "…" | codex exec --json -s read-only --skip-git-repo-check -o last.txt -` in a
+scratch dir took 7s, exited 0 and wrote the answer to `last.txt`. Then
+`codex exec resume <thread_id> --json -o last2.txt -` continued the same thread,
+also exit 0. No process was left behind.
 
-- the JSONL event types, and which one carries the session id, token usage and
-  any rate-limit or quota reading;
-- the exit code and events when the quota is exhausted (the 429 equivalent);
-- whether `resume` accepts `--json` and `-o` together;
-- whether a detached `codex exec` leaves any process behind after the answer.
+- **Stream (`--json`)** is four event types: `thread.started` (carries `thread_id`,
+  the id `resume` takes), `turn.started`, `item.completed` (`item.type` =
+  `agent_message`, with `text`), and `turn.completed` with `usage`:
+  `input_tokens`, `cached_input_tokens`, `cache_write_input_tokens`,
+  `output_tokens`, `reasoning_output_tokens`. No cost, no model name, no quota.
+  Resume re-emits the same `thread_id`, and its usage is cumulative for the thread.
+- **Session file** `~/.codex/sessions/YYYY/MM/DD/rollout-…-<thread_id>.jsonl` has
+  what the stream omits: the model (`gpt-6-astra` by default here), `duration_ms`,
+  and on each `token_count` event a `rate_limits` block —
+  `primary {used_percent, window_minutes: 300, resets_at}`,
+  `secondary {used_percent, window_minutes: 10080, resets_at}`, `plan_type`, and
+  `rate_limit_reached_type`. That is the Codex equivalent of `unifiedWindows`.
+
+Still unknown: the exit code and events when the quota is actually exhausted.
+`rate_limit_reached_type` is the field to watch.
