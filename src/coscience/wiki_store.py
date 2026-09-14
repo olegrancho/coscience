@@ -166,6 +166,21 @@ def run_dir(substrate, program_id: str, run_id: str) -> Path:
     return state_dir(substrate, program_id) / "runs" / run_id
 
 
+def snapshot_pages(substrate, program_id: str) -> dict[str, str]:
+    """{bundle-relative page path: content hash} for every page in the page dirs.
+    Taken before and after a run, the difference is what the run changed — measured,
+    where the agent's own report is only what it believes it wrote."""
+    bundle = bundle_dir(substrate, program_id)
+    out: dict[str, str] = {}
+    for d in PAGE_DIRS:
+        for f in sorted((bundle / d).glob("**/*.md")):
+            try:
+                out[str(f.relative_to(bundle))] = hashlib.sha256(f.read_bytes()).hexdigest()
+            except OSError:
+                continue
+    return out
+
+
 def ensure_bundle(substrate, program_id: str) -> Path:
     """Create the bundle skeleton if it is missing. Idempotent, and never
     overwrites a file that exists — the log and the index accumulate content."""

@@ -189,6 +189,9 @@ def beat(substrate, program, now: float, agent, *,
         # taking it earlier would predate autofix's own writes and attribute them
         # to the agent's run instead of to the fix step that produced them.
         dirty_before = _dirty_paths(substrate)
+        # What the bundle held before the agent touched it, so collect can count the
+        # pages the run actually created and changed instead of trusting its report.
+        _write_page_snapshot(run_dir, wiki_store.snapshot_pages(substrate, program.id))
 
         token = agent.launch(kind=kind, program=program, bundle=bundle,
                              run_dir=run_dir, objects=objects, report=report,
@@ -217,6 +220,37 @@ def _lint_report(substrate, program) -> str:
     from coscience import wiki_lint
     findings, _fixed = wiki_lint.run_lint(substrate, program.id, fix=True)
     return wiki_lint.render_report(findings)
+
+
+_PAGE_SNAPSHOT = "pages_before.json"
+
+
+def _write_page_snapshot(run_dir: Path, pages: dict[str, str]) -> None:
+    """Best-effort: a run with no snapshot falls back to its report's own counts."""
+    import json
+    try:
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / _PAGE_SNAPSHOT).write_text(json.dumps(pages))
+    except OSError:
+        pass
+
+
+def _page_counts(substrate, program_id: str, run_dir: Path, report: dict) -> tuple[int, int]:
+    """(created, updated) pages, from the bundle as it stood before the run and now.
+
+    The agent's report said what it believed it wrote, and those counts reached the
+    dashboard: r0017 reported 4 pages created and 9 updated, where the bundle showed
+    6 files changed and all four "created" pages already existed. A run launched
+    before snapshots existed has none, and keeps its report's numbers."""
+    import json
+    try:
+        before = json.loads((run_dir / _PAGE_SNAPSHOT).read_text())
+    except (OSError, ValueError):
+        return (len(report.get("pages_created") or []), len(report.get("pages_updated") or []))
+    after = wiki_store.snapshot_pages(substrate, program_id)
+    created = sum(1 for path in after if path not in before)
+    updated = sum(1 for path, digest in after.items() if path in before and before[path] != digest)
+    return created, updated
 
 
 def _dirty_paths(substrate) -> list[str]:
@@ -459,10 +493,11 @@ def _collect(substrate, program, now, agent, state, run) -> str:
             **outcome)
 
     state["run"] = None
+    created, updated = _page_counts(substrate, program.id, run_dir, report)
     state["last_run"] = {
         "id": run_id, "kind": kind, "status": status, "at": now,
-        "pages_created": len(report.get("pages_created") or []),
-        "pages_updated": len(report.get("pages_updated") or []),
+        "pages_created": created,
+        "pages_updated": updated,
         "notes": str(report.get("notes") or ""),
         "escaped": escaped,
     }

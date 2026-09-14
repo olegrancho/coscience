@@ -183,11 +183,39 @@ def test_lint_failures_reset_the_shared_counter_so_a_fresh_ingest_gets_its_own_c
     assert state["failures"] == 1
 
 
-def test_report_counts_land_in_last_run(substrate):
+def test_page_counts_are_measured_from_the_bundle_not_taken_from_the_report(substrate):
+    """D2: the report names what the agent believes it wrote. r0017 claimed 4 pages
+    created that already existed."""
+    agent = FakeWikiAgent()
+    p = _seed(substrate)
+    wiki_store.ensure_bundle(substrate, "p1")
+    bundle = wiki_store.bundle_dir(substrate, "p1")
+    (bundle / "concepts" / "old.md").write_text("---\ntype: Concept\n---\nold\n")
+    (bundle / "concepts" / "same.md").write_text("---\ntype: Concept\n---\nsame\n")
+    wiki.beat(substrate, p, 100.0, agent)
+    run_dir = agent.launches[0]["run_dir"]
+    (bundle / "concepts" / "old.md").write_text("---\ntype: Concept\n---\nrevised\n")
+    (bundle / "sources" / "result-r0.md").write_text("---\ntype: Source\n---\nnew\n")
+    (run_dir / "agent.exit").write_text("0\n")
+    claimed = {"pages_created": ["concepts/old.md", "concepts/same.md", "sources/result-r0.md"],
+               "pages_updated": ["concepts/elsewhere.md"], "notes": "n"}
+    (run_dir / "report.json").write_text(json.dumps(claimed))
+    agent.report = claimed
+    agent.alive = False
+
+    wiki.beat(substrate, p, 200.0, agent)
+
+    last = wiki_store.load_state(substrate, "p1")["last_run"]
+    assert (last["pages_created"], last["pages_updated"]) == (1, 1)
+    assert last["notes"] == "n"
+
+
+def test_a_run_without_a_page_snapshot_keeps_its_report_counts(substrate):
     agent = FakeWikiAgent()
     p = _seed(substrate)
     wiki.beat(substrate, p, 100.0, agent)
     run_dir = agent.launches[0]["run_dir"]
+    (run_dir / "pages_before.json").unlink()        # launched before snapshots existed
     (run_dir / "agent.exit").write_text("0\n")
     (run_dir / "report.json").write_text(
         '{"pages_created": ["concepts/a.md", "sources/result-r0.md"],'
