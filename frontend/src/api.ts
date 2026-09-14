@@ -39,6 +39,7 @@ export interface SprintRow {
   goals: string; program: string | null;
   priority: number; steps: number; results: string[];
   rationale: string; resources_required: Record<string, number>;
+  unrunnable?: string;    // why it can never be granted (asks above total capacity); "" if it can
   started_at: number | null; last_status_at: number | null;
   model: string; activity: SprintActivity | null;
   votes: VoteTally;
@@ -84,6 +85,7 @@ export interface Sprint {
   id: string; status: string; title: string; summary: string;
   goals: string; priority: number; preemptible: boolean;
   resources_required: Record<string, number>; rationale: string; plan: string[];
+  unrunnable?: string;    // why it can never be granted (asks above total capacity); "" if it can
   program: string | null; results: string[]; threads: FeedbackThreadT[];
   agent_running: boolean; started_at: number | null; error: string; lease: unknown | null;
   model: string; activity: SprintActivity | null; votes: VoteTally;

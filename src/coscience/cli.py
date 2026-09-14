@@ -218,7 +218,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.once or not args.loop:
             r = dispatch_once(args.repo)
             print(f"granted={r.granted} hibernated={r.hibernated} beaten={r.beaten} "
-                  f"completed={r.completed} waiting={r.waiting}", flush=True)
+                  f"completed={r.completed} waiting={r.waiting} "
+                  f"unrunnable={len(r.unrunnable)}", flush=True)
             for line in r.wiki:
                 print(line, flush=True)
             return 0
@@ -228,6 +229,8 @@ def main(argv: list[str] | None = None) -> int:
             # a beaten sprint launches/advances its agent -> a Claude run that cycle
             # waiting is a current snapshot (shown live), not a per-cycle event to sum
             line = f"granted {r.granted} · completed {r.completed} · waiting {r.waiting}"
+            if r.unrunnable:
+                line += f" · unrunnable {len(r.unrunnable)} ({', '.join(r.unrunnable)})"
             if r.wiki:
                 line += " · " + " · ".join(r.wiki)
             return (line,

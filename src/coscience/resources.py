@@ -31,6 +31,20 @@ def load_pool(repo_root) -> ResourcePool:
 WORKER_KEY = "workers"
 
 
+def over_capacity(required: dict[str, float], pool: ResourcePool) -> dict[str, tuple[float, float]]:
+    """{resource: (requested, total capacity)} for each amount larger than the pool's
+    TOTAL. Such a sprint can never be granted, however long it waits: the grant step
+    compares against what is available, and available never exceeds the total."""
+    return {k: (float(v), pool.capacity.get(k, 0.0)) for k, v in (required or {}).items()
+            if float(v) > pool.capacity.get(k, 0.0)}
+
+
+def describe_over_capacity(over: dict[str, tuple[float, float]]) -> str:
+    """"needs cpu 24 but capacity is 16" — empty when nothing is over."""
+    return "; ".join(f"needs {k} {need:g} but capacity is {cap:g}"
+                     for k, (need, cap) in sorted(over.items()))
+
+
 def effective_requirement(required: dict[str, float], pool: ResourcePool) -> dict[str, float]:
     """What a sprint actually consumes. When the pool declares a worker cap, every
     sprint costs one worker slot on top of what it declares — that is what bounds

@@ -304,6 +304,7 @@ class Service:
 
     def list_sprints(self, status: str | None = None) -> list[dict]:
         wanted = SprintStatus(status) if status is not None else None
+        pool = self._ledger().pool
         rows = []
         for sprint in self.substrate.iter_sprints(status=wanted):
             started = None
@@ -323,6 +324,7 @@ class Service:
                 "results": list(sprint.results),
                 "rationale": sprint.rationale,
                 "resources_required": sprint.resources_required,
+                "unrunnable": self._unrunnable(sprint, pool),
                 "started_at": started,
                 "last_status_at": self._last_status_at(sprint),
                 "model": sprint.model,
@@ -343,10 +345,20 @@ class Service:
         from coscience.claude_executor import read_activity
         return read_activity(self.substrate.sprint_dir(sprint_id))
 
+    @staticmethod
+    def _unrunnable(sprint: Sprint, pool) -> str:
+        """Why this sprint can never be granted, or "". Only for sprints still headed
+        for a grant: a finished one's request no longer matters."""
+        if sprint.status in (SprintStatus.DONE, SprintStatus.CANCELED, SprintStatus.FAILED):
+            return ""
+        from coscience.resources import describe_over_capacity, over_capacity
+        return describe_over_capacity(over_capacity(sprint.resources_required, pool))
+
     def get_sprint(self, sprint_id: str, viewer: str = "") -> dict:
         sprint = self._load_sprint(sprint_id)
         progress = self.substrate.load_progress(sprint_id)
-        lease = self._ledger().lease_for(sprint_id)
+        ledger = self._ledger()
+        lease = ledger.lease_for(sprint_id)
         if progress.job_token:
             agent_state = "sleeping"
         elif progress.agent_token:
@@ -369,6 +381,7 @@ class Service:
             "priority": sprint.priority,
             "preemptible": sprint.preemptible,
             "resources_required": sprint.resources_required,
+            "unrunnable": self._unrunnable(sprint, ledger.pool),
             "rationale": sprint.rationale,
             "program": sprint.program,
             "model": sprint.model,

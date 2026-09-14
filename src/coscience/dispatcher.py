@@ -9,7 +9,7 @@ from pathlib import Path
 from coscience.ledger import Ledger
 from coscience.models import BeatOutcome, ProgramStatus, SprintStatus, set_status
 from coscience.pause import is_paused
-from coscience.resources import WORKER_KEY, ResourcePool, effective_requirement
+from coscience.resources import WORKER_KEY, ResourcePool, effective_requirement, over_capacity
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
 from coscience.worker import Worker
@@ -25,7 +25,8 @@ class CycleReport:
     hibernated: int = 0
     beaten: int = 0
     completed: int = 0
-    waiting: int = 0
+    waiting: int = 0                  # leaseless sprints that could be granted once room frees
+    unrunnable: list[str] = field(default_factory=list)   # asking for more than the pool's total
     reconciled: int = 0
     wiki: list[str] = field(default_factory=list)   # non-empty wiki beat lines this cycle
 
@@ -195,8 +196,15 @@ class Dispatcher:
                 queue.pop(lease.sprint_id, None)
                 report.completed += 1
 
-        report.waiting = sum(
-            1 for s in eligible if self.ledger.lease_for(s.id) is None)
+        # A request above the pool's total is not waiting — no amount of waiting grants
+        # it — so it is named separately instead of hiding inside the waiting count.
+        for s in eligible:
+            if self.ledger.lease_for(s.id) is not None:
+                continue
+            if over_capacity(s.resources_required, self.ledger.pool):
+                report.unrunnable.append(s.id)
+            else:
+                report.waiting += 1
 
         # Release chat locks left idle past the inactivity window (cuts a final
         # version), so a walked-away editing session frees the artifact.

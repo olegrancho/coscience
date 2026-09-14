@@ -594,6 +594,11 @@ export default function SprintDetail() {
               ))}
             </Stack>
           ) : <Text size="sm" c="dimmed">Minimal — no reserved resources.</Text>}
+          {s.unrunnable && (
+            <Text size="sm" mt={10} fw={600} style={{ color: "var(--signal)" }}>
+              Can't ever start: {s.unrunnable}. Lower the request, or raise capacity on Compute.
+            </Text>
+          )}
         </Card>
       </SimpleGrid>
 
