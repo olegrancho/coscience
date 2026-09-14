@@ -1,105 +1,14 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 58
+version: 66
 last_updated: 2026-09-13
 ---
 
 # To QC
 
-### F10. Declare a dead call lost without waiting out the grace
+# To Do (sprint)
 
-The dispatcher collects finished chat turns every cycle, and a call whose process
-is gone reads `lost` at once instead of after 15 minutes (`24eae7e`, deployed 09-13 02:59).
-
-**Check:** after deploy, send a chat message and reply nothing else — its row on
-Compute turns `ok` within a few seconds of the reply finishing, without opening
-the thread again. A run that ends normally can read `lost` for up to one dispatcher
-cycle before its collect writes the end; a row that stays `lost` is a real death.
-On a dashboard-only host with no dispatcher, chat turns still wait for a read.
-
-### N1. Tell the PM what compute exists
-
-The PM prompt carries a COMPUTE block — declared capacity, what running sprints
-hold, and the rule to request only what a sprint's heaviest step uses (`0f6ae89`).
-
-**Check:** the next p2 PM transcript (`.coscience/pm-p2.out`) shows the COMPUTE
-block with the real totals, and the next sprints it proposes ask for no more CPU
-than their work needs — none above capacity. Capacity is deliberately not a
-fingerprint input, so raising it does not wake a PM by itself.
-
-### N2. Flag a request larger than total capacity
-
-The dispatcher reports sprints asking for more than the pool's total as
-unrunnable instead of waiting, and the sprint page says why (`73a683d`).
-
-**Check:** with capacity below a queued sprint's request, the dispatch log reads
-`… · waiting N · unrunnable 1 (<id>)` and that sprint's page shows "Can't ever
-start: needs cpu 24 but capacity is 16" under its compute. The sprint is only
-flagged — never parked or edited.
-
-### K6. Count the experiments waiting to run
-
-The rail's pulse has a "waiting" row counting approved and queued sprints in
-active programs, with any that can never start shown apart as "N can't start".
-
-**Check:** the rail's waiting number matches the approved plus queued sprints of
-active programs on the board, and a sprint made unrunnable (N2) moves from
-"waiting" to "can't start". "awaiting you" still counts proposed sprints only.
-
-### D2. Stop reporting pages as created when they already existed
-
-A wiki run's created/updated counts are measured from a content-hash snapshot of
-the bundle's pages taken at launch, not taken from the agent's report.
-
-**Check:** after the next ingest on p2 or p5, compare `last_run.pages_created` and
-`pages_updated` on the wiki card with `git diff --stat` of that run's commit over
-`programs/<id>/wiki/{concepts,entities,syntheses,sources}` — they should agree,
-where the report's own lists may name more. The run dir holds `pages_before.json`.
-
-### A4. Warn when the ledger and the bundle disagree
-
-`coscience wiki --status` runs the dry-run reconcile and appends "ledger behind
-bundle: N unrecorded, M drifted — see --reconcile" for any program that is behind.
-
-**Check:** `coscience wiki --status` on the live substrate prints no such suffix
-today (every program agrees, as of 09-13 18:37); a program whose Source page
-proves an object the ledger does not record shows `1 unrecorded`. Only the cheap
-version was built — the dispatcher does not run this check.
-
-### F5. Backfill the log from run history
-
-`python -m coscience.call_backfill --apply` rebuilt 31 wiki calls ($57.70, 08-26 to
-09-04) into the call log from run envelopes; all 45 worker sidecars were already
-logged, so none were added (`dc74da6`).
-
-**Check:** on Compute, look at wiki calls before 09-04 — p3 r0001–r0010 and p5
-r0001–r0013 now appear, most `rate-limited` (spot-checked against their envelopes:
-429 "session limit"). Rows carry `backfilled: true`, and a second run adds nothing.
-The pre-backfill log is kept beside the live one as `*.pre-backfill-20260913`.
-
-### B2. Record ingest progress per object, not per run
-
-The ingest prompt has the agent append each finished object to `progress.jsonl`;
-a failed or rate-limited run keeps those objects and counts the failure only
-against the rest (`6e5ee11`).
-
-**Check:** the next ingest run dir on p2 or p5 holds a `progress.jsonl` with one
-line per object it finished. When a run is cut off (a 429 or a restart), the wiki
-beat line reads `wiki: ingest deferred … (kept N of M)` and those N objects are in
-the ledger's `ingested` while the rest stay pending.
-
-### H1. Work out what a Codex backend would take
-
-`docs/codex-backend.md` maps every `claude` coupling to its `codex exec`
-equivalent and recommends an `AgentBackend` seam; Codex CLI 0.154.0 is installed
-on Avatar at `~/.local/bin/codex` (`1a9b7ec`).
-
-**Check:** read the verdict and the two gaps (per-call cost, usage windows) in
-`docs/codex-backend.md`. Its last section is still open: it needs `codex login`
-on Avatar, then one throwaway `codex exec --json` and one `codex exec resume` to
-learn the event schema, quota behaviour and session-id field.
-
-# To Do
+# To Do (backlog)
 
 ## A. Wiki ledger integrity
 
@@ -308,54 +217,206 @@ are the cheap ones before wiring it.
 No sprint waits on a resource request the platform can never grant, and the PM
 proposes work sized to the compute it actually has.
 
+## O. Compute onboarding
+
+Any server someone onboards becomes schedulable compute — its CPUs, memory and each
+GPU with its VRAM join one pool — and every sprint lands on a machine its request
+actually fits.
+
+### O1. Decide the multi-host execution model
+
+Write down where a sprint's agent runs, where its jobs run, and how both reach the
+substrate and the program's files once more than one machine is in the pool.
+
+Everything today assumes one host: `executor.launch_detached` is a local `Popen`,
+liveness is a `pid:starttime` read from this machine's `/proc`, and worker, wiki
+and chat agents all run beside the dispatcher. The choices that shape every other
+item here are whether the agent stays central and only jobs go remote, or the agent
+runs on the host; whether files are shared (sync, NFS) or shipped per run; and how
+access is held (SSH keys, a per-host daemon). This blocks O2–O7; output is a design
+doc, not code.
+
+### O2. Model compute as hosts, not one flat pool
+
+Turn `.coscience/resources.yaml` into a list of hosts — each with CPUs, memory and
+GPUs — and derive the pool totals from them.
+
+`ResourcePool.capacity` is a flat `{cpu, gpu, workers, housekeepers}` map and a lease
+holds amounts with no idea which machine they are on, so 16 CPUs across two boxes
+reads the same as 16 on one. A lease has to name its host for placement,
+reconciling and release to mean anything. The current file becomes one implicit
+`local` host, so a single-machine install keeps working unchanged.
+
+### O3. Describe GPUs by their VRAM
+
+Record each GPU's model and VRAM, and allocate GPU requests by memory so more than
+one process can share a card that has room.
+
+A GPU is a count today (`gpu: 1.0`), so p5-c24's job holds the only card while it
+may use a fraction of its memory, and nothing can tell a 12 GB card from an 80 GB
+one. Allocation by VRAM needs per-device bookkeeping in the ledger, an optional
+"exclusive" flag for work that cannot share, and the chosen device handed to the
+job (e.g. `CUDA_VISIBLE_DEVICES`).
+
+### O4. Give a sprint's request the shape of real compute
+
+Replace the flat `resources_required` map with total CPU and memory, GPU count with
+VRAM per GPU, and whether the work may be split across hosts.
+
+`distributed: false` means the whole request must fit on one machine; `true` lets
+CPU work span hosts. Old flat requests migrate as `distributed: false`. Everything
+that reads a request moves with it: `effective_requirement`, `over_capacity` (N2),
+the PM's COMPUTE block and proposal schema (N1), the sprint edit dialog, and the
+sprint page.
+
+### O5. Onboard a server and discover what it offers
+
+Let a human add a server with its access details, have an agent probe it, and add
+the confirmed hardware to the pool.
+
+The probe reads what the host really has — `nproc`, memory, `nvidia-smi` names and
+VRAM, disk, and whether Python and the agent CLI are present — and proposes a host
+entry for a human to confirm rather than writing it straight into the pool. Needs a
+place to keep access details that is not the git-tracked substrate, and a Compute
+page flow for adding, probing and confirming a host.
+
+### O6. Place and run work on a remote host
+
+Choose a host at grant time, then launch, watch and collect a sprint's work there.
+
+Placement picks a host whose free CPU, memory and GPU VRAM fit the request (or
+several hosts when distributed); launch, liveness, stop and collect then go through
+that host instead of local `Popen` and `/proc`. The worker's detached-job flow
+(sleep, wake, reconcile "no lease ⇒ no running job") has to work across the network
+without killing a job because a probe timed out. Shape depends entirely on O1.
+
+### O7. Keep hosts healthy, visible and removable
+
+Heartbeat every host, stop granting on one that goes quiet, and let a human drain
+and remove it; show hosts individually on Compute.
+
+A dead host must not keep leases forever or have its jobs declared lost the moment
+one heartbeat is missed. Compute today shows pool-wide gauges; with hosts it needs a
+per-host view — CPU, memory, each GPU's VRAM in use — plus onboarding, drain and
+remove controls.
+
+## C. Codex as a second agent backend
+
+Any agent kind in any program can run on Codex instead of Claude, with its tokens,
+usage window and failures as visible as a Claude run's.
+
+### C1. Cut a backend seam with Claude as its only implementation
+
+Move command-building and stream parsing out of the worker, wiki, chat and PM into
+one `AgentBackend` interface, with no change in behaviour.
+
+Each agent kind builds its own `claude` command line and parses Claude Code's
+stream itself (`claude_executor`, `wiki_agent`, `chat_agent`, `pm_claude`, plus the
+shared `agent_stream` and `usage_meter` readers), so there is nowhere a second
+backend plugs in. The interface is `command(...)`, `parse(events) -> StreamResult`
+and `label(event)`; lifecycle logic stays where it is. The existing tests passing
+unchanged is the proof it is a refactor. Blocks C2–C5.
+
+Details: [docs/codex-backend.md](docs/codex-backend.md)
+
+### C2. Implement the Codex backend
+
+Launch and resume Codex runs through the seam, and read both what its stream says
+and what only its session file records.
+
+`codex exec --json -o <file> -` and `codex exec resume <thread_id> …` worked headless
+on Avatar (09-13): the stream gives `thread_id`, the agent's messages and token
+usage; the session file under `~/.codex/sessions/` adds the model, duration and the
+5h/weekly `rate_limits`. Permissions map to `-s read-only` for read-only scopes and
+a writable or full-access sandbox for workers (a decision). Still unknown: what a run
+does when the quota is exhausted — `rate_limit_reached_type` is the field to watch.
+
+### C3. Gate each launch on the quota of the backend it uses
+
+Read the usage window of whichever backend an agent is about to run on, and show
+both quotas on the rail.
+
+The worker, wiki and PM launch gates and the rail's bars read Claude's
+`unifiedWindows` only. Codex's windows have the same shape (`used_percent`,
+`resets_at`, 300 and 10080 minutes) but come from its session file, so the reading
+has to be recorded per backend after each run, as Claude's is today.
+
+### C4. Show Codex calls on Compute
+
+Record Codex calls in the call log with tokens, model and how they ended, and decide
+what the cost column shows for them.
+
+A ChatGPT-plan run has no per-call price: its events carry tokens only. The choice is
+tokens with an empty cost, or a cost estimated from a price table; either way the
+Compute totals must not silently mix real Claude dollars with estimates.
+
+### C5. Choose the backend per agent kind per program
+
+Put a backend choice beside each model picker in program settings, with Codex's
+models offered when Codex is chosen.
+
+The Models grid already holds planner, chat, worker and wiki models (H4/H5), so this
+is a second dial on the same four cards plus a `*_backend` field per kind on the
+program. `MODEL_OPTIONS` is Claude-only today and needs a per-backend list.
+
+### C6. Pilot Codex on a low-risk job before sprints
+
+Run Codex first on something read-only and cheap — the wiki probe or Draft with AI —
+and compare its output and token use with Claude's on the same inputs.
+
+Workers edit files unattended for an hour at a time, so they are the wrong first
+target. A read-only job exercises launch, parse, gate and call log end to end, and a
+side-by-side comparison says whether Codex is worth routing real work to. Which job
+to pilot is a decision.
+
 # Done
+
+### H1. Work out what a Codex backend would take
+
+`docs/codex-backend.md` maps every `claude` coupling to `codex exec`, with a real run's
+event schema and quota windows; the build is planned as block C.
+
+### B2. Record ingest progress per object, not per run
+
+Ingest agents log each finished object to `progress.jsonl` (wikitest r0004 did, before
+its report), and a cut-off run keeps those objects; the cut-off path is unit-tested only.
+
+### F5. Backfill the log from run history
+
+The call log now holds 31 rebuilt wiki calls from 08-26 to 09-04 ($57.70), visible on
+Compute; `python -m coscience.call_backfill` adds any others without duplicating.
+
+### A4. Warn when the ledger and the bundle disagree
+
+`coscience wiki --status` flags a ledger behind its bundle; with wikitest's wt-r4
+removed from the ledger it read "1 unrecorded" until `--reconcile --apply`.
+
+### D2. Stop reporting pages as created when they already existed
+
+A wiki run's page counts are measured from a snapshot of the bundle; wikitest r0004
+recorded 1 created and 4 updated where the agent claimed 7 updates.
+
+### F10. Declare a dead call lost without waiting out the grace
+
+The dispatcher collects finished chat turns each cycle, so a call whose process is
+gone reads `lost` at once; a p3 reply closed 5s after it finished with no reader.
+
+### N1. Tell the PM what compute exists
+
+The PM prompt states the declared capacity and what running sprints hold, and tells
+the PM to request only what a sprint's heaviest step uses.
+
+### N2. Flag a request larger than total capacity
+
+A sprint asking for more than the pool's total is reported as unrunnable in the
+dispatch log and on its page, not counted as waiting.
+
+### K6. Count the experiments waiting to run
+
+The rail counts approved and queued experiments as "waiting", with any that can
+never start shown beside it.
 
 ### F9. Label a wiki call by the model that did the work
 
 A wiki call is labelled with the model that cost the most in its run, so a Haiku
 side call no longer names an Opus ingest.
-
-### K5. Let a human promote an idea into a sprint
-
-An idea's → button opens the proposal form, which the planner can draft in full;
-submitting creates the sprint, moves the idea's lineage onto it and drops the idea.
-
-### F8. Decide a call is lost by its process, not its age
-
-Every call records its process token, and a call stays `running` for as long as
-that process is alive; a dead one still waits out the grace, which F10 tracks.
-
-### G3. Charge the worker slot to the agent, not to the lease
-
-A sprint asleep on a detached job holds its lease without a `workers` slot and
-takes one back when it launches an agent, as p2-c54 did on waking at 01:11.
-
-### H5. Give chat its own model
-
-Each program has a chat model of its own, set in program settings, and an unset
-one keeps chatting on the planner's model.
-
-### H4. Give a program a default worker model
-
-Each program has a worker model that new sprints take when proposed, shown with
-the other three in a Models grid in program settings.
-
-### K4. Mark how far into the window we are on the usage bars
-
-Both usage bars carry a tick at the elapsed fraction of the 5h and weekly windows,
-fed by a `resets_at` epoch on every usage reading.
-
-### K2. Give the program wiki card something to say
-
-The program's wiki card shows page counts by type as a coloured bar, the pending
-count, and when the last run landed.
-
-### K1. Group the programs overview by state
-
-The programs page heads active, paused and closed programs with their own counts,
-with closed folded until expanded.
-
-### J1. Stop paying for tool schemas the wiki never calls
-
-Wiki runs launch with only `Bash, Edit, Read, Write`, cutting every turn's prefix
-from ~21.6k to ~14.1k tokens; p2 cost per turn fell from $0.053–0.056 to $0.042–0.046.
