@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 53
+version: 56
 last_updated: 2026-09-13
 ---
 
@@ -9,7 +9,7 @@ last_updated: 2026-09-13
 ### F10. Declare a dead call lost without waiting out the grace
 
 The dispatcher collects finished chat turns every cycle, and a call whose process
-is gone reads `lost` at once instead of after 15 minutes (uncommitted, not deployed).
+is gone reads `lost` at once instead of after 15 minutes (`24eae7e`, deployed 09-13 02:59).
 
 **Check:** after deploy, send a chat message and reply nothing else — its row on
 Compute turns `ok` within a few seconds of the reply finishing, without opening
@@ -46,23 +46,43 @@ active programs, with any that can never start shown apart as "N can't start".
 active programs on the board, and a sprint made unrunnable (N2) moves from
 "waiting" to "can't start". "awaiting you" still counts proposed sprints only.
 
+### D2. Stop reporting pages as created when they already existed
+
+A wiki run's created/updated counts are measured from a content-hash snapshot of
+the bundle's pages taken at launch, not taken from the agent's report.
+
+**Check:** after the next ingest on p2 or p5, compare `last_run.pages_created` and
+`pages_updated` on the wiki card with `git diff --stat` of that run's commit over
+`programs/<id>/wiki/{concepts,entities,syntheses,sources}` — they should agree,
+where the report's own lists may name more. The run dir holds `pages_before.json`.
+
+### A4. Warn when the ledger and the bundle disagree
+
+`coscience wiki --status` runs the dry-run reconcile and appends "ledger behind
+bundle: N unrecorded, M drifted — see --reconcile" for any program that is behind.
+
+**Check:** `coscience wiki --status` on the live substrate prints no such suffix
+today (every program agrees, as of 09-13 18:37); a program whose Source page
+proves an object the ledger does not record shows `1 unrecorded`. Only the cheap
+version was built — the dispatcher does not run this check.
+
+### F5. Backfill the log from run history
+
+`python -m coscience.call_backfill --apply` rebuilt 31 wiki calls ($57.70, 08-26 to
+09-04) into the call log from run envelopes; all 45 worker sidecars were already
+logged, so none were added (`dc74da6`).
+
+**Check:** on Compute, look at wiki calls before 09-04 — p3 r0001–r0010 and p5
+r0001–r0013 now appear, most `rate-limited` (spot-checked against their envelopes:
+429 "session limit"). Rows carry `backfilled: true`, and a second run adds nothing.
+The pre-backfill log is kept beside the live one as `*.pre-backfill-20260913`.
+
 # To Do
 
 ## A. Wiki ledger integrity
 
 The ledger credits every object whose page is actually in the bundle, so no
 result is silently missing from its program's wiki.
-
-### A4. Warn when the ledger and the bundle disagree
-
-Have the dispatcher notice a bundle holding pages for objects the ledger still
-calls pending, instead of waiting for someone to audit it.
-
-`coscience wiki --reconcile` makes the divergence repairable but nothing detects
-it: p3 sat with 49 pages behind an empty ledger for two days in silence. Cheapest
-version is a count on the `--status` line; a stronger one runs the dry-run check
-at dispatcher startup. Worth doing after B1 and B2, which should make the
-divergence rare rather than routine.
 
 ## B. Ingest failure handling
 
@@ -94,31 +114,10 @@ the prose.
 most while being the healthiest wiki suggests the agent declares relations in
 frontmatter and forgets the prose link — a prompt fix rather than 29 hand edits.
 
-### D2. Stop reporting pages as created when they already existed
-
-Have the ingest report name what the run changed, not what it believes it wrote.
-
-r0017 reported 4 pages created and 9 updated; diffing the bundle against the
-pre-run commit shows 6 files changed, and all four "created" pages already
-existed with the right `origin_hash`. The counts reach `last_run.pages_created`
-and the dashboard, so a run that mostly confirmed existing work reads as a
-productive one. The run already computes `dirty_before` for the containment
-check, so the honest numbers are a diff away rather than the agent's own account.
-
 ## F. LLM call metrics
 
 Every Claude call the platform makes is visible on Compute with what it cost,
 what it was for, and how it ended.
-
-### F5. Backfill the log from run history
-
-Reconstruct past rows from the `agent.out` envelopes and cost sidecars already on
-disk.
-
-Every wiki run dir holds a result envelope with `total_cost_usd`, `modelUsage`,
-`duration_ms` and a `rate_limit_event`; sprint dirs hold the worker sidecars. So
-the history is recoverable rather than starting from zero, and it is the only way
-the 08-30..09-01 wiki spend ever reaches the page.
 
 ## I. Wiki responsiveness
 
