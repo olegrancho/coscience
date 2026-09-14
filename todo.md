@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 57
+version: 58
 last_updated: 2026-09-13
 ---
 
@@ -87,6 +87,17 @@ against the rest (`6e5ee11`).
 line per object it finished. When a run is cut off (a 429 or a restart), the wiki
 beat line reads `wiki: ingest deferred … (kept N of M)` and those N objects are in
 the ledger's `ingested` while the rest stay pending.
+
+### H1. Work out what a Codex backend would take
+
+`docs/codex-backend.md` maps every `claude` coupling to its `codex exec`
+equivalent and recommends an `AgentBackend` seam; Codex CLI 0.154.0 is installed
+on Avatar at `~/.local/bin/codex` (`1a9b7ec`).
+
+**Check:** read the verdict and the two gaps (per-call cost, usage windows) in
+`docs/codex-backend.md`. Its last section is still open: it needs `codex login`
+on Avatar, then one throwaway `codex exec --json` and one `codex exec resume` to
+learn the event schema, quota behaviour and session-id field.
 
 # To Do
 
@@ -271,22 +282,6 @@ dashboard must not be ambiguous. Depends on M1.
 
 Agent work is not locked to one CLI or one model, so the platform can follow
 whatever is cheapest or most capable for a given job.
-
-### H1. Work out what a Codex backend would take
-
-Explore first: map every place the platform assumes the `claude` CLI, and report
-what an alternative executor would have to satisfy.
-
-The coupling is wider than the binary name. Three call sites default
-`claude_bin="claude"` (`claude_executor.py`, `wiki_agent.py`, `chat_agent.py`)
-and each builds a shell line around Claude Code's own flags —
-`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`, `-p`, `--model`,
-`--dangerously-skip-permissions`, `--resume`. Deeper in, `agent_stream.py` parses
-Claude Code's stream-json envelope, and the whole call log reads cost, turns and
-`rate_limit_event` out of that same shape. A second backend needs an answer for
-each of those, plus session resume, which is what the worker leans on after an
-ambiguous exit. Output is a written finding, not code: whether this is an
-adapter behind the existing three classes or a deeper seam.
 
 ### H3. Pick the PM's model from the work the cycle is doing
 
