@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 49
+version: 51
 last_updated: 2026-09-13
 ---
 
@@ -163,12 +163,14 @@ for now, not a standing suite; making them re-runnable is a later decision.
 
 Run one subagent per question against the program's bundle, and keep its stream.
 
-No API and no wiki engine are needed: the bundle is markdown on disk, so an agent
-with Read and Glob already does "get page, follow its links", and `ls concepts/`
-is the concept listing. The retrieval trace is free — every `Read` with its path
-and size is already in `agent.out`, which is how r0017's 18 reads and 127KB of
-context were reconstructed. What each run yields is an answer, the pages it
-reached, the order it reached them in, and what it did with them.
+The runner exists and is piloted, so this waits only on L1:
+`python -m coscience.wiki_probe --program p2` reads `programs/p2/wiki-questions.md`
+(a markdown list, one question per item) and writes `report.md`, `summary.json` and
+both streams under `~/.cache/coscience/wiki-probe/p2/<stamp>/`. Each agent is
+read-only in the bundle, starts from `index.md`, and may leave for raw results
+only by saying so; the report flags every read outside the wiki. The 09-13 pilot
+on p5 took 50s and $0.14 for one question on Sonnet 5, and the answering model
+defaults to the program's planner model.
 
 ### L3. Debrief each agent after it answers
 
@@ -177,8 +179,10 @@ Ask the agent, in a second turn, what it could not find and what misled it.
 The trace shows what an agent read; only the agent can say what it went looking
 for and failed to find, which page it expected to exist, or where two pages
 disagreed and it had to guess. Absence is the defect class a wiki hides best and
-the one that matters most here. Cheap — the session is already open, so the
-debrief costs one more turn on a context that is already paid for.
+the one that matters most here. Built into the same runner as a `--resume` turn
+with five fixed questions; on the pilot it cost $0.03 and surfaced a real defect
+unprompted — the p5 canonical numbers ledger, billed as the single source of
+truth, predates and omits the program's best result (0.8609, p5-c26).
 
 ### L4. Read the traces against Oleg's own account
 
@@ -287,6 +291,34 @@ one moved. A landed result or a goals change is integration and wants the strong
 model; a sprint status change, an idea comment or a feedback reply is mundane and
 does not. Worth confirming against the call log that the mundane triggers really
 are the cheap ones before wiring it.
+
+## N. Requests that fit the compute
+
+No sprint waits on a resource request the platform can never grant, and the PM
+proposes work sized to the compute it actually has.
+
+### N1. Tell the PM what compute exists
+
+Put the declared capacity (and what is currently leased) into the PM prompt, so
+`resources_required` in its proposals fits.
+
+On 09-13 four p2 sprints (c60 ×2, c62, c63) sat `queued` asking for `cpu: 24`
+against a capacity of 16, and nothing in p2's instructions or guidance asked for
+24 — the PM chose it, plausibly for a 32-core box, because the prompt's proposal
+schema offers `resources_required` with no sense of the pool. The capacity is in
+`.coscience/resources.yaml`; `gather_context` is where it would join `PMContext`.
+
+### N2. Flag a request larger than total capacity
+
+Mark a sprint whose request exceeds a declared capacity as unrunnable — on its
+page and in the dispatch log — instead of counting it as waiting.
+
+`select_grants` skips a sprint whose need exceeds what is available, and a need
+above the pool's total can never become available, so such a sprint is silently
+counted in "waiting N" forever: on 09-13 the log read `granted 0 · waiting 5` for
+hours with four of the five impossible. `Ledger.pool.capacity` already has the
+totals. Worth deciding whether the sprint page shows it only, or the rail's
+waiting count (K6) excludes it too.
 
 # Done
 
