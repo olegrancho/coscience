@@ -286,11 +286,18 @@ def main(argv: list[str] | None = None) -> int:
                     substrate, program.id, state.get("ingested") or {},
                     set(state.get("quarantined") or []))
                 run = state.get("run") or {}
+                # The dry-run reconcile, so a ledger that has fallen behind its bundle
+                # is seen on the status line instead of waiting for someone to audit
+                # it — p3 sat with 49 pages behind an empty ledger for two days.
+                r = wiki.reconcile(substrate, program.id)
+                behind = (f" · ledger behind bundle: {len(r['credited'])} unrecorded, "
+                          f"{len(r['drift'])} drifted — see --reconcile"
+                          if r["credited"] or r["drift"] else "")
                 print(f"{program.id}: pending {len(pending)} · "
                       f"ingested {len(state.get('ingested') or {})} · "
                       f"since lint {state.get('ingests_since_lint', 0)} · "
                       f"quarantined {len(state.get('quarantined') or [])} · "
-                      f"{'running ' + run.get('kind', '') if run else 'idle'}", flush=True)
+                      f"{'running ' + run.get('kind', '') if run else 'idle'}{behind}", flush=True)
             return 0
 
         if args.reconcile:

@@ -119,3 +119,21 @@ def test_wiki_reconcile_exits_one_on_drift(substrate, capsys):
 
     assert main(["wiki", "--repo", str(substrate.repo_root), "--reconcile"]) == 1
     assert "drift 1" in capsys.readouterr().out
+
+
+def test_wiki_status_says_when_the_ledger_is_behind_its_bundle(substrate, capsys):
+    """A4: p3 sat with 49 pages behind an empty ledger for two days, and nothing said so."""
+    _seed(substrate)
+    wiki_store.ensure_bundle(substrate, "p1")
+    _ingested_source(substrate)
+
+    assert main(["wiki", "--repo", str(substrate.repo_root), "--status"]) == 0
+
+    assert "ledger behind bundle: 1 unrecorded, 0 drifted" in capsys.readouterr().out
+    assert wiki_store.load_state(substrate, "p1")["ingested"] == {}   # status only reads
+
+
+def test_wiki_status_stays_quiet_when_the_ledger_agrees(substrate, capsys):
+    _seed(substrate)
+    main(["wiki", "--repo", str(substrate.repo_root), "--status"])
+    assert "ledger behind" not in capsys.readouterr().out
