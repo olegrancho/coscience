@@ -58,7 +58,6 @@ def test_utilization_is_a_fraction_and_reads_back_as_percent():
     got = usage_meter.read_limits()
     assert got["windows"]["5h"]["pct"] == 13
     assert got["windows"]["week"]["pct"] == 57
-    assert got["status"] == "allowed"
 
 
 def test_recording_none_writes_nothing(limits_file):
@@ -73,11 +72,10 @@ def test_a_reading_older_than_its_window_is_not_served(limits_file):
     assert usage_meter.read_limits() is None
 
 
-def test_payload_without_windows_yields_status_only():
+def test_payload_without_windows_yields_no_windows():
     usage_meter.record_limits({"status": "allowed", "resetsAt": 1788550200})
     got = usage_meter.read_limits()
-    assert got["windows"] == {}
-    assert got["status"] == "allowed"
+    assert got == {"windows": {}, "live": True}
 
 
 def test_the_budget_panel_prefers_the_recorded_reading(monkeypatch):
@@ -92,14 +90,29 @@ def test_the_budget_panel_prefers_the_recorded_reading(monkeypatch):
 
 def test_the_gate_decides_from_the_recorded_reading():
     assert _usage_ok_from_limits(None) is None
-    assert _usage_ok_from_limits({"windows": {}, "status": "allowed"}) is None
-    assert _usage_ok_from_limits({"windows": {}, "status": "rejected"}) is False
+    assert _usage_ok_from_limits({"windows": {}}) is None
     healthy = {"windows": {"5h": {"pct": 13}, "week": {"pct": 57}}, "status": "allowed"}
     assert _usage_ok_from_limits(healthy, threshold=90.0, weekly_threshold=99.0) is True
     spent = {"windows": {"5h": {"pct": 95}, "week": {"pct": 57}}, "status": "allowed"}
     assert _usage_ok_from_limits(spent, threshold=90.0, weekly_threshold=99.0) is False
     week_spent = {"windows": {"5h": {"pct": 3}, "week": {"pct": 99}}, "status": "allowed"}
     assert _usage_ok_from_limits(week_spent, threshold=90.0, weekly_threshold=99.0) is False
+
+
+def test_the_gate_never_acts_on_the_readings_status():
+    # Claude's rate-limit status ("allowed_warning", even "rejected") is advice; the
+    # gate decides from the window percentages alone.
+    warned = {"windows": {"5h": {"pct": 30}, "week": {"pct": 40}}, "status": "allowed_warning"}
+    assert _usage_ok_from_limits(warned) is True
+    assert _usage_ok_from_limits({"windows": {"5h": {"pct": 30}}, "status": "rejected"}) is True
+    assert _usage_ok_from_limits({"windows": {}, "status": "rejected"}) is None
+    full = {"windows": {"5h": {"pct": 100}, "week": {"pct": 40}}, "status": "allowed_warning"}
+    assert _usage_ok_from_limits(full) is False
+
+
+def test_the_recorded_reading_does_not_carry_the_status():
+    usage_meter.record_limits({**EVENT["rate_limit_info"], "status": "allowed_warning"})
+    assert "status" not in usage_meter.read_limits()
 
 
 def test_a_stale_usage_script_cache_reports_nothing_rather_than_a_frozen_number(monkeypatch):

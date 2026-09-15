@@ -511,13 +511,12 @@ def current_window() -> dict | None:
 
 def read_limits(max_age: float = _LIMITS_MAX_AGE, now: float | None = None) -> dict | None:
     """The last recorded rate-limit reading as {windows: {"5h"/"week": {pct, resets}},
-    status, live: True}, or None when there is none or it is older than `max_age`
+    live: True}, or None when there is none or it is older than `max_age`
     (a stale reading describes a window that may have reset since).
 
-    `windows` is empty when the payload carried no `unifiedWindows` — older Claude
-    Code sends `status` alone. `status` is the verdict on the request that produced
-    the reading, not a percentage: anything other than "allowed" means that call was
-    throttled."""
+    `windows` is empty when the payload carried no `unifiedWindows`. The payload's
+    status field is not returned: nothing may act on Claude's warnings, only on the
+    window percentages."""
     now = time.time() if now is None else now
     try:
         rec = json.loads(limits_path().read_text())
@@ -534,8 +533,7 @@ def read_limits(max_age: float = _LIMITS_MAX_AGE, now: float | None = None) -> d
             got = _window(unified.get(src))
             if got:
                 windows[key] = got
-    return {"windows": windows, "status": str(info.get("status") or ""),
-            "live": True}
+    return {"windows": windows, "live": True}
 
 
 def usage_output(ttl: float = 300.0, now: float | None = None) -> str | None:

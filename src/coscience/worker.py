@@ -61,16 +61,16 @@ def _read_cost(sprint_dir) -> dict:
 
 def _usage_ok_from_limits(limits, threshold: float = 100.0,
                           weekly_threshold: float | None = None) -> bool | None:
-    """Decide launch-safety from `usage_meter.read_limits()`. None means "can't tell
-    from this" — no reading, or one carrying no windows — and the caller falls back.
+    """Decide launch-safety from `usage_meter.read_limits()`: the window percentages
+    and nothing else. None means "can't tell from this" — no reading, or one carrying
+    no windows — and the caller falls back.
 
-    A `status` other than "allowed" is decisive on its own: that reading came from a
-    call Claude itself throttled, so nothing we launch would get through."""
+    The reading's status field (e.g. "allowed_warning") is deliberately not read: it
+    is advice nobody asked the platform to act on, and acting on it blocked chat and
+    the PM loop at 30% of the 5-hour window. A call Claude actually refuses shows up
+    as a full window and as that call's own rate-limited outcome."""
     if not limits:
         return None
-    status = limits.get("status") or ""
-    if status and status != "allowed":
-        return False
     windows = limits.get("windows") or {}
     if not windows:
         return None
