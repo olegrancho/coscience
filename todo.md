@@ -1,76 +1,79 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 74
+version: 82
 last_updated: 2026-09-14
 ---
 
 # To QC
 
-### O2. Model compute as hosts, not one flat pool
-
-`.coscience/resources.yaml` reads as a `local` host plus an optional `hosts:` section,
-every lease names its host, and no grant spans two machines or lands on a host
-reserved for another program; remote hosts are not placeable until O6.
-
-**Check:** `GET /api/ledger` after deploy lists one `local` host, no `host_errors`,
-and the running leases, and `leases.json` still has no `host` key on local leases.
-Committed, not yet deployed.
-
-# To Do (sprint)
-
 ### O3. Describe GPUs by their VRAM
 
-Record each GPU's model and VRAM, and allocate GPU requests by memory so more than
-one process can share a card that has room.
+Hosts list GPUs as cards with VRAM, leases hold specific cards whole or as VRAM
+shares (`gpu_vram_gb`), and the worker agent is told its cards as
+`CUDA_VISIBLE_DEVICES`.
 
-A GPU is a count today (`gpu: 1.0`), so one GPU sprint's job holds the only card while it
-may use a fraction of its memory, and nothing can tell a 12 GB card from an 80 GB
-one. Allocation by VRAM needs per-device bookkeeping in the ledger, an optional
-"exclusive" flag for work that cannot share, and the chosen device handed to the
-job (e.g. `CUDA_VISIBLE_DEVICES`).
+**Check:** after deploy, `GET /api/ledger` shows the local card with `vram_gb: null`
+held whole by the running GPU sprint, exactly as the count did before. Sharing starts
+only once the card's VRAM is declared under `gpus:`; declare it only after every host
+running the platform has O3, since older code cannot read the list. 1514 tests passed at landing.
 
 ### O4. Give a sprint's request the shape of real compute
 
-Replace the flat `resources_required` map with total CPU and memory, GPU count with
-VRAM per GPU, and whether the work may be split across hosts.
+A request names `cpu`, `memory_gb`, `gpu` (whole cards) and `gpu_vram_gb` (shared
+VRAM) plus a recorded `distributed` flag; the PM sees each host and the keys it cannot
+give, and the edit dialog and sprint page speak the same shape.
 
-`distributed: false` means the whole request must fit on one machine; `true` lets
-CPU work span hosts. Old flat requests migrate as `distributed: false`. Everything
-that reads a request moves with it: `effective_requirement`, `over_capacity` (N2),
-the PM's COMPUTE block and proposal schema (N1), the sprint edit dialog, and the
-sprint page.
+**Check:** after deploy, a PM cycle's prompt lists the local host with "never request:
+memory_gb, gpu_vram_gb", and the edit dialog's compute fields round-trip on a proposed
+sprint. `distributed` is recorded only; spanning hosts is not built. 1528 Python and 363 frontend tests passed at
+landing.
 
 ### O5. Onboard a server and discover what it offers
 
-Let a human add a server with its access details, have an agent probe it, and add
-the confirmed hardware to the pool.
+The Compute page's Add-server dialog probes a server over key-only SSH, runs four
+checks, shows facts and warnings, and confirms it into `resources.yaml` `hosts:`; a
+server whose checks failed cannot be added.
 
-The probe reads what the host really has — `nproc`, memory, `nvidia-smi` names and
-VRAM, disk, and whether Python and the agent CLI are present — and proposes a host
-entry for a human to confirm rather than writing it straight into the pool. Access
-is an SSH key only, so a host entry says how to reach the box and never holds a
-secret. Needs a Compute page flow for adding, probing and confirming a host.
+**Check:** set `COSCIENCE_ALLOW_ONBOARDING=1` in the service environment (it is off by
+default because a probe ssh-es with the service account's keys), then probe one real
+server and compare the facts with the machine: CPU, memory, each GPU's VRAM, disk, and
+the four checks. A confirmed server takes work only with `COSCIENCE_ALLOW_REMOTE=1` (O6). 
 
 ### O6. Place and run work on a remote host
 
-Choose a host at grant time, then launch, watch and collect a sprint's work there.
+With `COSCIENCE_ALLOW_REMOTE=1`, a remote server takes grants and a sprint stays on
+the server it started on. The worker agent launches jobs there over SSH and declares
+them with `host` and `collect`. The platform watches them (an SSH failure is
+"unknown", a reboot is "lost"), stops them only by verified identity, and copies
+outputs into `collected/` before waking the agent.
 
-Placement picks a host whose free CPU, memory and GPU VRAM fit the request (or
-several hosts when distributed); launch, liveness, stop and collect then go through
-that host instead of local `Popen` and `/proc`. The worker's detached-job flow
-(sleep, wake, reconcile "no lease ⇒ no running job") has to work across the network
-without killing a job because a probe timed out. The spec's §11 lists what must change
-before the first remote host is made placeable.
+**Check:** after deploy with the variable unset, the Compute page still shows remote
+servers as "waits for remote launch" and local sprints run as before. Then set it for
+both the HTTP server and the dispatch loop, and reserve an onboarded server for one
+test program. A sprint there should launch a job over SSH, sleep, and wake with a note
+naming what was copied into `collected/`. Stopping it should end the job on the server.
+Spreading one request across servers is not built. 1662 Python and 375 frontend tests passed at landing.
 
 ### O7. Keep hosts healthy, visible and removable
 
-Heartbeat every host, stop granting on one that goes quiet, and let a human drain
-and remove it; show hosts individually on Compute.
+The dispatch loop checks each remote server once a minute. A server silent for 30
+minutes, or drained, takes no new sprints but keeps its running work. The Compute
+page's servers card shows health, what is in use, leftover run folders and stranded
+leases, and can drain and remove a server. One sprint's failing beat no longer stalls
+the others; after three in a row that sprint is failed.
 
-A dead host must not keep leases forever or have its jobs declared lost the moment
-one heartbeat is missed. Compute today shows pool-wide gauges; with hosts it needs a
-per-host view — CPU, memory, each GPU's VRAM in use — plus onboarding, drain and
-remove controls.
+**Check:** after deploy, with `COSCIENCE_ALLOW_REMOTE` unset, the Compute page reads as
+before ("waits for remote launch" on remote servers). With it set for both processes and
+one onboarded test server:
+- `.coscience/host-health.json` records the server answering;
+- blocking its SSH for 30 minutes marks it quiet, and no new sprint lands there;
+- Drain then Remove is refused while a sprint still has work there and for 2 minutes
+  after the drain.
+
+Still open, listed in spec §11: copy-back inside the beat, the footprint record for
+collect paths outside the run directory, and ungated remove. 1712 Python and 388 frontend tests pass on the landed code.
+
+# To Do (sprint)
 
 ### O8. Let a worker agent pull the red button
 
@@ -342,6 +345,10 @@ to pilot is a decision.
 
 # Done
 
+### O2. Model compute as hosts, not one flat pool
+
+The pool is a `local` host plus an optional `hosts:` section, every lease names its host, and a malformed host entry is reported in `host_errors` instead of stopping the platform.
+
 ### O1. Decide the multi-host execution model
 
 The multi-host design is recorded in `docs/superpowers/specs/2026-09-14-multi-host-execution-design.md`, and every O item after it builds from that document.
@@ -385,8 +392,3 @@ recorded 1 created and 4 updated where the agent claimed 7 updates.
 
 The dispatcher collects finished chat turns each cycle, so a call whose process is
 gone reads `lost` at once; a chat reply closed 5s after it finished with no reader.
-
-### N1. Tell the PM what compute exists
-
-The PM prompt states the declared capacity and what running sprints hold, and tells
-the PM to request only what a sprint's heaviest step uses.

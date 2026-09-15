@@ -89,7 +89,24 @@ A host entry holds only what is not secret, so the list lives in the substrate �
 - **probed facts** (§5), shown on the host's page and summarized to worker agents.
 
 A lease names its host (O2). A request fits a host when that host alone covers it,
-unless the request is `distributed` (O4).
+unless the request is `distributed` — recorded from O4, placed across hosts from O6.
+
+GPUs are cards, not a summed count (O3). A host lists them as `gpus: [{vram_gb, model}]`;
+a bare `gpu: N` still means N cards whose VRAM nobody declared, which are only ever lent
+whole. A request's `gpu: N` alone asks for N whole cards; adding `gpu_vram_gb: X` makes
+them X-GB shares other work may use too (on its own it means one card). A lease records
+the card indices it holds, and the worker agent is told them as `CUDA_VISIBLE_DEVICES`.
+A sprint re-granted while its agent or job still runs is given its previous cards first.
+
+A request (O4) uses four keys — `cpu` cores, `memory_gb`, `gpu` whole cards and
+`gpu_vram_gb` VRAM per shared card — plus a sprint-level `distributed` flag saying the
+work may span hosts. The flag is recorded, editable and shown now, and used for
+placement from O6.
+
+**Rolling out cards is one-way.** Code older than O3 cannot read a `gpus:` list, and it
+does not see VRAM shares as holding a card. Declare `gpus:` only after every host that
+runs the platform has O3 deployed; to roll back, remove `gpus:` and let running share
+leases finish first.
 
 ---
 
@@ -97,6 +114,18 @@ unless the request is `distributed` (O4).
 
 A human adds a host; a probe proposes an entry; the human confirms it. Nothing enters
 the pool unconfirmed (O5).
+
+The probe is deterministic code, not an agent: one read-only script over key-only SSH
+(`BatchMode=yes`, default host-key policy — an unknown host key fails with an instruction
+to connect once by hand) and the checks below. Each probe is recorded in the substrate as
+`.coscience/host-probes/<name>.json`; confirming writes the host into `resources.yaml`
+`hosts:`. A run root is `~`, a path under `~/` or an absolute path in letters, digits, `.`,
+`_`, `-` and `/`, so nothing a human types reaches a remote shell unquoted.
+Onboarding is off unless the deployment sets `COSCIENCE_ALLOW_ONBOARDING=1`, because a
+probe makes the backend ssh with its own keys to a target a dashboard user types; a
+server whose checks failed cannot be confirmed. Not yet collected (O7): disk quota,
+compilers, transfer speed to the dispatcher machine, Python versions beyond `python3`,
+and other users' processes (only logged-in users are counted).
 
 **Declared by the human**
 
@@ -187,16 +216,18 @@ ssh gpu1 'cd ~/coscience-runs/<sprint-id> && setsid nohup python train.py --fold
 3. **Stop and hibernate.** `ssh <host> kill -- -<pgid>`; `setsid` made the job its own
    process-group leader.
 4. **Collect before waking.** When the job exits or the wake time comes, rsync every
-   `collect` path into `sprints/<id>/work/`, then relaunch the worker agent. The wake
+   `collect` path into `sprints/<id>/collected/`, then relaunch the worker agent. The wake
    message states what happened:
 
    > Your job on gpu1 ended (exit 0). Before waking you, the platform
-   > copied `~/coscience-runs/<sprint-id>/work` → `sprints/<sprint-id>/work/` at 14:02. Read the
+   > copied `~/coscience-runs/<sprint-id>/work` → `sprints/<sprint-id>/collected/work` at 14:02. Read the
    > results there; you do not need to copy them yourself. Nothing else on the host
    > was copied.
 
    A failed copy is stated just as plainly — which path, and why — so a stale folder
-   is never read as fresh.
+   is never read as fresh. (O6: copies land in `collected/<last folder name>`, so two
+   `collect` paths may not share a last folder name; a job the platform could not stop
+   at its time limit is named in the note, and the agent is asked to stop it.)
 5. **Record remote footprint.** Every working directory and `collect` path a sprint
    used is recorded on the sprint. The dispatcher never deletes them itself: a
    hibernated sprint needs its directory back. Directories of finished, failed or
@@ -311,7 +342,7 @@ fits the machine.
 |---|---|
 | O2 | hosts file in the substrate; implicit `local`; allowed programs; lease names its host; run root |
 | O3 | per-GPU VRAM and driver in the host entry; device choice handed to the job |
-| O4 | request fits one host unless `distributed` |
+| O4 | canonical request keys (`cpu`, `memory_gb`, `gpu`, `gpu_vram_gb`) and the `distributed` flag, recorded; per-host COMPUTE for the PM |
 | O5 | onboarding split: declared / probed / tested (§5); SSH key only |
 | O6 | sticky placement respecting reservations; host section in worker-agent instructions; `job.json` `host` and `collect`; verify on declare; remote liveness, kill, collect-before-wake with the wake message; remote footprint record |
 | O7 | unreachable timeout and boot-id rule (§7); per-host page with probed facts, leftover run directories, drain and remove |
@@ -325,7 +356,9 @@ fits the machine.
 - The hosts and lease schema — settled in O2
   (`docs/superpowers/plans/2026-09-14-o2-hosts-model.md`).
 - The unreachable timeout — O7, starting from 30 minutes.
-- How a `distributed` request is split across hosts — O4 and O6.
+- How a `distributed` request is split across hosts — not built in O6 (every request is
+  placed on one host; the flag stays recorded only). When it lands, `over_capacity`
+  and the unrunnable flag must judge a `distributed` request against the hosts it may span.
 - Whether the wiki and chat agents ever need remote placement — out of scope for O.
 
 **Before O6 makes any remote host placeable** (found in O2's final review; none has
@@ -333,16 +366,73 @@ an effect while only `local` takes work):
 
 - The PM's COMPUTE block sums capacity across a program's hosts, but a request must
   fit on one host: give the PM per-host capacity (or the largest host) and say no
-  request may exceed one host.
+  request may exceed one host. (Done in O4: COMPUTE lists each host and states the
+  one-host rule.)
 - The Compute page capacity editor edits the pool total; it must edit the `local`
-  host's amounts instead.
+  host's amounts instead. (Done in O6: it edits this machine's capacity once a remote
+  host takes work.)
 - The unrunnable message ("needs gpu 1 but capacity is 0") must name the host it
-  judged.
+  judged. (Done in O6: it names a pinned host, or the closest host when several take work.)
+- A re-granted sprint's preferred GPU cards are matched by index only; once several
+  hosts are placeable, the preference must name its host. (Done in O6: a sprint that
+  launched anything is re-granted only on its own host, so the indices are that host's.)
+- Onboarding and remote placement need an access decision: the dashboard's auth gate is
+  inactive where no users file exists, and confirmed hosts will receive sprint code and data.
+  (Decided in O5/O6: onboarding is off unless `COSCIENCE_ALLOW_ONBOARDING=1`, and no remote
+  host is placeable unless `COSCIENCE_ALLOW_REMOTE=1`.)
+- Refuse a run root of `~` or `/` for any `rsync --delete`, and find a remote job by its
+  token (pid and start time), not by pid alone. (Done in O6: copying back never uses
+  `--delete` and refuses `~` and `/`; a remote job token is `<host>:<pid>:<starttime>:<boot_id>`,
+  and a job whose start time was never read is not signalled.)
+- Run a probe as a background job: a probe of a stalling host can hold a request thread
+  for minutes.
 - Choose a placement policy on purpose; O2 is first-fit in declaration order, which
   lets small sprints fragment a large host.
 - Yield-victim selection only frees room on one host at a time, so a deficit in both
-  host CPU and a worker slot can miss a victim on another host.
+  host CPU and a worker slot can miss a victim on another host. (Addressed in O3:
+  victims are chosen by simulation and pruned.)
+- For a multi-card share request the unrunnable message names one card size ("needs
+  gpu_vram_gb 32 but capacity is 48"); say how many cards have enough VRAM on which host.
+
+**O4 (done):** the PM prompt names the request keys, including `gpu_vram_gb` shares, and
+the COMPUTE block lists each card's VRAM.
 
 **O7:** a lease whose host was removed or renamed in the pool makes pool-wide
 `available` negative and strands a sleeping sprint's worker-slot reacquire; drain
-and remove must release or migrate such leases first.
+and remove must release or migrate such leases first. (Done in O7: such a lease is
+"stranded" — it keeps its sprint's work but leaves pool-wide use, and the Compute page
+lists it; a host is removed only when drained and no lease names it.) Likewise, card-less GPU leases
+from before O3 that outnumber a host's cards are given no card on load and drop out of
+`used`; over-commitment should be shown, not hidden.
+
+**O7, from O6's final review:**
+
+- Copying a job's outputs back runs inside the dispatch beat (up to 600 s per path), so a
+  large collect delays every other sprint's beat; move it off the beat.
+- The remote footprint record (§6.3 step 5) is not built: `job_collect` is cleared when a
+  job ends. A host page can list `<run_root>/<sprint-id>` from `progress.host`, but collect
+  paths outside the run directory are not remembered.
+- Stopping or reconciling a sprint clears a remote job token even when the stop failed,
+  with no note (the time-limit path has one). (Done in O7: the stop path writes the same note.)
+- The sprint list's unrunnable check reads one progress file per sprint.
+- Switching `COSCIENCE_ALLOW_REMOTE` off while a remote lease is held drops that host from
+  the pool total while the lease still counts, so pool-wide `available` goes negative
+  (per-host fit is unaffected). (Done in O7: that lease is stranded and leaves pool-wide use.) Both the HTTP server and the dispatch loop must have the
+  variable set, or the Compute page and actual placement disagree.
+
+**O7 as built:** the dispatch loop asks each placeable remote host `bash -c true` at most
+once a minute (checks run concurrently) and records `.coscience/host-health.json`, which the
+HTTP server reads. A host failing for 30 minutes is quiet. A quiet host, or one marked
+`drain: true` in `resources.yaml`, takes no new grants, but a sprint whose agent or job is
+still running there is re-adopted on it after a lost lease, so no job's tracking is dropped
+because its host went quiet. One sprint's failing beat no longer aborts the dispatch cycle; the
+error is recorded on the sprint and counted in the loop's output. Escalating sprints that sleep
+on a quiet host is O8's.
+
+A server is removed only when it is drained, at least two minutes have passed since the drain
+(so a cycle that loaded the pool before the drain cannot still grant there), no lease names it,
+and no unfinished sprint has worked on it. A sprint whose beat raises repeatedly is failed after
+the worker's failure cap instead of holding its lease forever. Left open: removing a server is
+not gated like adding one (it makes no SSH call, like the capacity and pause routes); a corrupt
+health file restarts the 30-minute count; the sprint list reads the health file once per pinned
+sprint; more than eight unreachable servers still add about 20 s per eight to a cycle.
