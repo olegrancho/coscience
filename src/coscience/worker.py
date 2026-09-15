@@ -38,6 +38,15 @@ JOB_MAX_SECONDS = float(os.environ.get("COSCIENCE_JOB_MAX_SECONDS", 7 * 24 * 360
 _USAGE_LIMIT_RE = re.compile(r"(session|usage|rate) limit|hit your .*limit|limit ·", re.I)
 
 
+def _could_not_stop_line(host: str) -> str:
+    """A remote job the platform could not stop must not be forgotten silently —
+    surfaced in `collect_note` so a human sees it when they look at the sprint."""
+    return (f"The platform could not stop the job on {host} (the host "
+            "could not be asked, the job's identity was never read, or the pid is "
+            "not the leader of its own process group — launch with setsid). Check "
+            "whether it is still running and stop it yourself.")
+
+
 def _read_cost(sprint_dir) -> dict:
     """Best-effort usage from the agent's cost sidecar; {} if absent (an interrupted
     run, or the fake agent in tests). Returns the whole sidecar so the per-component
@@ -485,13 +494,7 @@ class Worker:
                 self._terminate(progress.job_token)
                 self._collect_job(progress, sprint_dir)
                 if not self._last_terminate_ok:
-                    # A remote job the platform could not stop must not be forgotten
-                    # silently — leave a note a human will see when they look at the
-                    # sprint, since nothing else here surfaces it.
-                    line = (f"The platform could not stop the job on {progress.job_host} (the host "
-                            "could not be asked, the job's identity was never read, or the pid is "
-                            "not the leader of its own process group — launch with setsid). Check "
-                            "whether it is still running and stop it yourself.")
+                    line = _could_not_stop_line(progress.job_host)
                     progress.collect_note = (f"{progress.collect_note}\n{line}"
                                              if progress.collect_note else line)
                 progress.assess_reason = "timed out"
@@ -813,7 +816,11 @@ class Worker:
             try:
                 self._terminate(progress.job_token)
             except Exception:
-                pass
+                self._last_terminate_ok = False
+            if not self._last_terminate_ok:
+                line = _could_not_stop_line(progress.job_host)
+                progress.collect_note = (f"{progress.collect_note}\n{line}"
+                                         if progress.collect_note else line)
             progress.job_token = ""
             progress.job_host = ""
             progress.job_collect = []

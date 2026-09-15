@@ -73,14 +73,28 @@ class Ledger:
     def lease_for(self, sprint_id: str) -> Lease | None:
         return self._leases.get(sprint_id)
 
+    def _stranded(self, lease: Lease) -> bool:
+        host = self.pool.host(lease.host)
+        return host is None or not host.placeable
+
+    def stranded(self) -> list[Lease]:
+        """Leases on a host the pool no longer has or no longer places on. They keep
+        their sprint's work alive but no longer count against pool-wide totals, which
+        would otherwise go negative."""
+        return [l for l in self._leases.values() if self._stranded(l)]
+
     def used(self, host: str | None = None) -> dict[str, float]:
         """Amounts held — across the pool, or on one host. Platform keys count on
         every host, since they bound agents on the dispatcher's machine. `gpu` counts
-        cards held: a card lent out in shares is one card in use."""
+        cards held: a card lent out in shares is one card in use. A stranded lease
+        (its host left the pool, or the pool no longer places there) keeps its
+        platform-key amounts — those bound agents on the dispatcher's own machine,
+        wherever the lease's host was — but drops out of pool-wide totals otherwise,
+        so a removed host's capacity leaving the pool doesn't drive use negative."""
         out = {k: 0.0 for k in self._keys_ever_leased if k not in GPU_KEYS}
         held: set[tuple[str, int]] = set()
         for lease in self._leases.values():
-            on_host = host is None or lease.host == host
+            on_host = (lease.host == host) if host is not None else not self._stranded(lease)
             for k, v in lease.amounts.items():
                 if k in GPU_KEYS or (not on_host and k not in PLATFORM_KEYS):
                     continue
@@ -104,21 +118,20 @@ class Ledger:
         return out
 
     def can_fit(self, amounts: dict[str, float], host: str | None = None) -> bool:
-        plain = {k: v for k, v in amounts.items() if k not in GPU_KEYS}
         if host is None:
-            room = self.available()
-            hosts = self.pool.placeable_hosts(None)
-        else:
-            h = self.pool.host(host)
-            if h is None:
-                return False
-            room = self._room(h)
-            hosts = [h]
+            # A request must fit on one grantable host; a drained or quiet host's
+            # capacity is not room this can use.
+            return self.fit(amounts) is not None
+        h = self.pool.host(host)
+        if h is None:
+            return False
+        plain = {k: v for k, v in amounts.items() if k not in GPU_KEYS}
+        room = self._room(h)
         if not all(room.get(k, 0.0) >= v for k, v in plain.items()):
             return False
         if not gpu_request(amounts)[0]:
             return True
-        return any(self.pick_gpus(h, amounts) is not None for h in hosts)
+        return self.pick_gpus(h, amounts) is not None
 
     def device_use(self, host: str, exclude=frozenset(),
                    pending: Iterable[tuple] = ()) -> dict[int, tuple[bool, float]]:
@@ -204,14 +217,18 @@ class Ledger:
 
     def fit(self, amounts: dict[str, float], program: str | None = None,
             pending: Iterable[tuple] = (), exclude=frozenset(),
-            host: str | None = None, prefer: Iterable[int] = ()) -> tuple[str, list[int]] | None:
+            host: str | None = None, prefer: Iterable[int] = (),
+            readopt: bool = False) -> tuple[str, list[int]] | None:
         """(host, card indices) on the first placeable host `program` may use that holds
         ALL of `amounts`, or None. `pending` is what this cycle has granted but not yet
         acquired, so one pass of grants never books the same room twice; `exclude`
         names leases to treat as released, for weighing preemption; `host` limits the
-        search to one host; `prefer` is passed to `pick_gpus`."""
+        search to one host; `prefer` is passed to `pick_gpus`. `readopt` re-adopts a
+        sprint whose agent or job is still physically running: a drained or quiet
+        host still holds its room — only NEW grants are kept off such a host."""
         pending = _normalize(pending)
-        for h in self.pool.placeable_hosts(program):
+        hosts = self.pool.placeable_hosts(program) if readopt else self.pool.grantable_hosts(program)
+        for h in hosts:
             if host is not None and h.name != host:
                 continue
             room = self._room(h, exclude)
@@ -234,11 +251,11 @@ class Ledger:
 
     # --- mutations ---
     def acquire(self, sprint_id, amounts, now, ttl, priority=0, preemptible=True,
-                program=None, prefer_cards=(), host=None):
+                program=None, prefer_cards=(), host=None, readopt=False):
         existing = self._leases.get(sprint_id)
         if existing is not None:
             return existing
-        placed = self.fit(amounts, program, prefer=prefer_cards, host=host)
+        placed = self.fit(amounts, program, prefer=prefer_cards, host=host, readopt=readopt)
         if placed is None:
             return None
         host, cards = placed

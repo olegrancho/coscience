@@ -47,3 +47,23 @@ def test_worker_subcommand_still_works(tmp_path):
     _seed(tmp_path, "sp1")
     code = main(["worker", "--repo", str(tmp_path), "--once"])
     assert code == 0
+
+
+def test_dispatch_once_prints_beat_errors_when_any(tmp_path, monkeypatch, capsys):
+    """R10(a): the --once summary line names how many sprints hit a beat error, so a
+    failing beat is visible without digging into a sprint's error field."""
+    from coscience.dispatcher import CycleReport, Dispatcher
+    monkeypatch.setattr(Dispatcher, "run_one_cycle",
+                        lambda self, now=None: CycleReport(granted=1, beat_errors=["sp1"]))
+    code = main(["dispatch", "--repo", str(tmp_path), "--once"])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "granted=1" in out and "beat errors: 1" in out
+
+
+def test_dispatch_once_omits_beat_errors_when_none(tmp_path, monkeypatch, capsys):
+    from coscience.dispatcher import CycleReport, Dispatcher
+    monkeypatch.setattr(Dispatcher, "run_one_cycle", lambda self, now=None: CycleReport(granted=1))
+    code = main(["dispatch", "--repo", str(tmp_path), "--once"])
+    assert code == 0
+    assert "beat errors" not in capsys.readouterr().out

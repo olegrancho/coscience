@@ -80,3 +80,27 @@ def test_bound_missing_artifact_does_not_crash_cycle(substrate):
     disp.run_one_cycle(now=1.0)                       # must not raise
     disp.ledger.load()
     assert disp.ledger.lease_for("s1") is not None    # granted; missing aid ignored
+
+
+# --- Round 2, Fix D gap 1: the give-up path releases artifact locks ----------------
+
+def test_a_sprint_failed_by_the_beat_cap_releases_its_artifact_lock(substrate, monkeypatch):
+    from coscience.worker import MAX_AGENT_FAILURES
+    artifacts.create_artifact(substrate, "p", "doc", "Doc", "md")
+    _queued(substrate, "s1", "p", bound=["doc"])
+    disp = _disp(substrate, {"cpu": 4.0})
+    disp.run_one_cycle(now=1.0)                       # grant + lock (default FakeAgent beat)
+    disp.ledger.load()
+    assert disp.ledger.lease_for("s1") is not None
+    assert substrate.load_artifact("p", "doc").lock.get("holder_id") == "s1"
+
+    def beat(sprint):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(disp.worker, "run_sprint_beat", beat)
+
+    for i in range(MAX_AGENT_FAILURES):
+        disp.run_one_cycle(now=float(2 + i))
+
+    assert substrate.load_sprint("s1").status == SprintStatus.FAILED
+    assert disp.ledger.lease_for("s1") is None
+    assert not substrate.load_artifact("p", "doc").lock              # released, not held forever

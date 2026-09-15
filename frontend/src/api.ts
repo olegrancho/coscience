@@ -105,10 +105,18 @@ export interface SprintFile {
 }
 export interface ResultRow { id: string; sprint: string; summary: string; program?: string | null; completed_at?: number | null }
 export interface LedgerCard { index: number; model: string; vram_gb: number | null; whole: boolean; shared_gb: number }
+export interface HostHealth {
+  state: "local" | "unchecked" | "ok" | "failing" | "quiet";
+  checked_at: number; last_ok: number; fail_since: number; reason: string;
+}
+export interface HostLeftover { sprint_id: string; status: string; path: string }
+export interface StrandedLease { sprint_id: string; host: string; listed?: boolean }
 export interface LedgerHost {
   name: string; ssh: string; placeable: boolean; programs: string[]; run_root: string;
   capacity: Record<string, number>; available: Record<string, number>; gpus: LedgerCard[];
   shared?: boolean; owner?: string; notes?: string;
+  drain?: boolean; drained_at?: number;
+  health?: HostHealth; used?: Record<string, number>; leases?: number; leftover?: HostLeftover[];
 }
 export interface HostCheck { name: string; ok: boolean; detail: string }
 export interface HostDeclaration {
@@ -126,7 +134,7 @@ export interface Ledger {
   // This machine's own amounts, once compute spans hosts — what `PUT /api/capacity`
   // writes. Falls back to `capacity` against an older backend that doesn't send it.
   local_capacity?: Record<string, number>;
-  hosts?: LedgerHost[]; host_errors?: string[];
+  hosts?: LedgerHost[]; host_errors?: string[]; stranded?: StrandedLease[];
 }
 export interface GraphNode {
   id: string; kind: "idea" | "experiment"; stage: "idea" | "experiment" | "result"; label: string;
@@ -493,6 +501,12 @@ export const api = {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ paused }),
     }).then(j<Ledger>),
+  drainHost: (name: string, drain: boolean) =>
+    fetch(`/api/hosts/${encodeURIComponent(name)}/drain`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ drain }),
+    }).then(j<Ledger>),
+  removeHost: (name: string) =>
+    fetch(`/api/hosts/${encodeURIComponent(name)}`, { method: "DELETE" }).then(j<Ledger>),
   getUsage: () => fetch("/api/usage").then(j<Usage>),
   getCallLog: (limit = 200) =>
     fetch(`/api/usage/calls?limit=${limit}`).then(j<{ calls: CallRow[] }>),

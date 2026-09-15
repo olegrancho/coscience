@@ -46,6 +46,8 @@ class Host:
     shared: bool = False                                 # other people use this machine too
     owner: str = ""                                      # who to ask about it
     notes: str = ""                                      # usage rules, e.g. hours or longest job
+    drain: bool = False                                  # takes no new grants; running work finishes
+    drained_at: float = 0.0                              # time.time() when drain was set; 0.0 = unknown/long ago
 
     def __post_init__(self):
         if not self.gpus and self.capacity.get(GPU_KEY, 0.0) >= 1:
@@ -75,6 +77,9 @@ class ResourcePool:
     # Human-readable messages for `hosts:` entries that were skipped, one per bad
     # entry — parsing never fails the whole pool over one hand-edited typo.
     host_errors: list[str] = field(default_factory=list)
+    # Hosts that take no new grants this cycle and why (e.g. quiet); set by the
+    # dispatcher, never parsed.
+    closed: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         if self.hosts is None:
@@ -87,6 +92,10 @@ class ResourcePool:
 
     def placeable_hosts(self, program: str | None) -> list[Host]:
         return [h for h in self.hosts if h.placeable and h.allows(program)]
+
+    def grantable_hosts(self, program: str | None) -> list[Host]:
+        """Hosts a new grant may land on: placeable, allowed, not drained, not closed."""
+        return [h for h in self.placeable_hosts(program) if not h.drain and h.name not in self.closed]
 
     @classmethod
     def from_dict(cls, d: dict) -> "ResourcePool":
@@ -177,6 +186,8 @@ def _parse_host(name: str, spec) -> Host:
                 or not math.isfinite(val) or val < 0):
             raise ValueError(f"hosts.{name}.{key}: capacity must be a finite non-negative number")
         capacity[key] = float(val)
+    if "drain" in spec and not isinstance(spec["drain"], bool):
+        raise ValueError(f"hosts.{name}.drain: must be true or false")
     programs = spec.get("programs") or []
     if not isinstance(programs, list):
         raise ValueError(f"hosts.{name}: programs must be a list")
@@ -189,11 +200,16 @@ def _parse_host(name: str, spec) -> Host:
         capacity[GPU_KEY] = float(len(gpus))
     elif GPU_KEY in capacity and capacity[GPU_KEY] != int(capacity[GPU_KEY]):
         raise ValueError(f"hosts.{name}.capacity.gpu: must be a whole number of cards")
+    drained_at_raw = spec.get("drained_at")
+    drained_at = (float(drained_at_raw)
+                  if isinstance(drained_at_raw, (int, float)) and not isinstance(drained_at_raw, bool)
+                  else 0.0)
     return Host(name=name, capacity=capacity, ssh=ssh,
                 programs=[str(p) for p in programs],
                 run_root=str(spec.get("run_root") or ""), gpus=gpus,
                 shared=bool(spec.get("shared", False)), owner=str(spec.get("owner") or ""),
-                notes=str(spec.get("notes") or ""))
+                notes=str(spec.get("notes") or ""), drain=bool(spec.get("drain", False)),
+                drained_at=drained_at)
 
 
 def _parse_gpus(where: str, spec) -> list[Gpu]:

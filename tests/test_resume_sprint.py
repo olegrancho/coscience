@@ -39,11 +39,13 @@ def test_resume_resets_counters(tmp_path):
     sid = _done(svc)
     svc.substrate.save_progress(ProgressState(
         sprint_id=sid, failures=2, ambiguous_exits=3, scratch_size=99,
-        agent_token="stale", agent_session_id="old-sess", last_error="boom"))
+        agent_token="stale", agent_session_id="old-sess", last_error="boom",
+        beat_failures=3))
     svc.resume_sprint(sid, by="u")
     prog = svc.substrate.load_progress(sid)
     assert prog.failures == 0 and prog.ambiguous_exits == 0 and prog.agent_token == ""
     assert prog.scratch_size == 0 and prog.agent_session_id == "" and prog.last_error == ""
+    assert prog.beat_failures == 0          # Round 2: resume must not leave the beat-cap primed
 
 
 def test_resume_allows_failed(tmp_path):

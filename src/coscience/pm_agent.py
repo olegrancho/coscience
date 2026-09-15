@@ -295,9 +295,12 @@ def _compute(substrate, program_id: str) -> tuple[dict, dict, list[dict]]:
     request — only the hosts it may be placed on, so a reserved machine is never
     planned around by a program that will not get it. The per-host view is what the PM
     sizes against: a request must fit on one host."""
+    from coscience import host_health
     from coscience.ledger import Ledger
     from coscience.resources import GPU_KEY, PLATFORM_KEYS, load_pool
     pool = load_pool(substrate.repo_root)
+    health = host_health.load(substrate.repo_root)
+    now = time.time()
     hosts = pool.placeable_hosts(program_id)
     capacity: dict[str, float] = {}
     for h in hosts:
@@ -315,10 +318,13 @@ def _compute(substrate, program_id: str) -> tuple[dict, dict, list[dict]]:
                 if ledger is not None else {})
         for k, v in held.items():
             leased[k] = leased.get(k, 0.0) + v
+        closed = ("draining" if h.drain else
+                  ("not answering" if host_health.state(health.get(h.name), now) == "quiet" else ""))
         per_host.append({"name": h.name,
                          "capacity": {k: v for k, v in h.capacity.items() if k != GPU_KEY},
                          "gpus": [g.vram_gb for g in h.gpus],
-                         "held": held})
+                         "held": held,
+                         "closed": closed})
     leased = {k: v for k, v in leased.items() if k in capacity and v}
     return capacity, leased, per_host
 

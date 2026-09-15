@@ -15,13 +15,14 @@ from uuid import uuid4
 
 import yaml
 
-from coscience import graph, threads
+from coscience import graph, host_health, threads
 from coscience.artifacts import DESCRIPTION_FILE, FIGURE_DESCRIPTION_NOTE
 from coscience.ledger import Ledger
 from coscience.models import (DEFAULT_MODEL, Sprint, SprintStatus, Program, ProgramStatus,
                               Idea, ChatThread, set_status)
 from coscience.pause import is_paused
-from coscience.resources import GPU_KEY, GPU_VRAM_KEY, LOCAL, PLATFORM_KEYS, ResourcePool, load_pool
+from coscience.resources import (GPU_KEY, GPU_VRAM_KEY, LOCAL, PLATFORM_KEYS, ResourcePool,
+                                 _parse_host, load_pool)
 from coscience.substrate import Substrate
 
 
@@ -34,6 +35,11 @@ def service_from_env() -> "Service":
 class NotFoundError(KeyError):
     """A requested sprint or result does not exist."""
 
+
+# Fix B: how long after a drain a remove is allowed. Shorter than this and a
+# dispatch cycle in flight when the drain landed may not have seen it yet — a grant
+# could land between the pool load and the remove.
+REMOVE_AFTER_DRAIN = 120.0
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 # Never worth quoting on an overview card, even though some are technically text.
@@ -232,6 +238,7 @@ class Service:
         progress.agent_token = ""
         progress.agent_session_id = ""      # don't --resume the prior finished session
         progress.failures = 0
+        progress.beat_failures = 0
         progress.ambiguous_exits = 0
         progress.scratch_size = 0
         progress.last_error = ""
@@ -364,6 +371,15 @@ class Service:
             host = pool.host(pinned)
             if host is None or not host.placeable:
                 return f"its work is on host {pinned}, which is not in the pool or not taking work"
+            if host.drain:
+                return (f"{pinned} is draining and this sprint is pinned there: "
+                        "take the host back or stop the sprint")
+            entry = host_health.load(self.repo_root).get(pinned)
+            if host_health.state(entry, time.time()) == "quiet":
+                fail_since = float((entry or {}).get("fail_since") or 0.0)
+                return (f"pinned to {pinned}, which has not answered since "
+                        f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(fail_since))}: "
+                        "its work is kept and it takes no new grants")
             if not host.allows(sprint.program):
                 # The host is fine in general — its `programs:` restriction changed
                 # (or was added) after this sprint's work landed there.
@@ -421,7 +437,8 @@ class Service:
             "job": job,
             "started_at": progress.started_at,
             "activity": self._activity(sprint_id) if sprint.status == SprintStatus.EXECUTING else None,
-            "error": progress.last_error if sprint.status == SprintStatus.FAILED else "",
+            "error": progress.last_error if (sprint.status == SprintStatus.FAILED
+                                             or progress.last_error.startswith("beat failed:")) else "",
             "lease": None if lease is None else {
                 "id": lease.id, "sprint_id": lease.sprint_id, "amounts": lease.amounts,
                 "granted_at": lease.granted_at, "expires_at": lease.expires_at,
@@ -1624,9 +1641,34 @@ class Service:
         return sorted(str(p.relative_to(work)) for p in work.rglob("*") if p.is_file())
 
     # --- ledger ---
+    def _leftover_by_host(self, pool) -> dict[str, list[dict]]:
+        """{host name: [{"sprint_id", "status", "path"}]} for finished sprints whose run
+        directory is still sitting on a remote host, sorted by sprint id. Skipped
+        entirely (no substrate walk) when the pool has no host with `ssh` — a local-only
+        deployment never leaves anything to list."""
+        if not any(h.ssh for h in pool.hosts):
+            return {}
+        out: dict[str, list[dict]] = {}
+        for sprint in self.substrate.iter_sprints():
+            if sprint.status not in (SprintStatus.DONE, SprintStatus.CANCELED, SprintStatus.FAILED):
+                continue
+            progress = self.substrate.load_progress(sprint.id)
+            host = pool.host(progress.host) if progress.host else None
+            if host is None or not host.run_root:
+                continue
+            out.setdefault(host.name, []).append(
+                {"sprint_id": sprint.id, "status": sprint.status.value,
+                 "path": f"{host.run_root.rstrip('/')}/{sprint.id}"})
+        for rows in out.values():
+            rows.sort(key=lambda r: r["sprint_id"])
+        return out
+
     def ledger_status(self) -> dict:
         from coscience.pause import is_paused
         ledger = self._ledger()
+        health = host_health.load(self.repo_root)
+        now = time.time()
+        leftover = self._leftover_by_host(ledger.pool)
 
         def cards(host) -> list[dict]:
             use = ledger.device_use(host.name)
@@ -1653,7 +1695,19 @@ class Service:
                  # A host that cannot take work has nothing available to grant.
                  "available": ledger.available(h.name) if h.placeable else {},
                  "gpus": cards(h),
-                 "shared": h.shared, "owner": h.owner, "notes": h.notes}
+                 "shared": h.shared, "owner": h.owner, "notes": h.notes,
+                 "drain": h.drain, "drained_at": h.drained_at,
+                 "health": ({"state": "local", "checked_at": 0.0, "last_ok": 0.0,
+                             "fail_since": 0.0, "reason": ""}
+                            if h.is_local else
+                            {"state": host_health.state(health.get(h.name), now),
+                             **{k: health.get(h.name, {}).get(k, default) for k, default in
+                                (("checked_at", 0.0), ("last_ok", 0.0),
+                                 ("fail_since", 0.0), ("reason", ""))}}),
+                 "used": {k: v for k, v in ledger.used(h.name).items()
+                          if k not in PLATFORM_KEYS and v},
+                 "leases": sum(1 for l in ledger.all_leases() if l.host == h.name),
+                 "leftover": leftover.get(h.name, [])}
                 for h in ledger.pool.hosts
             ],
             "leases": [
@@ -1663,6 +1717,9 @@ class Service:
                  "host": l.host, "gpu_devices": list(l.gpu_devices)}
                 for l in ledger.all_leases()
             ],
+            "stranded": [{"sprint_id": l.sprint_id, "host": l.host,
+                         "listed": ledger.pool.host(l.host) is not None}
+                        for l in ledger.stranded()],
         }
 
     def set_pause(self, paused: bool) -> dict:
@@ -1742,6 +1799,95 @@ class Service:
         finally:
             tmp.unlink(missing_ok=True)
 
+    def _resources_hosts(self) -> tuple[dict, dict]:
+        """Load resources.yaml and return (the loaded document, its `hosts:` mapping) —
+        unwrapping a `resources:` wrapper when that's where `hosts:` lives, same as
+        onboarding's confirm_host. The returned mapping is already installed as
+        `loaded`'s (or its wrapper's) "hosts" key, so mutating it in place and passing
+        `loaded` to _write_resources keeps the edit."""
+        path = self.repo_root / ".coscience" / "resources.yaml"
+        try:
+            loaded = yaml.safe_load(path.read_text()) if path.is_file() else {}
+        except yaml.YAMLError as exc:
+            raise ValueError(f"resources.yaml could not be read: {exc}")
+        loaded = loaded if isinstance(loaded, dict) else {}
+        wrapped = loaded.get("resources")
+        holder = wrapped if isinstance(wrapped, dict) and "hosts" in wrapped else loaded
+        if "hosts" in holder and not isinstance(holder["hosts"], dict):
+            raise ValueError("resources.yaml hosts: is not a mapping; fix the file before adding a server")
+        hosts = holder.get("hosts") or {}
+        holder["hosts"] = hosts
+        return loaded, hosts
+
+    def set_host_drain(self, name: str, drain: bool) -> dict:
+        """Stop new grants on a host (running work finishes), or take it back."""
+        if name == LOCAL:
+            raise ValueError("this machine is not drained; use Pause to stop new work here")
+        loaded, hosts = self._resources_hosts()
+        if name not in hosts:
+            raise NotFoundError(f"no host {name!r} in the pool")
+        if not isinstance(hosts[name], dict):
+            raise ValueError(f"hosts.{name}: is not a mapping; fix the file first")
+        if drain:
+            hosts[name]["drain"] = True
+            # Fix B: so a remove can tell whether the dispatcher has had a chance to
+            # see the drain yet (it loads the pool once per cycle).
+            hosts[name]["drained_at"] = time.time()
+        else:
+            hosts[name].pop("drain", None)
+            hosts[name].pop("drained_at", None)
+        _parse_host(name, hosts[name])
+        self._write_resources(loaded)
+        self.substrate.commit(f"host {name} {'drained' if drain else 'takes work again'}")
+        return self.ledger_status()
+
+    def remove_host(self, name: str) -> dict:
+        """Take a drained host with no unfinished work out of the pool. Its probe
+        record and any run directories on the host itself are left alone."""
+        if name == LOCAL:
+            raise ValueError("this machine cannot be removed; use Pause to stop new work here")
+        loaded, hosts = self._resources_hosts()
+        if name not in hosts:
+            raise NotFoundError(f"no host {name!r} in the pool")
+        if not isinstance(hosts[name], dict):
+            raise ValueError(f"hosts.{name}: is not a mapping; fix the file first")
+        if hosts[name].get("drain") is not True:
+            raise ValueError(f"drain {name} before removing it, so no new sprint lands there meanwhile")
+        drained_at = hosts[name].get("drained_at")
+        # Fix B: a hand-edited entry with no drained_at counts as long drained (no
+        # cycle to wait for was ever timed), so it is not held up here.
+        if isinstance(drained_at, (int, float)) and not isinstance(drained_at, bool) \
+                and time.time() - drained_at < REMOVE_AFTER_DRAIN:
+            raise ValueError(f"{name} was drained less than {int(REMOVE_AFTER_DRAIN // 60)} minutes ago; "
+                             "wait for the dispatcher to see it, then remove")
+        # Fix A: a sprint still physically on this host (an EXECUTING sprint whose
+        # lease lapsed and hasn't been re-adopted, or one pinned here while QUEUED or
+        # HIBERNATED) must finish or be stopped first — removing the host now would
+        # orphan the job (reconcile can't kill what it can't reach) or make a pinned
+        # sprint unrunnable for good.
+        unfinished = []
+        for sprint in self.substrate.iter_sprints():
+            if sprint.status in (SprintStatus.DONE, SprintStatus.CANCELED, SprintStatus.FAILED):
+                continue
+            progress = self.substrate.load_progress(sprint.id)
+            if progress.host == name or progress.job_host == name:
+                unfinished.append(sprint.id)
+        if unfinished:
+            n = len(unfinished)
+            raise ValueError(f"{n} unfinished sprint{'s' if n != 1 else ''} still "
+                             f"work{'' if n != 1 else 's'} on {name} "
+                             f"({', '.join(unfinished[:5])}{'…' if n > 5 else ''}): "
+                             "let them finish or stop them first")
+        holding = [l.sprint_id for l in self._ledger().all_leases() if l.host == name]
+        if holding:
+            raise ValueError(f"{len(holding)} sprint{' still holds' if len(holding) == 1 else 's still hold'} "
+                             f"a lease on {name}: wait for {'it' if len(holding) == 1 else 'them'} to finish, "
+                             "or stop them")
+        del hosts[name]
+        self._write_resources(loaded)
+        self.substrate.commit(f"host {name} removed from the pool")
+        return self.ledger_status()
+
     # --- onboarding (O5) ---
     _HOST_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -1788,7 +1934,6 @@ class Service:
         """Write a probed server into `resources.yaml` `hosts:`, keeping the rest of the
         file. The entry is checked by the same parser the pool uses, so what is written
         is what loads."""
-        from coscience.resources import _parse_host
         path = self._host_probe_path(str(name or ""))
         if not self._HOST_NAME.match(str(name or "")) or not path.is_file():
             raise NotFoundError(f"no probe recorded for host {name!r}")
@@ -1815,19 +1960,8 @@ class Service:
                 entry[key] = declared[key]
         _parse_host(name, entry)                           # raises ValueError for a bad entry
 
-        resources = self.repo_root / ".coscience" / "resources.yaml"
-        try:
-            loaded = yaml.safe_load(resources.read_text()) if resources.is_file() else {}
-        except yaml.YAMLError as exc:
-            raise ValueError(f"resources.yaml could not be read: {exc}")
-        loaded = loaded if isinstance(loaded, dict) else {}
-        wrapped = loaded.get("resources")
-        holder = wrapped if isinstance(wrapped, dict) and "hosts" in wrapped else loaded
-        if "hosts" in holder and not isinstance(holder["hosts"], dict):
-            raise ValueError("resources.yaml hosts: is not a mapping; fix the file before adding a server")
-        hosts = holder.get("hosts") or {}
+        loaded, hosts = self._resources_hosts()
         hosts[name] = entry
-        holder["hosts"] = hosts
         self._write_resources(loaded)
         self.substrate.commit(f"host {name} added to the pool")
         return self.ledger_status()

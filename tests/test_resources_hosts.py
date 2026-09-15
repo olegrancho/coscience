@@ -67,12 +67,26 @@ def test_the_legacy_resources_wrapper_still_reads():
     ({"b": {"ssh": "b", "programs": "p2"}}, "programs must be a list"),
     ({"b": "remote1"}, "must be a mapping"),
     ({"b": {"ssh": "-oProxyCommand=x"}}, "hosts.b.ssh"),
+    ({"b": {"ssh": "b", "drain": "yes"}}, "hosts.b.drain: must be true or false"),
 ])
 def test_a_malformed_host_is_skipped_and_named(hosts, message):
     pool = ResourcePool.from_dict({"cpu": 1, "hosts": hosts})
     assert [h.name for h in pool.hosts] == [LOCAL]          # local work is unaffected
     assert pool.capacity == {"cpu": 1.0}
     assert len(pool.host_errors) == 1 and message in pool.host_errors[0]
+
+
+def test_a_hosts_drained_at_is_parsed_and_defaults_to_zero():
+    pool = ResourcePool.from_dict({"cpu": 1, "hosts": {
+        "b": {"ssh": "b", "drain": True, "drained_at": 1234.5},
+        "c": {"ssh": "c"}}})
+    assert pool.host("b").drained_at == 1234.5
+    assert pool.host("c").drained_at == 0.0
+
+
+def test_a_non_numeric_drained_at_is_ignored():
+    pool = ResourcePool.from_dict({"cpu": 1, "hosts": {"b": {"ssh": "b", "drained_at": "soon"}}})
+    assert pool.host("b").drained_at == 0.0
 
 
 def test_a_malformed_host_does_not_take_its_neighbours_down():

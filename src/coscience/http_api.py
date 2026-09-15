@@ -148,6 +148,10 @@ class HostConfirmIn(BaseModel):
     probed_at: float | None = None
 
 
+class HostDrainIn(BaseModel):
+    drain: bool
+
+
 class PauseUpdate(BaseModel):
     paused: bool
 
@@ -916,6 +920,24 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         _require_onboarding()
         try:
             return service.confirm_host(**body.model_dump())
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.put("/hosts/{name}/drain")
+    def set_host_drain(name: str, body: HostDrainIn) -> dict:
+        try:
+            return service.set_host_drain(name, body.drain)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.delete("/hosts/{name}")
+    def remove_host(name: str) -> dict:
+        try:
+            return service.remove_host(name)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:

@@ -18,7 +18,8 @@ class SchedulerPolicy:
             return sprint.priority
         return sprint.priority + int((now - queued_at) // self.aging_interval)
 
-    def select_grants(self, candidates, queued_at, ledger: Ledger, now, pinned=None) -> list[Sprint]:
+    def select_grants(self, candidates, queued_at, ledger: Ledger, now, pinned=None,
+                      readopt=frozenset()) -> list[Sprint]:
         def sort_key(s: Sprint):
             return (-self.effective_priority(s, queued_at.get(s.id, now), now),
                     queued_at.get(s.id, now))
@@ -31,8 +32,11 @@ class SchedulerPolicy:
             # The dispatcher acquires in this same order, so `ledger.acquire` lands
             # each sprint on the host and cards chosen here. A sprint pinned to a
             # host by earlier work is only ever fit there — it waits rather than
-            # moving elsewhere.
-            placed = ledger.fit(need, sprint.program, pending, host=pinned.get(sprint.id))
+            # moving elsewhere. A candidate in `readopt` (its agent or job is still
+            # physically running) may still land on its pinned host even when that
+            # host is drained or quiet — only new work is kept off it.
+            placed = ledger.fit(need, sprint.program, pending, host=pinned.get(sprint.id),
+                                readopt=sprint.id in readopt)
             if placed is not None:
                 pending.append((placed[0], need, placed[1]))
                 granted.append(sprint)
@@ -61,7 +65,7 @@ class SchedulerPolicy:
         eligible.sort(key=lambda l: (l.priority, -l.granted_at))
         wants_cards = gpu_request(need)[0] > 0
 
-        for h in ledger.pool.placeable_hosts(candidate.program):
+        for h in ledger.pool.grantable_hosts(candidate.program):
             if pinned_host is not None and h.name != pinned_host:
                 continue
             victims: list[Lease] = []

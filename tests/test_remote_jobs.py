@@ -333,6 +333,42 @@ def test_an_unreachable_host_during_terminate_leaves_a_could_not_stop_note(tmp_p
             "launch with setsid). Check whether it is still running and stop it yourself." in note)
 
 
+def test_stopping_a_sprint_names_a_job_it_could_not_stop(tmp_path):
+    # A job.json declared while its host was unreachable carries an identity-less
+    # token ("gpu1:4242::"); remote_exec.terminate refuses to signal such a token at
+    # all (see test_a_timed_out_job_the_platform_could_not_stop_leaves_a_note). A
+    # human stop must not lose that the stop failed, same as the watchdog path.
+    sub = Substrate(tmp_path); _queued(sub)
+    s = sub.load_sprint("s1"); s.status = SprintStatus.EXECUTING; sub.save_sprint(s)
+    prog = sub.load_progress("s1")
+    prog.job_token, prog.job_host, prog.job_collect = "gpu1:4242::", "gpu1", ["~/runs/s1/work"]
+    sub.save_progress(prog)
+    runner = ScriptRunner()
+    w = Worker(sub, FakeAgent(), slots=Slots(), runner=runner)
+    assert w.stop_sprint(sub.load_sprint("s1")) == ["s1"]
+    assert not any("kill" in call[-1] for call in runner.calls)
+    prog = sub.load_progress("s1")
+    assert prog.job_token == ""
+    assert "The platform could not stop the job on gpu1" in prog.collect_note
+
+
+# --- M6: a raising terminate still notes the failed stop ---------------------------
+
+def test_a_raising_terminate_still_notes_the_failed_stop(tmp_path):
+    sub = Substrate(tmp_path); _queued(sub)
+    s = sub.load_sprint("s1"); s.status = SprintStatus.EXECUTING; sub.save_sprint(s)
+    prog = sub.load_progress("s1")
+    prog.job_token, prog.job_host = "gpu1:4242:777:boot-1", "gpu1"
+    sub.save_progress(prog)
+
+    def boom(token):
+        raise RuntimeError("kaboom")
+    w = Worker(sub, FakeAgent(), slots=Slots(), terminate=boom)
+    assert w.stop_sprint(sub.load_sprint("s1")) == ["s1"]
+    note = sub.load_progress("s1").collect_note
+    assert "The platform could not stop the job on gpu1" in note
+
+
 def test_the_dispatcher_slot_handle_describes_the_leases_host(tmp_path, every_host_placeable):
     from coscience.dispatcher import _WorkerSlots
     from coscience.ledger import Ledger

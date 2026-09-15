@@ -160,6 +160,7 @@ class ProgressState:
     started_at: float | None = None    # when the current agent run was launched
     failures: int = 0                  # consecutive agent failures (nonzero exit), for the retry cap
     last_error: str = ""               # why the most recent run failed (surfaced to the PM)
+    beat_failures: int = 0             # consecutive dispatcher-side beat exceptions, for the retry cap
     job_token: str = ""                # tracked detached job "<pid>:<starttime>"; "" = none
     job_out: str = ""                  # job output path (relative to sprint dir)
     job_note: str = ""                 # human-readable job description

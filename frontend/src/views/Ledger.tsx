@@ -146,7 +146,7 @@ export default function Ledger() {
         {saveError && <Text size="sm" c="red" style={{ marginTop: 12 }}>{saveError}</Text>}
       </Card>
 
-      <HostsCard hosts={l.hosts ?? []} errors={l.host_errors ?? []} />
+      <HostsCard hosts={l.hosts ?? []} errors={l.host_errors ?? []} stranded={l.stranded ?? []} />
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 12 }}>running now · {l.leases.length}</div>

@@ -217,9 +217,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "dispatch":
         if args.once or not args.loop:
             r = dispatch_once(args.repo)
-            print(f"granted={r.granted} hibernated={r.hibernated} beaten={r.beaten} "
-                  f"completed={r.completed} waiting={r.waiting} "
-                  f"unrunnable={len(r.unrunnable)}", flush=True)
+            summary = (f"granted={r.granted} hibernated={r.hibernated} beaten={r.beaten} "
+                      f"completed={r.completed} waiting={r.waiting} "
+                      f"unrunnable={len(r.unrunnable)}")
+            if r.beat_errors:
+                summary += f" beat errors: {len(r.beat_errors)}"
+            print(summary, flush=True)
             for line in r.wiki:
                 print(line, flush=True)
             return 0
@@ -231,6 +234,8 @@ def main(argv: list[str] | None = None) -> int:
             line = f"granted {r.granted} · completed {r.completed} · waiting {r.waiting}"
             if r.unrunnable:
                 line += f" · unrunnable {len(r.unrunnable)} ({', '.join(r.unrunnable)})"
+            if r.beat_errors:
+                line += f" · beat errors: {len(r.beat_errors)}"
             if r.wiki:
                 line += " · " + " · ".join(r.wiki)
             return (line,

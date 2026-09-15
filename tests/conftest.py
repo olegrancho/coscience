@@ -175,3 +175,10 @@ def every_host_placeable(monkeypatch):
     host-aware already, so tests exercise it as if remote hosts were live."""
     from coscience.resources import Host
     monkeypatch.setattr(Host, "placeable", property(lambda self: True))
+
+
+@pytest.fixture(autouse=True)
+def health_check_never_runs_ssh(monkeypatch):
+    """The dispatcher checks remote hosts each cycle; in tests every host answers."""
+    from coscience import host_health
+    monkeypatch.setattr(host_health, "default_runner", lambda argv, stdin, timeout: (0, "", ""))

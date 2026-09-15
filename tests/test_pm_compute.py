@@ -23,7 +23,7 @@ def test_the_context_carries_capacity_and_what_is_leased_without_platform_keys(s
     # Not a trigger: a lease turning over must not wake every program's PM.
     assert "compute" not in json.dumps(_context_payload(ctx))
     assert ctx.compute_hosts == [
-        {"name": "local", "capacity": {"cpu": 24.0}, "gpus": [None], "held": {"cpu": 24.0}}]
+        {"name": "local", "capacity": {"cpu": 24.0}, "gpus": [None], "held": {"cpu": 24.0}, "closed": ""}]
 
 
 def test_the_prompt_states_each_host_and_the_sizing_rule():
@@ -155,3 +155,9 @@ def test_a_staged_proposal_survives_an_unknown_field_on_reload(substrate):
 
     staged = read_staging(substrate, "p1")
     assert staged.output.proposals[0].suffix == "x"
+
+
+def test_a_host_that_takes_no_new_work_says_so():
+    ctx = PMContext(program_id="p1", goals="g", cycle=0, compute_hosts=[
+        {"name": "big", "capacity": {"cpu": 16.0}, "gpus": [], "held": {}, "closed": "draining"}])
+    assert "big" in render_compute(ctx) and "takes no new work (draining)" in render_compute(ctx)

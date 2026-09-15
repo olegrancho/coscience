@@ -13,9 +13,9 @@ from coscience.pause import is_paused
 from coscience.resources import LOCAL, WORKER_KEY, ResourcePool, effective_requirement, gpu_request, over_capacity
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
-from coscience.worker import Worker
+from coscience.worker import MAX_AGENT_FAILURES, Worker
 
-from coscience import artifacts, wiki
+from coscience import artifacts, host_health, wiki
 
 _ELIGIBLE = (SprintStatus.QUEUED, SprintStatus.EXECUTING, SprintStatus.HIBERNATED)
 
@@ -30,6 +30,8 @@ class CycleReport:
     unrunnable: list[str] = field(default_factory=list)   # asking for more than the pool's total
     reconciled: int = 0
     wiki: list[str] = field(default_factory=list)   # non-empty wiki beat lines this cycle
+    beat_errors: list[str] = field(default_factory=list)   # sprints whose beat raised
+    failed: int = 0                    # sprints FAILed by the beat-failure cap this cycle
 
 
 class _WorkerSlots:
@@ -113,7 +115,7 @@ def _probe_facts_line(repo_root, host_name: str) -> str:
 class Dispatcher:
     def __init__(self, substrate: Substrate, agent,
                  pool: ResourcePool, policy: SchedulerPolicy | None = None,
-                 usage_gate=None, wiki_agent=None):
+                 usage_gate=None, wiki_agent=None, host_runner=None):
         self.substrate = substrate
         self.agent = agent
         self.policy = policy or SchedulerPolicy()
@@ -124,6 +126,7 @@ class Dispatcher:
                              slots=_WorkerSlots(self.ledger, repo_root=substrate.repo_root))
         self._queue_path = cos / "queue.json"
         self._wiki_agent = wiki_agent      # None -> built lazily on first use
+        self._host_runner = host_runner
 
     def _load_queue(self) -> dict[str, float]:
         if self._queue_path.is_file():
@@ -143,6 +146,12 @@ class Dispatcher:
 
         self.ledger.load()
         self.ledger.expire(now)
+
+        # Which remote hosts answer. A quiet one takes no new grants this cycle; its
+        # leases, jobs and liveness are untouched (spec §7).
+        entries = host_health.check(self.substrate.repo_root, self.ledger.pool, now,
+                                    runner=self._host_runner)
+        self.ledger.pool.closed = {name: "quiet" for name in host_health.quiet(entries, now)}
 
         eligible = self.substrate.iter_sprints()
         eligible = [s for s in eligible if s.status in _ELIGIBLE]
@@ -173,7 +182,13 @@ class Dispatcher:
         # A sprint that has launched anything stays on that host: its files, and any
         # job still running, are there.
         pinned = {s.id: host for s in needs if (host := self.substrate.load_progress(s.id).host)}
-        for sprint in self.policy.select_grants(needs, queue, self.ledger, now, pinned=pinned):
+        # LIVENESS re-adoption (below) must not be blocked by a drained or quiet
+        # host: a physically running agent or job is not new work, and killing it
+        # because its host stopped answering health checks would violate spec §7.
+        readopt = {s.id for s in needs if self.worker.agent_running(s.id)
+                  or self.substrate.load_progress(s.id).job_token}
+        for sprint in self.policy.select_grants(needs, queue, self.ledger, now, pinned=pinned,
+                                                readopt=readopt):
             eff = self.policy.effective_priority(sprint, queue.get(sprint.id, now), now)
             progress = self.substrate.load_progress(sprint.id)
             live = self.worker.agent_running(sprint.id) or bool(progress.job_token)
@@ -186,7 +201,8 @@ class Dispatcher:
                                    priority=eff, preemptible=sprint.preemptible,
                                    program=sprint.program,
                                    prefer_cards=progress.gpu_devices if live else (),
-                                   host=pinned.get(sprint.id)):
+                                   host=pinned.get(sprint.id),
+                                   readopt=sprint.id in readopt):
                 # Acquire the sprint's artifact locks (instantiating create-targets).
                 # If a same-cycle race lost the atomic acquire, give the lease back
                 # and leave the sprint queued for a later cycle.
@@ -254,8 +270,53 @@ class Dispatcher:
             sprint = self.substrate.load_sprint(lease.sprint_id)
             if sprint.status != SprintStatus.EXECUTING:
                 continue
-            outcome = self.worker.run_sprint_beat(sprint)
+            gave_up = False
+            try:
+                outcome = self.worker.run_sprint_beat(sprint)
+            except Exception as exc:          # one sprint's fault must not stall every other sprint
+                progress = self.substrate.load_progress(sprint.id)
+                progress.last_error = f"beat failed: {type(exc).__name__}: {exc}"
+                progress.beat_failures += 1
+                report.beat_errors.append(sprint.id)
+                outcome = None
+                if progress.beat_failures >= MAX_AGENT_FAILURES:
+                    # A beat that never succeeds must not hold its lease forever,
+                    # renewed every cycle: stop it, fail it, and let the lease go.
+                    gave_up = True
+                    self.substrate.save_progress(progress)
+                    try:
+                        self.worker.stop_sprint(sprint)
+                    except Exception as stop_exc:
+                        # A stop that itself raises (e.g. an unreachable remote host)
+                        # must not abort the whole cycle — note it and carry on failing
+                        # the sprint; a human can still see the job may be orphaned.
+                        progress.last_error += f" (stopping it also failed: {stop_exc})"
+                        self.substrate.save_progress(progress)
+                    # Matches the worker's own FAILED path (worker.py, MAX_AGENT_FAILURES
+                    # cap on agent failures): release the sprint's artifact locks before
+                    # it goes terminal, or every other sprint bound to them stays blocked.
+                    artifacts.release_for_sprint(self.substrate, sprint, now)
+                    set_status(sprint, SprintStatus.FAILED)
+                    self.substrate.save_sprint(sprint)
+                    self.ledger.release(lease.sprint_id)
+                    queue.pop(lease.sprint_id, None)
+                    report.failed += 1
+                else:
+                    self.substrate.save_progress(progress)
+            else:
+                # A beat that returns normally clears a lingering beat-failure state
+                # from an earlier transient exception — one bad cycle must not show
+                # forever once the sprint is beating cleanly again.
+                progress = self.substrate.load_progress(sprint.id)
+                if progress.beat_failures or progress.last_error.startswith("beat failed:"):
+                    progress.beat_failures = 0
+                    if progress.last_error.startswith("beat failed:"):
+                        progress.last_error = ""
+                    self.substrate.save_progress(progress)
+
             report.beaten += 1
+            if gave_up:
+                continue          # do not renew a lease that was just released
             eff = self.policy.effective_priority(sprint, queue.get(sprint.id, now), now)
             self.ledger.renew(lease.sprint_id, now, ttl, priority=eff)
             if outcome == BeatOutcome.COMPLETED:
@@ -290,7 +351,7 @@ class Dispatcher:
 
         self._save_queue(queue)
         if (report.granted or report.completed or report.hibernated
-                or report.reconciled or reaped or report.wiki):
+                or report.reconciled or reaped or report.wiki or report.failed):
             self.substrate.commit("dispatch cycle")
         return report
 

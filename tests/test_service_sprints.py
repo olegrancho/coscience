@@ -4,6 +4,25 @@ from coscience.models import DEFAULT_MODEL, SprintStatus
 from coscience.service import NotFoundError, Service
 
 
+def test_get_sprint_shows_a_beat_failure_even_when_not_marked_failed(tmp_path):
+    """R10(b): a beat error is visible on the sprint even when its status stayed
+    something other than FAILED (dispatcher beat isolation keeps a sprint running
+    after one bad beat; the error should still surface)."""
+    from coscience.models import ProgressState, Sprint
+    svc = Service(tmp_path)
+    svc.substrate.save_sprint(Sprint(id="sp1", status=SprintStatus.EXECUTING, goals="g", plan=["a"]))
+    svc.substrate.save_progress(ProgressState(sprint_id="sp1", last_error="beat failed: boom"))
+    assert svc.get_sprint("sp1")["error"] == "beat failed: boom"
+
+
+def test_get_sprint_hides_an_unrelated_error_when_not_failed(tmp_path):
+    from coscience.models import ProgressState, Sprint
+    svc = Service(tmp_path)
+    svc.substrate.save_sprint(Sprint(id="sp1", status=SprintStatus.EXECUTING, goals="g", plan=["a"]))
+    svc.substrate.save_progress(ProgressState(sprint_id="sp1", last_error="stale error from a prior run"))
+    assert svc.get_sprint("sp1")["error"] == ""
+
+
 def test_rationale_and_program_surface(tmp_path):
     from coscience.models import Sprint, SprintStatus
     svc = Service(tmp_path)

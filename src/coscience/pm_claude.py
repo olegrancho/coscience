@@ -471,6 +471,9 @@ def render_compute(context: PMContext) -> str:
         missing = _unavailable_keys(h)
         if missing:
             line += f" — not declared here, never request: {', '.join(missing)}"
+        closed = h.get("closed") or ""
+        if closed:
+            line += f" — takes no new work ({closed})"
         lines.append(line)
     return ("COMPUTE: the hosts this program's sprints can be placed on:\n" + "\n".join(lines) + """
 A sprint runs on ONE host: every amount in its resources_required must fit on a single host
