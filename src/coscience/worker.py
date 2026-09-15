@@ -11,13 +11,16 @@ import json
 import os
 import re
 import time
+from pathlib import Path
 
-from coscience import artifacts, feedback_harvest, usage_meter
+from coscience import artifacts, feedback_harvest, remote_exec, usage_meter
 from coscience.executor import ExecutionContext
 from coscience.executor import is_running as _job_is_running
 from coscience.executor import process_token, terminate_detached as _terminate
+from coscience.host_probe import subprocess_runner
 from coscience.models import BeatOutcome, Result, Sprint, SprintStatus, set_status
 from coscience.pause import is_paused
+from coscience.resources import LOCAL
 from coscience.substrate import Substrate
 
 # After this many real (non-usage) failures, a sprint is marked FAILED rather than
@@ -154,13 +157,22 @@ class _NoSlots:
     def acquire(self, sprint_id: str) -> bool:
         return True
 
+    def gpus(self, sprint_id: str) -> tuple[list[int], float | None]:
+        return [], None
+
+    def host(self, sprint_id: str) -> dict:
+        return {"name": "local", "ssh": "", "run_root": "", "facts": "", "notes": ""}
+
+    def ssh_for(self, host_name: str) -> str:
+        return ""
+
 
 _NO_SLOTS = _NoSlots()
 
 
 class Worker:
     def __init__(self, substrate: Substrate, agent, usage_gate=None,
-                 job_alive=None, terminate=None, slots=None):
+                 job_alive=None, terminate=None, slots=None, runner=None):
         self.substrate = substrate
         self.agent = agent
         # The dispatcher's worker-slot handle: .release(id) / .acquire(id) -> bool.
@@ -171,10 +183,82 @@ class Worker:
         self._slots = slots or _NO_SLOTS
         # callable () -> bool; True = ok to launch. Default checks real usage.
         self._usage_gate = usage_gate
+        # (argv, stdin, timeout) -> (code, out, err), for remote job control over ssh.
+        self._runner = runner or subprocess_runner
         # callable (token) -> bool; True = the detached job is still alive.
-        self._job_alive = job_alive or _job_is_running
+        self._job_alive = job_alive or self._default_job_alive
         # callable (token) -> None; stop an overrun detached job.
-        self._terminate = terminate or _terminate
+        self._terminate = terminate or self._default_terminate
+        # "" (never a remote token seen) | "alive"/"gone"/"lost"/"unknown" — the
+        # remote job_state the last _default_job_alive call read, so the caller can
+        # tell "gone" from "lost" without re-parsing the token.
+        self._last_job_state = ""
+        # Whether the most recent self._terminate() call actually stopped the job
+        # (True for a local token, and for a remote call that succeeded); False when
+        # a remote host could not be asked or the token had no identity to verify.
+        self._last_terminate_ok = True
+
+    def _default_job_alive(self, token: str) -> bool:
+        """A local job by /proc; a remote job over ssh. An unreachable host counts as
+        alive: a job is never declared dead because its host could not be asked."""
+        remote = remote_exec.parse_token(token)
+        if remote is None:
+            self._last_job_state = ""
+            return _job_is_running(token)
+        ssh = self._slots.ssh_for(remote.host)
+        state = remote_exec.job_state(ssh, remote, runner=self._runner) if ssh else "unknown"
+        self._last_job_state = state
+        return state in ("alive", "unknown")
+
+    def _default_terminate(self, token: str) -> None:
+        remote = remote_exec.parse_token(token)
+        if remote is None:
+            _terminate(token)
+            self._last_terminate_ok = True
+            return
+        ssh = self._slots.ssh_for(remote.host)
+        if ssh:
+            self._last_terminate_ok = remote_exec.terminate(ssh, remote, runner=self._runner)
+        else:
+            self._last_terminate_ok = False
+
+    def _collect_job(self, progress, sprint_dir) -> None:
+        """Copy a remote job's declared outputs into the sprint's `collected/` folder
+        before the agent is woken, and leave a note saying exactly what was copied."""
+        if not progress.job_host or not progress.job_collect:
+            return
+        ssh = self._slots.ssh_for(progress.job_host)
+        dest = Path(sprint_dir) / "collected"
+        if not ssh:
+            progress.collect_note = (f"Nothing was copied back: host {progress.job_host} is no "
+                                     "longer in the pool.")
+            return
+        # The substrate commit that follows this beat is `git add -A`: without this,
+        # a collected checkpoint or large log would land in the substrate's history.
+        # A folder whose own .gitignore is exactly "*" is ignored entirely, including
+        # the .gitignore itself.
+        dest.mkdir(parents=True, exist_ok=True)
+        gitignore = dest / ".gitignore"
+        try:
+            already = gitignore.read_text() == "*\n"
+        except OSError:
+            already = False
+        if not already:
+            gitignore.write_text("*\n")
+        results = remote_exec.collect(ssh, progress.job_collect, dest, runner=self._runner)
+        stamp = time.strftime("%H:%M")
+
+        def _line(r: dict) -> str:
+            if not r["ok"]:
+                return f"- {r['path']} was NOT copied: {r['detail']}"
+            base = f"- {r['path']} → {dest}/{Path(r['path']).name} (at {stamp})"
+            return f"{base} — {r['detail']}" if r["detail"] else base
+
+        lines = [_line(r) for r in results]
+        progress.collect_note = (
+            f"Before waking you, the platform copied these paths from {progress.job_host}. Read "
+            "the results there; you do not need to copy them yourself. Nothing else was copied.\n"
+            + "\n".join(lines))
 
     def _build_context(self, sprint: Sprint) -> ExecutionContext:
         """Gather the program goal, sprint description and prior results so the
@@ -216,6 +300,9 @@ class Worker:
                                  for c in sprint.artifacts_create
                                  if str(c.get("aid") or "") == aid), "md")
                 artifact_specs.append({"aid": aid, "kind": kind, "work_path": str(work_path)})
+        gpu_devices, gpu_vram_gb = self._slots.gpus(sprint.id)
+        host = self._slots.host(sprint.id)
+        host_run_dir = f"{host['run_root'].rstrip('/')}/{sprint.id}" if host["ssh"] and host["run_root"] else ""
         return ExecutionContext(
             program_title=program_title, program_goal=program_goal,
             sprint_title=sprint.title, sprint_summary=sprint.summary,
@@ -234,6 +321,11 @@ class Worker:
             job_out=progress.job_out,
             job_note=progress.job_note,
             artifacts=artifact_specs,
+            gpu_devices=gpu_devices,
+            gpu_vram_gb=gpu_vram_gb,
+            host_name=host["name"], host_ssh=host["ssh"], host_run_dir=host_run_dir,
+            host_facts=host["facts"], host_notes=host["notes"],
+            collect_note=progress.collect_note,
         )
 
     def _agent_cwd(self, workdir: str):
@@ -299,7 +391,10 @@ class Worker:
                     "note": str(d.get("note", "")),
                     "expected_seconds": _num("expected_seconds"),
                     "wake_after_seconds": _num("wake_after_seconds"),
-                    "max_seconds": _num("max_seconds")}
+                    "max_seconds": _num("max_seconds"),
+                    "host": str(d.get("host") or ""),
+                    "collect": [str(p) for p in (d.get("collect") or []) if isinstance(p, str)]
+                               if isinstance(d.get("collect"), list) else []}
         except (json.JSONDecodeError, ValueError, TypeError, KeyError, OSError):
             try:
                 f.unlink(missing_ok=True)              # drop the poison; treat as no job
@@ -335,9 +430,12 @@ class Worker:
                 pass
         return self._agent_cwd(workdir)
 
-    def _nudge(self, sprint_dir) -> str:
+    def _nudge(self, sprint_dir, job_refusal: str = "") -> str:
         fj = sprint_dir / "finished.json"
+        why = (f"Your last job.json was refused, so nothing is being tracked: {job_refusal}\n\n"
+               if job_refusal else "")
         return (
+            why +
             "You ended your turn without signaling completion. The platform treats "
             f"this sprint as DONE only when {fj} exists. Do exactly ONE thing now:\n"
             f'1. If the real work is genuinely FINISHED: write {fj} as '
@@ -357,6 +455,8 @@ class Worker:
             except Exception:
                 pass
         progress.job_token = ""
+        progress.job_host = ""
+        progress.job_collect = []
         progress.job_out = progress.job_note = progress.assess_reason = ""
         progress.job_next_wake = progress.job_max_seconds = 0.0
         progress.job_started_at = None
@@ -375,17 +475,34 @@ class Worker:
         if progress.job_token and not progress.agent_token:
             now = time.time()
             if not self._job_alive(progress.job_token):
-                progress.assess_reason = "finished"
+                progress.assess_reason = "lost" if self._last_job_state == "lost" else "finished"
+                self._collect_job(progress, sprint_dir)
                 progress.job_token = ""                   # job gone; nothing to track
+                progress.job_host = ""
+                progress.job_collect = []
             elif progress.job_max_seconds and progress.job_started_at is not None \
                     and now - progress.job_started_at > progress.job_max_seconds:
                 self._terminate(progress.job_token)
+                self._collect_job(progress, sprint_dir)
+                if not self._last_terminate_ok:
+                    # A remote job the platform could not stop must not be forgotten
+                    # silently — leave a note a human will see when they look at the
+                    # sprint, since nothing else here surfaces it.
+                    line = (f"The platform could not stop the job on {progress.job_host} (the host "
+                            "could not be asked, the job's identity was never read, or the pid is "
+                            "not the leader of its own process group — launch with setsid). Check "
+                            "whether it is still running and stop it yourself.")
+                    progress.collect_note = (f"{progress.collect_note}\n{line}"
+                                             if progress.collect_note else line)
                 progress.assess_reason = "timed out"
                 progress.job_token = ""                   # killed
+                progress.job_host = ""
+                progress.job_collect = []
             elif progress.job_next_wake and now >= progress.job_next_wake:
                 # Job still alive — keep tracking it (watchdog stays armed) while the
                 # assess run checks in. If that run finishes/fails without handling the
                 # job, the done/failed path reaps it (below) so it can't be orphaned.
+                self._collect_job(progress, sprint_dir)
                 progress.assess_reason = "wake"
             else:
                 # Waiting on the job, not on Claude. Keep the lease (it holds the
@@ -419,6 +536,12 @@ class Worker:
             ctx = self._build_context(sprint)
             token = self.agent.start(sprint, ctx, sprint_dir, ctx.repo_root)
             progress.agent_token = token
+            # Remember the cards this agent was told it holds, so a dispatcher outage
+            # that outlives the lease TTL can re-grant this sprint the SAME cards
+            # instead of handing them out from scratch (see Ledger.pick_gpus prefer).
+            progress.gpu_devices = list(ctx.gpu_devices)
+            progress.host = ctx.host_name
+            progress.collect_note = ""      # the note has now been handed to this run
             # Opened at launch so a killed agent still leaves a row; `calls()`
             # infers `lost` for a start that never gets an end.
             progress.agent_call = usage_meter.start_call(
@@ -510,9 +633,56 @@ class Worker:
         # 3a) declared a detached job -> the final message is premature (real work
         # still running detached): ignore it and sleep on the job instead.
         job = self._read_job_json(sprint_dir)
+        job_refusal = ""       # non-"" only when this beat itself refused a declaration
+        if job is not None:
+            held = self._slots.host(sprint.id)["name"]
+            if job["host"] in ("", "local") and held != LOCAL:
+                # The sprint's lease is on a remote host; an agent that omitted
+                # `host` (or wrote "local") still ran its job there, not on this
+                # machine. Treat it as declared on the held host so its pid is never
+                # mistaken for a local process (a live pid here could belong to
+                # someone else entirely) and watchdog/cancel/reap ask the real host.
+                job = {**job, "host": held}
+            elif job["host"] not in ("", "local") and job["host"] != held:
+                # A job on a host this sprint does not hold could be neither watched
+                # nor stopped: refuse it and say why — and, if this run ends up being
+                # brought back with a nudge (below), tell IT why too (M1).
+                (sprint_dir / "job.json").unlink(missing_ok=True)
+                job_refusal = (f"job.json named host {job['host']!r} but this sprint "
+                               f"runs on {held!r}")
+                progress.last_error = job_refusal
+                job = None
         if job is not None:
             now = time.time()
-            progress.job_token = process_token(job["pid"])
+            job_host = "" if job["host"] in ("", "local") else job["host"]
+            state = "alive"
+            if job_host:
+                ssh = self._slots.ssh_for(job_host)
+                if ssh:
+                    new_token, state = remote_exec.make_token(
+                        job_host, ssh, job["pid"], runner=self._runner)
+                else:
+                    # The held host has no usable ssh target (removed from the pool,
+                    # or an invalid ssh value slipping past parse-time validation —
+                    # Fix C): never hand a "" target to make_token/ssh_argv, which
+                    # would raise mid-beat and stall every later lease this cycle.
+                    new_token = str(remote_exec.RemoteToken(job_host, job["pid"], "", ""))
+                    state = "unknown"
+                prev = remote_exec.parse_token(progress.job_token)
+                if state == "unknown" and prev is not None and prev.host == job_host \
+                        and prev.pid == job["pid"]:
+                    # Same job re-declared (e.g. the "wake" flow, which never clears
+                    # job_token) while the host happens to be unreachable right now:
+                    # keep the token we already trust — its starttime/boot_id are
+                    # what terminate() needs — instead of downgrading to a fresh,
+                    # identity-less one.
+                    pass
+                else:
+                    progress.job_token = new_token
+            else:
+                progress.job_token = process_token(job["pid"])
+            progress.job_host = job_host
+            progress.job_collect = job["collect"] if job_host else []
             progress.job_out = job["out_file"]
             progress.job_note = job["note"]
             progress.job_started_at = now
@@ -523,6 +693,16 @@ class Worker:
             progress.agent_token = ""
             progress.ambiguous_exits = 0
             (sprint_dir / "job.json").unlink(missing_ok=True)     # consume it
+            if state == "gone":
+                # The declared job was not running on its host: tell the agent now,
+                # with whatever it wrote, rather than sleeping on nothing. Its own
+                # reason value (not "finished") so claude_executor can explain it
+                # plainly — "finished" would wrongly imply the job ran to completion.
+                self._collect_job(progress, sprint_dir)
+                progress.assess_reason = "not_running"
+                progress.job_token = ""
+                progress.job_host = ""
+                progress.job_collect = []
             self.substrate.save_progress(progress)
             self.substrate.commit(f"sprint {sprint.id}: detached job declared ({progress.job_note})")
             return BeatOutcome.PROGRESSED                          # stay executing, sleep on the job
@@ -603,7 +783,7 @@ class Worker:
             self.substrate.commit(f"sprint {sprint.id}: no done-signal, no session — will relaunch")
             return BeatOutcome.PROGRESSED
         token = self.agent.resume(progress.agent_session_id, sprint_dir,
-                                  self._nudge(sprint_dir), sprint.model,
+                                  self._nudge(sprint_dir, job_refusal), sprint.model,
                                   self._sprint_cwd(sprint))
         progress.agent_token = token
         # A resume is its own Claude call and its own row: it spends a window
@@ -635,6 +815,8 @@ class Worker:
             except Exception:
                 pass
             progress.job_token = ""
+            progress.job_host = ""
+            progress.job_collect = []
             stopped = True
         if not stopped:
             return []
@@ -676,6 +858,8 @@ class Worker:
                 pass
             progress.assess_reason = progress.assess_reason or "finished"
             progress.job_token = ""
+            progress.job_host = ""
+            progress.job_collect = []
             progress.job_started_at = None
             progress.job_next_wake = 0.0
             progress.job_max_seconds = 0.0

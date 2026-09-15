@@ -19,6 +19,19 @@ from coscience.models import Sprint
 
 USAGE_CMD = "python3 ~/.claude/skills/usage/usage.py"
 
+# Most assess_reason values (e.g. "finished", "timed out", "wake") read fine as the
+# bare word in the heading below. These two don't: "lost" and "not_running" name an
+# internal state, not something an agent reading its instructions would recognise —
+# so they get a plain-English sentence instead (M4).
+_ASSESS_REASON_LABELS = {
+    "lost": "the host rebooted, so your job there is gone",
+    "not_running": "the job was not running when you declared it (check the pid you wrote)",
+}
+
+
+def _assess_reason_label(reason: str) -> str:
+    return _ASSESS_REASON_LABELS.get(reason, reason)
+
 
 def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
                        scratchpad: Path) -> str:
@@ -28,6 +41,8 @@ def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
     comments = ""
     assess_section = ""
     artifacts_section = ""
+    gpu_section = ""
+    host_section = ""
     if context is not None:
         program = f"{context.program_title}: {context.program_goal}".strip(": ").strip()
         if context.prior_results:
@@ -60,15 +75,44 @@ def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
                 "`meta.md`, no version directory of your own. Those are the platform's to "
                 "write, and a hand-written one carrying an invented or empty `created_at` "
                 "breaks every later read of that artifact.\n" + alines + figure_note)
+        if context.gpu_devices:
+            ids = ",".join(str(d) for d in context.gpu_devices)
+            share = (f"up to {context.gpu_vram_gb:g} GB of VRAM on each; other jobs may share "
+                     "these cards" if context.gpu_vram_gb
+                     else "the whole card(s); nothing else is scheduled on them")
+            gpu_section = (
+                "\n\n## GPUs for this sprint\n"
+                f"This sprint holds GPU device(s) {ids}: {share}. Start every GPU process "
+                f"with `CUDA_VISIBLE_DEVICES={ids}` and do not use any other GPU.")
+        if context.host_ssh:
+            facts = f"\nWhat the host is: {context.host_facts}." if context.host_facts else ""
+            notes = f"\nNotes on this host: {context.host_notes}" if context.host_notes else ""
+            host_section = f"""
+
+## Where this sprint's heavy work runs
+This sprint holds host `{context.host_name}`. Your own shell runs on the platform's machine: edit, read
+and run quick commands here, and run anything heavy on the host over SSH (`ssh {context.host_ssh} '<command>'`).
+Use {context.host_run_dir} on the host as this sprint's working directory. Paths, environments and
+installed software there differ from this machine, and nothing is shared unless you copy it there:
+a job only sees what is on the host when it starts.{facts}{notes}
+Long jobs on the host follow the DETACHED-JOB PROTOCOL below with two changes. Launch with
+`ssh {context.host_ssh} 'mkdir -p {context.host_run_dir}/work && cd {context.host_run_dir} && setsid nohup <cmd> > work/<out_file> 2>&1 < /dev/null & echo $!'`
+and add `"host": "{context.host_name}"` and `"collect": ["{context.host_run_dir}/work"]` to job.json (out_file is
+then the path on the host). Before waking you, the platform copies each collect path into this sprint's
+`collected/` folder — that folder is a scratch copy not kept in the sprint's history, so copy or summarise
+anything you need from it elsewhere in the sprint folder. Before you finish, make sure the results you need
+are in this sprint's folder, then delete what you created on the host."""
         if context.assess_reason:
             assess_section = f"""
-## Resuming to check a detached job ({context.assess_reason})
+## Resuming to check a detached job ({_assess_reason_label(context.assess_reason)})
 A previous run launched a detached job ("{context.job_note}"); its output is at
 {context.job_out}. Read it and decide: if the goal is met, produce the final result;
 if the job needs more time and is still healthy, re-declare job.json with a new wake
 time; if it failed, either relaunch it or report the failure. If you abandon a
 still-running job, kill it first.
 """
+            if context.collect_note:
+                assess_section += f"\n{context.collect_note}\n"
     return f"""# Sprint: {sprint.title or sprint.id}
 
 You are an autonomous research agent. Carry out this sprint end to end, unattended.
@@ -92,7 +136,7 @@ sprint. Just do the work.
 
 Objective:
 {sprint.goals}
-{comments}{artifacts_section}
+{comments}{artifacts_section}{gpu_section}{host_section}
 
 ## Suggested steps (guidance only — you decide the actual work)
 {steps}

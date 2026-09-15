@@ -6,10 +6,11 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from coscience.host_probe import ssh_argv
 from coscience.ledger import Ledger
 from coscience.models import BeatOutcome, ProgramStatus, SprintStatus, set_status
 from coscience.pause import is_paused
-from coscience.resources import WORKER_KEY, ResourcePool, effective_requirement, over_capacity
+from coscience.resources import LOCAL, WORKER_KEY, ResourcePool, effective_requirement, gpu_request, over_capacity
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
 from coscience.worker import Worker
@@ -39,8 +40,9 @@ class _WorkerSlots:
     used to hold the slot for the job's whole duration anyway. A pool that
     declares no `workers` cap is uncapped, so this is a no-op there."""
 
-    def __init__(self, ledger: Ledger):
+    def __init__(self, ledger: Ledger, repo_root=None):
         self.ledger = ledger
+        self.repo_root = repo_root
 
     def _capped(self) -> bool:
         return WORKER_KEY in self.ledger.pool.capacity
@@ -54,6 +56,59 @@ class _WorkerSlots:
             return True
         return self.ledger.acquire_key(sprint_id, WORKER_KEY, 1.0)
 
+    def gpus(self, sprint_id: str) -> tuple[list[int], float | None]:
+        """The cards this sprint's lease holds and the VRAM share on each (None =
+        whole cards), for the worker agent's instructions."""
+        lease = self.ledger.lease_for(sprint_id)
+        if lease is None:
+            return [], None
+        return list(lease.gpu_devices), gpu_request(lease.amounts)[1]
+
+    def ssh_for(self, host_name: str) -> str:
+        host = self.ledger.pool.host(host_name)
+        if host is None or not host.ssh:
+            return ""
+        try:
+            ssh_argv(host.ssh)
+        except ValueError:
+            # A bad ssh value should have been caught when the pool was parsed
+            # (Fix C), but this is the last line of defence: "" makes the job
+            # "unknown" to the caller, never a crash inside a beat.
+            return ""
+        return host.ssh
+
+    def host(self, sprint_id: str) -> dict:
+        """Where this sprint's lease is, for the worker agent's instructions: the host's
+        name, ssh target, run root, a line of probed facts and its notes."""
+        lease = self.ledger.lease_for(sprint_id)
+        if lease is None or lease.host == LOCAL:
+            return {"name": LOCAL, "ssh": "", "run_root": "", "facts": "", "notes": ""}
+        host = self.ledger.pool.host(lease.host)
+        if host is None:
+            # The lease names a host the pool no longer has (removed since the
+            # grant): keep its name so progress.host isn't overwritten with
+            # "local" — the caller still needs to know work is stranded there.
+            return {"name": lease.host, "ssh": "", "run_root": "", "facts": "", "notes": ""}
+        return {"name": host.name, "ssh": host.ssh, "run_root": host.run_root,
+                "facts": _probe_facts_line(self.repo_root, host.name), "notes": host.notes}
+
+
+def _probe_facts_line(repo_root, host_name: str) -> str:
+    """"OS · CPU · N threads · N GB memory" from the host's last onboarding probe, or ""."""
+    if repo_root is None:
+        return ""
+    path = Path(repo_root) / ".coscience" / "host-probes" / f"{host_name}.json"
+    try:
+        facts = json.loads(path.read_text()).get("facts") or {}
+    except (OSError, ValueError, AttributeError):
+        return ""
+    parts = [str(facts[k]) for k in ("os", "cpu_model") if facts.get(k)]
+    if facts.get("threads"):
+        parts.append(f"{facts['threads']} threads")
+    if facts.get("mem_total_kb"):
+        parts.append(f"{round(facts['mem_total_kb'] / 1024 / 1024)} GB memory")
+    return " · ".join(parts)
+
 
 class Dispatcher:
     def __init__(self, substrate: Substrate, agent,
@@ -66,7 +121,7 @@ class Dispatcher:
         cos = substrate.repo_root / ".coscience"
         self.ledger = Ledger(pool, cos / "leases.json")
         self.worker = Worker(substrate, agent, usage_gate=usage_gate,
-                             slots=_WorkerSlots(self.ledger))
+                             slots=_WorkerSlots(self.ledger, repo_root=substrate.repo_root))
         self._queue_path = cos / "queue.json"
         self._wiki_agent = wiki_agent      # None -> built lazily on first use
 
@@ -115,14 +170,23 @@ class Dispatcher:
                  and not artifacts.sprint_blocked(self.substrate, s)
                  and (not blocked or self.worker.agent_running(s.id)
                       or self.substrate.load_progress(s.id).job_token)]
-        for sprint in self.policy.select_grants(needs, queue, self.ledger, now):
+        # A sprint that has launched anything stays on that host: its files, and any
+        # job still running, are there.
+        pinned = {s.id: host for s in needs if (host := self.substrate.load_progress(s.id).host)}
+        for sprint in self.policy.select_grants(needs, queue, self.ledger, now, pinned=pinned):
             eff = self.policy.effective_priority(sprint, queue.get(sprint.id, now), now)
+            progress = self.substrate.load_progress(sprint.id)
+            live = self.worker.agent_running(sprint.id) or bool(progress.job_token)
+            # A sprint re-adopted with its agent or job still running keeps the cards
+            # that work is already using; fresh placement could put a second job on them.
             if self.ledger.acquire(sprint.id,
                                    effective_requirement(sprint.resources_required,
                                                          self.ledger.pool),
                                    now, ttl,
                                    priority=eff, preemptible=sprint.preemptible,
-                                   program=sprint.program):
+                                   program=sprint.program,
+                                   prefer_cards=progress.gpu_devices if live else (),
+                                   host=pinned.get(sprint.id)):
                 # Acquire the sprint's artifact locks (instantiating create-targets).
                 # If a same-cycle race lost the atomic acquire, give the lease back
                 # and leave the sprint queued for a later cycle.
@@ -161,7 +225,9 @@ class Dispatcher:
             cand_eff = self.policy.effective_priority(cand, queue.get(cand.id, now), now)
             yieldable = {l.sprint_id for l in self.ledger.all_leases()
                          if self.worker.is_yieldable(l.sprint_id)}
-            victims = self.policy.select_yield_victims(cand, cand_eff, self.ledger, yieldable)
+            victims = self.policy.select_yield_victims(
+                cand, cand_eff, self.ledger, yieldable,
+                pinned_host=self.substrate.load_progress(cand.id).host or None)
             for v in victims:
                 self.ledger.release(v.sprint_id)
                 self.worker.hibernate_sprint(self.substrate.load_sprint(v.sprint_id))
@@ -202,7 +268,8 @@ class Dispatcher:
         for s in eligible:
             if self.ledger.lease_for(s.id) is not None:
                 continue
-            if over_capacity(s.resources_required, self.ledger.pool, s.program):
+            if over_capacity(s.resources_required, self.ledger.pool, s.program,
+                             only_host=self.substrate.load_progress(s.id).host or None):
                 report.unrunnable.append(s.id)
             else:
                 report.waiting += 1

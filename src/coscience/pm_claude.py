@@ -278,7 +278,7 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
     {{"sprint_id": "<an EDITABLE (still-proposed) sprint to revise per feedback>",
       "goals": "<rewritten objective, optional>", "plan": ["<revised step>", "..."],
       "summary": "<optional>", "title": "<optional>", "priority": <int, optional>,
-      "resources_required": {{}} or null,
+      "resources_required": {{}} or null, "distributed": <true|false, optional>,
       "artifacts_bound": ["<existing artifact id(s) this sprint should now edit — optional>"],
       "artifacts_create": [{{"title": "<new artifact this sprint should produce>", "kind": "md|data|figure|page"}}]}}
   ],
@@ -327,7 +327,7 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
       "summary": "one or two plain sentences a reviewer can skim to decide",
       "goals": "<the full objective, as STRUCTURED markdown a human reads at a glance: 2-4 SHORT paragraphs separated by a BLANK LINE, and '-' bullets for any list of conditions/probes/sub-questions. Put REAL blank lines in the JSON string (escaped as \\n\\n). Do NOT write one long run-on paragraph.>",
       "plan": ["<suggested step in plain language>", "<another>", "..."],
-      "priority": <int>, "resources_required": {{}} or null,
+      "priority": <int>, "resources_required": {{}} or null, "distributed": false,
       "rationale": "<why this experiment next; short — 1-3 sentences, a blank line (\\n\\n) between distinct points if more than one>",
       "from_idea": "<id of the pool idea this promotes, or omit>",
       "model": "<optional: a Claude model slug to run this sprint's worker on, e.g. 'claude-sonnet-4-6' for cheap/routine work or 'claude-opus-5' for hard reasoning; omit to use the program's default worker model>"}}
@@ -390,10 +390,11 @@ the work itself. So:
   guidance for the agent, NOT shell commands or code. Describe WHAT to do and what a
   good result looks like; let the agent figure out how. Never put `python3 -c`,
   `printf`, file redirects, or any executable command in `plan`.
-`resources_required` maps a resource name to a NUMBER only (e.g. {{"cpu": 1}} or {{"gpu": 2}}),
-or {{}} — never put notes or prose in it; put caveats in `rationale`. Size it to what the
-sprint's heaviest step actually uses at once, never to the machine, and never above the
-COMPUTE totals (see COMPUTE above).
+`resources_required` maps a resource name to a NUMBER only (e.g. {{"cpu": 4, "memory_gb": 16}},
+{{"gpu": 1}} or {{"gpu_vram_gb": 12}} — using only keys COMPUTE lists for a host), or {{}} —
+never put notes or prose in it; put caveats in `rationale`. Size it to what the sprint's
+heaviest step actually uses at once, never to the machine, and never above what ONE host
+in COMPUTE holds (see COMPUTE above).
 You may also change an editable sprint's resources_required (compute) here in response to
 feedback — e.g. drop a gpu the environment can't provide and run on cpu.
 `title` is a short headline; `summary` is the skimmable gist; `goals` is the full objective
@@ -423,21 +424,65 @@ def _amounts(d: dict) -> str:
     return ", ".join(f"{k} {v:g}" for k, v in sorted(d.items())) or "nothing"
 
 
-def render_compute(context: PMContext) -> str:
-    """The pool a proposal's `resources_required` draws on, and the rule for sizing it.
+def _cards(vrams: list) -> str:
+    if not vrams:
+        return ""
+    if all(v is None for v in vrams):
+        return f"{len(vrams)} GPU card(s), VRAM not declared (whole cards only)"
+    return f"{len(vrams)} GPU card(s): " + ", ".join(
+        "VRAM not declared" if v is None else f"{v:g} GB" for v in vrams)
 
-    Over-asking is the failure this exists for: on 09-13 the PM gave four p2 sprints
+
+def _unavailable_keys(host: dict) -> list[str]:
+    """The canonical request keys this host cannot give, in the fixed order
+    `cpu, memory_gb, gpu, gpu_vram_gb` — a key the host doesn't list has no
+    capacity there (see render_compute's docstring), so the PM must be told,
+    not left to copy an example that happens to name it."""
+    capacity = host.get("capacity") or {}
+    gpus = host.get("gpus") or []
+    keys = []
+    if "cpu" not in capacity:
+        keys.append("cpu")
+    if "memory_gb" not in capacity:
+        keys.append("memory_gb")
+    if not gpus:
+        keys += ["gpu", "gpu_vram_gb"]
+    elif all(v is None for v in gpus):
+        keys.append("gpu_vram_gb")
+    return keys
+
+
+def render_compute(context: PMContext) -> str:
+    """The hosts a proposal's `resources_required` draws on, and the rule for sizing it.
+
+    Over-asking is the failure this exists for: on 09-13 the PM gave four sprints
     `cpu: 24` against a capacity of 16, so they could never start; once capacity
-    was raised, one of them reserved all 24 CPUs while using under 2% of one."""
-    if not context.compute_capacity:
+    was raised, one of them reserved all 24 CPUs while using under 2% of one. Hosts
+    are listed one by one because a request must fit on one of them — a summed total
+    would invite requests no single machine can hold."""
+    hosts = [h for h in context.compute_hosts if h.get("capacity") or h.get("gpus")]
+    if not hosts:
         return ("COMPUTE: no capacity is declared for this environment. Request only what a "
                 "sprint's heaviest step actually uses at once.")
-    return f"""COMPUTE: this environment has {_amounts(context.compute_capacity)} in total; running
-sprints hold {_amounts(context.compute_leased)} of it right now. A sprint's resources_required
-is RESERVED for as long as the sprint runs — other sprints cannot use it, even while this one
-sits idle between steps. Request only what the work actually needs: the cores or GPUs its
-heaviest step uses at once, not the size of the machine. Never request more than the total
-above — a request larger than the total can never be granted, and the sprint waits forever."""
+    lines = []
+    for h in hosts:
+        parts = [p for p in (_amounts(h["capacity"]) if h["capacity"] else "", _cards(h["gpus"])) if p]
+        line = f"- {h['name']}: {'; '.join(parts)} — running sprints hold {_amounts(h['held'])}"
+        missing = _unavailable_keys(h)
+        if missing:
+            line += f" — not declared here, never request: {', '.join(missing)}"
+        lines.append(line)
+    return ("COMPUTE: the hosts this program's sprints can be placed on:\n" + "\n".join(lines) + """
+A sprint runs on ONE host: every amount in its resources_required must fit on a single host
+above (`distributed` records that the work could span hosts, but work is not yet split across
+them). Use these keys: `cpu` (cores), `memory_gb`, `gpu` (whole cards — nothing else runs on
+them) and `gpu_vram_gb` (VRAM per card — the cards are shared with other work; alone it means
+one card). Request only keys a host lists: a key a host does not list has no capacity there,
+and a sprint asking for it never starts. A sprint's resources_required is RESERVED for as long
+as the sprint runs — other sprints cannot use it, even while this one sits idle between steps.
+Request only what the work actually needs: the cores, memory or VRAM its heaviest step uses at
+once, not the size of the machine. A request no single host can hold can never be granted, and
+the sprint waits forever.""")
 
 
 def parse_response(text: str) -> PMCycleOutput:
@@ -450,6 +495,7 @@ def parse_response(text: str) -> PMCycleOutput:
                 plan=[str(s) for s in p.get("plan", [])],
                 priority=int(p.get("priority", 0)),
                 resources_required=coerce_resources(p.get("resources_required")),
+                distributed=p.get("distributed") is True,
                 rationale=str(p.get("rationale", "")),
                 title=str(p.get("title", "")),
                 summary=str(p.get("summary", "")),

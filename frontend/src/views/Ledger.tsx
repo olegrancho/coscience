@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import CallLog from "../components/CallLog";
 import CapacityModal from "../components/CapacityModal";
+import HostsCard from "../components/HostsCard";
 import { EmptyState, Gauge, UsagePanel } from "../components/ui";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -26,7 +27,7 @@ export default function Ledger() {
   const capacityRef = useRef<Record<string, number>>({});
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   pendingRef.current = pending;
-  if (ledger.data) capacityRef.current = ledger.data.capacity;
+  if (ledger.data) capacityRef.current = ledger.data.local_capacity ?? ledger.data.capacity;
 
   const save = useCallback(async () => {
     timerRef.current = null;
@@ -69,6 +70,10 @@ export default function Ledger() {
   if (ledger.error || !ledger.data) return <EmptyState title="Couldn't load compute">Try again in a moment.</EmptyState>;
   const l = ledger.data;
   const keys = Object.keys(l.capacity);
+  // Once a remote server takes work the pool totals include it; the capacity editor
+  // and the steppers change this machine's own amounts.
+  const editable = l.local_capacity ?? l.capacity;
+  const remoteTakesWork = (l.hosts ?? []).some((h) => h.placeable && h.ssh);
 
   return (
     <Stack gap="lg">
@@ -121,19 +126,27 @@ export default function Ledger() {
           </Text>
         )}
 
+        {remoteTakesWork && (
+          <Text size="sm" c="dimmed" style={{ marginBottom: 16 }}>
+            Totals include remote servers. Edit capacity changes this machine only.
+          </Text>
+        )}
+
         {keys.length ? (
           <Stack gap={16}>
             {keys.map((k) => (
               <Gauge key={k} label={k} used={l.used[k] ?? 0}
                      capacity={pending[k] ?? l.capacity[k]}
                      pending={k in pending}
-                     onAdjust={(delta) => adjust(k, delta)} />
+                     onAdjust={remoteTakesWork ? undefined : (delta) => adjust(k, delta)} />
             ))}
           </Stack>
         ) : <Text size="sm" c="dimmed">No compute pool is configured yet, so there's nothing to meter.</Text>}
 
         {saveError && <Text size="sm" c="red" style={{ marginTop: 12 }}>{saveError}</Text>}
       </Card>
+
+      <HostsCard hosts={l.hosts ?? []} errors={l.host_errors ?? []} />
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 12 }}>running now · {l.leases.length}</div>
@@ -148,11 +161,11 @@ export default function Ledger() {
             </Table.Thead>
             <Table.Tbody>
               {l.leases.map((lease, i) => {
-                const x = lease as { id: string; sprint_id: string; amounts: Record<string, number> };
+                const x = lease as { id: string; sprint_id: string; amounts: Record<string, number>; host?: string };
                 return (
                   <Table.Tr key={i}>
                     <Table.Td><Link to={`/sprints/${x.sprint_id}`} className="mono" style={{ fontSize: 13, color: "var(--machine)", textDecoration: "none" }}>{x.sprint_id}</Link></Table.Td>
-                    <Table.Td className="mono" style={{ fontSize: 13 }}>{Object.entries(x.amounts).map(([k, v]) => `${v} ${k}`).join(", ")}</Table.Td>
+                    <Table.Td className="mono" style={{ fontSize: 13 }}>{`${Object.entries(x.amounts).map(([k, v]) => `${v} ${k}`).join(", ")}${x.host && x.host !== "local" ? ` on ${x.host}` : ""}`}</Table.Td>
                   </Table.Tr>
                 );
               })}
@@ -170,7 +183,7 @@ export default function Ledger() {
       </Card>
 
       <CapacityModal opened={editing} onClose={() => setEditing(false)}
-                     capacity={l.capacity} used={l.used} />
+                     capacity={editable} used={l.used} />
     </Stack>
   );
 }

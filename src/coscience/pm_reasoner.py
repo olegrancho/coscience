@@ -72,6 +72,8 @@ class PMContext:
     # over is not new information about the program, and would wake every PM at once.
     compute_capacity: dict = field(default_factory=dict)         # {"cpu": 24.0, "gpu": 1.0}
     compute_leased: dict = field(default_factory=dict)           # {"cpu": 24.0}
+    # The same pool per host this program may be placed on: [{name, capacity, gpus, held}].
+    compute_hosts: list[dict] = field(default_factory=list)
 
     @property
     def free_slots(self) -> int:
@@ -85,6 +87,7 @@ class ProposedSprint:
     plan: list[str] = field(default_factory=list)   # suggested steps (guidance), not commands
     priority: int = 0
     resources_required: dict | None = None
+    distributed: bool = False
     rationale: str = ""
     title: str = ""
     summary: str = ""

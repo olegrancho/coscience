@@ -229,20 +229,45 @@ const num = (n: number) => (Number.isInteger(n) ? String(n) : String(n));
 
 /** Turn a resource request into a human sense of cost + a 0–4 fill + scale word. */
 export function computeCost(resources: Record<string, number>, capacity: Record<string, number>) {
-  const keys = Object.keys(resources ?? {});
+  // A VRAM share is a card that others may also use: judge it as one card of the pool,
+  // never as a resource of its own that capacity does not list.
+  const req: Record<string, number> = { ...(resources ?? {}) };
+  if (req.gpu_vram_gb && !req.gpu) req.gpu = 1;
+  delete req.gpu_vram_gb;
+  const keys = Object.keys(req);
   if (!keys.length) return { text: "minimal", scale: "light", filled: 0 };
   let best = keys[0];
   let frac = 0;
   for (const k of keys) {
     const cap = capacity[k] ?? 0;
-    const f = cap > 0 ? resources[k] / cap : 0;
+    const f = cap > 0 ? req[k] / cap : 0;
     if (f >= frac) { frac = f; best = k; }
   }
   const cap = capacity[best] ?? 0;
-  const text = cap > 0 ? `${num(resources[best])} of ${num(cap)} ${best}` : `${num(resources[best])} ${best}`;
+  const text = cap > 0 ? `${num(req[best])} of ${num(cap)} ${best}` : `${num(req[best])} ${best}`;
   const scale = frac < 0.34 ? "light" : frac < 0.67 ? "moderate" : "heavy";
   const filled = Math.max(1, Math.min(4, Math.round(frac * 4)));
   return { text, scale, filled };
+}
+
+const COMPUTE_KEYS = ["cpu", "memory_gb", "gpu", "gpu_vram_gb"];
+
+/** A request in words, one line per part: cores, memory, whole cards or VRAM shares,
+ *  any other resource as "name amount", then whether it may span hosts. */
+export function describeCompute(resources: Record<string, number>, distributed = false): string[] {
+  const r = resources ?? {};
+  const lines: string[] = [];
+  if (r.cpu) lines.push(`${num(r.cpu)} CPU ${r.cpu === 1 ? "core" : "cores"}`);
+  if (r.memory_gb) lines.push(`${num(r.memory_gb)} GB memory`);
+  const vram = r.gpu_vram_gb ?? 0;
+  const cards = r.gpu ? Math.ceil(r.gpu) : (vram > 0 ? 1 : 0);
+  if (cards && vram > 0) lines.push(`${cards} ${cards === 1 ? "GPU" : "GPUs"} × ${num(vram)} GB VRAM each (shared)`);
+  else if (cards) lines.push(`${cards} whole ${cards === 1 ? "GPU" : "GPUs"}`);
+  for (const [k, v] of Object.entries(r)) {
+    if (!COMPUTE_KEYS.includes(k)) lines.push(`${k} ${num(v)}`);
+  }
+  if (lines.length) lines.push(distributed ? "may span hosts" : "one host");
+  return lines;
 }
 
 /** "12m" / "1h 5m" / "2d 3h" — a compact elapsed duration. */

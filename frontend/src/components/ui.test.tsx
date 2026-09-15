@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 
-import { Gauge, MODEL_OPTIONS, UsageBar, ZoomableImg, tokenTitle, windowElapsed } from "./ui";
+import { Gauge, MODEL_OPTIONS, UsageBar, ZoomableImg, computeCost, describeCompute, tokenTitle, windowElapsed } from "./ui";
 
 // jsdom has no matchMedia; MantineProvider's color-scheme effect needs it.
 beforeAll(() => {
@@ -165,5 +165,27 @@ describe("UsageBar", () => {
   it("draws no mark when the window position is unknown", () => {
     render(bar());
     expect(screen.queryByTestId("window-tick")).toBeNull();
+  });
+});
+
+describe("describeCompute", () => {
+  it("reads the canonical keys in words", () => {
+    expect(describeCompute({ cpu: 8, memory_gb: 32, gpu: 2, gpu_vram_gb: 16 }, false))
+      .toEqual(["8 CPU cores", "32 GB memory", "2 GPUs × 16 GB VRAM each (shared)", "one host"]);
+  });
+  it("names whole cards, other resources and a request that may span hosts", () => {
+    expect(describeCompute({ gpu: 1, tpu: 2 }, true)).toEqual(["1 whole GPU", "tpu 2", "may span hosts"]);
+  });
+  it("reads a bare VRAM share as one card", () => {
+    expect(describeCompute({ gpu_vram_gb: 8 })).toEqual(["1 GPU × 8 GB VRAM each (shared)", "one host"]);
+  });
+  it("is empty for an empty request", () => {
+    expect(describeCompute({})).toEqual([]);
+  });
+});
+
+describe("computeCost with a VRAM share", () => {
+  it("counts the share as one card, not as a resource of its own", () => {
+    expect(computeCost({ gpu_vram_gb: 8 }, { gpu: 1 }).text).toBe("1 of 1 gpu");
   });
 });

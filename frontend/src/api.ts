@@ -39,6 +39,7 @@ export interface SprintRow {
   goals: string; program: string | null;
   priority: number; steps: number; results: string[];
   rationale: string; resources_required: Record<string, number>;
+  distributed?: boolean;
   unrunnable?: string;    // why it can never be granted (asks above total capacity); "" if it can
   started_at: number | null; last_status_at: number | null;
   model: string; activity: SprintActivity | null;
@@ -84,7 +85,7 @@ export interface CallRow {
 export interface Sprint {
   id: string; status: string; title: string; summary: string;
   goals: string; priority: number; preemptible: boolean;
-  resources_required: Record<string, number>; rationale: string; plan: string[];
+  resources_required: Record<string, number>; distributed: boolean; rationale: string; plan: string[];
   unrunnable?: string;    // why it can never be granted (asks above total capacity); "" if it can
   program: string | null; results: string[]; threads: FeedbackThreadT[];
   agent_running: boolean; started_at: number | null; error: string; lease: unknown | null;
@@ -103,10 +104,29 @@ export interface SprintFile {
   content: string; truncated: boolean; binary: boolean;
 }
 export interface ResultRow { id: string; sprint: string; summary: string; program?: string | null; completed_at?: number | null }
+export interface LedgerCard { index: number; model: string; vram_gb: number | null; whole: boolean; shared_gb: number }
+export interface LedgerHost {
+  name: string; ssh: string; placeable: boolean; programs: string[]; run_root: string;
+  capacity: Record<string, number>; available: Record<string, number>; gpus: LedgerCard[];
+  shared?: boolean; owner?: string; notes?: string;
+}
+export interface HostCheck { name: string; ok: boolean; detail: string }
+export interface HostDeclaration {
+  ssh: string; run_root: string; shared: boolean; programs: string[]; owner: string; notes: string;
+}
+export interface HostProbe {
+  name: string; declared: HostDeclaration; probed_at: number; ok: boolean; error: string;
+  facts: Record<string, unknown>; checks: HostCheck[]; warnings: string[];
+  proposal: { capacity?: Record<string, number>; gpus?: { model: string; vram_gb: number }[] };
+}
 export interface Ledger {
   capacity: Record<string, number>; used: Record<string, number>;
   available: Record<string, number>; leases: unknown[];
   paused: boolean;
+  // This machine's own amounts, once compute spans hosts — what `PUT /api/capacity`
+  // writes. Falls back to `capacity` against an older backend that doesn't send it.
+  local_capacity?: Record<string, number>;
+  hosts?: LedgerHost[]; host_errors?: string[];
 }
 export interface GraphNode {
   id: string; kind: "idea" | "experiment"; stage: "idea" | "experiment" | "result"; label: string;
@@ -221,7 +241,7 @@ async function j<T>(r: Response): Promise<T> {
 
 export interface SprintPatch {
   goals?: string; plan?: string[]; priority?: number;
-  resources_required?: Record<string, number>; preemptible?: boolean; model?: string;
+  resources_required?: Record<string, number>; distributed?: boolean; preemptible?: boolean; model?: string;
 }
 
 export const api = {
@@ -410,6 +430,7 @@ export const api = {
     fetch(`/api/sprints/${id}/threads/${tid}`, { method: "DELETE" }).then(j<void>),
   submitSprint: (body: { id: string; goals: string; plan: string[]; program?: string;
                          priority?: number; resources_required?: Record<string, number>;
+                         distributed?: boolean;
                          artifacts_bound?: string[];
                          artifacts_create?: { aid: string; title: string; kind: string }[];
                          from_idea?: string; title?: string; summary?: string;
@@ -453,6 +474,15 @@ export const api = {
   listResults: () => fetch("/api/results").then(j<ResultRow[]>),
   getResult: (id: string) => fetch(`/api/results/${id}`).then(j<ResultRow>),
   getLedger: () => fetch("/api/ledger").then(j<Ledger>),
+  probeHost: (body: { name: string } & HostDeclaration) =>
+    fetch("/api/hosts/probe", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(j<HostProbe>),
+  listHostProbes: () => fetch("/api/hosts/probes").then(j<HostProbe[]>),
+  confirmHost: (body: { name: string; capacity: Record<string, number>; probed_at?: number }) =>
+    fetch("/api/hosts", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(j<Ledger>),
   setCapacity: (capacity: Record<string, number>) =>
     fetch("/api/capacity", {
       method: "PUT", headers: { "Content-Type": "application/json" },

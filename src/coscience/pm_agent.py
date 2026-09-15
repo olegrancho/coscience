@@ -271,7 +271,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
         if i.id in shown_ids and i.edges:
             rel = "; ".join(f"{e['type']} {e['dst']}" for e in i.edges)
             graph_lines.append(f"{i.id}: {rel}")
-    capacity, leased = _compute(substrate, program_id)
+    capacity, leased, hosts = _compute(substrate, program_id)
     return PMContext(
         program_id=program_id, goals=program.goals, cycle=pm.cycle,
         instructions=substrate.load_instructions(program_id),
@@ -286,34 +286,41 @@ def gather_context(substrate, program_id: str) -> PMContext:
         results_dir=str(substrate.repo_root / "results"),
         graph_lines=graph_lines,
         artifacts=artifact_dicts, artifact_feedback=artifact_feedback,
-        compute_capacity=capacity, compute_leased=leased,
+        compute_capacity=capacity, compute_leased=leased, compute_hosts=hosts,
     )
 
 
-def _compute(substrate, program_id: str) -> tuple[dict, dict]:
-    """(capacity, currently leased) of the resources a sprint in this program can
+def _compute(substrate, program_id: str) -> tuple[dict, dict, list[dict]]:
+    """(capacity, currently leased, per-host view) of what a sprint in this program can
     request — only the hosts it may be placed on, so a reserved machine is never
-    planned around by a program that will not get it."""
+    planned around by a program that will not get it. The per-host view is what the PM
+    sizes against: a request must fit on one host."""
     from coscience.ledger import Ledger
-    from coscience.resources import PLATFORM_KEYS, load_pool
+    from coscience.resources import GPU_KEY, PLATFORM_KEYS, load_pool
     pool = load_pool(substrate.repo_root)
     hosts = pool.placeable_hosts(program_id)
     capacity: dict[str, float] = {}
     for h in hosts:
         for k, v in h.capacity.items():
             capacity[k] = capacity.get(k, 0.0) + v
-    leased: dict[str, float] = {}
     try:
         ledger = Ledger(pool, substrate.repo_root / ".coscience" / "leases.json")
         ledger.load()
-        for h in hosts:
-            for k, v in ledger.used(h.name).items():
-                if k not in PLATFORM_KEYS:
-                    leased[k] = leased.get(k, 0.0) + v
     except (OSError, ValueError, TypeError, KeyError):
-        leased = {}
+        ledger = None
+    leased: dict[str, float] = {}
+    per_host: list[dict] = []
+    for h in hosts:
+        held = ({k: v for k, v in ledger.used(h.name).items() if k not in PLATFORM_KEYS and v}
+                if ledger is not None else {})
+        for k, v in held.items():
+            leased[k] = leased.get(k, 0.0) + v
+        per_host.append({"name": h.name,
+                         "capacity": {k: v for k, v in h.capacity.items() if k != GPU_KEY},
+                         "gpus": [g.vram_gb for g in h.gpus],
+                         "held": held})
     leased = {k: v for k, v in leased.items() if k in capacity and v}
-    return capacity, leased
+    return capacity, leased, per_host
 
 
 def _resolve_workdir(substrate, workdir: str) -> str:
@@ -395,6 +402,7 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
         "proposals": [
             {"suffix": p.suffix, "goals": p.goals, "plan": p.plan,
              "priority": p.priority, "resources_required": p.resources_required,
+             "distributed": p.distributed,
              "rationale": p.rationale, "title": p.title, "summary": p.summary,
              "from_idea": p.from_idea, "model": p.model}
             for p in output.proposals
@@ -423,7 +431,9 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         edge_ops=list(data.get("edge_ops", [])),
         artifact_tasks=list(data.get("artifact_tasks", [])),
         adopt_artifacts=list(data.get("adopt_artifacts", [])),
-        proposals=[ProposedSprint(**p) for p in data.get("proposals", [])],
+        proposals=[ProposedSprint(**{k: v for k, v in p.items()
+                                     if k in ProposedSprint.__dataclass_fields__})
+                   for p in data.get("proposals", [])],
     )
     return StagedCycle(cycle=int(data["cycle"]), output=output,
                        fingerprint=data.get("fingerprint", ""),
@@ -689,6 +699,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 plan=list(prop.plan),
                 program=program_id, priority=prop.priority,
                 resources_required=coerce_resources(prop.resources_required),
+                distributed=bool(prop.distributed),
                 rationale=prop.rationale,
                 title=prop.title,
                 summary=prop.summary,
@@ -867,6 +878,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         # LLM is ignored (leaves compute unchanged) rather than wiping it.
         if isinstance(edit.get("resources_required"), dict):
             sp.resources_required = coerce_resources(edit["resources_required"])
+        if isinstance(edit.get("distributed"), bool):
+            sp.distributed = edit["distributed"]
         substrate.save_sprint(sp)
 
     # --- thread replies: the PM's answer to each open feedback thread it acted on

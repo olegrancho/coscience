@@ -35,6 +35,14 @@ class ExecutionContext:
     job_out: str = ""        # path to the detached job's captured output (set when assessing)
     job_note: str = ""       # the job's own short description (set when assessing)
     artifacts: list[dict] = field(default_factory=list)  # [{aid, kind, work_path}] deliverables to write into work/
+    gpu_devices: list[int] = field(default_factory=list)  # card indices this sprint's lease holds
+    gpu_vram_gb: float | None = None                       # VRAM share per card; None = whole cards
+    host_name: str = "local"      # the host this sprint's lease is on
+    host_ssh: str = ""            # ssh target for it; "" = this machine
+    host_run_dir: str = ""        # this sprint's working directory on the host
+    host_facts: str = ""          # one line from the host's onboarding probe
+    host_notes: str = ""          # the host entry's notes
+    collect_note: str = ""        # what the platform copied back before this run
 
 
 def launch_detached(command: str, cwd: "str | Path | None" = None) -> str:

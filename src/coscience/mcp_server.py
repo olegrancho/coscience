@@ -22,12 +22,14 @@ def build_server(service: Service, name: str = "coscience") -> FastMCP:
     def submit_sprint(id: str, goals: str, plan: list[str],
                       program: str | None = None, priority: int = 0,
                       preemptible: bool = True,
-                      resources_required: dict | None = None) -> dict:
+                      resources_required: dict | None = None,
+                      distributed: bool = False) -> dict:
         """Submit a new sprint proposal; returns the created sprint detail."""
         try:
             service.submit_sprint(id=id, goals=goals, plan=plan, program=program,
                                   priority=priority, preemptible=preemptible,
-                                  resources_required=resources_required)
+                                  resources_required=resources_required,
+                                  distributed=distributed)
         except ValueError as exc:
             raise ToolError(str(exc))
         return service.get_sprint(id)

@@ -12,6 +12,18 @@ from coscience.substrate import Substrate
 
 
 @pytest.fixture(autouse=True)
+def _clear_remote_backoff():
+    """remote_exec.read_identity keeps a module-level per-host backoff (Fix F) so an
+    unreachable host costs one timeout per beat, not one per sleeping sprint. It must
+    not leak between tests: one test's "host is down" must never silence another
+    test's identity read."""
+    from coscience import remote_exec
+    remote_exec._unreachable_until.clear()
+    yield
+    remote_exec._unreachable_until.clear()
+
+
+@pytest.fixture(autouse=True)
 def _isolated_cache(tmp_path_factory, monkeypatch):
     """Point the host-local cache at a fresh dir per test. Without it every test
     would append to the developer's real ~/.cache/coscience and read back another

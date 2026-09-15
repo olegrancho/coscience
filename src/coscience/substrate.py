@@ -64,6 +64,7 @@ class Substrate:
             },
             priority=int(fm.get("priority", 0)),
             preemptible=bool(fm.get("preemptible", True)),
+            distributed=bool(fm.get("distributed", False)),
             rationale=str(fm.get("rationale", "")),
             title=str(fm.get("title", "")),
             summary=str(fm.get("summary", "")),
@@ -105,6 +106,8 @@ class Substrate:
             fm["priority"] = sprint.priority
         if not sprint.preemptible:
             fm["preemptible"] = False
+        if sprint.distributed:
+            fm["distributed"] = True
         if sprint.rationale:
             fm["rationale"] = sprint.rationale
         if sprint.title:
@@ -184,6 +187,11 @@ class Substrate:
             agent_session_id=str(fm.get("agent_session_id", "")),
             ambiguous_exits=int(fm.get("ambiguous_exits", 0)),
             scratch_size=int(fm.get("scratch_size", 0)),
+            gpu_devices=[int(d) for d in (fm.get("gpu_devices") or [])],
+            host=str(fm.get("host", "")),
+            job_host=str(fm.get("job_host", "")),
+            job_collect=[str(p) for p in (fm.get("job_collect") or [])],
+            collect_note=str(fm.get("collect_note", "")),
         )
 
     def save_progress(self, progress: ProgressState) -> None:
@@ -204,6 +212,11 @@ class Substrate:
             "agent_session_id": progress.agent_session_id,
             "ambiguous_exits": progress.ambiguous_exits,
             "scratch_size": progress.scratch_size,
+            "gpu_devices": list(progress.gpu_devices),
+            "host": progress.host,
+            "job_host": progress.job_host,
+            "job_collect": list(progress.job_collect),
+            "collect_note": progress.collect_note,
         }
         d = self.sprint_dir(progress.sprint_id)
         d.mkdir(parents=True, exist_ok=True)

@@ -52,6 +52,7 @@ class SprintSubmit(BaseModel):
     program: str | None = None
     priority: int = 0
     preemptible: bool = True
+    distributed: bool = False
     resources_required: dict[str, float] | None = None
     artifacts_bound: list[str] | None = None
     artifacts_create: list[dict] | None = None
@@ -110,11 +111,41 @@ class SprintPatch(BaseModel):
     priority: int | None = None
     resources_required: dict[str, float] | None = None
     preemptible: bool | None = None
+    distributed: bool | None = None
     model: str | None = None
 
 
 class CapacityUpdate(BaseModel):
     capacity: dict[str, float] = Field(default_factory=dict)
+
+
+ONBOARDING_ENV = "COSCIENCE_ALLOW_ONBOARDING"
+
+
+def _require_onboarding() -> None:
+    """Probing makes this backend ssh with its own keys to a target a dashboard user
+    types, so a deployment turns it on deliberately."""
+    if os.environ.get(ONBOARDING_ENV) != "1":
+        raise HTTPException(status_code=403, detail=(
+            "server onboarding is off on this deployment: it lets the backend ssh with its "
+            f"own keys. Set {ONBOARDING_ENV}=1 in the service environment to turn it on."))
+
+
+class HostProbeIn(BaseModel):
+    name: str
+    ssh: str
+    run_root: str = ""
+    shared: bool = False
+    programs: list[str] = Field(default_factory=list)
+    owner: str = ""
+    notes: str = ""
+
+
+class HostConfirmIn(BaseModel):
+    name: str
+    capacity: dict[str, float] = Field(default_factory=dict)
+    gpus: list[dict] | None = None
+    probed_at: float | None = None
 
 
 class PauseUpdate(BaseModel):
@@ -295,6 +326,7 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
                 plan=list(body.plan),
                 program=body.program, priority=body.priority,
                 preemptible=body.preemptible,
+                distributed=body.distributed,
                 resources_required=body.resources_required,
                 artifacts_bound=body.artifacts_bound,
                 artifacts_create=body.artifacts_create,
@@ -864,6 +896,28 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def set_capacity(body: CapacityUpdate) -> dict:
         try:
             return service.set_capacity(body.capacity)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.post("/hosts/probe")
+    def probe_host(body: HostProbeIn) -> dict:
+        _require_onboarding()
+        try:
+            return service.probe_host(**body.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.get("/hosts/probes")
+    def list_host_probes() -> list[dict]:
+        return service.list_host_probes()
+
+    @api.post("/hosts")
+    def confirm_host(body: HostConfirmIn) -> dict:
+        _require_onboarding()
+        try:
+            return service.confirm_host(**body.model_dump())
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 

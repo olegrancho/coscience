@@ -47,6 +47,7 @@ class Lease:
     priority: int = 0
     preemptible: bool = True
     host: str = "local"              # the machine these amounts are on; platform keys are pool-wide
+    gpu_devices: list[int] = field(default_factory=list)   # card indices on `host`; [] = no GPU
 
 
 @dataclass
@@ -60,6 +61,7 @@ class Sprint:
     resources_required: dict[str, float] = field(default_factory=dict)
     priority: int = 0
     preemptible: bool = True
+    distributed: bool = False           # may its work span hosts? recorded now; placed across hosts from O6
     rationale: str = ""
     title: str = ""
     summary: str = ""
@@ -165,11 +167,16 @@ class ProgressState:
     job_expected_seconds: float = 0.0
     job_next_wake: float = 0.0         # absolute ts; wake the agent when now >= this
     job_max_seconds: float = 0.0       # clamped watchdog cap
-    assess_reason: str = ""            # "" normal; else "finished"/"timed out"/"wake" -> next launch is an assess run
+    assess_reason: str = ""            # "" normal; else "finished"/"timed out"/"wake"/"lost"/"not_running" -> next launch is an assess run
     agent_call: str = ""               # open call-log id for the running agent; "" = none
     agent_session_id: str = ""         # claude session id of the current/last run, for --resume
     ambiguous_exits: int = 0           # consecutive no-progress clean exits with no completion signal
     scratch_size: int = 0              # scratchpad bytes at the last ambiguous exit (progress marker)
+    gpu_devices: list[int] = field(default_factory=list)  # cards this sprint's agent was last told it holds
+    host: str = ""                     # host this sprint's agent was last told it runs on; "" = never launched
+    job_host: str = ""                 # host of the tracked detached job; "" = this machine
+    job_collect: list[str] = field(default_factory=list)  # paths on job_host to copy back before waking
+    collect_note: str = ""             # what was copied back, for the next agent run
 
 
 @dataclass

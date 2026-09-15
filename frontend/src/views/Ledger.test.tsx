@@ -135,6 +135,30 @@ describe("Compute page", () => {
     renderPage();
     expect(await screen.findByText(/nothing running/i)).toBeTruthy();
   });
+
+  it("edits this machine's capacity, not the pool total, once remote servers take work", async () => {
+    ledger.mockResolvedValue({
+      capacity: { cpu: 40, workers: 2 }, local_capacity: { cpu: 24, workers: 2 },
+      used: {}, available: {}, leases: [], paused: false, host_errors: [],
+      hosts: [
+        { name: "local", ssh: "", placeable: true, programs: [], run_root: "", capacity: { cpu: 24 }, available: {}, gpus: [] },
+        { name: "gpu1", ssh: "gpu1", placeable: true, programs: [], run_root: "~/runs", capacity: { cpu: 16 }, available: {}, gpus: [] },
+      ],
+    });
+    renderPage();
+    expect(await screen.findByText(/Edit capacity changes this machine only/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Edit capacity" }));
+    expect((await screen.findByLabelText("cpu capacity") as HTMLInputElement).value).toBe("24");
+  });
+
+  it("shows which server a running experiment is on", async () => {
+    ledger.mockResolvedValue({
+      capacity: { cpu: 40 }, used: { cpu: 4 }, available: {}, paused: false, host_errors: [], hosts: [],
+      leases: [{ id: "l1", sprint_id: "s1", amounts: { cpu: 4 }, host: "gpu1" }],
+    });
+    renderPage();
+    expect(await screen.findByText(/on gpu1/)).toBeTruthy();
+  });
 });
 
 describe("Compute page steppers", () => {

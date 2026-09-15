@@ -147,7 +147,8 @@ def test_usage_endpoint_shape(client):
 
 def test_ledger_status_shape(client):
     body = client.get("/api/ledger").json()
-    assert set(body) == {"capacity", "used", "available", "leases", "paused", "hosts", "host_errors"}
+    assert set(body) == {"capacity", "used", "available", "leases", "paused", "hosts", "host_errors",
+                        "local_capacity"}
 
 
 def test_missing_sprint_is_404(client):
@@ -245,3 +246,34 @@ def test_replan_endpoint_runs_a_beat(client, monkeypatch):
 
 def test_replan_missing_is_404(client):
     assert client.post("/api/programs/nope/replan").status_code == 404
+
+
+def test_submit_and_patch_accept_distributed(client):
+    r = client.post("/api/sprints", json={"id": "span1", "goals": "g", "plan": ["a"],
+                                           "distributed": True})
+    assert r.status_code < 300
+    assert client.get("/api/sprints/span1").json()["distributed"] is True
+    r = client.patch("/api/sprints/span1", json={"distributed": False})
+    assert r.status_code == 200 and r.json()["distributed"] is False
+
+
+def test_onboarding_routes_probe_list_and_confirm(client, monkeypatch):
+    from coscience import host_probe
+    from tests.host_probe_fakes import FakeRunner
+    monkeypatch.setenv("COSCIENCE_ALLOW_ONBOARDING", "1")
+    monkeypatch.setattr(host_probe, "subprocess_runner", FakeRunner())
+
+    r = client.post("/api/hosts/probe", json={"name": "gpu1", "ssh": "gpu1"})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert [p["name"] for p in client.get("/api/hosts/probes").json()] == ["gpu1"]
+    r = client.post("/api/hosts", json={"name": "gpu1", "capacity": {"cpu": 8}})
+    assert r.status_code == 200
+    assert "gpu1" in [h["name"] for h in r.json()["hosts"]]
+    assert client.post("/api/hosts/probe", json={"name": "local", "ssh": "gpu1"}).status_code == 422
+
+
+def test_onboarding_is_off_unless_the_deployment_turns_it_on(client, monkeypatch):
+    monkeypatch.delenv("COSCIENCE_ALLOW_ONBOARDING", raising=False)
+    r = client.post("/api/hosts/probe", json={"name": "gpu1", "ssh": "gpu1"})
+    assert r.status_code == 403 and "COSCIENCE_ALLOW_ONBOARDING" in r.json()["detail"]
+    assert client.post("/api/hosts", json={"name": "gpu1", "capacity": {}}).status_code == 403

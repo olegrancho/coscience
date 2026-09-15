@@ -79,7 +79,8 @@ def test_results_round_trip(server, tmp_path):
 
 def test_ledger_status_shape(server):
     status = call(server, "ledger_status", {})
-    assert set(status) == {"capacity", "used", "available", "leases", "paused", "hosts", "host_errors"}
+    assert set(status) == {"capacity", "used", "available", "leases", "paused", "hosts", "host_errors",
+                          "local_capacity"}
 
 
 def test_missing_sprint_raises_tool_error(server):
@@ -95,3 +96,9 @@ def test_duplicate_submit_raises_tool_error(server):
     with pytest.raises(ToolError):
         asyncio.run(server.call_tool("submit_sprint", {
             "id": "sp1", "goals": "g", "plan": ["true"]}))
+
+
+def test_submit_sprint_accepts_distributed(server):
+    status = call(server, "submit_sprint", {"id": "span1", "goals": "g", "plan": ["a"],
+                                            "distributed": True})
+    assert status["distributed"] is True

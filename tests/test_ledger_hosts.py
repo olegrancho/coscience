@@ -87,8 +87,8 @@ def test_a_reacquired_key_must_fit_on_the_leases_own_host(tmp_path, every_host_p
 
 def test_a_local_lease_is_saved_in_the_format_older_code_reads(tmp_path):
     import json
-    led = _ledger(tmp_path, ResourcePool({"gpu": 1.0}))
-    led.acquire("sp1", {"gpu": 1.0}, now=0.0, ttl=60.0)
+    led = _ledger(tmp_path, ResourcePool({"cpu": 1.0}))
+    led.acquire("sp1", {"cpu": 1.0}, now=0.0, ttl=60.0)
     [entry] = json.loads((tmp_path / "leases.json").read_text())
     assert set(entry) == {"id", "sprint_id", "amounts", "granted_at", "expires_at",
                           "priority", "preemptible"}

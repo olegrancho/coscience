@@ -164,6 +164,15 @@ class FakeSlots:
         self.held.add(sprint_id)
         return True
 
+    def gpus(self, sprint_id):
+        return [], None
+
+    def host(self, sprint_id):
+        return {"name": "local", "ssh": "", "run_root": "", "facts": "", "notes": ""}
+
+    def ssh_for(self, host_name):
+        return ""
+
 
 def _sleeping(sub, sid="s1", *, next_wake):
     s = sub.load_sprint(sid); s.status = SprintStatus.EXECUTING; sub.save_sprint(s)

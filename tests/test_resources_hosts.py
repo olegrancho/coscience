@@ -66,6 +66,7 @@ def test_the_legacy_resources_wrapper_still_reads():
     ({"b": {"ssh": "b", "capacity": {"cpu": float("nan")}}}, "non-negative number"),
     ({"b": {"ssh": "b", "programs": "p2"}}, "programs must be a list"),
     ({"b": "remote1"}, "must be a mapping"),
+    ({"b": {"ssh": "-oProxyCommand=x"}}, "hosts.b.ssh"),
 ])
 def test_a_malformed_host_is_skipped_and_named(hosts, message):
     pool = ResourcePool.from_dict({"cpu": 1, "hosts": hosts})

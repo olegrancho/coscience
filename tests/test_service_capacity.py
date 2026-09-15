@@ -144,9 +144,11 @@ def test_ledger_status_lists_every_host(tmp_path):
     status = Service(tmp_path).ledger_status()
     assert status["hosts"] == [
         {"name": "local", "ssh": "", "placeable": True, "programs": [], "run_root": "",
-         "capacity": {"cpu": 24.0}, "available": {"cpu": 24.0, "workers": 3.0}},
+         "capacity": {"cpu": 24.0}, "available": {"cpu": 24.0, "workers": 3.0}, "gpus": [],
+         "shared": False, "owner": "", "notes": ""},
         {"name": "remote1", "ssh": "remote1", "placeable": False, "programs": ["p2"],
-         "run_root": "~/coscience-runs", "capacity": {"cpu": 28.0}, "available": {}},
+         "run_root": "~/coscience-runs", "capacity": {"cpu": 28.0}, "available": {}, "gpus": [],
+         "shared": False, "owner": "", "notes": ""},
     ]
 
 
@@ -178,3 +180,40 @@ def test_ledger_status_reports_a_malformed_host_and_keeps_serving(tmp_path):
     assert [h["name"] for h in status["hosts"]] == ["local"]
     assert status["capacity"] == {"cpu": 4.0}
     assert status["host_errors"] == ["hosts.typo: needs ssh (an ssh alias or user@host)"]
+
+
+def test_ledger_status_describes_each_card(tmp_path):
+    from coscience.ledger import Ledger
+    from coscience.resources import load_pool
+    _write(tmp_path, "cpu: 4\ngpus:\n  - {model: A, vram_gb: 24}\n")
+    led = Ledger(load_pool(tmp_path), tmp_path / ".coscience" / "leases.json")
+    led.load()
+    led.acquire("sp1", {"gpu_vram_gb": 8}, now=0.0, ttl=60.0)
+
+    status = Service(tmp_path).ledger_status()
+
+    assert status["hosts"][0]["gpus"] == [
+        {"index": 0, "model": "A", "vram_gb": 24.0, "whole": False, "shared_gb": 8.0}]
+    assert status["leases"][0]["gpu_devices"] == [0]
+    assert status["capacity"]["gpu"] == 1.0
+    assert status["used"]["gpu"] == 1.0
+
+
+def test_set_capacity_keeps_the_card_list_and_drops_the_count(tmp_path):
+    _write(tmp_path, "cpu: 4\ngpu: 1\ngpus:\n  - {vram_gb: 24}\n")
+    Service(tmp_path).set_capacity({"cpu": 8, "gpu": 3})
+    written = yaml.safe_load((tmp_path / ".coscience" / "resources.yaml").read_text())
+    assert written == {"cpu": 8.0, "gpus": [{"vram_gb": 24}]}
+
+
+@pytest.mark.parametrize("name", ["gpus", "gpu_vram_gb"])
+def test_set_capacity_refuses_gpu_detail_names(tmp_path, name):
+    with pytest.raises(ValueError, match=f"'{name}' is reserved"):
+        Service(tmp_path).set_capacity({name: 1})
+
+
+def test_set_capacity_keeps_the_count_beside_a_malformed_card_list(tmp_path):
+    _write(tmp_path, "cpu: 4\ngpu: 1\ngpus: 24GB\n")
+    Service(tmp_path).set_capacity({"cpu": 8, "gpu": 1})
+    written = yaml.safe_load((tmp_path / ".coscience" / "resources.yaml").read_text())
+    assert written == {"cpu": 8.0, "gpu": 1.0, "gpus": "24GB"}

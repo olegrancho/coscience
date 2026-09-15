@@ -33,6 +33,7 @@ def test_submit_then_list_and_get(tmp_path):
     assert row == {"id": "sp1", "status": "proposed", "title": "cure", "summary": "",
                    "goals": "cure", "program": None, "priority": 3, "steps": 1,
                    "results": [], "rationale": "", "resources_required": {"gpu": 1.0},
+                   "distributed": False,
                    # No resources.yaml here, so the pool is empty and a gpu can never be granted.
                    "unrunnable": "needs gpu 1 but capacity is 0",
                    "started_at": None, "model": DEFAULT_MODEL, "activity": None,

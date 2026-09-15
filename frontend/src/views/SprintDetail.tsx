@@ -8,7 +8,7 @@ import { Transcript } from "../components/Transcript";
 import { FeedbackThread } from "../components/FeedbackThread";
 import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
-import { AbsTime, BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, ZoomableImg, isImageName, voterId } from "../components/ui";
+import { AbsTime, BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, ZoomableImg, describeCompute, isImageName, voterId } from "../components/ui";
 import { markSeen } from "../sprintSeen";
 import PageToc, { type TocEntry } from "../components/PageToc";
 import SprintEditModal from "../components/SprintEditModal";
@@ -245,7 +245,7 @@ export default function SprintDetail() {
   const actions = availableActions(s.status as SprintStatus);
   const progTitle = program.data?.title || prog;
   const isDone = s.status === "done";
-  const resources = Object.entries(s.resources_required);
+  const compute = describeCompute(s.resources_required, s.distributed);
 
   const approve = async () => {
     try { await api.approveSprint(id); notifications.show({ color: "teal", title: "Approved", message: "Added to the PM's queue — it schedules and runs it when ready. Use Run to force it now." }); refresh(); }
@@ -587,10 +587,10 @@ export default function SprintDetail() {
         </Card>
         <Card padding="lg" radius="md" style={cardStyle}>
           <div className="eyebrow" style={{ marginBottom: 10 }}>{isDone ? "compute it used" : "compute it will use"}</div>
-          {resources.length ? (
+          {compute.length ? (
             <Stack gap={6}>
-              {resources.map(([k, v]) => (
-                <Group key={k} justify="space-between"><Text size="sm" c="dimmed">{k}</Text><Text size="sm" className="mono">{v}</Text></Group>
+              {compute.map((line) => (
+                <Text key={line} size="sm" className="mono">{line}</Text>
               ))}
             </Stack>
           ) : <Text size="sm" c="dimmed">Minimal — no reserved resources.</Text>}
