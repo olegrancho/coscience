@@ -436,3 +436,54 @@ the worker's failure cap instead of holding its lease forever. Left open: removi
 not gated like adding one (it makes no SSH call, like the capacity and pause routes); a corrupt
 health file restarts the 30-minute count; the sprint list reads the health file once per pinned
 sprint; more than eight unreachable servers still add about 20 s per eight to a cycle.
+
+**O8 as built:** a sprint escalates when its worker agent writes `escalate.json` (read on a clean
+or a failed exit, removed at every launch, and winning over `finished.json`; a job declared in the
+same turn is still tracked), or when the dispatcher sees it sleeping on a job whose host is quiet.
+The sprint moves to `escalated`: its lease is kept and renewed, its worker slot released, it is
+never granted or yielded, and a job it has keeps being watched and collected, but the agent is not
+relaunched. The escalation is a sprint thread marked `kind: "escalation"`, addressed to the PM, or
+to a human when the PM already answered this sprint once. One function applies every answer and
+returns a reason instead of failing: the PM may resume (its instructions reach the next run once),
+reallocate (the dispatcher then stops and collects on the old host, noting a stop it could not make,
+releases the lease and re-pins the sprint to the new host, which starts a fresh session) or pass it
+to a human; a human may resume, reallocate or stop at either level, and a human answer resets the
+repeat rule, as does re-running a finished sprint. The dashboard shows the escalation on the sprint
+page with the human answers and a count of human-level escalations in the header.
+
+**O8, left open:** escalating a sprint on a host a human drained is not automatic (only a quiet
+host raises one); a program list has a "needs you" badge but no per-program count; a human's
+replies in the escalation thread are for people only — the agent reads only the answer's
+instructions; the escalation beat and a human answer still race in theory on anything other than
+job fields (answers never write job fields, and the beat reloads before saving); and the report
+check for claimed answers is a text heuristic.
+
+
+**O14 as built.** A server's program access has three shapes: no key (every program),
+`programs:` (only these) and `exclude_programs:` (every program but these). The third
+keeps a program off a server without freezing the list of every other program, so a
+program created later still runs there. This machine takes the same two keys at the
+top level of `resources.yaml`. Both are edited from the server dialog and from a
+program's settings (one checkbox per server); both write the same keys. Removing the
+last program from an "only these" list is refused rather than read as every program.
+Sprints pinned to a server that loses their program are reported back to whoever made
+the change and stay where they are.
+
+**O15 as built.** Drain and its two-minute remove wait are gone. Remove marks a server
+(`remove: true`): it takes no new grants, and the dispatcher deletes it at the start of
+a cycle, before granting, once no lease names it and no unfinished sprint's work is on
+it. Only the dispatcher grants, so deleting there cannot race a grant, and no human
+timing is involved. Every writer of `resources.yaml` holds one file lock. A marked
+server lists what it is waiting on; Keep takes the mark back. A hand-written
+`drain: true` still keeps new work off a server, and Keep clears it.
+
+**O11 as built.** After a probe, a human can ask an agent to survey the server. The survey
+is a full-scope chat session scoped to the server (`.coscience/host-surveys/<name>/`),
+built on program chat's thread store, launch, collection, gates and call log (kind
+`survey`). The agent reaches the server over SSH, may write only inside the run root and
+its own working directory, and writes `proposal.json`: capacity, GPU cards, notes and
+overrides. The backend validates the proposal before showing it; an invalid one is shown
+as an error and never applied. A failed check stays failed: the server enters the pool
+over it only when the human accepts overrides and every failed check has the agent's
+written reason, and those reasons are kept in the server's notes. Behind
+`COSCIENCE_ALLOW_ONBOARDING`. This machine's Detect is unchanged.

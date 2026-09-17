@@ -1,43 +1,19 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 82
-last_updated: 2026-09-14
+version: 107
+last_updated: 2026-09-17
 ---
 
 # To QC
 
-### O3. Describe GPUs by their VRAM
+### O13. Document the remote-server switches for deployments
 
-Hosts list GPUs as cards with VRAM, leases hold specific cards whole or as VRAM
-shares (`gpu_vram_gb`), and the worker agent is told its cards as
-`CUDA_VISIBLE_DEVICES`.
+`CLAUDE.md` § Deployment now has a "Remote servers" section: what `COSCIENCE_ALLOW_ONBOARDING`
+and `COSCIENCE_ALLOW_REMOTE` turn on, which processes need each, and how to switch them
+off. This host's setup file says where it sets them.
 
-**Check:** after deploy, `GET /api/ledger` shows the local card with `vram_gb: null`
-held whole by the running GPU sprint, exactly as the count did before. Sharing starts
-only once the card's VRAM is declared under `gpus:`; declare it only after every host
-running the platform has O3, since older code cannot read the list. 1514 tests passed at landing.
-
-### O4. Give a sprint's request the shape of real compute
-
-A request names `cpu`, `memory_gb`, `gpu` (whole cards) and `gpu_vram_gb` (shared
-VRAM) plus a recorded `distributed` flag; the PM sees each host and the keys it cannot
-give, and the edit dialog and sprint page speak the same shape.
-
-**Check:** after deploy, a PM cycle's prompt lists the local host with "never request:
-memory_gb, gpu_vram_gb", and the edit dialog's compute fields round-trip on a proposed
-sprint. `distributed` is recorded only; spanning hosts is not built. 1528 Python and 363 frontend tests passed at
-landing.
-
-### O5. Onboard a server and discover what it offers
-
-The Compute page's Add-server dialog probes a server over key-only SSH, runs four
-checks, shows facts and warnings, and confirms it into `resources.yaml` `hosts:`; a
-server whose checks failed cannot be added.
-
-**Check:** set `COSCIENCE_ALLOW_ONBOARDING=1` in the service environment (it is off by
-default because a probe ssh-es with the service account's keys), then probe one real
-server and compare the facts with the machine: CPU, memory, each GPU's VRAM, disk, and
-the four checks. A confirmed server takes work only with `COSCIENCE_ALLOW_REMOTE=1` (O6). 
+**Check:** read `CLAUDE.md` § Remote servers and the environment-file paragraph in this
+host's `local_setup_*.md`. Both edits are uncommitted in the main checkout.
 
 ### O6. Place and run work on a remote host
 
@@ -47,11 +23,20 @@ them with `host` and `collect`. The platform watches them (an SSH failure is
 "unknown", a reboot is "lost"), stops them only by verified identity, and copies
 outputs into `collected/` before waking the agent.
 
-**Check:** after deploy with the variable unset, the Compute page still shows remote
-servers as "waits for remote launch" and local sprints run as before. Then set it for
-both the HTTP server and the dispatch loop, and reserve an onboarded server for one
-test program. A sprint there should launch a job over SSH, sleep, and wake with a note
-naming what was copied into `collected/`. Stopping it should end the job on the server.
+**Check:** set up so far:
+- the page read as before with remote placement off;
+- `COSCIENCE_ALLOW_REMOTE=1` is now set for the backend and both loops;
+- a remote server is onboarded, answering, and reserved for the test program.
+
+The test plan, waiting on Claude usage and a free worker slot (all three are busy):
+1. Create a test-program sprint with a small CPU request and **Memory (GB) = 4**. This machine declares no memory, so the sprint can only be placed on the remote server; until O14, nothing else keeps the program off this machine.
+2. Give it goals that launch a short job over SSH into its run folder, write an output, and declare the job with `host` and `collect`.
+3. Release it and watch:
+   - its lease names the remote server;
+   - the sprint sleeps on the job;
+   - it wakes with a note naming what was copied into `collected/`.
+4. Run a second one and stop it mid-job: the job must end on the server.
+
 Spreading one request across servers is not built. 1662 Python and 375 frontend tests passed at landing.
 
 ### O7. Keep hosts healthy, visible and removable
@@ -62,32 +47,68 @@ page's servers card shows health, what is in use, leftover run folders and stran
 leases, and can drain and remove a server. One sprint's failing beat no longer stalls
 the others; after three in a row that sprint is failed.
 
-**Check:** after deploy, with `COSCIENCE_ALLOW_REMOTE` unset, the Compute page reads as
-before ("waits for remote launch" on remote servers). With it set for both processes and
-one onboarded test server:
-- `.coscience/host-health.json` records the server answering;
-- blocking its SSH for 30 minutes marks it quiet, and no new sprint lands there;
-- Drain then Remove is refused while a sprint still has work there and for 2 minutes
-  after the drain.
+**Check:** checked so far on the live platform:
+- with remote placement off, the page read as before;
+- with it on, the remote server reads "answering" and its use and leftovers show;
+- an unreachable test server (reserved for the test program, its SSH target never resolves) reads "not answering since …" with the SSH reason.
+
+Left to check on the unreachable server:
+- it turns quiet 30 minutes after its first failure and says it takes no new work;
+- Drain then Remove: Remove stays disabled until drained and for 2 minutes after, then removes it (which also cleans up the test server).
+
+The failing-beat isolation and the three-strike cap are covered by tests only. The time reads `23.03` on a dot-separator locale (P2).
 
 Still open, listed in spec §11: copy-back inside the beat, the footprint record for
 collect paths outside the run directory, and ungated remove. 1712 Python and 388 frontend tests pass on the landed code.
 
-# To Do (sprint)
-
 ### O8. Let a worker agent pull the red button
 
-Give a worker agent a way to stop and ask for help, which the PM either resolves or
-passes on to a human.
+A worker agent writes `escalate.json`, or the platform raises one when a sprint sleeps on a
+quiet server's job. The sprint is then held as `escalated`, keeping its lease and job. The PM
+answers with resume, reallocate or to_human; a human can resume, move or stop from the sprint
+page. Human-level escalations show in the header and on the program's sprint list.
 
-A server disconnect, a job it cannot explain, or a belief that it broke something
-should halt the sprint rather than be worked around: the dispatcher holds the sprint
-and does not relaunch the agent until the escalation is answered. The PM sees it on
-its next cycle and either resumes the sprint with instructions, reallocates it to
-another host, or escalates to a human, who must see it on the dashboard
-unmistakably; the PM never attempts a hands-on repair. The dispatcher
-raises the same signal itself when a host stays unreachable while the agent sleeps
-on a job, and this adds a held state to `docs/sprint-lifecycle.md`.
+**Check:** after it lands, write an `escalate.json` by hand in a test sprint's folder and let
+its agent end its turn. The sprint should turn `escalated`, its escalation should show on the
+sprint page, and the PM's next cycle should list it. Then answer Resume from the panel: the
+next run's instructions carry the answer. A second escalation on the same sprint goes to a
+human and shows "N need you" in the header. Landed and deployed.
+
+### O10. Configure each server from its card
+
+Every server card on Compute has a Config button. A remote server's dialog is prefilled,
+can be re-probed, and saves with "Update configuration"; only a new SSH target or run folder
+needs a passing probe. This machine's dialog has Detect, which fills the GPU cards with their
+VRAM. It shows the detected CPU and memory beside the declared values, each with a
+"use detected" link.
+
+**Check:** after it lands, open Config on this machine and press Detect. The GPU should show its real VRAM,
+CPU should stay at the declared count with the detected thread count beside it, and memory
+stay empty unless you use detected. Update, and confirm `resources.yaml` keeps workers and housekeepers.
+On a remote server, change notes and Update with no probe needed. Change its SSH target, and Update
+stays blocked until a re-probe passes. "Use detected" memory takes the full RAM, not a 90%
+share. Landed and deployed.
+
+### O14. Choose where each program may run from either side
+
+A server's dialog picks its programs from a list with an "All programs" switch and exceptions, Program settings has one checkbox per server, and this machine can be restricted like any other server.
+
+**Check:** in a program's settings, uncheck this machine and save: the servers card on Compute reads "all except <program>" on this machine and none of that program's new sprints land here. Then Config a remote server, turn All programs off and see Update blocked until a program is picked. Landed and deployed.
+
+### O15. Remove a server with one button
+
+The servers card has one Remove button: a server with nothing on it leaves the pool within a dispatch cycle, one with work on it takes no new work and leaves when that work ends, and Keep takes a removal back.
+
+**Check:** on Compute, Remove an idle test server and see it gone within seconds, with a "removed" commit in the substrate; Remove a server holding a sprint and see "removing — waiting on <sprint>", then Keep. Once deployed this replaces O7's Drain → Remove steps. Landed and deployed.
+
+### O11. Let an agent own server discovery
+
+After a probe, the server dialog can start an agent survey: a full-access session that checks the server over SSH and proposes capacity, GPU cards and notes, which the dialog can apply; a failed check is accepted only through the agent's written reasons plus an explicit "with the agent's overrides" click.
+
+**Check:** probe a test server, click Survey with an agent, wait for its reply and proposal, then Use proposal and Add: the pool entry carries the proposal's cards and notes. Re-probe it and confirm that its old overrides are refused as stale. Starts a real Claude session on this machine with this backend's SSH keys. Known and parked: a finished reply can be collected twice by the dashboard and the dispatcher at once, as in program chat today. Landed and deployed.
+
+
+# To Do (sprint)
 
 ### O9. Keep per-program host notes the PM maintains
 
@@ -100,6 +121,39 @@ A shared server can be fungible CPU for one program's batch runs while its old G
 driver and C library rule out current PyTorch builds for another. Worker agents find such quirks and report them; the PM folds the reports
 into the notes, so the next sprint on that host starts from what the last one
 learned.
+
+### O12. Review the server cards against real servers
+
+Once O8–O11 work and a few real servers run sprints, review the Compute page's server
+cards and redesign them if they don't hold up.
+
+The current card was designed against test fixtures. Several real servers with GPUs,
+reservations, health states, leftovers and notes will show whether it reads at a glance or
+needs another layout, such as one card per server or a denser table. The outcome may be
+"keep it". Blocked on having servers onboarded and in use, not on code.
+
+### O16. Reserve memory for every sprint
+
+Declare `memory_gb` on every server, this machine included, and give each server a
+default reservation for sprints that do not ask for memory.
+
+The ledger gates memory only where a server declares it: this machine declares none, so
+memory is never counted here, and a sprint that asks for none reserves none on any server
+even if it uses tens of GB. With memory declared everywhere and a default per server
+(e.g. 4 GB) charged when a request omits `memory_gb`, the ledger reflects every sprint.
+The PM's "never request: memory_gb" line then goes away, and the capacity editor and the
+server dialog show and edit the default.
+
+### O17. Tell the worker agent its memory budget
+
+Add a memory line to the worker agent's instructions: the amount its sprint reserved and
+that its processes must stay under it.
+
+Blocked on O16, which makes every sprint's reservation real. The instructions already
+carry a GPU section naming the cards and VRAM share. Memory gets the same treatment on
+trust, with no enforcement: nothing stops a job from using more. Enforcing it (a cgroup
+or `MemoryMax`) and checking free memory at grant time stay unplanned until a job
+actually runs a server out of memory.
 
 # To Do (backlog)
 
@@ -343,7 +397,67 @@ target. A read-only job exercises launch, parse, gate and call log end to end, a
 side-by-side comparison says whether Codex is worth routing real work to. Which job
 to pilot is a decision.
 
+## P. UI updates
+
+The dashboard shows a human everything they need to see and change, and uses the
+screen space it takes.
+
+### P1. Redesign the sprint edit dialog
+
+Rebuild the sprint edit dialog so every editable field is shown and the screen space is
+used well.
+
+The dialog is a narrow single column (Mantine's default modal size). It shows goals,
+priority, preemptible and the five compute fields. It leaves out the plan and the worker
+model, which the edit API already accepts. Title, summary and rationale cannot be edited
+at all. A wider layout could group the fields into what the work is (goals, plan) and how
+it runs (priority, preemptible, model, compute), and keep the existing rule for which
+fields each status may change.
+
+### P2. Show times the same way whatever the browser's locale
+
+Format every time on the dashboard as 24-hour `HH:MM`, and every date in one fixed style,
+instead of taking the browser's locale.
+
+A server's "not answering since" read `23.03` on a browser whose locale writes times with a
+dot. The same locale formatting is used for the exact times in tooltips and the short dates
+(`components/ui.tsx`), the call log's timestamps (`CallLog.tsx`) and the servers card
+(`HostsCard.tsx`). One shared formatter used everywhere fixes all of them, and does not
+depend on which locale a viewer's browser reports.
+
+## Q. Code rot
+
+The platform does what someone decided it should, and never acts on a signal because it
+happens to be there.
+
+### Q1. Audit the codebase for rot and remove it
+
+Find and fix every place where code reads a signal and acts on it without anyone deciding
+it should, starting with an audit. Rot here means warnings, statuses, flags, fallbacks or
+thresholds that gate, retry or change behaviour because a value exists, not because a
+person asked for that behaviour.
+
+Example found on 09-15: the launch gate blocked chat and the PM loop because Claude's
+rate-limit reading said `allowed_warning` (the week running fast, calls still going through).
+Nobody reads that warning, and nothing should act on it. The audit lists every such reader
+across the backend, loops and dashboard: what it reads, what it changes, and whether anyone
+asked for it. It includes heuristics that quietly change outcomes, flags nobody sets, and
+fallbacks that hide a failure. Each finding is removed or made an explicit choice, and a
+short note in `CLAUDE.md` says what not to reintroduce.
+
 # Done
+
+### O5. Onboard a server and discover what it offers
+
+The Compute page's Add-server dialog probes a server over key-only SSH, runs four checks and adds it to the pool; the first real server was onboarded with it on the live platform.
+
+### O4. Give a sprint's request the shape of real compute
+
+A request names `cpu`, `memory_gb`, `gpu` and `gpu_vram_gb`; the PM's COMPUTE block lists what each host can give, and the edit dialog and sprint page round-trip the same shape.
+
+### O3. Describe GPUs by their VRAM
+
+Hosts list GPUs as cards with VRAM and a lease holds whole cards or VRAM shares; this machine's GPU is declared with its VRAM and read back by the live Compute page.
 
 ### O2. Model compute as hosts, not one flat pool
 
@@ -377,18 +491,3 @@ its report), and a cut-off run keeps those objects; the cut-off path is unit-tes
 
 The call log now holds 31 rebuilt wiki calls from 08-26 to 09-04 ($57.70), visible on
 Compute; `python -m coscience.call_backfill` adds any others without duplicating.
-
-### A4. Warn when the ledger and the bundle disagree
-
-`coscience wiki --status` flags a ledger behind its bundle; with one test result
-removed from the ledger it read "1 unrecorded" until `--reconcile --apply`.
-
-### D2. Stop reporting pages as created when they already existed
-
-A wiki run's page counts are measured from a snapshot of the bundle; a test-wiki run
-recorded 1 created and 4 updated where the agent claimed 7 updates.
-
-### F10. Declare a dead call lost without waiting out the grace
-
-The dispatcher collects finished chat turns each cycle, so a call whose process is
-gone reads `lost` at once; a chat reply closed 5s after it finished with no reader.
