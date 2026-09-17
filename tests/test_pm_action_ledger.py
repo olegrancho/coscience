@@ -5,6 +5,8 @@ sprint, pruned the idea pool and adopted an artifact, while every action list ca
 empty. Nothing happened, and no log line, state field or report section showed it — the
 sprint simply sat in `approved` and every later beat printed "idle — no input changed".
 """
+import pytest
+
 from coscience.models import Program, Sprint, SprintStatus
 from coscience.pm_agent import actions_ledger, pm_beat, unbacked_claims
 from coscience.pm_reasoner import FakeReasoner, PMCycleOutput
@@ -105,6 +107,33 @@ def test_claim_check_covers_prune_and_adopt():
     assert unbacked_claims("Adopted the AUROC tables.", {"adopted": []}) == [
         "adopted an artifact"]
     assert unbacked_claims("Adopted the AUROC tables.", {"adopted": ["a1"]}) == []
+
+
+_ESCALATION_FLAG = "resumed, reallocated, or passed an escalation to a human"
+
+
+@pytest.mark.parametrize("report", [
+    "Resumed the escalated sprint p1-s2 with instructions.",
+    "Passed p1-s2 to a human.",
+])
+def test_claim_check_flags_real_escalation_answers(report):
+    assert unbacked_claims(report, {"escalations_answered": []}) == [_ESCALATION_FLAG]
+
+
+@pytest.mark.parametrize("report", [
+    "We resumed work on the data after the fix.",
+    "The sprint will resume once gpu2 is back.",
+    "Nothing to reallocate this cycle.",
+    "p1-s3 is still escalated to a human; waiting on Oleg.",
+    "I did not resume p1-s3.",
+])
+def test_claim_check_does_not_flag_ordinary_prose(report):
+    assert unbacked_claims(report, {"escalations_answered": []}) == []
+
+
+def test_claim_check_is_not_flagged_when_backed(substrate):
+    assert unbacked_claims("Resumed the escalated sprint p1-s2.",
+                           {"escalations_answered": [("p1-s2", "resume")]}) == []
 
 
 # --- the loop's beat line ---

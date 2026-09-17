@@ -11,7 +11,7 @@ import re
 import time
 from dataclasses import dataclass
 
-from coscience import artifacts, graph, housekeeping, threads, usage_meter
+from coscience import artifacts, escalation, graph, housekeeping, threads, usage_meter
 from coscience.models import Sprint, SprintStatus, Idea, set_status
 from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
 
@@ -44,7 +44,34 @@ _CLAIM_CHECKS = (
     ("released an approved sprint", r"\breleas(?:e|ed|es|ing)\b", "released"),
     ("pruned the idea pool", r"\bprun(?:e|ed|es|ing)\b", "ideas_removed"),
     ("adopted an artifact", r"\badopt(?:ed|s|ing)\b", "adopted"),
+    # A report may narrate answering an escalation (resume/reallocate/to_human)
+    # without the cycle ever having submitted one in escalation_answers. Tied to
+    # escalation context (not bare "resume"/"reallocate", which show up in plenty
+    # of ordinary prose — "the job will resume", "nothing to reallocate") so this
+    # only fires on an actual claim of answering one:
+    #  - resumed/reallocated an ESCALATION: "resumed"/"reallocated" sharing a
+    #    clause with "escalat..." (raised/escalated/still escalated, etc.);
+    #  - handed one to a human: passed/handed/sent/routed/moved ... to (a) human.
+    ("resumed, reallocated, or passed an escalation to a human",
+     r"\b(?:resumed|reallocated)\b[^.]{0,60}\bescalat"
+     r"|\b(?:passed|handed|sent|routed|moved)\b[^.]{0,40}\bto(?:\s+a)?[\s_]+human\b",
+     "escalations_answered"),
 )
+
+# Negation words that, immediately before a claim match in the same sentence,
+# mean the report is DENYING the action, not claiming it ("I did not resume
+# p1-s3" must never be flagged as an unbacked claim of resuming it).
+_NEGATION_RE = re.compile(r"\b(?:not|n't|never)\b", re.I)
+
+
+def _unnegated_match(pattern: str, text: str) -> bool:
+    for m in re.finditer(pattern, text, re.I):
+        # Look back only to the start of the current sentence, so a negation in
+        # an EARLIER sentence never suppresses a real claim in this one.
+        clause = re.split(r"[.!?]", text[:m.start()])[-1]
+        if not _NEGATION_RE.search(clause):
+            return True
+    return False
 
 
 def unbacked_claims(report: str, actions: dict) -> list[str]:
@@ -53,10 +80,11 @@ def unbacked_claims(report: str, actions: dict) -> list[str]:
     Deliberately a heuristic on the prose, so it only ever WARNS — a false positive
     must not cost a cycle. `actions` maps the summary key to what was applied."""
     flagged = []
+    report = report or ""
     for label, pattern, key in _CLAIM_CHECKS:
         applied = actions.get(key)
         count = applied if isinstance(applied, int) else len(applied or ())
-        if not count and re.search(pattern, report or "", re.I):
+        if not count and _unnegated_match(pattern, report):
             flagged.append(label)
     return flagged
 
@@ -81,8 +109,11 @@ def actions_ledger(actions: dict) -> str:
     for key, label in (("ideas_added", "Ideas added"), ("ideas_removed", "Ideas pruned")):
         if actions.get(key):
             lines.append(f"- {label}: {actions[key]}")
+    for sid, action in actions.get("escalations_answered") or ():
+        lines.append(f"- Escalation answered: `{sid}` ({action})")
     for key, label in (("release_skipped", "Release FAILED"), ("reopen_skipped", "Reopen FAILED"),
-                       ("adopt_skipped", "Adopt FAILED")):
+                       ("adopt_skipped", "Adopt FAILED"),
+                       ("escalation_skipped", "Escalation answer FAILED")):
         for skip in actions.get(key) or ():
             lines.append(f"- {label}: `{skip['id']}` — {skip['why']}")
     for claim in actions.get("unbacked_claims") or ():
@@ -123,6 +154,12 @@ def _context_payload(context: PMContext) -> dict:
     # "change" nobody made — the payload is a wire format, not just a local dict.
     if context.instructions:
         payload["instructions"] = context.instructions
+    # Same reasoning: a program with no escalations must not gain a new fingerprint
+    # key, or every existing program wakes once this ships. Keyed on (sprint_id,
+    # thread_id) — the fields inside an escalation are static once raised, so the
+    # PM re-reasons the moment one appears, not on every unrelated detail.
+    if context.escalations:
+        payload["escalations"] = sorted((e["sprint_id"], e["thread_id"]) for e in context.escalations)
     return payload
 
 
@@ -144,6 +181,7 @@ _TRIGGER_LABELS = {
     "human_ideas": "a human idea",
     "idea_comments": "comment on an idea",
     "artifact_feedback": "comment on an artifact",
+    "escalations": "sprint escalated",
 }
 
 
@@ -185,8 +223,13 @@ def gather_context(substrate, program_id: str) -> PMContext:
     # the substrate, and this runs on every idle beat of the PM loop — the lineage
     # block below used to trigger a second full walk for the same program.
     program_sprints = [s for s in substrate.iter_sprints() if s.program == program_id]
+    escalations: list[dict] = []
     for s in program_sprints:
         for th in s.threads:
+            if th.get("kind") == "escalation":
+                # Escalations are surfaced separately (below) as `escalations`, with
+                # their own PM-facing shape and rules — never as ordinary feedback.
+                continue
             if (th.get("target") == "pm" and threads.needs_reply(th)
                     and s.status not in (SprintStatus.CANCELED, SprintStatus.PARKED)):
                 sprint_feedback.append({
@@ -222,6 +265,28 @@ def gather_context(substrate, program_id: str) -> PMContext:
                           SprintStatus.HIBERNATED):
             open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals,
                                  "priority": s.priority})
+        elif s.status == SprintStatus.ESCALATED:
+            # A human-level escalation is not the PM's to answer (see
+            # docs/sprint-lifecycle.md) — only "pm" ones reach its context.
+            progress = substrate.load_progress(s.id)
+            esc = progress.escalation or {}
+            # A pending human stop (Fix D) already refuses every PM answer — showing
+            # it here would just have the PM's answer bounce off "a stop is already
+            # pending for this sprint" every cycle until the dispatcher carries the
+            # stop out.
+            if esc.get("level") == "pm" and not progress.stop_requested:
+                from coscience.resources import load_pool
+                hosts_allowed = escalation.move_targets(
+                    load_pool(substrate.repo_root), program_id, progress.host, substrate.repo_root)
+                escalations.append({
+                    "sprint_id": s.id, "title": s.title,
+                    "thread_id": str(esc.get("thread_id") or ""),
+                    "by": str(esc.get("by") or ""), "host": str(esc.get("host") or ""),
+                    "what": str(esc.get("what") or ""), "tried": str(esc.get("tried") or ""),
+                    "may_have_broken_something": bool(esc.get("may_have_broken_something")),
+                    "needs": str(esc.get("needs") or ""),
+                    "hosts_allowed": hosts_allowed,
+                })
     # Oldest first, so "the most recent N" is expressible when the prompt is rendered.
     completed.sort(key=lambda s: s["finished_at"])
     failed.sort(key=lambda s: s["finished_at"])
@@ -287,6 +352,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
         graph_lines=graph_lines,
         artifacts=artifact_dicts, artifact_feedback=artifact_feedback,
         compute_capacity=capacity, compute_leased=leased, compute_hosts=hosts,
+        escalations=escalations,
     )
 
 
@@ -318,8 +384,9 @@ def _compute(substrate, program_id: str) -> tuple[dict, dict, list[dict]]:
                 if ledger is not None else {})
         for k, v in held.items():
             leased[k] = leased.get(k, 0.0) + v
-        closed = ("draining" if h.drain else
-                  ("not answering" if host_health.state(health.get(h.name), now) == "quiet" else ""))
+        closed = ("being removed" if h.removing else
+                  ("draining" if h.drain else
+                   ("not answering" if host_health.state(health.get(h.name), now) == "quiet" else "")))
         per_host.append({"name": h.name,
                          "capacity": {k: v for k, v in h.capacity.items() if k != GPU_KEY},
                          "gpus": [g.vram_gb for g in h.gpus],
@@ -402,6 +469,7 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
         "reopen_ids": list(output.reopen_ids),
         "release_ids": list(output.release_ids),
         "thread_replies": list(output.thread_replies),
+        "escalation_answers": list(output.escalation_answers),
         "edge_ops": list(output.edge_ops),
         "artifact_tasks": list(output.artifact_tasks),
         "adopt_artifacts": list(output.adopt_artifacts),
@@ -434,6 +502,7 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         reopen_ids=list(data.get("reopen_ids", [])),
         release_ids=list(data.get("release_ids", [])),
         thread_replies=list(data.get("thread_replies", [])),
+        escalation_answers=list(data.get("escalation_answers", [])),
         edge_ops=list(data.get("edge_ops", [])),
         artifact_tasks=list(data.get("artifact_tasks", [])),
         adopt_artifacts=list(data.get("adopt_artifacts", [])),
@@ -938,6 +1007,35 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             if hit:
                 substrate.save_artifact(art)
 
+    # --- escalation answers: the PM's decision for each pm-level escalation shown
+    # in its context (resume / reallocate / to_human). Guarded to this program's own
+    # sprints, same shape as release/reopen below; the substrate write itself (thread
+    # append, status change, progress fields) lives in escalation.answer. ---
+    escalations_answered: list[tuple[str, str]] = []
+    escalation_skipped: list[dict] = []
+    for ans in staged.output.escalation_answers:
+        if not isinstance(ans, dict):
+            continue
+        sid = str(ans.get("sprint_id") or "")
+        action = str(ans.get("action") or "")
+        if not sid or not action:
+            continue
+        if not (substrate.sprint_dir(sid) / "sprint.md").is_file():
+            escalation_skipped.append({"id": sid, "why": "no such sprint"})
+            continue
+        sp = substrate.load_sprint(sid)
+        if sp.program != program_id:
+            escalation_skipped.append({"id": sid, "why": f"belongs to program {sp.program}"})
+            continue
+        why = escalation.answer(substrate, sid, action,
+                                instructions=str(ans.get("instructions") or ""),
+                                host=str(ans.get("host") or ""), by="pm", now=now_ts,
+                                thread_id=str(ans.get("thread_id") or ""))
+        if why:
+            escalation_skipped.append({"id": sid, "why": why})
+        else:
+            escalations_answered.append((sid, action))
+
     # --- release: put an APPROVED sprint into production (-> queued). The approved
     # pool is the PM's managed queue; it releases items here as it sees need, and the
     # dispatcher runs queued sprints by priority as compute frees. Guarded to this
@@ -987,7 +1085,9 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                "dropped": dropped, "adopted": adopted,
                "ideas_added": ideas_added, "ideas_removed": ideas_removed,
                "release_skipped": release_skipped, "reopen_skipped": reopen_skipped,
-               "adopt_skipped": adopt_skipped}
+               "adopt_skipped": adopt_skipped,
+               "escalations_answered": escalations_answered,
+               "escalation_skipped": escalation_skipped}
     actions["unbacked_claims"] = unbacked_claims(staged.output.report, actions)
     # The reasoner's prose, then the platform's own record of what it applied.
     substrate.save_report(program_id, staged.output.report + actions_ledger(actions))
@@ -1020,6 +1120,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             "released": list(released), "reopened": list(reopened),
             "release_skipped": [dict(s) for s in release_skipped],
             "adopt_skipped": [dict(s) for s in adopt_skipped],
+            "escalations_answered": list(escalations_answered),
+            "escalation_skipped": [dict(s) for s in escalation_skipped],
             "unbacked_claims": list(actions["unbacked_claims"]),
         })
         pm.activations = pm.activations[-50:]          # keep the recent timeline bounded
@@ -1034,4 +1136,6 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             "released": released, "reopened": reopened,
             "release_skipped": release_skipped, "reopen_skipped": reopen_skipped,
             "adopt_skipped": adopt_skipped,
+            "escalations_answered": escalations_answered,
+            "escalation_skipped": escalation_skipped,
             "unbacked_claims": actions["unbacked_claims"]}

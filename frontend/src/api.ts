@@ -1,7 +1,7 @@
 export interface CurrentUser { username: string; name: string; initials: string }
 export interface MeResponse { user: CurrentUser | null; required: boolean }
 export interface ProgramRow { id: string; title: string; status: string; goals: string }
-export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string; last_status_at: number | null; votes: VoteTally }
+export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string; last_status_at: number | null; votes: VoteTally; escalation_level: "" | "pm" | "human" }
 export interface PMActivation { at: number; cycle: number; triggers: string[]; submitted: string[]; forced: boolean }
 export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
@@ -40,6 +40,7 @@ export interface SprintRow {
   priority: number; steps: number; results: string[];
   rationale: string; resources_required: Record<string, number>;
   distributed?: boolean;
+  escalation_level: "" | "pm" | "human";
   unrunnable?: string;    // why it can never be granted (asks above total capacity); "" if it can
   started_at: number | null; last_status_at: number | null;
   model: string; activity: SprintActivity | null;
@@ -82,6 +83,19 @@ export interface CallRow {
   limits_before: UsageWindow | null;
   limits_after: UsageWindow | null;
 }
+// A worker agent or the platform has stopped and is asking for help; the
+// sprint is held (status "escalated") until the PM or a human answers.
+// `level: "pm"` — the PM answers on its next cycle; `level: "human"` — no PM
+// answer worked (or none is possible) and a person must decide.
+export interface SprintEscalation {
+  level: "pm" | "human"; by: "agent" | "dispatcher"; at: number; host: string;
+  what: string; tried: string; may_have_broken_something: boolean; needs: string;
+  thread_id: string; hosts_allowed: string[];
+  stop_requested: boolean;   // a human stop is pending; the platform carries it out next cycle
+}
+export interface AttentionRow { sprint_id: string; program: string; title: string; what: string; at: number }
+export interface Attention { escalated_to_human: AttentionRow[] }
+
 export interface Sprint {
   id: string; status: string; title: string; summary: string;
   goals: string; priority: number; preemptible: boolean;
@@ -90,6 +104,7 @@ export interface Sprint {
   program: string | null; results: string[]; threads: FeedbackThreadT[];
   agent_running: boolean; started_at: number | null; error: string; lease: unknown | null;
   model: string; activity: SprintActivity | null; votes: VoteTally;
+  escalation?: SprintEscalation | null;
   decisions?: { by: string; action: string; at: number }[];
   status_history?: { status: string; at: number; by: string; action: string }[];
   created_at?: number | null;
@@ -111,22 +126,50 @@ export interface HostHealth {
 }
 export interface HostLeftover { sprint_id: string; status: string; path: string }
 export interface StrandedLease { sprint_id: string; host: string; listed?: boolean }
+export interface HostBlocker { sprint_id: string; status: string; reason: string }
 export interface LedgerHost {
-  name: string; ssh: string; placeable: boolean; programs: string[]; run_root: string;
+  name: string; ssh: string; placeable: boolean; programs: string[]; exclude_programs: string[]; run_root: string;
   capacity: Record<string, number>; available: Record<string, number>; gpus: LedgerCard[];
   shared?: boolean; owner?: string; notes?: string;
   drain?: boolean; drained_at?: number;
+  removing: boolean; waiting_on: HostBlocker[];
   health?: HostHealth; used?: Record<string, number>; leases?: number; leftover?: HostLeftover[];
 }
 export interface HostCheck { name: string; ok: boolean; detail: string }
 export interface HostDeclaration {
-  ssh: string; run_root: string; shared: boolean; programs: string[]; owner: string; notes: string;
+  ssh: string; run_root: string; shared: boolean; programs: string[]; exclude_programs: string[]; owner: string; notes: string;
 }
 export interface HostProbe {
   name: string; declared: HostDeclaration; probed_at: number; ok: boolean; error: string;
   facts: Record<string, unknown>; checks: HostCheck[]; warnings: string[];
   proposal: { capacity?: Record<string, number>; gpus?: { model: string; vram_gb: number }[] };
 }
+// POST /api/hosts/local/detect — same shape family as HostProbe, but for this
+// machine there is nothing to SSH-check, so `checks` is absent altogether
+// rather than sent empty.
+export interface LocalDetect {
+  ok: boolean; error: string; facts: Record<string, unknown>; warnings: string[];
+  proposal: { capacity?: Record<string, number>; gpus?: { model: string; vram_gb: number }[] };
+}
+export interface HostUpdate {
+  ssh?: string; run_root?: string; shared?: boolean; programs?: string[]; exclude_programs?: string[];
+  owner?: string; notes?: string; capacity?: Record<string, number>;
+  gpus?: { model: string; vram_gb: number }[]; probed_at?: number;
+  // Set only when the write is authorized by an agent survey's written overrides
+  // rather than by every check passing — see SurveyProposal.overrides.
+  accept_overrides?: boolean;
+}
+export interface SurveyOverride { check: string; reason: string }
+export interface SurveyProposal {
+  capacity: Record<string, number>; gpus: { model: string; vram_gb: number }[];
+  notes: string; overrides: SurveyOverride[];
+}
+export interface HostSurvey {
+  name: string; started: boolean; pending: boolean;
+  messages: { role: string; text: string; at: number }[];
+  proposal: SurveyProposal | null; proposal_error: string;
+}
+export interface CutOff { sprint_id: string; host: string }
 export interface Ledger {
   capacity: Record<string, number>; used: Record<string, number>;
   available: Record<string, number>; leases: unknown[];
@@ -479,6 +522,12 @@ export const api = {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     }).then(j<Sprint>),
+  answerEscalation: (id: string, body: { action: "resume" | "reallocate" | "stop"; instructions?: string; host?: string; thread_id?: string }) =>
+    fetch(`/api/sprints/${id}/escalation`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(j<Sprint>),
+  getAttention: () => fetch("/api/attention").then(j<Attention>),
   listResults: () => fetch("/api/results").then(j<ResultRow[]>),
   getResult: (id: string) => fetch(`/api/results/${id}`).then(j<ResultRow>),
   getLedger: () => fetch("/api/ledger").then(j<Ledger>),
@@ -487,26 +536,48 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     }).then(j<HostProbe>),
   listHostProbes: () => fetch("/api/hosts/probes").then(j<HostProbe[]>),
-  confirmHost: (body: { name: string; capacity: Record<string, number>; probed_at?: number }) =>
+  confirmHost: (body: {
+    name: string; capacity: Record<string, number>; gpus?: { model: string; vram_gb: number }[];
+    notes?: string; probed_at?: number; accept_overrides?: boolean;
+  }) =>
     fetch("/api/hosts", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     }).then(j<Ledger>),
-  setCapacity: (capacity: Record<string, number>) =>
+  updateHost: (name: string, body: HostUpdate) =>
+    fetch(`/api/hosts/${encodeURIComponent(name)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(j<Ledger & { cut_off: CutOff[] }>),
+  surveyHost: (name: string, message = "") =>
+    fetch(`/api/hosts/${encodeURIComponent(name)}/survey`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message }),
+    }).then(j<HostSurvey>),
+  getSurvey: (name: string) =>
+    fetch(`/api/hosts/${encodeURIComponent(name)}/survey`).then(j<HostSurvey>),
+  setHostPrograms: (name: string, body: { programs: string[]; exclude_programs: string[] }) =>
+    fetch(`/api/hosts/${encodeURIComponent(name)}/programs`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(j<Ledger & { cut_off: CutOff[] }>),
+  setProgramHosts: (id: string, hosts: string[]) =>
+    fetch(`/api/programs/${encodeURIComponent(id)}/hosts`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hosts }),
+    }).then(j<Ledger & { cut_off: CutOff[] }>),
+  detectLocal: () => fetch("/api/hosts/local/detect", { method: "POST" }).then(j<LocalDetect>),
+  // `gpus` is sent only when this machine's own cards are being written — most
+  // capacity edits (workers, housekeepers, custom keys) have nothing to do with them.
+  setCapacity: (capacity: Record<string, number>, gpus?: { model: string; vram_gb: number }[]) =>
     fetch("/api/capacity", {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ capacity }),
+      body: JSON.stringify(gpus ? { capacity, gpus } : { capacity }),
     }).then(j<Ledger>),
   setPause: (paused: boolean) =>
     fetch("/api/pause", {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ paused }),
     }).then(j<Ledger>),
-  drainHost: (name: string, drain: boolean) =>
-    fetch(`/api/hosts/${encodeURIComponent(name)}/drain`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ drain }),
-    }).then(j<Ledger>),
   removeHost: (name: string) =>
     fetch(`/api/hosts/${encodeURIComponent(name)}`, { method: "DELETE" }).then(j<Ledger>),
+  keepHost: (name: string) =>
+    fetch(`/api/hosts/${encodeURIComponent(name)}/keep`, { method: "POST" }).then(j<Ledger>),
   getUsage: () => fetch("/api/usage").then(j<Usage>),
   getCallLog: (limit = 200) =>
     fetch(`/api/usage/calls?limit=${limit}`).then(j<{ calls: CallRow[] }>),

@@ -19,6 +19,7 @@ class SprintStatus(StrEnum):
     EXECUTING = "executing"    # lease granted; the worker agent is running
     PARKED = "parked"          # human shelved a proposed sprint; inert, off the PM's cap
     HIBERNATED = "hibernated"  # dispatcher yielded it at a safe point; parked mid-work, waiting for capacity
+    ESCALATED = "escalated"   # stopped to ask for help; lease kept, agent not relaunched until answered
     DONE = "done"
     CANCELED = "canceled"
     FAILED = "failed"          # agent failed repeatedly; terminal until a human acts
@@ -178,6 +179,13 @@ class ProgressState:
     job_host: str = ""                 # host of the tracked detached job; "" = this machine
     job_collect: list[str] = field(default_factory=list)  # paths on job_host to copy back before waking
     collect_note: str = ""             # what was copied back, for the next agent run
+    escalation: dict = field(default_factory=dict)  # {} = none; else {by, at, what, tried,
+                                        # may_have_broken_something, needs, host, level, thread_id}
+    pm_answered: bool = False          # a PM has already answered an escalation on this sprint;
+                                        # the next one goes straight to a human
+    resume_note: str = ""              # PM/human's note handed to the agent on resume after an escalation
+    reallocate_to: str = ""            # host the PM/human wants the resumed sprint placed on; "" = unchanged
+    stop_requested: bool = False       # a human asked to give up on an escalated sprint
 
 
 @dataclass

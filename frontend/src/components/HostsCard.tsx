@@ -4,6 +4,7 @@ import { Fragment, useState } from "react";
 import { api } from "../api";
 import type { LedgerHost, StrandedLease } from "../api";
 import AddHostModal from "./AddHostModal";
+import { accessLabel } from "./programAccess";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
@@ -20,6 +21,13 @@ export function hostOffer(host: LedgerHost): string {
 
 const DRAIN_SUFFIX = "draining — takes no new work";
 
+/** What a removing server's status line ends with: what it is still waiting on,
+ *  if anything, before it can leave the pool. */
+function removingSuffix(host: LedgerHost): string {
+  if (!host.waiting_on.length) return "removing — leaves the pool on the dispatcher's next cycle";
+  return `removing — waiting on ${host.waiting_on.map((w) => `${w.sprint_id} (${w.status}, ${w.reason})`).join(", ")}`;
+}
+
 /** How a server is answering health checks, in words. Falls back to the old
  *  placeable-based text against a backend that doesn't send `health` yet. */
 export function healthText(host: LedgerHost): string {
@@ -28,6 +36,7 @@ export function healthText(host: LedgerHost): string {
   // read as "not checked yet" (as if it's about to be). Say why plainly instead,
   // without even looking at the (meaningless) health state.
   if (host.ssh && !host.placeable) {
+    if (host.removing) return `waits for remote launch; ${removingSuffix(host)}`;
     return host.drain ? `waits for remote launch; ${DRAIN_SUFFIX}` : "waits for remote launch";
   }
   if (!host.health) return "takes work";
@@ -43,7 +52,8 @@ export function healthText(host: LedgerHost): string {
   let text = byState[state];
   // M8b: "takes no new work" is said once — as the drain suffix when draining,
   // otherwise as quiet's own reason.
-  if (state === "quiet" && !host.drain) text += "; takes no new work";
+  if (state === "quiet" && !host.drain && !host.removing) text += "; takes no new work";
+  if (host.removing) return state === "ok" ? removingSuffix(host) : `${text}; ${removingSuffix(host)}`;
   if (host.drain) return state === "ok" ? DRAIN_SUFFIX : `${text}; ${DRAIN_SUFFIX}`;
   return text;
 }
@@ -63,16 +73,20 @@ export function inUseText(host: LedgerHost): string[] {
 }
 
 export default function HostsCard(
-  { hosts, errors, stranded = [] }: { hosts: LedgerHost[]; errors: string[]; stranded?: StrandedLease[] },
+  { hosts, errors, stranded = [], localCapacity }: {
+    hosts: LedgerHost[]; errors: string[]; stranded?: StrandedLease[];
+    localCapacity?: Record<string, number>;
+  },
 ) {
   const [adding, setAdding] = useState(false);
+  const [configuring, setConfiguring] = useState<LedgerHost | null>(null);
   const [error, setError] = useState("");
   const qc = useQueryClient();
 
-  const drain = async (name: string, next: boolean) => {
+  const keep = async (name: string) => {
     setError("");
     try {
-      await api.drainHost(name, next);
+      await api.keepHost(name);
       qc.invalidateQueries({ queryKey: ["ledger"] });
     } catch (e) {
       setError(String(e));
@@ -86,7 +100,10 @@ export default function HostsCard(
       ? ` It leaves behind: ${leftover.slice(0, 5).map((l) => l.path).join(", ")}` +
         (leftover.length > 5 ? ` and ${leftover.length - 5} more.` : ".")
       : "";
-    if (!window.confirm(`Remove ${host.name} from the pool? Its run directories stay on the server.${extra}`)) return;
+    if (!window.confirm(
+      `Remove ${host.name}? It takes no new work now and leaves the pool as soon as nothing runs there. `
+      + `Its run directories stay on the server.${extra}`,
+    )) return;
     setError("");
     try {
       await api.removeHost(host.name);
@@ -95,12 +112,6 @@ export default function HostsCard(
       setError(String(e));
     }
   };
-
-  // Fix B: a host drained moments ago may not have been seen by the dispatcher's
-  // next cycle yet — a grant could still land between its pool load and this remove.
-  const drainedRecently = (h: LedgerHost) =>
-    !!h.drain && typeof h.drained_at === "number" && h.drained_at > 0
-    && Date.now() / 1000 - h.drained_at < 120;
 
   return (
     <Card padding="lg" radius="md" style={cardStyle}>
@@ -126,28 +137,29 @@ export default function HostsCard(
                 <Table.Td>
                   {inUseText(h).map((line, i) => <Text key={i} size="sm">{line}</Text>)}
                 </Table.Td>
-                <Table.Td>{h.programs.length ? h.programs.join(", ") : "all"}</Table.Td>
+                <Table.Td>{accessLabel(h)}</Table.Td>
                 <Table.Td>{healthText(h)}</Table.Td>
                 <Table.Td>
-                  {h.ssh && (
-                    <Group gap="xs" wrap="nowrap">
+                  <Group gap="xs" wrap="nowrap">
+                    <Button size="xs" variant="default"
+                            aria-label={`Configure ${h.name}`}
+                            onClick={() => setConfiguring(h)}>
+                      Config
+                    </Button>
+                    {h.ssh && (h.removing || h.drain ? (
                       <Button size="xs" variant="default"
-                              aria-label={`${h.drain ? "Take back" : "Drain"} ${h.name}`}
-                              onClick={() => void drain(h.name, !h.drain)}>
-                        {h.drain ? "Take back" : "Drain"}
+                              aria-label={`Keep ${h.name}`}
+                              onClick={() => void keep(h.name)}>
+                        Keep
                       </Button>
+                    ) : (
                       <Button size="xs" variant="default" color="red"
                               aria-label={`Remove ${h.name}`}
-                              disabled={!h.drain || (h.leases ?? 0) > 0 || drainedRecently(h)}
-                              title={!h.drain ? "drain it first"
-                                    : (h.leases ?? 0) > 0 ? "sprints still hold leases here"
-                                    : drainedRecently(h) ? "drained moments ago; the dispatcher needs a cycle to see it"
-                                    : undefined}
                               onClick={() => void remove(h)}>
                         Remove
                       </Button>
-                    </Group>
-                  )}
+                    ))}
+                  </Group>
                 </Table.Td>
               </Table.Tr>
               {h.leftover && h.leftover.length > 0 && (
@@ -175,7 +187,13 @@ export default function HostsCard(
             : `${s.sprint_id} still holds a lease on ${s.host}, which is no longer in the pool: stop the sprint or add the server back.`}
         </Text>
       ))}
-      <AddHostModal opened={adding} onClose={() => setAdding(false)} />
+      <AddHostModal
+        opened={adding || !!configuring}
+        onClose={() => { setAdding(false); setConfiguring(null); }}
+        host={configuring ?? undefined}
+        local={!!configuring && !configuring.ssh}
+        localCapacity={localCapacity}
+      />
     </Card>
   );
 }

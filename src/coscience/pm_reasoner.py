@@ -74,6 +74,11 @@ class PMContext:
     compute_leased: dict = field(default_factory=dict)           # {"cpu": 24.0}
     # The same pool per host this program may be placed on: [{name, capacity, gpus, held}].
     compute_hosts: list[dict] = field(default_factory=list)
+    # Sprints of this program held in `escalated` at level "pm", waiting on the PM to
+    # answer: [{sprint_id, title, thread_id, by, host, what, tried,
+    # may_have_broken_something, needs, hosts_allowed}]. A human-level escalation
+    # never appears here — the PM does not see it (see docs/sprint-lifecycle.md).
+    escalations: list[dict] = field(default_factory=list)
 
     @property
     def free_slots(self) -> int:
@@ -107,6 +112,7 @@ class PMCycleOutput:
     reopen_ids: list[str] = field(default_factory=list)      # approved sprints to send back to proposed (now obsolete)
     release_ids: list[str] = field(default_factory=list)     # approved sprints to release into production (-> queued)
     thread_replies: list[dict] = field(default_factory=list)  # [{thread_id, text}] PM answers to open feedback threads
+    escalation_answers: list[dict] = field(default_factory=list)  # [{sprint_id, action, instructions, host}]
     edge_ops: list[dict] = field(default_factory=list)  # [{op:"add"|"delete", type, src, dst, rationale, confidence?, evidence?}]
     artifact_tasks: list[dict] = field(default_factory=list)  # [{suffix, artifact_ids, create:[{title,kind}], instructions}]
     adopt_artifacts: list[dict] = field(default_factory=list)  # [{aid, title, kind, files:[...], content, filename, note}]

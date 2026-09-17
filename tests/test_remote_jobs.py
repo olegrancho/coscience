@@ -33,6 +33,9 @@ class Slots:
     def ssh_for(self, host_name):
         return host_name if host_name == self.name else ""
 
+    def host_quiet(self, host_name):
+        return False
+
 
 class ScriptRunner:
     def __init__(self, *replies):

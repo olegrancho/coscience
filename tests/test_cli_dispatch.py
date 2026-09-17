@@ -67,3 +67,47 @@ def test_dispatch_once_omits_beat_errors_when_none(tmp_path, monkeypatch, capsys
     code = main(["dispatch", "--repo", str(tmp_path), "--once"])
     assert code == 0
     assert "beat errors" not in capsys.readouterr().out
+
+
+def test_dispatch_once_prints_removed_hosts_when_any(tmp_path, monkeypatch, capsys):
+    # M5 (fix round 1): a one-shot run that deletes a marked server must say so —
+    # nothing else would surface it.
+    from coscience.dispatcher import CycleReport, Dispatcher
+    monkeypatch.setattr(Dispatcher, "run_one_cycle",
+                        lambda self, now=None: CycleReport(granted=0, removed_hosts=["a", "b"]))
+    code = main(["dispatch", "--repo", str(tmp_path), "--once"])
+    assert code == 0
+    assert "removed=a, b" in capsys.readouterr().out
+
+
+def test_dispatch_once_omits_removed_hosts_when_none(tmp_path, monkeypatch, capsys):
+    from coscience.dispatcher import CycleReport, Dispatcher
+    monkeypatch.setattr(Dispatcher, "run_one_cycle", lambda self, now=None: CycleReport(granted=1))
+    code = main(["dispatch", "--repo", str(tmp_path), "--once"])
+    assert code == 0
+    assert "removed=" not in capsys.readouterr().out
+
+
+def test_dispatch_once_prints_a_removal_error(tmp_path, monkeypatch, capsys):
+    # M2 (fix round 1): a pool-file error in the removal step used to be reduced to
+    # a bare "beat errors: 1" count with the text nowhere in sight.
+    from coscience.dispatcher import CycleReport, Dispatcher
+    monkeypatch.setattr(Dispatcher, "run_one_cycle",
+                        lambda self, now=None: CycleReport(granted=1, removal_error="hosts: is not a mapping"))
+    code = main(["dispatch", "--repo", str(tmp_path), "--once"])
+    assert code == 0
+    assert "removal error: hosts: is not a mapping" in capsys.readouterr().out
+
+
+def test_dispatch_loop_line_reports_removed_hosts_and_removal_errors(tmp_path, monkeypatch):
+    from coscience.dispatcher import CycleReport, Dispatcher
+    monkeypatch.setattr(Dispatcher, "run_one_cycle",
+                        lambda self, now=None: CycleReport(
+                            granted=0, removed_hosts=["a"], removal_error="hosts: is not a mapping"))
+    lines = []
+    monkeypatch.setattr(cli, "_status_loop",
+                        lambda status, beat, interval, max_beats: lines.append(beat()))
+    code = main(["dispatch", "--repo", str(tmp_path), "--loop"])
+    assert code == 0
+    line = lines[0][0]
+    assert "removed a" in line and "removal error: hosts: is not a mapping" in line

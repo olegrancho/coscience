@@ -193,6 +193,11 @@ class Substrate:
             job_host=str(fm.get("job_host", "")),
             job_collect=[str(p) for p in (fm.get("job_collect") or [])],
             collect_note=str(fm.get("collect_note", "")),
+            escalation=dict(fm.get("escalation") or {}),
+            pm_answered=bool(fm.get("pm_answered", False)),
+            resume_note=str(fm.get("resume_note", "")),
+            reallocate_to=str(fm.get("reallocate_to", "")),
+            stop_requested=bool(fm.get("stop_requested", False)),
         )
 
     def save_progress(self, progress: ProgressState) -> None:
@@ -219,6 +224,11 @@ class Substrate:
             "job_host": progress.job_host,
             "job_collect": list(progress.job_collect),
             "collect_note": progress.collect_note,
+            "escalation": dict(progress.escalation),
+            "pm_answered": progress.pm_answered,
+            "resume_note": progress.resume_note,
+            "reallocate_to": progress.reallocate_to,
+            "stop_requested": progress.stop_requested,
         }
         d = self.sprint_dir(progress.sprint_id)
         d.mkdir(parents=True, exist_ok=True)
@@ -509,7 +519,19 @@ class Substrate:
         return threads
 
     def load_chat_thread(self, program_id: str, thread_id: str) -> "ChatThread | None":
-        path = self.chat_thread_dir(program_id, thread_id) / "thread.md"
+        return self._load_thread_at(self.chat_thread_dir(program_id, thread_id), thread_id)
+
+    def save_chat_thread(self, program_id: str, thread: ChatThread) -> None:
+        self._save_thread_at(self.chat_thread_dir(program_id, thread.id), thread)
+
+    def delete_chat_thread(self, program_id: str, thread_id: str) -> None:
+        import shutil
+        d = self.chat_thread_dir(program_id, thread_id)
+        if d.is_dir():
+            shutil.rmtree(d)
+
+    def _load_thread_at(self, d: Path, thread_id: str) -> "ChatThread | None":
+        path = d / "thread.md"
         if not path.is_file():
             return None
         fm, _ = parse(path.read_text())
@@ -530,8 +552,7 @@ class Substrate:
             artifacts=[str(a) for a in fm.get("artifacts", [])],
         )
 
-    def save_chat_thread(self, program_id: str, thread: ChatThread) -> None:
-        d = self.chat_thread_dir(program_id, thread.id)
+    def _save_thread_at(self, d: Path, thread: ChatThread) -> None:
         d.mkdir(parents=True, exist_ok=True)
         fm = {"type": "chat_thread", "title": thread.title, "scope": thread.scope,
               "announced_scope": thread.announced_scope,
@@ -542,11 +563,21 @@ class Substrate:
               "messages": thread.messages}
         (d / "thread.md").write_text(serialize(fm, f"# Chat {thread.id}\n"))
 
-    def delete_chat_thread(self, program_id: str, thread_id: str) -> None:
-        import shutil
-        d = self.chat_thread_dir(program_id, thread_id)
-        if d.is_dir():
-            shutil.rmtree(d)
+    # --- host surveys (an agent's survey of a compute server, O11) ---
+    def survey_thread_dir(self, name: str) -> Path:
+        return self.repo_root / ".coscience" / "host-surveys" / name
+
+    def load_survey_thread(self, name: str) -> "ChatThread | None":
+        return self._load_thread_at(self.survey_thread_dir(name), name)
+
+    def save_survey_thread(self, name: str, thread: ChatThread) -> None:
+        self._save_thread_at(self.survey_thread_dir(name), thread)
+
+    def list_survey_threads(self) -> list[ChatThread]:
+        d = self.repo_root / ".coscience" / "host-surveys"
+        found = [self.load_survey_thread(sub.name) for sub in (d.iterdir() if d.is_dir() else [])
+                 if (sub / "thread.md").is_file()]
+        return [t for t in found if t is not None]
 
     # --- ideas (a pool of candidate directions + the PM's summary of it) ---
     def load_ideas(self, program_id: str) -> tuple[str, list[Idea]]:

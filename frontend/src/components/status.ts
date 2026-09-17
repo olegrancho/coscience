@@ -5,6 +5,7 @@ const STATUS_VAR: Record<string, string> = {
   approved: "var(--st-approved)",
   queued: "var(--st-queued)",
   executing: "var(--st-executing)",
+  escalated: "var(--signal)",   // warm: a worker or the platform is asking for help
   parked: "var(--st-parked)",
   hibernated: "var(--st-hibernated)",
   done: "var(--st-done)",
@@ -23,5 +24,5 @@ export function statusVar(status: string): string {
 export const NEEDS_HUMAN = "proposed";
 
 export const SPRINT_STATE_ORDER = [
-  "proposed", "approved", "queued", "executing", "parked", "hibernated", "done", "failed", "paused", "canceled",
+  "proposed", "approved", "queued", "executing", "escalated", "parked", "hibernated", "done", "failed", "paused", "canceled",
 ];

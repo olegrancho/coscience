@@ -220,8 +220,12 @@ def main(argv: list[str] | None = None) -> int:
             summary = (f"granted={r.granted} hibernated={r.hibernated} beaten={r.beaten} "
                       f"completed={r.completed} waiting={r.waiting} "
                       f"unrunnable={len(r.unrunnable)}")
+            if r.removed_hosts:
+                summary += f" removed={', '.join(r.removed_hosts)}"
             if r.beat_errors:
                 summary += f" beat errors: {len(r.beat_errors)}"
+            if r.removal_error:
+                summary += f" removal error: {r.removal_error}"
             print(summary, flush=True)
             for line in r.wiki:
                 print(line, flush=True)
@@ -234,8 +238,12 @@ def main(argv: list[str] | None = None) -> int:
             line = f"granted {r.granted} · completed {r.completed} · waiting {r.waiting}"
             if r.unrunnable:
                 line += f" · unrunnable {len(r.unrunnable)} ({', '.join(r.unrunnable)})"
+            if r.removed_hosts:
+                line += f" · removed {', '.join(r.removed_hosts)}"
             if r.beat_errors:
                 line += f" · beat errors: {len(r.beat_errors)}"
+            if r.removal_error:
+                line += f" · removal error: {r.removal_error}"
             if r.wiki:
                 line += " · " + " · ".join(r.wiki)
             return (line,

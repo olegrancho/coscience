@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import { useMe, UserChip } from "./auth";
 import LiveAgents from "./components/LiveAgents";
+import AttentionBadge from "./components/AttentionBadge";
 import { pulseCounts } from "./components/pulseCounts";
 import { Heartbeat, WindowTick, windowElapsed } from "./components/ui";
 import Overview from "./views/Overview";
@@ -196,6 +197,7 @@ export default function App() {
     <AppShell header={{ height: 52 }} navbar={{ width: 232, breakpoint: "sm" }} padding={0}>
       <AppShell.Header style={{ background: "var(--card)", borderBottom: "1px solid var(--hairline)" }}>
         <Group h="100%" px="lg" justify="flex-end" wrap="nowrap">
+          <AttentionBadge />
           <VersionBanner />
           <UserMenu />
           <Group gap={7} wrap="nowrap">

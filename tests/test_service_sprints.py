@@ -56,6 +56,7 @@ def test_submit_then_list_and_get(tmp_path):
                    # No resources.yaml here, so the pool is empty and a gpu can never be granted.
                    "unrunnable": "needs gpu 1 but capacity is 0",
                    "started_at": None, "model": DEFAULT_MODEL, "activity": None,
+                   "escalation_level": "",
                    "votes": {"up": 0, "down": 0, "mine": 0}}
     detail = svc.get_sprint("sp1")
     assert detail["status"] == "proposed"

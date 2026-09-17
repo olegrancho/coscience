@@ -156,6 +156,29 @@ def render_prompt(context: PMContext) -> str:
 
     graph_block = _lines(context.graph_lines, lambda ln: f"- {ln}") if context.graph_lines else "(none yet)"
 
+    escalations_block = ""
+    if context.escalations:
+        def _escalation_lines(e):
+            lines = [f"- {e['sprint_id']} ({e.get('title') or '(untitled)'}) — raised by "
+                     f"{e.get('by') or 'unknown'}" + (f" on {e['host']}" if e.get("host") else "")]
+            lines.append(f"  what happened: {e.get('what', '')}")
+            if e.get("tried"):
+                lines.append(f"  tried: {e['tried']}")
+            if e.get("may_have_broken_something"):
+                lines.append("  the agent believes it may have damaged the host or the program's data")
+            if e.get("needs"):
+                lines.append(f"  needs: {e['needs']}")
+            lines.append(f"  hosts it may move to (reallocate): "
+                         f"{', '.join(e.get('hosts_allowed') or []) or '(none)'}")
+            return "\n".join(lines)
+        escalations_block = ("\n\nESCALATIONS — sprints STOPPED and waiting on you. A sprint is held "
+            "until you answer. Answer each with one entry in escalation_answers: resume (with "
+            "instructions for the agent — e.g. the job is fine, wait; retry once; skip that step), "
+            "reallocate (to one of the hosts listed, with instructions), or to_human. You have no "
+            "tools and cannot repair anything yourself. Choose to_human whenever the issue needs "
+            "someone on a machine, the program's data may be damaged, or you are not confident it "
+            "can be fixed easily.\n" + "\n".join(_escalation_lines(e) for e in context.escalations))
+
     # The clip markers point at absolute paths under this directory. It sits in the
     # substrate, which for a program with its own workdir is nowhere near the session's
     # cwd — so the location has to be stated, not implied.
@@ -197,7 +220,7 @@ COMPLETED SPRINTS AND RESULTS (use these to decide what is most valuable next):
 FAILED SPRINTS (the agent gave up after repeated errors — read the reason and react:
 propose a corrected/rescoped sprint, change the approach, or record an idea; do NOT
 blindly re-propose the same thing):
-{failed_block}
+{failed_block}{escalations_block}
 
 HUMAN FEEDBACK ADDRESSED TO YOU about specific sprints — each shown as an open thread id
 and its message history (act on each: if it is EDITABLE, revise that sprint via
@@ -257,6 +280,7 @@ do maps to exactly one field:
   prune an idea                              -> its id in "delete_idea_ids"
   record a new direction                     -> text in "new_ideas"
   answer an open feedback thread             -> an entry in "thread_replies"
+  answer an escalation                       -> an entry in "escalation_answers"
   file output that ALREADY EXISTS as an artifact -> an entry in "adopt_artifacts"
   commission output that must be COMPUTED    -> an entry in "artifact_tasks"
   record a relationship between two nodes    -> an entry in "edge_ops"
@@ -292,6 +316,12 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
   "thread_replies": [{{"thread_id": "<id of an open feedback thread shown above,
                        whether on a sprint, a pool idea, or standing guidance>",
                        "text": "<short reply: what you did in response, or why you can't>"}}],
+  "escalation_answers": [{{"sprint_id": "<exact id>", "action": "resume|reallocate|to_human",
+                          "instructions": "<what the agent should do>",
+                          "host": "<only for reallocate>",
+                          "thread_id": "<the escalation's thread_id, from ESCALATIONS above —
+                                        copy it back exactly so a stale answer to an
+                                        already-resolved escalation is never applied>"}}],
   "edge_ops": [
     {{"op": "add",
       "type": "<one of: inspired_by | builds_on | supersedes | confirms | refutes>",
@@ -520,6 +550,14 @@ def parse_response(text: str) -> PMCycleOutput:
         release_ids=[str(s) for s in data.get("release_ids", [])],
         thread_replies=[dict(r) for r in data.get("thread_replies", [])
                         if isinstance(r, dict) and r.get("thread_id")],
+        escalation_answers=[
+            {"sprint_id": str(a["sprint_id"]).strip(), "action": str(a["action"]).strip(),
+             "instructions": str(a.get("instructions") or ""), "host": str(a.get("host") or ""),
+             "thread_id": str(a.get("thread_id") or "")}
+            for a in data.get("escalation_answers", [])
+            if isinstance(a, dict) and str(a.get("sprint_id") or "").strip()
+            and str(a.get("action") or "").strip()
+        ],
         edge_ops=[dict(o) for o in data.get("edge_ops", [])
                   if isinstance(o, dict) and o.get("op") and o.get("type")],
         artifact_tasks=[dict(t) for t in data.get("artifact_tasks", []) if isinstance(t, dict)],

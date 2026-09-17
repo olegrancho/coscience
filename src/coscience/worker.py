@@ -13,7 +13,7 @@ import re
 import time
 from pathlib import Path
 
-from coscience import artifacts, feedback_harvest, remote_exec, usage_meter
+from coscience import artifacts, escalation, feedback_harvest, host_health, remote_exec, usage_meter
 from coscience.executor import ExecutionContext
 from coscience.executor import is_running as _job_is_running
 from coscience.executor import process_token, terminate_detached as _terminate
@@ -175,6 +175,9 @@ class _NoSlots:
     def ssh_for(self, host_name: str) -> str:
         return ""
 
+    def host_quiet(self, host_name: str) -> bool:
+        return False
+
 
 _NO_SLOTS = _NoSlots()
 
@@ -335,6 +338,7 @@ class Worker:
             host_name=host["name"], host_ssh=host["ssh"], host_run_dir=host_run_dir,
             host_facts=host["facts"], host_notes=host["notes"],
             collect_note=progress.collect_note,
+            resume_note=progress.resume_note,
         )
 
     def _agent_cwd(self, workdir: str):
@@ -470,6 +474,82 @@ class Worker:
         progress.job_next_wake = progress.job_max_seconds = 0.0
         progress.job_started_at = None
 
+    def _declare_job(self, sprint: Sprint, progress, sprint_dir):
+        """Read + validate a just-exited run's job.json and, if accepted, record it
+        onto `progress` (job_token/job_host/job_collect/...) and consume the file.
+
+        Returns (declared, state, job_refusal): `declared` is False when there was no
+        job.json, or it was refused for naming a host this sprint does not hold (the
+        file is unlinked either way; `job_refusal` explains a refusal). When declared,
+        `state` is "alive"/"gone"/"unknown" as resolved by identity verification.
+
+        Shared by the normal post-exit path (3a: sleeps on the job, and nudges the
+        agent if it turns out to be "gone") and the escalation path (tracks it
+        identically but does neither — see run_sprint_beat)."""
+        job = self._read_job_json(sprint_dir)
+        job_refusal = ""
+        if job is not None:
+            held = self._slots.host(sprint.id)["name"]
+            if job["host"] in ("", "local") and held != LOCAL:
+                # The sprint's lease is on a remote host; an agent that omitted
+                # `host` (or wrote "local") still ran its job there, not on this
+                # machine. Treat it as declared on the held host so its pid is never
+                # mistaken for a local process (a live pid here could belong to
+                # someone else entirely) and watchdog/cancel/reap ask the real host.
+                job = {**job, "host": held}
+            elif job["host"] not in ("", "local") and job["host"] != held:
+                # A job on a host this sprint does not hold could be neither watched
+                # nor stopped: refuse it and say why — and, if this run ends up being
+                # brought back with a nudge, tell IT why too (M1).
+                (sprint_dir / "job.json").unlink(missing_ok=True)
+                job_refusal = (f"job.json named host {job['host']!r} but this sprint "
+                               f"runs on {held!r}")
+                progress.last_error = job_refusal
+                job = None
+        if job is None:
+            return False, "", job_refusal
+        now = time.time()
+        job_host = "" if job["host"] in ("", "local") else job["host"]
+        state = "alive"
+        if job_host:
+            ssh = self._slots.ssh_for(job_host)
+            if ssh:
+                new_token, state = remote_exec.make_token(
+                    job_host, ssh, job["pid"], runner=self._runner)
+            else:
+                # The held host has no usable ssh target (removed from the pool,
+                # or an invalid ssh value slipping past parse-time validation —
+                # Fix C): never hand a "" target to make_token/ssh_argv, which
+                # would raise mid-beat and stall every later lease this cycle.
+                new_token = str(remote_exec.RemoteToken(job_host, job["pid"], "", ""))
+                state = "unknown"
+            prev = remote_exec.parse_token(progress.job_token)
+            if state == "unknown" and prev is not None and prev.host == job_host \
+                    and prev.pid == job["pid"]:
+                # Same job re-declared (e.g. the "wake" flow, which never clears
+                # job_token) while the host happens to be unreachable right now:
+                # keep the token we already trust — its starttime/boot_id are
+                # what terminate() needs — instead of downgrading to a fresh,
+                # identity-less one.
+                pass
+            else:
+                progress.job_token = new_token
+        else:
+            progress.job_token = process_token(job["pid"])
+        progress.job_host = job_host
+        progress.job_collect = job["collect"] if job_host else []
+        progress.job_out = job["out_file"]
+        progress.job_note = job["note"]
+        progress.job_started_at = now
+        progress.job_expected_seconds = job["expected_seconds"]
+        progress.job_next_wake = now + job["wake_after_seconds"]
+        progress.job_max_seconds = min(job["max_seconds"] or JOB_MAX_SECONDS, JOB_MAX_SECONDS)
+        progress.assess_reason = ""
+        progress.agent_token = ""
+        progress.ambiguous_exits = 0
+        (sprint_dir / "job.json").unlink(missing_ok=True)     # consume it
+        return True, state, job_refusal
+
     def run_sprint_beat(self, sprint: Sprint) -> BeatOutcome:
         progress = self.substrate.load_progress(sprint.id)
         sprint_dir = self.substrate.sprint_dir(sprint.id)
@@ -483,6 +563,28 @@ class Worker:
         # collected normally in step 3.)
         if progress.job_token and not progress.agent_token:
             now = time.time()
+            if progress.job_host and self._slots.host_quiet(progress.job_host) \
+                    and sprint.status == SprintStatus.EXECUTING:
+                # The host this sprint sleeps on has stopped answering the platform's
+                # health checks — the job may still be running, but nobody can watch
+                # or collect it. Ask for help instead of guessing. Guarded on the
+                # sprint's own status (this branch only ever runs for an EXECUTING
+                # sprint, so it can never already have an open escalation) rather
+                # than on `progress.escalation` — a stale escalation dict left over
+                # from an earlier, already-answered one must not block a new one.
+                escalation.raise_escalation(self.substrate, sprint, progress, {
+                    "by": "dispatcher", "host": progress.job_host,
+                    "what": (f"{progress.job_host} has not answered the platform's checks for "
+                             f"{int(host_health.QUIET_AFTER // 60)} minutes while this sprint sleeps "
+                             f"on its job ({progress.job_note or 'job'}); the job's state is unknown"),
+                    "tried": "the platform's regular host checks",
+                    "may_have_broken_something": False,
+                    "needs": "a working host, or confirmation the job is still running",
+                }, now)
+                self._slots.release(sprint.id)
+                self.substrate.commit(
+                    f"sprint {sprint.id}: escalated by the platform ({progress.job_host} quiet)")
+                return BeatOutcome.PROGRESSED
             if not self._job_alive(progress.job_token):
                 progress.assess_reason = "lost" if self._last_job_state == "lost" else "finished"
                 self._collect_job(progress, sprint_dir)
@@ -531,11 +633,14 @@ class Worker:
             # still held, next beat tries again.
             if not self._slots.acquire(sprint.id):
                 return BeatOutcome.PROGRESSED
-            # Drop any stale job.json / finished.json left by a prior crashed or
-            # interrupted attempt, so only a signal written DURING this run's clean
-            # exit is honored (else a leftover file gets misattributed to this run).
+            # Drop any stale job.json / finished.json / escalate.json left by a prior
+            # crashed, interrupted or failed attempt, so only a signal written DURING
+            # this run's exit is honored (else a leftover file gets misattributed to
+            # this run — a failed run's escalate.json would otherwise escalate a later,
+            # unrelated clean run).
             (sprint_dir / "job.json").unlink(missing_ok=True)
             (sprint_dir / "finished.json").unlink(missing_ok=True)
+            (sprint_dir / "escalate.json").unlink(missing_ok=True)
             ctx = self._build_context(sprint)
             token = self.agent.start(sprint, ctx, sprint_dir, ctx.repo_root)
             progress.agent_token = token
@@ -545,6 +650,7 @@ class Worker:
             progress.gpu_devices = list(ctx.gpu_devices)
             progress.host = ctx.host_name
             progress.collect_note = ""      # the note has now been handed to this run
+            progress.resume_note = ""       # ditto for an escalation answer's note
             # Opened at launch so a killed agent still leaves a row; `calls()`
             # infers `lost` for a start that never gets an end.
             progress.agent_call = usage_meter.start_call(
@@ -607,6 +713,28 @@ class Worker:
             self.substrate.save_progress(progress)
             self.substrate.commit(f"sprint {sprint.id}: agent {why}, will retry")
             return BeatOutcome.PROGRESSED
+
+        # An agent that wrote escalate.json is asking for help — checked BEFORE the
+        # failure branch below, so a real (nonzero-exit) failure that escalated is
+        # never counted toward the retry cap: it asked for help instead of just
+        # dying. Hold the sprint with its lease; track anything it declared as a
+        # detached job in the same turn exactly as 3a would (so it isn't orphaned),
+        # but without sleeping on it or nudging about a "gone" job — nobody is being
+        # woken. A finished.json in the same turn is not read: the escalation wins
+        # over a completion claim. Never relaunch until the PM or a human answers.
+        record = escalation.read_escalate_json(sprint_dir)
+        if record is not None:
+            (sprint_dir / "escalate.json").unlink(missing_ok=True)
+            progress.agent_token = ""
+            self._declare_job(sprint, progress, sprint_dir)
+            held = self._slots.host(sprint.id)["name"]
+            host = progress.job_host or ("" if held == LOCAL else held)
+            escalation.raise_escalation(self.substrate, sprint, progress,
+                                        {**record, "by": "agent", "host": host}, time.time())
+            self._slots.release(sprint.id)
+            self.substrate.commit(f"sprint {sprint.id}: escalated by the agent")
+            return BeatOutcome.PROGRESSED
+
         if status == "failed":
             # A real failure (nonzero exit). Count it; after the cap, give up so a
             # broken sprint can't relaunch forever — and record why for the PM.
@@ -626,76 +754,17 @@ class Worker:
                 f"sprint {sprint.id}: attempt {progress.failures} failed, will retry")
             return BeatOutcome.PROGRESSED
 
-        # Reaching here: a clean exit (status 'ok'). Capture the claude session id so
-        # we can --resume this exact session if the agent stopped without signaling
-        # completion (preserves its full context).
+        # Reaching here: a clean exit (status 'ok'), no escalation. Capture the claude
+        # session id so we can --resume this exact session if the agent stopped
+        # without signaling completion (preserves its full context).
         sid = self.agent.read_session_id(sprint_dir)
         if sid:
             progress.agent_session_id = sid
 
         # 3a) declared a detached job -> the final message is premature (real work
         # still running detached): ignore it and sleep on the job instead.
-        job = self._read_job_json(sprint_dir)
-        job_refusal = ""       # non-"" only when this beat itself refused a declaration
-        if job is not None:
-            held = self._slots.host(sprint.id)["name"]
-            if job["host"] in ("", "local") and held != LOCAL:
-                # The sprint's lease is on a remote host; an agent that omitted
-                # `host` (or wrote "local") still ran its job there, not on this
-                # machine. Treat it as declared on the held host so its pid is never
-                # mistaken for a local process (a live pid here could belong to
-                # someone else entirely) and watchdog/cancel/reap ask the real host.
-                job = {**job, "host": held}
-            elif job["host"] not in ("", "local") and job["host"] != held:
-                # A job on a host this sprint does not hold could be neither watched
-                # nor stopped: refuse it and say why — and, if this run ends up being
-                # brought back with a nudge (below), tell IT why too (M1).
-                (sprint_dir / "job.json").unlink(missing_ok=True)
-                job_refusal = (f"job.json named host {job['host']!r} but this sprint "
-                               f"runs on {held!r}")
-                progress.last_error = job_refusal
-                job = None
-        if job is not None:
-            now = time.time()
-            job_host = "" if job["host"] in ("", "local") else job["host"]
-            state = "alive"
-            if job_host:
-                ssh = self._slots.ssh_for(job_host)
-                if ssh:
-                    new_token, state = remote_exec.make_token(
-                        job_host, ssh, job["pid"], runner=self._runner)
-                else:
-                    # The held host has no usable ssh target (removed from the pool,
-                    # or an invalid ssh value slipping past parse-time validation —
-                    # Fix C): never hand a "" target to make_token/ssh_argv, which
-                    # would raise mid-beat and stall every later lease this cycle.
-                    new_token = str(remote_exec.RemoteToken(job_host, job["pid"], "", ""))
-                    state = "unknown"
-                prev = remote_exec.parse_token(progress.job_token)
-                if state == "unknown" and prev is not None and prev.host == job_host \
-                        and prev.pid == job["pid"]:
-                    # Same job re-declared (e.g. the "wake" flow, which never clears
-                    # job_token) while the host happens to be unreachable right now:
-                    # keep the token we already trust — its starttime/boot_id are
-                    # what terminate() needs — instead of downgrading to a fresh,
-                    # identity-less one.
-                    pass
-                else:
-                    progress.job_token = new_token
-            else:
-                progress.job_token = process_token(job["pid"])
-            progress.job_host = job_host
-            progress.job_collect = job["collect"] if job_host else []
-            progress.job_out = job["out_file"]
-            progress.job_note = job["note"]
-            progress.job_started_at = now
-            progress.job_expected_seconds = job["expected_seconds"]
-            progress.job_next_wake = now + job["wake_after_seconds"]
-            progress.job_max_seconds = min(job["max_seconds"] or JOB_MAX_SECONDS, JOB_MAX_SECONDS)
-            progress.assess_reason = ""
-            progress.agent_token = ""
-            progress.ambiguous_exits = 0
-            (sprint_dir / "job.json").unlink(missing_ok=True)     # consume it
+        declared, state, job_refusal = self._declare_job(sprint, progress, sprint_dir)
+        if declared:
             if state == "gone":
                 # The declared job was not running on its host: tell the agent now,
                 # with whatever it wrote, rather than sleeping on nothing. Its own
@@ -802,6 +871,67 @@ class Worker:
             f"(attempt {progress.ambiguous_exits})")
         return BeatOutcome.PROGRESSED
 
+    # The fields a job-collect pass (or _reap_job) may change — reloaded onto a
+    # fresh copy of progress before saving, in run_escalated_beat, so a slow rsync
+    # can never overwrite a concurrent PM/human answer applied while it ran (Fix C).
+    _JOB_COLLECT_FIELDS = ("job_token", "job_host", "job_collect", "collect_note",
+                           "assess_reason", "job_out", "job_note", "job_next_wake",
+                           "job_max_seconds", "job_started_at")
+
+    def _save_job_fields(self, sprint_id: str, stale_progress) -> None:
+        """Reload progress fresh and copy onto it only the job/collect fields
+        `stale_progress` carries — never the whole (possibly stale) object, so a
+        concurrent answer's writes (resume_note, reallocate_to, pm_answered,
+        escalation, stop_requested, and the sprint's own status) survive."""
+        fresh = self.substrate.load_progress(sprint_id)
+        for f in self._JOB_COLLECT_FIELDS:
+            setattr(fresh, f, getattr(stale_progress, f))
+        self.substrate.save_progress(fresh)
+
+    def run_escalated_beat(self, sprint: Sprint) -> BeatOutcome:
+        """The sprint is held pending an answer: never launch the agent. Still watch
+        and collect a tracked job so it isn't orphaned while nobody is looking, and
+        still honor a human's decision to give up on it."""
+        progress = self.substrate.load_progress(sprint.id)
+        sprint_dir = self.substrate.sprint_dir(sprint.id)
+
+        if progress.stop_requested:
+            what = str((progress.escalation or {}).get("what", ""))
+            last_error = "stopped by a human after an escalation: " + what
+            try:
+                self.stop_sprint(sprint)
+            except Exception as exc:
+                last_error += f" (stopping it also failed: {exc})"
+            sprint = self.substrate.load_sprint(sprint.id)        # reload: stop_sprint may
+            progress = self.substrate.load_progress(sprint.id)    # have taken a while
+            if sprint.status != SprintStatus.ESCALATED:
+                # Someone else already moved this sprint on (e.g. a second dispatcher
+                # instance beat us to it) while stop_sprint ran — the stop we just did
+                # is harmless (idempotent once nothing is left running), but writing
+                # FAILED over whatever it is now would clobber real state.
+                return BeatOutcome.PROGRESSED
+            progress.last_error = last_error
+            progress.escalation = {}
+            progress.stop_requested = False
+            set_status(sprint, SprintStatus.FAILED)
+            artifacts.release_for_sprint(self.substrate, sprint, time.time())
+            self.substrate.save_sprint(sprint)
+            self.substrate.save_progress(progress)
+            self.substrate.commit(f"sprint {sprint.id}: FAILED after a human stop following an escalation")
+            return BeatOutcome.COMPLETED
+
+        if progress.job_token and not self._job_alive(progress.job_token):
+            progress.assess_reason = "lost" if self._last_job_state == "lost" else "finished"
+            self._collect_job(progress, sprint_dir)          # may rsync for minutes
+            progress.job_token = ""
+            progress.job_host = ""
+            progress.job_collect = []
+            self._save_job_fields(sprint.id, progress)
+            self.substrate.commit(f"sprint {sprint.id}: job ended while escalated")
+
+        self._slots.release(sprint.id)
+        return BeatOutcome.PROGRESSED
+
     def stop_sprint(self, sprint: Sprint) -> list[str]:
         """Stop the sprint's running agent and/or its tracked detached job, and
         clear whichever was set so a later beat relaunches (the agent resumes
@@ -831,6 +961,42 @@ class Worker:
         self.substrate.commit(f"sprint {sprint.id}: agent stopped")
         return [sprint.id]
 
+    def relocate(self, sprint: Sprint) -> None:
+        """Carry out a PM/human's `reallocate` answer: stop and collect any job still
+        tracked on the old host, then move the sprint's held host to
+        `progress.reallocate_to`. Called by the dispatcher before it would otherwise
+        beat this (still EXECUTING) sprint — no agent is running at this point, but a
+        still-tracked detached job on the old host must not be left running there."""
+        progress = self.substrate.load_progress(sprint.id)
+        sprint_dir = self.substrate.sprint_dir(sprint.id)
+        old, new = progress.host, progress.reallocate_to
+        if progress.job_token:
+            try:
+                self._terminate(progress.job_token)
+            except Exception:
+                self._last_terminate_ok = False
+            self._collect_job(progress, sprint_dir)
+            if not self._last_terminate_ok:
+                line = _could_not_stop_line(progress.job_host)
+                progress.collect_note = (f"{progress.collect_note}\n{line}"
+                                         if progress.collect_note else line)
+        progress.job_token = ""
+        progress.job_host = ""
+        progress.job_collect = []
+        progress.job_out = progress.job_note = progress.assess_reason = ""
+        progress.job_next_wake = progress.job_max_seconds = 0.0
+        progress.job_started_at = None
+        progress.agent_token = ""
+        progress.agent_session_id = ""
+        progress.host = new
+        progress.reallocate_to = ""
+        progress.gpu_devices = []
+        note = (f"You were moved from {old or 'this machine'} to {new}. You start fresh "
+                "there with only what is in the sprint folder (including collected/).")
+        progress.resume_note = f"{note}\n\n{progress.resume_note}" if progress.resume_note else note
+        self.substrate.save_progress(progress)
+        self.substrate.commit(f"sprint {sprint.id}: reallocated {old} → {new}")
+
     def is_yieldable(self, sprint_id: str) -> bool:
         """True if the sprint can safely yield its lease RIGHT NOW: nothing in
         flight and nothing uncollected. A non-empty `agent_token` means an agent
@@ -838,7 +1004,13 @@ class Worker:
         have just exited leaving output (a fresh finished.json / job.json) that the
         next beat must collect. Hibernating in that window would discard a completed
         result or orphan a just-declared detached job, so it is NOT yieldable. Only
-        a fully-idle sprint (token cleared) with no live job may yield."""
+        a fully-idle sprint (token cleared) with no live job may yield. An ESCALATED
+        sprint is never yieldable either, whatever its agent/job state: it is held on
+        purpose pending an answer, not a hibernation candidate to free capacity for
+        someone else — hibernating and re-granting it would relaunch the agent behind
+        the escalation's back."""
+        if self.substrate.load_sprint(sprint_id).status == SprintStatus.ESCALATED:
+            return False
         progress = self.substrate.load_progress(sprint_id)
         if progress.agent_token:
             return False

@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import ProgramDetail from "./ProgramDetail";
-import { api } from "../api";
+import { api, type SprintRef } from "../api";
 
 beforeEach(() => {
   window.matchMedia = window.matchMedia || ((q: string) => ({
@@ -182,5 +182,50 @@ describe("a transient fetch failure", () => {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     renderWith(qc);
     await waitFor(() => expect(screen.getByText(/Program not found/i)).toBeTruthy());
+  });
+});
+
+describe("experiments list", () => {
+  function row(over: Partial<SprintRef> = {}): SprintRef {
+    return {
+      id: "p-s1", status: "executing", goals: "g", title: "Do the assay",
+      results: [], model: "m", last_status_at: Date.now() / 1000,
+      votes: { up: 0, down: 0, mine: 0 }, escalation_level: "",
+      ...over,
+    };
+  }
+
+  function mockProgramWithSprints(sprints: SprintRef[]) {
+    vi.spyOn(api, "getProgram").mockResolvedValue({
+      id: "p", title: "P", status: "active", goals: "g", report: "", cycle: 0,
+      sprints, pm_model: "", workdir: "", activations: [], last_run: null, instructions: "",
+    } as any);
+    vi.spyOn(api, "listGuidance").mockResolvedValue([]);
+    vi.spyOn(api, "listIdeas").mockResolvedValue({ summary: "", ideas: [] } as any);
+    vi.spyOn(api, "listArtifacts").mockResolvedValue([]);
+    vi.spyOn(api, "getWikiSummary").mockResolvedValue({ pending: 0, pages: 0 } as any);
+  }
+
+  it("offers escalated and hibernated in the status filter", async () => {
+    mockProgramWithSprints([
+      row({ id: "p-s1", status: "escalated" }),
+      row({ id: "p-s2", status: "hibernated" }),
+    ]);
+    renderAt();
+    expect(await screen.findByRole("option", { name: "escalated (1)" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "hibernated (1)" })).toBeTruthy();
+  });
+
+  it("flags a sprint escalated to a human with a 'needs you' badge", async () => {
+    mockProgramWithSprints([
+      row({ id: "p-s1", title: "Needs a human", status: "escalated", escalation_level: "human" }),
+      row({ id: "p-s2", title: "Fine for now", status: "escalated", escalation_level: "pm" }),
+    ]);
+    renderAt();
+    await screen.findByText("Needs a human");
+    expect(screen.getByText("needs you")).toBeTruthy();
+    // Only the human-level row gets the badge — not the pm-level one.
+    const pmRow = screen.getByText("Fine for now").closest("div");
+    expect(pmRow?.parentElement?.textContent).not.toMatch(/needs you/);
   });
 });

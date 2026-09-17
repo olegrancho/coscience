@@ -105,6 +105,13 @@ class WikiMergePolicyIn(BaseModel):
     policy: str
 
 
+class EscalationAnswerIn(BaseModel):
+    action: str
+    instructions: str = ""
+    host: str = ""
+    thread_id: str = ""
+
+
 class SprintPatch(BaseModel):
     goals: str | None = None
     plan: list[str] | None = None
@@ -117,6 +124,7 @@ class SprintPatch(BaseModel):
 
 class CapacityUpdate(BaseModel):
     capacity: dict[str, float] = Field(default_factory=dict)
+    gpus: list[dict] | None = None
 
 
 ONBOARDING_ENV = "COSCIENCE_ALLOW_ONBOARDING"
@@ -137,6 +145,7 @@ class HostProbeIn(BaseModel):
     run_root: str = ""
     shared: bool = False
     programs: list[str] = Field(default_factory=list)
+    exclude_programs: list[str] = Field(default_factory=list)
     owner: str = ""
     notes: str = ""
 
@@ -146,10 +155,35 @@ class HostConfirmIn(BaseModel):
     capacity: dict[str, float] = Field(default_factory=dict)
     gpus: list[dict] | None = None
     probed_at: float | None = None
+    accept_overrides: bool = False
+    notes: str | None = None
 
 
-class HostDrainIn(BaseModel):
-    drain: bool
+class HostUpdateIn(BaseModel):
+    ssh: str | None = None
+    run_root: str | None = None
+    shared: bool | None = None
+    programs: list[str] | None = None
+    exclude_programs: list[str] | None = None
+    owner: str | None = None
+    notes: str | None = None
+    capacity: dict[str, float] | None = None
+    gpus: list[dict] | None = None
+    probed_at: float | None = None
+    accept_overrides: bool = False
+
+
+class SurveyIn(BaseModel):
+    message: str = ""
+
+
+class HostProgramsIn(BaseModel):
+    programs: list[str] = Field(default_factory=list)
+    exclude_programs: list[str] = Field(default_factory=list)
+
+
+class ProgramHostsIn(BaseModel):
+    hosts: list[str] = Field(default_factory=list)
 
 
 class PauseUpdate(BaseModel):
@@ -456,6 +490,23 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         return service.get_sprint(sprint_id)
+
+    @api.post("/sprints/{sprint_id}/escalation")
+    def answer_escalation(sprint_id: str, body: EscalationAnswerIn,
+                          user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.answer_escalation(sprint_id, body.action,
+                                             instructions=body.instructions, host=body.host,
+                                             by=(user.username if user else ""),
+                                             thread_id=body.thread_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"sprint not found: {sprint_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.get("/attention")
+    def attention() -> dict:
+        return service.attention()
 
     @api.post("/sprints/{sprint_id}/send_back")
     def send_back_sprint(sprint_id: str,
@@ -899,7 +950,7 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     @api.put("/capacity")
     def set_capacity(body: CapacityUpdate) -> dict:
         try:
-            return service.set_capacity(body.capacity)
+            return service.set_capacity(body.capacity, body.gpus)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
@@ -925,10 +976,43 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
-    @api.put("/hosts/{name}/drain")
-    def set_host_drain(name: str, body: HostDrainIn) -> dict:
+    @api.post("/hosts/local/detect")
+    def detect_local() -> dict:
+        return service.detect_local()
+
+    @api.post("/hosts/{name}/survey")
+    def survey_host(name: str, body: SurveyIn) -> dict:
+        _require_onboarding()
         try:
-            return service.set_host_drain(name, body.drain)
+            return service.survey_host(name, body.message)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.get("/hosts/{name}/survey")
+    def get_survey(name: str) -> dict:
+        _require_onboarding()
+        try:
+            return service.get_survey(name)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.put("/hosts/{name}")
+    def update_host(name: str, body: HostUpdateIn) -> dict:
+        try:
+            return service.update_host(name, **body.model_dump())
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.put("/hosts/{name}/programs")
+    def set_host_programs(name: str, body: HostProgramsIn) -> dict:
+        try:
+            return service.set_host_programs(name, body.programs, body.exclude_programs)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:
@@ -938,6 +1022,15 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def remove_host(name: str) -> dict:
         try:
             return service.remove_host(name)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.post("/hosts/{name}/keep")
+    def keep_host(name: str) -> dict:
+        try:
+            return service.keep_host(name)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:
@@ -1006,6 +1099,15 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.get_program(program_id)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.put("/programs/{program_id}/hosts")
+    def set_program_hosts(program_id: str, body: ProgramHostsIn) -> dict:
+        try:
+            return service.set_program_hosts(program_id, body.hosts)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     @api.post("/programs/{program_id}/status")
     def set_program_status(program_id: str, body: ProgramStatusIn) -> dict:

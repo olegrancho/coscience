@@ -1,8 +1,10 @@
 import { ActionIcon, Button, Checkbox, Group, Modal, NumberInput, Stack, Text, Textarea, TextInput, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type Program } from "../api";
 import DirectoryPickerModal from "./DirectoryPickerModal";
+import { cutOffMessage, hostAllows, onlyProgram } from "./programAccess";
 import { MergePolicySelect, ModelSelect } from "./ui";
 
 interface Props {
@@ -27,10 +29,16 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
   const [instructions, setInstructions] = useState("");
   const [saving, setSaving] = useState(false);
   const [browsing, setBrowsing] = useState(false);
+  const [checkedHosts, setCheckedHosts] = useState<Set<string>>(new Set());
   const seeded = useRef({ goals: "", model: "", wikiModel: "", chatModel: "", workerModel: "",
                           wikiEnabled: true,
                           wikiMerge: "auto", workdir: "", maxProposed: 0, instructions: "" });
+  // Which servers were checked when the ledger was first seen while open — null
+  // until seeded. Reset on close so the next open re-seeds from fresh ledger data.
+  const seededHosts = useRef<Set<string> | null>(null);
   const wasOpened = useRef(false);
+  const qc = useQueryClient();
+  const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.getLedger, enabled: opened });
 
   // Seed on the false->true open transition only. The program is refetched by a
   // background poll every few seconds; re-seeding on every render (or listing
@@ -65,6 +73,17 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
     if (!opened) setBrowsing(false);
   }, [opened]);
 
+  // Seed the checked servers the first time ledger data is present while open —
+  // not on every background refetch, or a click mid-edit would be discarded.
+  useEffect(() => {
+    if (!opened) { seededHosts.current = null; return; }
+    if (seededHosts.current === null && ledger.data?.hosts) {
+      const set = new Set(ledger.data.hosts.filter((h) => hostAllows(h, program.id)).map((h) => h.name));
+      seededHosts.current = set;
+      setCheckedHosts(set);
+    }
+  }, [opened, ledger.data, program.id]);
+
   const save = async () => {
     const was = seeded.current;
     const cap = maxProposed === "" ? 0 : Number(maxProposed);
@@ -84,11 +103,19 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
       if (folder !== was.workdir) workdirResult = await api.setProgramWorkdir(program.id, folder);
       if (cap !== was.maxProposed) await api.setProgramMaxProposed(program.id, cap);
       if (instructions !== was.instructions) await api.setProgramInstructions(program.id, instructions);
+      let cutOff: { sprint_id: string; host: string }[] = [];
+      const wasHosts = seededHosts.current;
+      if (wasHosts && !sameSet(checkedHosts, wasHosts)) {
+        const result = await api.setProgramHosts(program.id, [...checkedHosts]);
+        qc.invalidateQueries({ queryKey: ["ledger"] });
+        cutOff = result.cut_off ?? [];
+      }
       const staleWorkdir = workdirResult?.workdir && !workdirResult.exists;
       notifications.show({
-        color: staleWorkdir ? "yellow" : "teal",
+        color: cutOff.length ? "yellow" : staleWorkdir ? "yellow" : "teal",
         title: "Settings saved",
-        message: staleWorkdir
+        message: cutOff.length ? cutOffMessage(cutOff)
+          : staleWorkdir
           ? `Saved, but ${workdirResult!.workdir} doesn't exist yet — agents fall back to the control repo until it does.`
           : "Program settings updated.",
       });
@@ -173,6 +200,37 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
           }
         />
 
+        <div>
+          <Text size="sm" fw={500}>Servers</Text>
+          <Text size="xs" c="dimmed" mb={8}>Where this program's sprints may run.</Text>
+          <Stack gap={4}>
+            {(ledger.data?.hosts ?? []).map((h) => {
+              const checked = checkedHosts.has(h.name);
+              const locked = checked && onlyProgram(h, program.id);
+              return (
+                <Checkbox
+                  key={h.name}
+                  label={h.name === "local" ? "this machine" : h.name}
+                  aria-label={`may run on ${h.name}`}
+                  checked={checked}
+                  disabled={locked}
+                  description={locked ? "the only program this server takes" : undefined}
+                  onChange={() => setCheckedHosts((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(h.name)) next.delete(h.name); else next.add(h.name);
+                    return next;
+                  })}
+                />
+              );
+            })}
+          </Stack>
+          {ledger.data?.hosts && checkedHosts.size === 0 && (
+            <Text size="xs" c="orange" mt={4}>
+              No server takes this program's work; its sprints will wait.
+            </Text>
+          )}
+        </div>
+
         <NumberInput
           label="Max proposed experiments"
           aria-label="max proposed experiments"
@@ -209,6 +267,8 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
     </Modal>
   );
 }
+
+const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((x) => b.has(x));
 
 /** One agent job and the model it runs on, as a small titled tile. */
 function ModelCard({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {

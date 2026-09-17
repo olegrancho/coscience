@@ -64,7 +64,7 @@ def test_the_legacy_resources_wrapper_still_reads():
     ({"b": {"ssh": "b", "capacity": {"cpu": True}}}, "non-negative number"),
     ({"b": {"ssh": "b", "capacity": {"cpu": float("inf")}}}, "non-negative number"),
     ({"b": {"ssh": "b", "capacity": {"cpu": float("nan")}}}, "non-negative number"),
-    ({"b": {"ssh": "b", "programs": "p2"}}, "programs must be a list"),
+    ({"b": {"ssh": "b", "programs": "p2"}}, "programs: must be a list"),
     ({"b": "remote1"}, "must be a mapping"),
     ({"b": {"ssh": "-oProxyCommand=x"}}, "hosts.b.ssh"),
     ({"b": {"ssh": "b", "drain": "yes"}}, "hosts.b.drain: must be true or false"),

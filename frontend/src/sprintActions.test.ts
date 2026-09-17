@@ -20,6 +20,9 @@ describe("availableActions", () => {
     expect(availableActions("failed")).toEqual(["resume"]);
     expect(availableActions("canceled")).toEqual([]);
   });
+  it("offers nothing for escalated — answers live in the escalation panel", () => {
+    expect(availableActions("escalated")).toEqual([]);
+  });
 });
 
 describe("editableFields", () => {

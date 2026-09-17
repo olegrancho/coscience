@@ -283,6 +283,22 @@ def propose(facts: dict, shared: bool) -> dict:
     return {"capacity": capacity, "gpus": gpus}
 
 
+def detect_local(runner: Runner = subprocess_runner, now: float | None = None) -> dict:
+    """This machine's facts and a proposed capacity, from the same script the onboarding
+    probe runs over SSH — run locally with bash, no SSH and no checks. Nothing is written."""
+    now = time.time() if now is None else now
+    code, out, err = runner(["bash", "-s"], f"RUN_ROOT={shlex.quote(DEFAULT_RUN_ROOT)}\n{PROBE_SCRIPT}",
+                            PROBE_TIMEOUT)
+    if code != 0:
+        lines = [l for l in str(err).strip().splitlines() if l.strip()]
+        return {"ok": False, "error": lines[-1] if lines else f"probe script exited {code}",
+                "facts": {}, "warnings": [], "proposal": {}}
+    facts = parse_facts(out, now)
+    return {"ok": True, "error": "", "facts": facts,
+            "warnings": [w for w in warnings_for(facts, [], shared=False) if "GPU" in w or "nvidia" in w],
+            "proposal": propose(facts, shared=False)}
+
+
 def _login_error(target: str, code: int, err: str) -> str:
     if "Host key verification failed" in err:
         return (f"the server's host key is not known yet: connect once by hand (ssh {target}), "

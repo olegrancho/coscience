@@ -61,6 +61,9 @@ def test_the_worker_puts_the_cards_into_the_agent_context(substrate):
         def ssh_for(self, host_name):
             return ""
 
+        def host_quiet(self, host_name):
+            return False
+
     substrate.save_sprint(_sprint())
     worker = Worker(substrate, agent=None, slots=Slots())
     ctx = worker._build_context(substrate.load_sprint("sp1"))

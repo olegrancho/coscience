@@ -141,7 +141,27 @@ def test_list_and_get_program(tmp_path):
     assert detail["goals"] == "cure"
     assert detail["cycle"] == 0
     assert [s["id"] for s in detail["sprints"]] == ["p1-s1"]
+    assert detail["sprints"][0]["escalation_level"] == ""
     json.dumps(detail)  # JSON-serialisable
+
+
+def test_get_program_sprints_carry_escalation_level(tmp_path):
+    from coscience import escalation
+    from coscience.models import ProgressState
+    svc = Service(tmp_path)
+    svc.substrate.save_program(Program(id="p1", title="P", goals="g"))
+    sp = Sprint(id="p1-s1", status=SprintStatus.EXECUTING, goals="g", plan=["a"], program="p1")
+    svc.substrate.save_sprint(sp)
+    svc.substrate.save_progress(ProgressState(sprint_id="p1-s1"))
+    sp, progress = svc.substrate.load_sprint("p1-s1"), svc.substrate.load_progress("p1-s1")
+    escalation.raise_escalation(svc.substrate, sp, progress,
+                                {"what": "x", "by": "agent"}, now=1.0)
+    progress = svc.substrate.load_progress("p1-s1")
+    progress.escalation["level"] = "human"
+    svc.substrate.save_progress(progress)
+
+    detail = svc.get_program("p1")
+    assert detail["sprints"][0]["escalation_level"] == "human"
 
 
 def test_list_programs_status_filter(tmp_path):

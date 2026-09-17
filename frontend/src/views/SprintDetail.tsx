@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
 import { FeedbackThread } from "../components/FeedbackThread";
+import EscalationPanel from "../components/EscalationPanel";
 import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
 import { AbsTime, BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, ZoomableImg, describeCompute, isImageName, voterId } from "../components/ui";
@@ -205,7 +206,10 @@ export default function SprintDetail() {
     // live-updates as a sprint moves queued -> executing -> done without a reload.
     refetchInterval: (q) => {
       const st = q.state.data?.status;
-      const active = st === "proposed" || st === "approved" || st === "queued" || st === "executing";
+      // "escalated" too: the sprint is held, not terminal, and a PM/human answer
+      // (or the platform's own stop) moves it on without the page reloading.
+      const active = st === "proposed" || st === "approved" || st === "queued"
+        || st === "executing" || st === "escalated";
       return active ? 5000 : false;
     },
   });
@@ -221,6 +225,7 @@ export default function SprintDetail() {
     const d = sprint.data;
     if (!d) return [];
     return [
+      ...(d.status === "escalated" && d.escalation ? [{ id: "sec-escalation", label: "Escalation" }] : []),
       ...(d.title && d.goals && d.goals !== d.title ? [{ id: "sec-goals", label: "Goals" }] : []),
       ...(d.rationale ? [{ id: "sec-rationale", label: "Rationale" }] : []),
       ...(d.status === "failed" ? [{ id: "sec-failed", label: "Failed" }] : []),
@@ -466,6 +471,10 @@ export default function SprintDetail() {
           );
         })()}
       </div>
+
+      {s.status === "escalated" && s.escalation && (
+        <EscalationPanel sprint={s} onDone={refresh} />
+      )}
 
       {s.title && s.goals && s.goals !== s.title && (
         <Card id="sec-goals" padding="lg" radius="md" style={cardStyle}>

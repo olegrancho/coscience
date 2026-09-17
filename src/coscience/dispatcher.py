@@ -10,14 +10,15 @@ from coscience.host_probe import ssh_argv
 from coscience.ledger import Ledger
 from coscience.models import BeatOutcome, ProgramStatus, SprintStatus, set_status
 from coscience.pause import is_paused
-from coscience.resources import LOCAL, WORKER_KEY, ResourcePool, effective_requirement, gpu_request, over_capacity
+from coscience.resources import (LOCAL, WORKER_KEY, ResourcePool, effective_requirement,
+                                 gpu_request, load_pool, over_capacity)
 from coscience.scheduler import SchedulerPolicy
 from coscience.substrate import Substrate
 from coscience.worker import MAX_AGENT_FAILURES, Worker
 
-from coscience import artifacts, host_health, wiki
+from coscience import artifacts, host_health, host_removal, wiki
 
-_ELIGIBLE = (SprintStatus.QUEUED, SprintStatus.EXECUTING, SprintStatus.HIBERNATED)
+_ELIGIBLE = (SprintStatus.QUEUED, SprintStatus.EXECUTING, SprintStatus.HIBERNATED, SprintStatus.ESCALATED)
 
 
 @dataclass
@@ -32,6 +33,8 @@ class CycleReport:
     wiki: list[str] = field(default_factory=list)   # non-empty wiki beat lines this cycle
     beat_errors: list[str] = field(default_factory=list)   # sprints whose beat raised
     failed: int = 0                    # sprints FAILed by the beat-failure cap this cycle
+    removed_hosts: list[str] = field(default_factory=list)  # marked servers deleted this cycle (O15)
+    removal_error: str = ""            # why the removal step couldn't run this cycle, if it couldn't (O15)
 
 
 class _WorkerSlots:
@@ -78,6 +81,12 @@ class _WorkerSlots:
             # "unknown" to the caller, never a crash inside a beat.
             return ""
         return host.ssh
+
+    def host_quiet(self, host_name: str) -> bool:
+        """True if the host health check has marked this host quiet this cycle
+        (spec §7) — it has not answered checks for a while, so a sprint sleeping
+        on a job there cannot be assessed and should ask for help instead."""
+        return self.ledger.pool.closed.get(host_name) == "quiet"
 
     def host(self, sprint_id: str) -> dict:
         """Where this sprint's lease is, for the worker agent's instructions: the host's
@@ -147,11 +156,39 @@ class Dispatcher:
         self.ledger.load()
         self.ledger.expire(now)
 
+        # Servers a human marked for removal leave the pool here, before any grant
+        # this cycle, once nothing is on them (O15). Only this loop grants, so
+        # deleting here cannot race a grant onto a server that is already gone.
+        try:
+            removed = host_removal.remove_marked(self.substrate, self.ledger)
+        except ValueError as exc:
+            removed = []
+            report.removal_error = str(exc)
+        if removed:
+            # So the health check just below never pings a server that is already
+            # gone.
+            self.ledger.pool = load_pool(self.substrate.repo_root)
+            report.removed_hosts = removed
+
         # Which remote hosts answer. A quiet one takes no new grants this cycle; its
         # leases, jobs and liveness are untouched (spec §7).
         entries = host_health.check(self.substrate.repo_root, self.ledger.pool, now,
                                     runner=self._host_runner)
-        self.ledger.pool.closed = {name: "quiet" for name in host_health.quiet(entries, now)}
+        closed = {name: "quiet" for name in host_health.quiet(entries, now)}
+        self.ledger.pool.closed = closed
+
+        # M1 (fix round 1): a human can mark (or drain) a server at any point up to
+        # here — the health check above alone can take seconds — and this cycle's
+        # grant step must not miss it. Reload once more, right before granting, and
+        # reapply this cycle's health result (a freshly loaded pool starts with no
+        # `closed` of its own). A mark that lands after this point waits one more
+        # cycle; that window is cheap to shrink further but not worth chasing to zero.
+        # Only when the file actually exists: marking a server needs one already on
+        # file, and a caller (chiefly tests) that hands the Dispatcher a pool with no
+        # backing file at all is not something a human could have just edited.
+        if (self.substrate.repo_root / ".coscience" / "resources.yaml").is_file():
+            self.ledger.pool = load_pool(self.substrate.repo_root)
+            self.ledger.pool.closed = closed
 
         eligible = self.substrate.iter_sprints()
         eligible = [s for s in eligible if s.status in _ELIGIBLE]
@@ -175,13 +212,31 @@ class Dispatcher:
         paused = is_paused(self.substrate.repo_root)
         usage_ok = self._usage_gate() if self._usage_gate else True
         blocked = paused or not usage_ok
-        needs = [s for s in eligible if self.ledger.lease_for(s.id) is None
+        # An escalated sprint is never granted for its own sake: it keeps whatever
+        # lease it already held when it escalated, and a leaseless one with no job
+        # stays leaseless until a human or the PM answers and moves it back to
+        # executing. But a leaseless ESCALATED sprint that DOES hold a job token
+        # (a dispatcher outage lost its lease past the TTL) is a live-re-adoption
+        # candidate exactly like an EXECUTING one — without this, its job is never
+        # watched or collected again and a human stop on it never runs (Fix A).
+        needs = [s for s in eligible
+                 if (s.status != SprintStatus.ESCALATED
+                     or self.substrate.load_progress(s.id).job_token)
+                 and self.ledger.lease_for(s.id) is None
                  and not artifacts.sprint_blocked(self.substrate, s)
                  and (not blocked or self.worker.agent_running(s.id)
                       or self.substrate.load_progress(s.id).job_token)]
         # A sprint that has launched anything stays on that host: its files, and any
-        # job still running, are there.
-        pinned = {s.id: host for s in needs if (host := self.substrate.load_progress(s.id).host)}
+        # job still running, are there. A pending `reallocate` answer takes priority
+        # over the held host — if the lease was lost before Worker.relocate ran, a
+        # grant pinned to the OLD host could fail forever (or land back on it),
+        # stranding the intended move (Fix B).
+        pinned = {}
+        for s in needs:
+            progress = self.substrate.load_progress(s.id)
+            host = progress.reallocate_to or progress.host
+            if host:
+                pinned[s.id] = host
         # LIVENESS re-adoption (below) must not be blocked by a drained or quiet
         # host: a physically running agent or job is not new work, and killing it
         # because its host stopped answering health checks would violate spec §7.
@@ -268,11 +323,24 @@ class Dispatcher:
         # --- run one beat per leased, executing sprint ---
         for lease in self.ledger.all_leases():
             sprint = self.substrate.load_sprint(lease.sprint_id)
-            if sprint.status != SprintStatus.EXECUTING:
+            if sprint.status not in (SprintStatus.EXECUTING, SprintStatus.ESCALATED):
                 continue
             gave_up = False
+            relocated = False
             try:
-                outcome = self.worker.run_sprint_beat(sprint)
+                if sprint.status == SprintStatus.EXECUTING \
+                        and self.substrate.load_progress(sprint.id).reallocate_to:
+                    # A PM/human `reallocate` answer moves the sprint's held host
+                    # before it beats again — the next cycle's grant step re-adopts
+                    # it pinned to the new host (progress.host is set by relocate).
+                    self.worker.relocate(sprint)
+                    self.ledger.release(lease.sprint_id)
+                    relocated = True
+                    outcome = None
+                else:
+                    outcome = (self.worker.run_escalated_beat(sprint)
+                              if sprint.status == SprintStatus.ESCALATED
+                              else self.worker.run_sprint_beat(sprint))
             except Exception as exc:          # one sprint's fault must not stall every other sprint
                 progress = self.substrate.load_progress(sprint.id)
                 progress.last_error = f"beat failed: {type(exc).__name__}: {exc}"
@@ -315,7 +383,7 @@ class Dispatcher:
                     self.substrate.save_progress(progress)
 
             report.beaten += 1
-            if gave_up:
+            if gave_up or relocated:
                 continue          # do not renew a lease that was just released
             eff = self.policy.effective_priority(sprint, queue.get(sprint.id, now), now)
             self.ledger.renew(lease.sprint_id, now, ttl, priority=eff)
@@ -324,9 +392,34 @@ class Dispatcher:
                 queue.pop(lease.sprint_id, None)
                 report.completed += 1
 
+        # --- a leaseless ESCALATED sprint with a pending human stop is still
+        # carried out (Fix A) --- one with no job token never entered `needs`
+        # above, so it has no lease to beat through the loop over leases; without
+        # this, a human's stop on it would never run.
+        for sprint in eligible:
+            if sprint.status != SprintStatus.ESCALATED:
+                continue
+            if self.ledger.lease_for(sprint.id) is not None:
+                continue                      # has a lease: already beaten above
+            if not self.substrate.load_progress(sprint.id).stop_requested:
+                continue
+            try:
+                self.worker.run_escalated_beat(sprint)
+            except Exception as exc:          # one sprint's fault must not stall the cycle
+                progress = self.substrate.load_progress(sprint.id)
+                progress.last_error = f"beat failed: {type(exc).__name__}: {exc}"
+                self.substrate.save_progress(progress)
+                report.beat_errors.append(sprint.id)
+            else:
+                # A COMPLETED result (the normal outcome here) needs no lease
+                # release: there was never a lease to release.
+                report.beaten += 1
+
         # A request above the pool's total is not waiting — no amount of waiting grants
         # it — so it is named separately instead of hiding inside the waiting count.
         for s in eligible:
+            if s.status == SprintStatus.ESCALATED:
+                continue                      # held on purpose, not waiting for capacity
             if self.ledger.lease_for(s.id) is not None:
                 continue
             if over_capacity(s.resources_required, self.ledger.pool, s.program,
@@ -349,9 +442,12 @@ class Dispatcher:
                 if line:
                     report.wiki.append(line)
 
+        self._collect_surveys()
+
         self._save_queue(queue)
         if (report.granted or report.completed or report.hibernated
-                or report.reconciled or reaped or report.wiki or report.failed):
+                or report.reconciled or reaped or report.wiki or report.failed
+                or report.removed_hosts):
             self.substrate.commit("dispatch cycle")
         return report
 
@@ -376,6 +472,18 @@ class Dispatcher:
             for thread in self.substrate.list_chat_threads(program_id):
                 if thread.pending:
                     chat_agent.collect_thread(self.substrate, program_id, thread)
+        except Exception:
+            pass
+
+    def _collect_surveys(self) -> None:
+        """Collect finished host-survey turns without waiting for someone to open
+        the survey, so every Claude call gets its end within a cycle of finishing.
+        Like the chat and wiki beats, never allowed to break sprint supervision."""
+        from coscience import host_survey
+        try:
+            for thread in self.substrate.list_survey_threads():
+                if thread.pending:
+                    host_survey.collect(self.substrate, thread.id, thread)
         except Exception:
             pass
 

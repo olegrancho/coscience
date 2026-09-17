@@ -1,10 +1,13 @@
 """Declared resource capacity for an environment, as a list of hosts."""
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from uuid import uuid4
 
 import yaml
 
@@ -27,6 +30,8 @@ GPU_VRAM_KEY = "gpu_vram_gb"
 # request needs, and `gpu_vram_gb`, when present, the VRAM it needs on each of them.
 GPU_KEYS = frozenset({GPU_KEY, GPU_VRAM_KEY})
 
+ACCESS_KEYS = ("programs", "exclude_programs")
+
 
 @dataclass
 class Gpu:
@@ -40,7 +45,8 @@ class Host:
     name: str
     capacity: dict[str, float] = field(default_factory=dict)
     ssh: str = ""                                        # "" = the dispatcher's own machine
-    programs: list[str] = field(default_factory=list)   # [] = every program
+    programs: list[str] = field(default_factory=list)          # only these; [] = no "only" list
+    exclude_programs: list[str] = field(default_factory=list)  # every program but these
     run_root: str = ""                                   # where sprint work goes on the host
     gpus: list[Gpu] = field(default_factory=list)
     shared: bool = False                                 # other people use this machine too
@@ -48,6 +54,7 @@ class Host:
     notes: str = ""                                      # usage rules, e.g. hours or longest job
     drain: bool = False                                  # takes no new grants; running work finishes
     drained_at: float = 0.0                              # time.time() when drain was set; 0.0 = unknown/long ago
+    removing: bool = False                               # marked for removal; the dispatcher deletes it once empty
 
     def __post_init__(self):
         if not self.gpus and self.capacity.get(GPU_KEY, 0.0) >= 1:
@@ -66,7 +73,9 @@ class Host:
         return self.is_local or os.environ.get(REMOTE_ENV) == "1"
 
     def allows(self, program: str | None) -> bool:
-        return not self.programs or (program is not None and program in self.programs)
+        if self.programs:
+            return program is not None and program in self.programs
+        return program not in self.exclude_programs
 
 
 @dataclass
@@ -94,8 +103,10 @@ class ResourcePool:
         return [h for h in self.hosts if h.placeable and h.allows(program)]
 
     def grantable_hosts(self, program: str | None) -> list[Host]:
-        """Hosts a new grant may land on: placeable, allowed, not drained, not closed."""
-        return [h for h in self.placeable_hosts(program) if not h.drain and h.name not in self.closed]
+        """Hosts a new grant may land on: placeable, allowed, not drained, not
+        marked for removal, not closed."""
+        return [h for h in self.placeable_hosts(program)
+                if not h.drain and not h.removing and h.name not in self.closed]
 
     @classmethod
     def from_dict(cls, d: dict) -> "ResourcePool":
@@ -109,6 +120,12 @@ class ResourcePool:
         gpu_specs = raw.pop("gpus", None)
         if gpu_specs is None and raw is not d:
             gpu_specs = d.get("gpus")
+        access_specs: dict[str, object] = {}
+        for key in ACCESS_KEYS:
+            val = raw.pop(key, None)
+            if val is None and raw is not d:
+                val = d.get(key)
+            access_specs[key] = val
         host_specs = host_specs or {}
         host_errors: list[str] = []
         if not isinstance(host_specs, dict):
@@ -140,7 +157,16 @@ class ResourcePool:
             if v is not None and v != int(v):
                 host_errors.append(f"gpu: {v:g} is not a whole number of cards; using {int(v)}")
                 local_capacity[GPU_KEY] = float(int(v))
-        hosts = [Host(LOCAL, local_capacity, gpus=local_gpus)]
+        local_access = {k: v for k, v in access_specs.items() if v is not None}
+        local_programs: list[str] = []
+        local_excluded: list[str] = []
+        if local_access:
+            try:
+                local_programs, local_excluded = _parse_access("", local_access)
+            except ValueError as exc:
+                host_errors.append(str(exc))       # reported on Compute; local stays open
+        hosts = [Host(LOCAL, local_capacity, gpus=local_gpus,
+                      programs=local_programs, exclude_programs=local_excluded)]
         for name, spec in host_specs.items():
             try:
                 hosts.append(_parse_host(str(name), spec))
@@ -188,9 +214,9 @@ def _parse_host(name: str, spec) -> Host:
         capacity[key] = float(val)
     if "drain" in spec and not isinstance(spec["drain"], bool):
         raise ValueError(f"hosts.{name}.drain: must be true or false")
-    programs = spec.get("programs") or []
-    if not isinstance(programs, list):
-        raise ValueError(f"hosts.{name}: programs must be a list")
+    if "remove" in spec and not isinstance(spec["remove"], bool):
+        raise ValueError(f"hosts.{name}.remove: must be true or false")
+    programs, excluded = _parse_access(f"hosts.{name}.", spec)
     gpus: list[Gpu] = []
     if spec.get("gpus") is not None:
         gpus = _parse_gpus(f"hosts.{name}.", spec["gpus"])
@@ -205,11 +231,30 @@ def _parse_host(name: str, spec) -> Host:
                   if isinstance(drained_at_raw, (int, float)) and not isinstance(drained_at_raw, bool)
                   else 0.0)
     return Host(name=name, capacity=capacity, ssh=ssh,
-                programs=[str(p) for p in programs],
+                programs=programs, exclude_programs=excluded,
                 run_root=str(spec.get("run_root") or ""), gpus=gpus,
                 shared=bool(spec.get("shared", False)), owner=str(spec.get("owner") or ""),
                 notes=str(spec.get("notes") or ""), drain=bool(spec.get("drain", False)),
-                drained_at=drained_at)
+                drained_at=drained_at, removing=bool(spec.get("remove", False)))
+
+
+def _parse_access(where: str, spec: dict) -> tuple[list[str], list[str]]:
+    """A server's program access: `programs` (only these), `exclude_programs` (all but
+    these), or neither (every program). `where` prefixes messages, e.g. "hosts.a.". """
+    lists = []
+    for key in ACCESS_KEYS:
+        raw = spec.get(key)
+        if raw is None:
+            lists.append([])
+            continue
+        if not isinstance(raw, list):
+            raise ValueError(f"{where}{key}: must be a list of program ids")
+        lists.append([str(p) for p in raw])
+    programs, excluded = lists
+    if programs and excluded:
+        raise ValueError(f"{where}programs and exclude_programs can't both be set; "
+                         "use one: only these programs, or every program but these")
+    return programs, excluded
 
 
 def _parse_gpus(where: str, spec) -> list[Gpu]:
@@ -234,6 +279,62 @@ def load_pool(repo_root) -> ResourcePool:
     if not path.is_file():
         return ResourcePool()
     return ResourcePool.from_yaml(path)
+
+
+@contextlib.contextmanager
+def pool_file_lock(repo_root):
+    """Repo-level exclusive flock around a read-modify-write of resources.yaml.
+
+    Every writer of the pool file — the service's capacity and host-admin edits,
+    and the dispatcher's marked-server removal — holds this, so two processes
+    (or two requests in the HTTP server's threadpool) never race the same
+    read-modify-write and clobber each other's edit. Same shape as
+    `housekeeping._guard`."""
+    lockdir = Path(repo_root) / ".coscience"
+    lockdir.mkdir(parents=True, exist_ok=True)
+    with open(lockdir / "resources.lock", "w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def write_pool_file(repo_root, data: dict) -> None:
+    """Atomically write resources.yaml. Callers should hold `pool_file_lock` for
+    the whole read-modify-write this belongs to."""
+    path = Path(repo_root) / ".coscience" / "resources.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Unique per call: some callers are sync HTTP routes, which FastAPI runs in a
+    # threadpool, so concurrent calls are genuinely concurrent. A shared tmp name
+    # lets one thread's os.replace pull the file out from under another thread's
+    # write/replace.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
+    try:
+        tmp.write_text(yaml.safe_dump(data, sort_keys=True))
+        os.replace(tmp, path)  # atomic: a reader never sees a partial file
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def pool_file_hosts(repo_root) -> tuple[dict, dict]:
+    """Load resources.yaml and return (the loaded document, its `hosts:` mapping) —
+    unwrapping a `resources:` wrapper when that's where `hosts:` lives. The returned
+    mapping is already installed as `loaded`'s (or its wrapper's) "hosts" key, so
+    mutating it in place and passing `loaded` to `write_pool_file` keeps the edit."""
+    path = Path(repo_root) / ".coscience" / "resources.yaml"
+    try:
+        loaded = yaml.safe_load(path.read_text()) if path.is_file() else {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"resources.yaml could not be read: {exc}")
+    loaded = loaded if isinstance(loaded, dict) else {}
+    wrapped = loaded.get("resources")
+    holder = wrapped if isinstance(wrapped, dict) and "hosts" in wrapped else loaded
+    if "hosts" in holder and not isinstance(holder["hosts"], dict):
+        raise ValueError("resources.yaml hosts: is not a mapping; fix the file first")
+    hosts = holder.get("hosts") or {}
+    holder["hosts"] = hosts
+    return loaded, hosts
 
 
 def gpu_request(required: dict[str, float]) -> tuple[int, float | None]:

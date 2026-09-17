@@ -15,6 +15,20 @@ vi.mock("../api", () => ({
     setProgramMaxProposed: vi.fn().mockResolvedValue({}),
     setProgramInstructions: vi.fn().mockResolvedValue({}),
     listDirs: vi.fn().mockResolvedValue({ path: null, parent: null, roots: [], entries: [] }),
+    getLedger: vi.fn().mockResolvedValue({
+      capacity: {}, used: {}, available: {}, leases: [], paused: false,
+      hosts: [
+        { name: "local", ssh: "", placeable: true, programs: [], exclude_programs: [], run_root: "",
+          capacity: {}, available: {}, gpus: [] },
+        { name: "gpu1", ssh: "gpu1", placeable: true, programs: ["p1"], exclude_programs: [], run_root: "~/runs",
+          capacity: {}, available: {}, gpus: [] },
+        { name: "gpu2", ssh: "gpu2", placeable: true, programs: [], exclude_programs: ["p1"], run_root: "~/runs",
+          capacity: {}, available: {}, gpus: [] },
+      ],
+    }),
+    setProgramHosts: vi.fn().mockResolvedValue({
+      capacity: {}, used: {}, available: {}, leases: [], paused: false, hosts: [], cut_off: [],
+    }),
   },
 }));
 
@@ -186,6 +200,50 @@ describe("ProgramSettingsModal", () => {
       expect.objectContaining({
         color: "yellow",
         message: "Saved, but /nope doesn't exist yet — agents fall back to the control repo until it does.",
+      }),
+    ));
+  });
+
+  it("seeds server checkboxes from the ledger, one shape each", async () => {
+    renderModal();
+    expect((await screen.findByLabelText("may run on local") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("may run on gpu1") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("may run on gpu2") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("disables the only-program server's checkbox", async () => {
+    renderModal();
+    expect((await screen.findByLabelText("may run on gpu1") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.getByText("the only program this server takes")).toBeTruthy();
+  });
+
+  it("saves the remaining servers after unchecking one", async () => {
+    renderModal();
+    fireEvent.click(await screen.findByLabelText("may run on local"));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.setProgramHosts).toHaveBeenCalledWith("p1", ["gpu1"]));
+  });
+
+  it("does not call setProgramHosts when the server checkboxes are unchanged", async () => {
+    const { onSaved } = renderModal();
+    await screen.findByLabelText("may run on local");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(api.setProgramHosts).not.toHaveBeenCalled();
+  });
+
+  it("shows the cut-off message in yellow when saving takes work off a server", async () => {
+    vi.mocked(api.setProgramHosts).mockResolvedValueOnce({
+      capacity: {}, used: {}, available: {}, leases: [], paused: false, hosts: [],
+      cut_off: [{ sprint_id: "s1", host: "gpu2" }],
+    });
+    renderModal();
+    fireEvent.click(await screen.findByLabelText("may run on gpu2"));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(notifications.show).toHaveBeenCalledWith(
+      expect.objectContaining({
+        color: "yellow",
+        message: "s1 is pinned to gpu2. It keeps its work there and waits until the program is allowed back on that server or the sprint is stopped.",
       }),
     ));
   });

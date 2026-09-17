@@ -355,7 +355,8 @@ export default function ProgramDetail() {
         const counts = p.sprints.reduce<Record<string, number>>((a, s) => {
           a[s.status] = (a[s.status] ?? 0) + 1; return a;
         }, {});
-        const order = ["proposed", "approved", "queued", "executing", "parked", "failed", "done", "canceled"];
+        const order = ["proposed", "approved", "queued", "executing", "escalated", "hibernated",
+                      "parked", "failed", "done", "canceled"];
         return (
           <Card id="sec-experiments" padding="lg" radius="md" style={cardStyle}>
             <Group justify="space-between" align="center" mb={12} wrap="nowrap">
@@ -395,6 +396,9 @@ export default function ProgramDetail() {
                           <AbsTime at={s.last_status_at} dateOnly />
                         </Text>
                       ) : null}
+                      {s.escalation_level === "human" && (
+                        <Badge size="xs" color="red" variant="filled">needs you</Badge>
+                      )}
                       <StatusBadge status={s.status} />
                     </Group>
                   </div>

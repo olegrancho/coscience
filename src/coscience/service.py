@@ -15,14 +15,15 @@ from uuid import uuid4
 
 import yaml
 
-from coscience import graph, host_health, threads
+from coscience import graph, host_health, host_removal, threads
 from coscience.artifacts import DESCRIPTION_FILE, FIGURE_DESCRIPTION_NOTE
 from coscience.ledger import Ledger
 from coscience.models import (DEFAULT_MODEL, Sprint, SprintStatus, Program, ProgramStatus,
                               Idea, ChatThread, set_status)
 from coscience.pause import is_paused
-from coscience.resources import (GPU_KEY, GPU_VRAM_KEY, LOCAL, PLATFORM_KEYS, ResourcePool,
-                                 _parse_host, load_pool)
+from coscience.resources import (ACCESS_KEYS, GPU_KEY, GPU_VRAM_KEY, LOCAL, PLATFORM_KEYS,
+                                 ResourcePool, _parse_access, _parse_host, load_pool,
+                                 pool_file_hosts, pool_file_lock, write_pool_file)
 from coscience.substrate import Substrate
 
 
@@ -35,11 +36,6 @@ def service_from_env() -> "Service":
 class NotFoundError(KeyError):
     """A requested sprint or result does not exist."""
 
-
-# Fix B: how long after a drain a remove is allowed. Shorter than this and a
-# dispatch cycle in flight when the drain landed may not have seen it yet — a grant
-# could land between the pool load and the remove.
-REMOVE_AFTER_DRAIN = 120.0
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 # Never worth quoting on an overview card, even though some are technically text.
@@ -242,6 +238,14 @@ class Service:
         progress.ambiguous_exits = 0
         progress.scratch_size = 0
         progress.last_error = ""
+        # A prior life's escalation state must not leak into this one: a sprint the
+        # PM once answered, later finished and re-queued, would otherwise send its
+        # next (unrelated) escalation straight to a human.
+        progress.pm_answered = False
+        progress.escalation = {}
+        progress.resume_note = ""
+        progress.reallocate_to = ""
+        progress.stop_requested = False
         self.substrate.save_progress(progress)
         set_status(sprint, SprintStatus.QUEUED, by=by, action="resume")
         self.substrate.save_sprint(sprint)
@@ -323,9 +327,13 @@ class Service:
         for sprint in self.substrate.iter_sprints(status=wanted):
             started = None
             activity = None
+            escalation_level = ""
             if sprint.status == SprintStatus.EXECUTING:
                 started = self.substrate.load_progress(sprint.id).started_at
                 activity = self._activity(sprint.id)
+            elif sprint.status == SprintStatus.ESCALATED:
+                escalation_level = str(
+                    (self.substrate.load_progress(sprint.id).escalation or {}).get("level") or "")
             rows.append({
                 "id": sprint.id,
                 "status": sprint.status.value,
@@ -344,6 +352,7 @@ class Service:
                 "last_status_at": self._last_status_at(sprint),
                 "model": sprint.model,
                 "activity": activity,
+                "escalation_level": escalation_level,
                 "votes": self._vote_tally(sprint),
             })
         return rows
@@ -366,14 +375,22 @@ class Service:
         if sprint.status in (SprintStatus.DONE, SprintStatus.CANCELED, SprintStatus.FAILED):
             return ""
         from coscience.resources import describe_over_capacity, over_capacity_on
-        pinned = self.substrate.load_progress(sprint.id).host
+        progress = self.substrate.load_progress(sprint.id)
+        # A pending `reallocate` answer is where the next grant will pin this
+        # sprint (the dispatcher's grant step pins on `reallocate_to or host` too),
+        # even though nothing has landed there yet — check that target, not just
+        # where its work already is (fix round 1, I1).
+        pinned = progress.reallocate_to or progress.host
         if pinned:
             host = pool.host(pinned)
             if host is None or not host.placeable:
                 return f"its work is on host {pinned}, which is not in the pool or not taking work"
+            if host.removing:
+                return (f"{pinned} is being removed and this sprint's work is there: "
+                        "stop the sprint, or keep the server")
             if host.drain:
                 return (f"{pinned} is draining and this sprint is pinned there: "
-                        "take the host back or stop the sprint")
+                        "keep the server or stop the sprint")
             entry = host_health.load(self.repo_root).get(pinned)
             if host_health.state(entry, time.time()) == "quiet":
                 fail_since = float((entry or {}).get("fail_since") or 0.0)
@@ -409,6 +426,19 @@ class Service:
                    "expected_seconds": progress.job_expected_seconds,
                    "next_wake": progress.job_next_wake,
                    "max_seconds": progress.job_max_seconds}
+        escalation = None
+        if sprint.status == SprintStatus.ESCALATED and progress.escalation:
+            from coscience import escalation as escalation_mod
+            esc = progress.escalation
+            hosts_allowed = escalation_mod.move_targets(
+                self.pool, sprint.program, progress.host, self.repo_root)
+            escalation = {"level": esc.get("level", "pm"), "by": esc.get("by", ""),
+                         "at": esc.get("at", 0.0), "host": esc.get("host", ""),
+                         "what": esc.get("what", ""), "tried": esc.get("tried", ""),
+                         "may_have_broken_something": bool(esc.get("may_have_broken_something", False)),
+                         "needs": esc.get("needs", ""), "thread_id": esc.get("thread_id", ""),
+                         "hosts_allowed": hosts_allowed,
+                         "stop_requested": bool(progress.stop_requested)}
         return {
             "id": sprint.id,
             "status": sprint.status.value,
@@ -439,6 +469,7 @@ class Service:
             "activity": self._activity(sprint_id) if sprint.status == SprintStatus.EXECUTING else None,
             "error": progress.last_error if (sprint.status == SprintStatus.FAILED
                                              or progress.last_error.startswith("beat failed:")) else "",
+            "escalation": escalation,
             "lease": None if lease is None else {
                 "id": lease.id, "sprint_id": lease.sprint_id, "amounts": lease.amounts,
                 "granted_at": lease.granted_at, "expires_at": lease.expires_at,
@@ -457,6 +488,37 @@ class Service:
             self.substrate.save_progress(progress)
             self.substrate.commit(f"sprint {sprint_id}: wake requested")
         return self.get_sprint(sprint_id)
+
+    def answer_escalation(self, sprint_id: str, action: str, *, instructions: str = "",
+                          host: str = "", by: str = "", thread_id: str = "") -> dict:
+        """A human answers an escalated sprint (dashboard/HTTP path only — the PM
+        answers through its own reasoner loop, not this method). A literal `by`
+        of "pm" is not trusted as the PM: it is remapped so it can never act with
+        PM authority (e.g. answer a PM-level escalation, or skip a human-only
+        action's guard)."""
+        self._load_sprint(sprint_id)                 # NotFoundError if missing
+        from coscience import escalation
+        effective_by = by or "human"
+        if effective_by == "pm":
+            effective_by = "human:pm"
+        why = escalation.answer(self.substrate, sprint_id, action, instructions=instructions,
+                                host=host, by=effective_by, pool=self.pool, thread_id=thread_id)
+        if why:
+            raise ValueError(why)
+        self.substrate.commit(f"sprint {sprint_id}: escalation answered ({action}) by {effective_by}")
+        return self.get_sprint(sprint_id)
+
+    def attention(self) -> dict:
+        """Escalations currently with a human — the dashboard's cross-program
+        to-do list. PM-level escalations don't need a human yet, so they're left out."""
+        rows = []
+        for sprint in self.substrate.iter_sprints(status=SprintStatus.ESCALATED):
+            esc = self.substrate.load_progress(sprint.id).escalation or {}
+            if esc.get("level") == "human":
+                rows.append({"sprint_id": sprint.id, "program": sprint.program,
+                            "title": sprint.title, "what": esc.get("what", ""),
+                            "at": esc.get("at", 0.0)})
+        return {"escalated_to_human": rows}
 
     def usage_stats(self) -> dict:
         """Claude usage for the dashboard: the rolling 5h/weekly budget plus how
@@ -652,6 +714,9 @@ class Service:
             "sprints": [{"id": s.id, "status": s.status.value, "goals": s.goals,
                          "title": s.title, "results": list(s.results), "model": s.model,
                          "last_status_at": self._last_status_at(s),
+                         "escalation_level": (
+                             str((self.substrate.load_progress(s.id).escalation or {}).get("level") or "")
+                             if s.status == SprintStatus.ESCALATED else ""),
                          "votes": self._vote_tally(s)}
                         for s in sprints],
         }
@@ -1669,6 +1734,10 @@ class Service:
         health = host_health.load(self.repo_root)
         now = time.time()
         leftover = self._leftover_by_host(ledger.pool)
+        # One pass over every sprint/progress for every marked-or-drained host,
+        # rather than one pass per host — the dashboard polls this (fix round 1, M7).
+        waiting_names = {h.name for h in ledger.pool.hosts if h.removing or h.drain}
+        waiting_on = host_removal.blockers_by_host(self.substrate, ledger, waiting_names)
 
         def cards(host) -> list[dict]:
             use = ledger.device_use(host.name)
@@ -1690,13 +1759,15 @@ class Service:
             "host_errors": list(ledger.pool.host_errors),
             "hosts": [
                 {"name": h.name, "ssh": h.ssh, "placeable": h.placeable,
-                 "programs": list(h.programs), "run_root": h.run_root,
+                 "programs": list(h.programs), "exclude_programs": list(h.exclude_programs),
+                 "run_root": h.run_root,
                  "capacity": dict(h.capacity),
                  # A host that cannot take work has nothing available to grant.
                  "available": ledger.available(h.name) if h.placeable else {},
                  "gpus": cards(h),
                  "shared": h.shared, "owner": h.owner, "notes": h.notes,
-                 "drain": h.drain, "drained_at": h.drained_at,
+                 "drain": h.drain, "drained_at": h.drained_at, "removing": h.removing,
+                 "waiting_on": waiting_on.get(h.name, []),
                  "health": ({"state": "local", "checked_at": 0.0, "last_ok": 0.0,
                              "fail_since": 0.0, "reason": ""}
                             if h.is_local else
@@ -1731,11 +1802,22 @@ class Service:
         self.substrate.commit("paused" if paused else "resumed")
         return self.ledger_status()
 
-    def set_capacity(self, capacity: dict) -> dict:
+    def set_capacity(self, capacity: dict, gpus: list | None = None) -> dict:
         """Replace the declared resource pool. Validates, writes
         .coscience/resources.yaml atomically, commits, and returns fresh ledger
         status. Lowering a limit below what is currently leased is allowed and
-        drains: running work keeps its lease, new grants stop."""
+        drains: running work keeps its lease, new grants stop.
+
+        `gpus`, when a list, replaces this machine's GPU cards (`[]` removes them,
+        keeping whatever `gpu` count `capacity` itself carries); `None` keeps
+        whatever cards are already on file."""
+        clean_gpus: list[dict] | None = None
+        if gpus is not None:
+            errors = ResourcePool.from_dict({"gpus": gpus}).host_errors
+            if errors:
+                raise ValueError(errors[0])
+            clean_gpus = [{**g, "vram_gb": float(g["vram_gb"])} for g in gpus]
+
         clean: dict[str, float] = {}
         for raw_key, raw_val in (capacity or {}).items():
             key = str(raw_key).strip()
@@ -1749,6 +1831,8 @@ class Service:
                 raise ValueError("'hosts' is reserved for remote machines and can't be a resource name")
             if key in ("gpus", GPU_VRAM_KEY):
                 raise ValueError(f"'{key}' is reserved for GPU cards and can't be a resource name")
+            if key in ("programs", "exclude_programs"):
+                raise ValueError(f"'{key}' is reserved for program access and can't be a resource name")
             if key in clean:
                 raise ValueError(f"duplicate resource name: {key}")
             if isinstance(raw_val, bool) or not isinstance(raw_val, (int, float)):
@@ -1764,139 +1848,269 @@ class Service:
         # The editor edits this machine's amounts and the platform keys; remote
         # hosts are declared by hand and must survive the edit untouched.
         out: dict = dict(clean)
-        if path.is_file():
-            loaded = yaml.safe_load(path.read_text()) or {}
-            if isinstance(loaded, dict):
-                wrapped = loaded.get("resources")
-                hosts = (wrapped.get("hosts") if isinstance(wrapped, dict) else None) \
-                    or loaded.get("hosts")
-                if hosts:
-                    out["hosts"] = hosts
-                gpus = (wrapped.get("gpus") if isinstance(wrapped, dict) else None) \
-                    or loaded.get("gpus")
-                if gpus:
-                    # The card list is the count; an edited `gpu` number would contradict it.
-                    out["gpus"] = gpus
-                    # But only drop `gpu` beside a value the parser actually accepts —
-                    # dropping it beside a malformed one would leave no GPU at all.
-                    if not ResourcePool.from_dict({"gpus": gpus}).host_errors:
-                        out.pop(GPU_KEY, None)
-        self._write_resources(out)
+        with pool_file_lock(self.repo_root):
+            if path.is_file():
+                loaded = yaml.safe_load(path.read_text()) or {}
+                if isinstance(loaded, dict):
+                    wrapped = loaded.get("resources")
+                    hosts = (wrapped.get("hosts") if isinstance(wrapped, dict) else None) \
+                        or loaded.get("hosts")
+                    if hosts:
+                        out["hosts"] = hosts
+                    for key in ("programs", "exclude_programs"):
+                        value = (wrapped.get(key) if isinstance(wrapped, dict) else None) \
+                            or loaded.get(key)
+                        if value:
+                            out[key] = value
+                    if gpus is None:
+                        file_gpus = (wrapped.get("gpus") if isinstance(wrapped, dict) else None) \
+                            or loaded.get("gpus")
+                        if file_gpus:
+                            # The card list is the count; an edited `gpu` number would contradict it.
+                            out["gpus"] = file_gpus
+                            # But only drop `gpu` beside a value the parser actually accepts —
+                            # dropping it beside a malformed one would leave no GPU at all.
+                            if not ResourcePool.from_dict({"gpus": file_gpus}).host_errors:
+                                out.pop(GPU_KEY, None)
+            if gpus is not None:
+                if clean_gpus:
+                    out["gpus"] = clean_gpus
+                    out.pop(GPU_KEY, None)
+                else:
+                    out.pop("gpus", None)
+            self._write_resources(out)
         self.substrate.commit("capacity updated")
         return self.ledger_status()
 
     def _write_resources(self, data: dict) -> None:
-        path = self.repo_root / ".coscience" / "resources.yaml"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Unique per call: both callers (the capacity editor and server onboarding)
-        # are sync routes, so FastAPI runs them in a threadpool and concurrent calls
-        # are genuinely concurrent. A shared tmp name lets one thread's os.replace
-        # pull the file out from under another thread's write/replace.
-        tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
-        try:
-            tmp.write_text(yaml.safe_dump(data, sort_keys=True))
-            os.replace(tmp, path)  # atomic: a dispatcher reading it never sees a partial file
-        finally:
-            tmp.unlink(missing_ok=True)
+        write_pool_file(self.repo_root, data)
 
     def _resources_hosts(self) -> tuple[dict, dict]:
-        """Load resources.yaml and return (the loaded document, its `hosts:` mapping) —
-        unwrapping a `resources:` wrapper when that's where `hosts:` lives, same as
-        onboarding's confirm_host. The returned mapping is already installed as
-        `loaded`'s (or its wrapper's) "hosts" key, so mutating it in place and passing
-        `loaded` to _write_resources keeps the edit."""
-        path = self.repo_root / ".coscience" / "resources.yaml"
-        try:
-            loaded = yaml.safe_load(path.read_text()) if path.is_file() else {}
-        except yaml.YAMLError as exc:
-            raise ValueError(f"resources.yaml could not be read: {exc}")
-        loaded = loaded if isinstance(loaded, dict) else {}
+        """Load resources.yaml and return (the loaded document, its `hosts:` mapping).
+        See `resources.pool_file_hosts` for the shape."""
+        return pool_file_hosts(self.repo_root)
+
+    def _apply_access(self, holder: dict, programs: list, excluded: list) -> None:
+        """Set one server's access keys on its YAML mapping (a `hosts:` entry, or the
+        top level for this machine). Empty lists remove their key: no key is every
+        program, and an empty `programs:` would read as every program too."""
+        programs = [str(p) for p in programs]
+        excluded = [str(p) for p in excluded]
+        if programs and excluded:
+            raise ValueError("programs and exclude_programs can't both be set; use one: "
+                             "only these programs, or every program but these")
+        for key, value in (("programs", programs), ("exclude_programs", excluded)):
+            if value:
+                holder[key] = value
+            else:
+                holder.pop(key, None)
+
+    def _local_holder(self, loaded: dict) -> dict:
+        """The mapping this machine's amounts live in: the `resources:` wrapper when
+        the file uses one, else the top level."""
         wrapped = loaded.get("resources")
-        holder = wrapped if isinstance(wrapped, dict) and "hosts" in wrapped else loaded
-        if "hosts" in holder and not isinstance(holder["hosts"], dict):
-            raise ValueError("resources.yaml hosts: is not a mapping; fix the file before adding a server")
-        hosts = holder.get("hosts") or {}
-        holder["hosts"] = hosts
-        return loaded, hosts
+        return wrapped if isinstance(wrapped, dict) else loaded
 
-    def set_host_drain(self, name: str, drain: bool) -> dict:
-        """Stop new grants on a host (running work finishes), or take it back."""
-        if name == LOCAL:
-            raise ValueError("this machine is not drained; use Pause to stop new work here")
-        loaded, hosts = self._resources_hosts()
-        if name not in hosts:
-            raise NotFoundError(f"no host {name!r} in the pool")
-        if not isinstance(hosts[name], dict):
-            raise ValueError(f"hosts.{name}: is not a mapping; fix the file first")
-        if drain:
-            hosts[name]["drain"] = True
-            # Fix B: so a remove can tell whether the dispatcher has had a chance to
-            # see the drain yet (it loads the pool once per cycle).
-            hosts[name]["drained_at"] = time.time()
-        else:
-            hosts[name].pop("drain", None)
-            hosts[name].pop("drained_at", None)
-        _parse_host(name, hosts[name])
-        self._write_resources(loaded)
-        self.substrate.commit(f"host {name} {'drained' if drain else 'takes work again'}")
-        return self.ledger_status()
-
-    def remove_host(self, name: str) -> dict:
-        """Take a drained host with no unfinished work out of the pool. Its probe
-        record and any run directories on the host itself are left alone."""
-        if name == LOCAL:
-            raise ValueError("this machine cannot be removed; use Pause to stop new work here")
-        loaded, hosts = self._resources_hosts()
-        if name not in hosts:
-            raise NotFoundError(f"no host {name!r} in the pool")
-        if not isinstance(hosts[name], dict):
-            raise ValueError(f"hosts.{name}: is not a mapping; fix the file first")
-        if hosts[name].get("drain") is not True:
-            raise ValueError(f"drain {name} before removing it, so no new sprint lands there meanwhile")
-        drained_at = hosts[name].get("drained_at")
-        # Fix B: a hand-edited entry with no drained_at counts as long drained (no
-        # cycle to wait for was ever timed), so it is not held up here.
-        if isinstance(drained_at, (int, float)) and not isinstance(drained_at, bool) \
-                and time.time() - drained_at < REMOVE_AFTER_DRAIN:
-            raise ValueError(f"{name} was drained less than {int(REMOVE_AFTER_DRAIN // 60)} minutes ago; "
-                             "wait for the dispatcher to see it, then remove")
-        # Fix A: a sprint still physically on this host (an EXECUTING sprint whose
-        # lease lapsed and hasn't been re-adopted, or one pinned here while QUEUED or
-        # HIBERNATED) must finish or be stopped first — removing the host now would
-        # orphan the job (reconcile can't kill what it can't reach) or make a pinned
-        # sprint unrunnable for good.
-        unfinished = []
+    def _cut_off_pins(self) -> list[dict]:
+        """Unfinished sprints pinned to a server that no longer takes their program.
+        They keep their work where it is; O7's unrunnable message says what to do."""
+        pool = self.pool                  # read live from resources.yaml, so it sees the write
+        out = []
         for sprint in self.substrate.iter_sprints():
             if sprint.status in (SprintStatus.DONE, SprintStatus.CANCELED, SprintStatus.FAILED):
                 continue
-            progress = self.substrate.load_progress(sprint.id)
-            if progress.host == name or progress.job_host == name:
-                unfinished.append(sprint.id)
-        if unfinished:
-            n = len(unfinished)
-            raise ValueError(f"{n} unfinished sprint{'s' if n != 1 else ''} still "
-                             f"work{'' if n != 1 else 's'} on {name} "
-                             f"({', '.join(unfinished[:5])}{'…' if n > 5 else ''}): "
-                             "let them finish or stop them first")
-        holding = [l.sprint_id for l in self._ledger().all_leases() if l.host == name]
-        if holding:
-            raise ValueError(f"{len(holding)} sprint{' still holds' if len(holding) == 1 else 's still hold'} "
-                             f"a lease on {name}: wait for {'it' if len(holding) == 1 else 'them'} to finish, "
-                             "or stop them")
-        del hosts[name]
-        self._write_resources(loaded)
-        self.substrate.commit(f"host {name} removed from the pool")
+            pinned = self.substrate.load_progress(sprint.id).host
+            host = pool.host(pinned) if pinned else None
+            if host is not None and not host.allows(sprint.program):
+                out.append({"sprint_id": sprint.id, "host": pinned})
+        return out
+
+    def set_host_programs(self, name: str, programs: list[str], exclude_programs: list[str]) -> dict:
+        """Set one server's program access from the server side. `name` may be
+        'local' (this machine, edited at the top level of resources.yaml) or a
+        remote server name already in `hosts:`."""
+        changed = False
+        with pool_file_lock(self.repo_root):
+            loaded, hosts = self._resources_hosts()
+            if name == LOCAL:
+                holder = self._local_holder(loaded)
+            elif name not in hosts:
+                raise NotFoundError(f"no server {name!r} in the pool")
+            else:
+                holder = dict(hosts[name]) if isinstance(hosts[name], dict) else {}
+            before = {k: holder.get(k) for k in ACCESS_KEYS}
+            self._apply_access(holder, programs, exclude_programs)
+            if name == LOCAL:
+                # Only this machine's own keys are checked: another server's broken entry
+                # is already reported on Compute and must not block this edit.
+                _parse_access("", holder)
+            else:
+                _parse_host(name, holder)                       # raises ValueError for a bad entry
+                hosts[name] = holder
+            changed = {k: holder.get(k) for k in ACCESS_KEYS} != before
+            if changed:
+                self._write_resources(loaded)
+        if changed:
+            self.substrate.commit(f"server {name} program access updated")
+        return {**self.ledger_status(), "cut_off": self._cut_off_pins()}
+
+    def set_program_hosts(self, program_id: str, hosts_wanted: list[str]) -> dict:
+        """Set which servers take a program, from the program side. Every server in
+        the pool ends up allowing `program_id` iff its name is in `hosts_wanted`."""
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        wanted = set(hosts_wanted)
+
+        # I2 (fix round 1): the read, the unknown-server check and the edit
+        # computation all happen under the lock, built from the very document the
+        # lock guards (`loaded`/`hosts`) — never from a `self.pool` read before it.
+        # A server deleted (e.g. by the dispatcher) between an earlier unlocked read
+        # and this write used to read as unrecognised-but-editable, recreating a
+        # bare entry the parser then refused with a baffling "needs ssh". Now a
+        # server that isn't in `hosts_wanted`'s pool is a clear "no server named X".
+        changed = False
+        with pool_file_lock(self.repo_root):
+            loaded, hosts = self._resources_hosts()
+            pool = ResourcePool.from_dict(loaded)
+            pool_names = {h.name for h in pool.hosts}
+            unknown = [n for n in hosts_wanted if n not in pool_names]
+            if unknown:
+                raise ValueError(f"no server named {unknown[0]!r}")
+
+            # Compute every server's new (programs, excluded) lists before writing
+            # anything, so a refusal partway through never leaves a partial edit.
+            edits: list[tuple[str, list[str], list[str]]] = []
+            for host in pool.hosts:
+                want = host.name in wanted
+                has = host.allows(program_id)
+                if want == has:
+                    continue
+                programs = list(host.programs)
+                excluded = list(host.exclude_programs)
+                if programs:
+                    if want:
+                        programs = programs + [program_id]
+                    else:
+                        programs = [p for p in programs if p != program_id]
+                        if not programs:
+                            raise ValueError(f"{program_id} is the only program {host.name} takes; "
+                                             f"let another program use {host.name} first, or remove "
+                                             "the server")
+                elif excluded:
+                    if want:
+                        excluded = [p for p in excluded if p != program_id]
+                    else:
+                        excluded = excluded + [program_id]
+                else:
+                    # neither list set: currently allows everything, so `want` must be
+                    # False here (an equal `want`/`has` was skipped above)
+                    excluded = [program_id]
+                edits.append((host.name, programs, excluded))
+
+            if edits:
+                for name, programs, excluded in edits:
+                    if name == LOCAL:
+                        self._apply_access(self._local_holder(loaded), programs, excluded)
+                    else:
+                        entry = dict(hosts.get(name) or {})
+                        self._apply_access(entry, programs, excluded)
+                        _parse_host(name, entry)                    # raises ValueError for a bad entry
+                        hosts[name] = entry
+                self._write_resources(loaded)
+                changed = True
+        if changed:
+            self.substrate.commit(f"program {program_id} server access updated")
+        return {**self.ledger_status(), "cut_off": self._cut_off_pins()}
+
+    def remove_host(self, name: str) -> dict:
+        """Mark a server for removal: it takes no new grants, and the dispatcher
+        deletes it at the start of a cycle, before granting, once nothing is on it
+        (`host_removal.blockers`) — no human timing involved. Its probe record and
+        any run directories on the host itself are left alone. Calling this again
+        on an already-marked server is harmless."""
+        if name == LOCAL:
+            raise ValueError("this machine cannot be removed; use Pause to stop new work here")
+        with pool_file_lock(self.repo_root):
+            loaded, hosts = self._resources_hosts()
+            if name not in hosts:
+                raise NotFoundError(f"no host {name!r} in the pool")
+            if not isinstance(hosts[name], dict):
+                raise ValueError(f"hosts.{name}: is not a mapping; fix the file first")
+            entry = dict(hosts[name])
+            entry["remove"] = True
+            _parse_host(name, entry)
+            hosts[name] = entry
+            self._write_resources(loaded)
+        self.substrate.commit(f"server {name} marked for removal")
+        return self.ledger_status()
+
+    def keep_host(self, name: str) -> dict:
+        """Take back a remove or drain mark; the server takes new grants again."""
+        if name == LOCAL:
+            raise ValueError("this machine is always in the pool; there is nothing to keep")
+        with pool_file_lock(self.repo_root):
+            loaded, hosts = self._resources_hosts()
+            if name not in hosts:
+                raise NotFoundError(f"no host {name!r} in the pool")
+            if not isinstance(hosts[name], dict):
+                raise ValueError(f"hosts.{name}: is not a mapping; fix the file first")
+            entry = dict(hosts[name])
+            entry.pop("remove", None)
+            entry.pop("drain", None)
+            entry.pop("drained_at", None)
+            _parse_host(name, entry)
+            hosts[name] = entry
+            self._write_resources(loaded)
+        self.substrate.commit(f"server {name} kept in the pool")
         return self.ledger_status()
 
     # --- onboarding (O5) ---
-    _HOST_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+    # Dot-only names ("." or "..") are refused: `_host_probe_path`/`survey_thread_dir`
+    # join the name as a path segment, so an unvalidated ".." would escape into
+    # `.coscience` itself (review round 1, I2).
+    _HOST_NAME = re.compile(r"^(?!\.+$)[A-Za-z0-9._-]+$")
 
     def _host_probe_path(self, name: str) -> Path:
         return self.repo_root / ".coscience" / "host-probes" / f"{name}.json"
 
+    @staticmethod
+    def _append_notes(existing: str, lines: str) -> str:
+        """Append `lines` (one per newline) to `existing` notes, skipping any line
+        already present — a second target change that fails the same check must not
+        duplicate its Override line (review round 1, M4)."""
+        if not lines:
+            return existing
+        have = set(existing.splitlines())
+        to_add = [ln for ln in lines.splitlines() if ln not in have]
+        if not to_add:
+            return existing
+        return existing + ("\n" if existing else "") + "\n".join(to_add)
+
+    def _override_notes_or_raise(self, name: str, record: dict) -> str:
+        """The `Override <check>: <reason>` lines to append to a server's notes when
+        a human accepts a failed check on the agent's written say-so (O11). Raises
+        ValueError when the survey is still running, its proposal is missing,
+        invalid or silent on some failed check, or was written against a probe
+        other than the one currently on record (review round 1, I1) — an override
+        must be judged against exactly what the agent was shown."""
+        from coscience import host_survey
+        thread = self.substrate.load_survey_thread(name)
+        if thread is not None and thread.pending:
+            raise ValueError("the survey is still working; wait for it to finish")
+        tdir = self.substrate.survey_thread_dir(name)
+        ref = host_survey.read_probe_ref(tdir)
+        if ref is None:
+            raise ValueError(f"no survey has run against the current probe of {name}; survey it first")
+        if not host_survey.probe_ref_matches(ref, record):
+            raise ValueError(f"the survey ran against an older probe of {name}; ask the agent to look again")
+        proposal, proposal_error = host_survey.read_proposal(tdir, record)
+        if proposal_error:
+            raise ValueError(proposal_error)
+        return host_survey.override_notes(record, proposal)
+
     def probe_host(self, *, name: str, ssh: str, run_root: str = "", shared: bool = False,
-                   programs: list | None = None, owner: str = "", notes: str = "",
-                   runner=None) -> dict:
+                   programs: list | None = None, exclude_programs: list | None = None,
+                   owner: str = "", notes: str = "", runner=None) -> dict:
         """Probe a server and record what was found, for a human to confirm. Nothing
         enters the pool here."""
         from coscience import host_probe
@@ -1909,6 +2123,7 @@ class Service:
             str(run_root or "").strip() or host_probe.DEFAULT_RUN_ROOT)  # refuses an unsafe run root
         declared = {"ssh": ssh, "run_root": run_root,
                     "shared": bool(shared), "programs": [str(p) for p in (programs or [])],
+                    "exclude_programs": [str(p) for p in (exclude_programs or [])],
                     "owner": str(owner or ""), "notes": str(notes or "")}
         result = host_probe.probe_host(ssh, declared["run_root"], shared=declared["shared"],
                                        runner=runner or host_probe.subprocess_runner)
@@ -1929,8 +2144,120 @@ class Service:
                 continue
         return records
 
+    # --- agent survey of a probed server (O11) ---
+    def survey_host(self, name: str, message: str = "", launch=None) -> dict:
+        """Start or continue an agent's full-scope survey of a probed server: a
+        resumable Claude session scoped to the server (`.coscience/host-surveys/<name>/`),
+        built on program chat's thread store, launch, collection, gates and call log.
+        `launch(**kwargs)->token` is injectable for tests."""
+        from coscience import chat_agent, host_survey, usage_meter
+        from coscience.worker import claude_usage_ok
+        if not self._HOST_NAME.match(name or ""):
+            raise ValueError("a host name uses letters, digits, '.', '_' or '-' and is not all dots")
+        path = self._host_probe_path(name)
+        if not path.is_file():
+            raise NotFoundError(f"no probe recorded for host {name!r}")
+        record = json.loads(path.read_text())
+        if not record.get("ok"):
+            raise ValueError(f"the last probe of {name} could not log in; fix SSH and probe again")
+        thread = self.substrate.load_survey_thread(name)
+        message = str(message or "").strip()
+        if thread is not None:
+            if not message:
+                raise ValueError("message is required")
+            if thread.pending:
+                raise ValueError("the survey is still working on the previous message")
+        else:
+            thread = ChatThread(id=name, title=f"Survey of {name}", scope="full",
+                                session_id=str(uuid4()), created_at=time.time())
+        # Pause first: it also fails the usage gate below, but a reset does not clear
+        # it — Resume does — so the human must be told which stop this is. Mirrors
+        # post_chat_message's gates; a survey has no thread to append a system
+        # message into on refusal, so it raises instead.
+        if launch is None and is_paused(self.substrate.repo_root):
+            raise ValueError("Paused — Resume in Compute to keep talking.")
+        if launch is None and not claude_usage_ok(repo_root=self.substrate.repo_root):
+            raise ValueError("Claude usage is exhausted — please try again after the reset.")
+        resume = thread.turns_done > 0
+        tdir = self.substrate.survey_thread_dir(name)
+        if resume:
+            prompt = message
+            # A re-probe since the last turn invalidates whatever the agent last
+            # saw; tell it plainly rather than let it write overrides against
+            # stale facts (review round 1, I1).
+            if not host_survey.probe_ref_matches(host_survey.read_probe_ref(tdir), record):
+                prompt = host_survey.render_reprobe_notice(record) + "\n\nHuman: " + message
+        else:
+            entry = self._resources_hosts()[1].get(name)
+            prompt = host_survey.render_first_prompt(record, entry)
+            if message:
+                prompt += "\n\nHuman: " + message
+        if message:
+            thread.messages.append({"role": "user", "text": message, "at": time.time()})
+        tdir.mkdir(parents=True, exist_ok=True)
+        host_survey.ensure_gitignore(tdir)
+        launch = launch or chat_agent.launch_turn
+        token = launch(thread_dir=tdir, workdir=str(tdir), prompt=prompt, scope="full",
+                       session_id=thread.session_id, resume=resume, model="")
+        # Written only once the turn is launched, so a later accept judges the agent's
+        # overrides against exactly the probe it was shown. Writing it before a launch
+        # that then fails would vouch for a proposal the agent wrote about an older probe.
+        host_survey.write_probe_ref(tdir, record)
+        thread.pending, thread.agent_token = True, str(token)
+        thread.agent_call = usage_meter.start_call(
+            self.substrate.repo_root, "survey", limits=usage_meter.current_window(), token=str(token))
+        thread.messages = thread.messages[-200:]
+        self.substrate.save_survey_thread(name, thread)
+        self.substrate.commit(f"server {name}: survey message")
+        # Shaped like get_survey(name), but built directly rather than through it:
+        # get_survey collects a pending turn before reporting, and the turn this
+        # call just launched has had no chance yet to even write its first byte —
+        # collecting it here would race a real launch and misreport it as dead on
+        # every single call (mirrors why post_chat_message never re-collects either).
+        return self._survey_state(name, thread)
+
+    def get_survey(self, name: str) -> dict:
+        """The state of a server's survey: pending/finished messages, and the agent's
+        proposal once it has written one (validated against the current probe record).
+        Collects a finished turn first, as chat reads do."""
+        from coscience import host_survey
+        if not self._HOST_NAME.match(name or ""):
+            raise ValueError("a host name uses letters, digits, '.', '_' or '-' and is not all dots")
+        thread = self.substrate.load_survey_thread(name)
+        if thread is not None and thread.pending:
+            thread = host_survey.collect(self.substrate, name, thread)
+        return self._survey_state(name, thread)
+
+    def _survey_state(self, name: str, thread) -> dict:
+        from coscience import host_survey
+        proposal, proposal_error = None, ""
+        tdir = self.substrate.survey_thread_dir(name)
+        path = self._host_probe_path(name)
+        if path.is_file():
+            record = json.loads(path.read_text())
+            proposal, proposal_error = host_survey.read_proposal(tdir, record)
+            if proposal is not None and not host_survey.probe_ref_matches(
+                    host_survey.read_probe_ref(tdir), record):
+                # A stale proposal is never offered, even though it parses cleanly:
+                # it was written about a probe that is no longer current (I1).
+                proposal, proposal_error = None, (
+                    f"the survey ran against an older probe of {name}; ask the agent to look again")
+        elif (tdir / "proposal.json").is_file():
+            # The probe record is gone (removed, or re-added under the same name)
+            # but a stale proposal file is still sitting there — never show it (M6).
+            proposal_error = f"the probe record for {name} is gone; probe it again"
+        return {
+            "name": name,
+            "pending": bool(thread.pending) if thread is not None else False,
+            "messages": list(thread.messages) if thread is not None else [],
+            "proposal": proposal,
+            "proposal_error": proposal_error,
+            "started": thread is not None,
+        }
+
     def confirm_host(self, *, name: str, capacity: dict, gpus: list | None = None,
-                     probed_at: float | None = None) -> dict:
+                     probed_at: float | None = None, accept_overrides: bool = False,
+                     notes: str | None = None) -> dict:
         """Write a probed server into `resources.yaml` `hosts:`, keeping the rest of the
         file. The entry is checked by the same parser the pool uses, so what is written
         is what loads."""
@@ -1943,9 +2270,12 @@ class Service:
         if probed_at is not None and abs(probed_at - record["probed_at"]) > 1e-6:
             raise ValueError(f"the probe of {name} changed since it was reviewed; probe it again")
         failed = [c.get("name", "?") for c in record.get("checks", []) if not c.get("ok")]
+        override_lines = ""
         if failed:
-            raise ValueError(f"checks failed on {name}: {', '.join(failed)}; fix them on the "
-                             "server and probe again")
+            if not accept_overrides:
+                raise ValueError(f"checks failed on {name}: {', '.join(failed)}; fix them on the "
+                                 "server and probe again")
+            override_lines = self._override_notes_or_raise(name, record)
         declared = record["declared"]
         entry: dict = {"ssh": declared["ssh"], "run_root": declared["run_root"],
                        "capacity": {str(k): float(v) for k, v in (capacity or {}).items()},
@@ -1955,16 +2285,119 @@ class Service:
             proposed_capacity = record.get("proposal", {}).get("capacity", {})
             if "gpu" in proposed_capacity:
                 entry["capacity"].setdefault("gpu", proposed_capacity["gpu"])
-        for key in ("programs", "shared", "owner", "notes"):
+        for key in ("programs", "exclude_programs", "shared", "owner", "notes"):
             if declared.get(key):
                 entry[key] = declared[key]
+        # A caller-given `notes` (the dashboard's Add form, which may carry the
+        # agent's survey notes) replaces whatever the declaration held, before any
+        # override lines are appended below (review round 1, C2) — otherwise the
+        # human's edited notes silently reverted to the probe's declared ones.
+        if notes is not None:
+            if notes:
+                entry["notes"] = notes
+            else:
+                entry.pop("notes", None)
+        if override_lines:
+            entry["notes"] = self._append_notes(entry.get("notes", ""), override_lines)
         _parse_host(name, entry)                           # raises ValueError for a bad entry
 
-        loaded, hosts = self._resources_hosts()
-        hosts[name] = entry
-        self._write_resources(loaded)
+        with pool_file_lock(self.repo_root):
+            loaded, hosts = self._resources_hosts()
+            hosts[name] = entry
+            self._write_resources(loaded)
         self.substrate.commit(f"host {name} added to the pool")
         return self.ledger_status()
+
+    def detect_local(self, runner=None) -> dict:
+        """This machine's own facts and a proposed capacity — the same probe script
+        onboarding runs over SSH, run locally instead. Nothing is written."""
+        from coscience import host_probe
+        return host_probe.detect_local(runner=runner or host_probe.subprocess_runner)
+
+    def update_host(self, name: str, *, ssh: str | None = None, run_root: str | None = None,
+                    shared: bool | None = None, programs: list | None = None,
+                    exclude_programs: list | None = None,
+                    owner: str | None = None, notes: str | None = None,
+                    capacity: dict | None = None, gpus: list | None = None,
+                    probed_at: float | None = None, accept_overrides: bool = False) -> dict:
+        """Edit a remote host's entry in place, keeping `drain` and anything not
+        given here. A new SSH target or run root is refused unless a probe of it is
+        already on record and passed — the same bar `confirm_host` holds a new
+        server to."""
+        from coscience import host_probe
+        with pool_file_lock(self.repo_root):
+            loaded, hosts = self._resources_hosts()
+            if name == LOCAL or name not in hosts:
+                raise NotFoundError(f"no remote host {name!r} in the pool")
+            entry = hosts[name]
+            if not isinstance(entry, dict):
+                raise ValueError(f"hosts.{name}: is not a mapping; fix the file first")
+
+            new_ssh = ssh if ssh is not None else entry["ssh"]
+            new_root = run_root if run_root is not None else entry.get("run_root", host_probe.DEFAULT_RUN_ROOT)
+            ssh_changed = new_ssh != entry["ssh"]
+            root_changed = new_root != entry.get("run_root", host_probe.DEFAULT_RUN_ROOT)
+            override_lines = ""
+            if ssh_changed or root_changed:
+                message = (f"probe {name} with the new SSH target first" if ssh_changed
+                          else f"probe {name} with the new run root first")
+                path = self._host_probe_path(name)
+                record = json.loads(path.read_text()) if path.is_file() else None
+                if (record is None or record["declared"]["ssh"] != new_ssh
+                        or record["declared"]["run_root"] != new_root):
+                    raise ValueError(message)
+                if not record.get("ok"):
+                    raise ValueError(f"the last probe of {name} failed; probe it again before applying it")
+                failed = [c.get("name", "?") for c in record.get("checks", []) if not c.get("ok")]
+                if failed:
+                    if not accept_overrides:
+                        raise ValueError(f"checks failed on {name}: {', '.join(failed)}; fix them on the "
+                                         "server and probe again")
+                    override_lines = self._override_notes_or_raise(name, record)
+                if probed_at is not None and abs(probed_at - record["probed_at"]) > 1e-6:
+                    raise ValueError(f"the probe of {name} changed since it was reviewed; probe it again")
+
+            new_entry = dict(entry)
+            new_entry["ssh"] = new_ssh
+            new_entry["run_root"] = new_root
+            if shared is not None:
+                if shared:
+                    new_entry["shared"] = True
+                else:
+                    new_entry.pop("shared", None)
+            if owner is not None:
+                if owner:
+                    new_entry["owner"] = owner
+                else:
+                    new_entry.pop("owner", None)
+            if notes is not None:
+                if notes:
+                    new_entry["notes"] = notes
+                else:
+                    new_entry.pop("notes", None)
+            if programs is not None or exclude_programs is not None:
+                self._apply_access(new_entry, programs or [], exclude_programs or [])
+            if capacity is not None:
+                new_entry["capacity"] = {str(k): float(v) for k, v in capacity.items()}
+            if gpus is not None:
+                if gpus:
+                    new_entry["gpus"] = [{**g, "vram_gb": float(g["vram_gb"])} for g in gpus]
+                else:
+                    new_entry.pop("gpus", None)
+                # The dialog echoes the host's current capacity, which carries a derived
+                # `gpu: <old count>` — that stale count must not fight the new card list
+                # (or its absence) in _parse_host, so the count is derived fresh from `gpus`.
+                new_entry["capacity"] = {k: v for k, v in new_entry.get("capacity", {}).items()
+                                         if k != GPU_KEY}
+
+            if override_lines:
+                new_entry["notes"] = self._append_notes(new_entry.get("notes", ""), override_lines)
+
+            _parse_host(name, new_entry)                       # raises ValueError for a bad entry
+            hosts[name] = new_entry
+            self._write_resources(loaded)
+        self.substrate.commit(f"host {name} configuration updated")
+        return {**self.ledger_status(), "cut_off": self._cut_off_pins()}
 
     # --- wiki (phase 2: read) -------------------------------------------------
 

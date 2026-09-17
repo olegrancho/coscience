@@ -1,5 +1,5 @@
 export type SprintStatus =
-  | "proposed" | "approved" | "queued" | "executing" | "parked" | "hibernated"
+  | "proposed" | "approved" | "queued" | "executing" | "escalated" | "parked" | "hibernated"
   | "done" | "canceled" | "failed";
 
 // Human lifecycle actions. `approve`/`run` are the primary (state-advancing) ones;
@@ -15,6 +15,7 @@ export function availableActions(status: SprintStatus): Action[] {
   if (status === "approved") return ["run", "sendBack", "edit", "reject", "demote"];
   if (status === "queued") return ["reject", "edit"];
   if (status === "executing") return ["edit"];
+  if (status === "escalated") return [];   // answers live in EscalationPanel, not here
   if (status === "parked") return ["unpark", "demote", "cancel"];
   if (status === "done" || status === "failed") return ["resume"];
   return [];

@@ -43,6 +43,7 @@ class ExecutionContext:
     host_facts: str = ""          # one line from the host's onboarding probe
     host_notes: str = ""          # the host entry's notes
     collect_note: str = ""        # what the platform copied back before this run
+    resume_note: str = ""         # the PM/human's note handed down after an escalation answer
 
 
 def launch_detached(command: str, cwd: "str | Path | None" = None) -> str:

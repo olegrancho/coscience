@@ -43,7 +43,10 @@ def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
     artifacts_section = ""
     gpu_section = ""
     host_section = ""
+    resume_section = ""
     if context is not None:
+        if context.resume_note:
+            resume_section = f"\n## An answer to your escalation\n{context.resume_note}\n"
         program = f"{context.program_title}: {context.program_goal}".strip(": ").strip()
         if context.prior_results:
             prior = "\n\n".join(context.prior_results)
@@ -127,7 +130,7 @@ proceed, or refuse to work because you think another agent is running this sprin
 platform guarantees exactly one worker per sprint. There is no human watching this
 session to answer questions; asking one, or stopping to request a decision, fails the
 sprint. Just do the work.
-
+{resume_section}
 ## Program goal
 {program or "(see the sprint objective below)"}
 
@@ -211,6 +214,23 @@ then exit. Backgrounding without step 2 loses your work.
       "expected_seconds": 2400, "wake_after_seconds": 2700, "max_seconds": 5400,
       "note": "InfoNCE temperature sweep, legacy pair"}}
      # then end your turn. Do NOT print "sweep started" as if the sprint were done.
+
+## When to stop and ask for help (escalate)
+Sometimes you cannot proceed and should NOT keep trying. Write `{{sprint_dir}}/escalate.json`:
+  {{"what": "<what happened>", "tried": "<what you already tried>",
+   "may_have_broken_something": true|false, "needs": "<what would unblock you>"}}
+then end your turn. Do this — instead of continuing to retry, improvising a workaround, or
+declaring the sprint done/failed on your own — when:
+- a host you need is unreachable and stays unreachable after a reasonable retry,
+- a failure you cannot explain after a genuine attempt to diagnose it,
+- you believe you may have damaged the host or the program's data (say so; set
+  `may_have_broken_something` true),
+- an environment blocker (missing tool, broken dependency, permissions) you cannot resolve
+  within this sprint.
+Never escalate for an ordinary bug in your own code — fix it and keep going. Once you write
+escalate.json, the sprint is held: any job you left running keeps running and is collected
+normally, but nobody relaunches you until a PM or a human reads this and answers. You will be
+relaunched with that answer when one arrives.
 {assess_section}"""
 
 
