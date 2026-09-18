@@ -1,10 +1,16 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 107
+version: 109
 last_updated: 2026-09-17
 ---
 
 # To QC
+
+### O14. Choose where each program may run from either side
+
+Each server holds one list of the programs it runs, with select-all in the dropdown; a program's settings tick the servers it may use; creating a program asks which servers, all ticked. `exclude_programs` and the "all programs" state are gone, and nothing in either view is disabled.
+
+**Check:** in the test program's settings, untick the remote server and save — it should just work, and the servers card should then read "none" for it. Untick every program on a server in its Config dialog and see the card read "none". Create a program with one server unticked and confirm its sprints only go to the others. A server whose list was never set still shows every program ticked and admits everything until its first save. Built in a worktree, uncommitted.
 
 ### O13. Document the remote-server switches for deployments
 
@@ -88,12 +94,6 @@ stay empty unless you use detected. Update, and confirm `resources.yaml` keeps w
 On a remote server, change notes and Update with no probe needed. Change its SSH target, and Update
 stays blocked until a re-probe passes. "Use detected" memory takes the full RAM, not a 90%
 share. Landed and deployed.
-
-### O14. Choose where each program may run from either side
-
-A server's dialog picks its programs from a list with an "All programs" switch and exceptions, Program settings has one checkbox per server, and this machine can be restricted like any other server.
-
-**Check:** in a program's settings, uncheck this machine and save: the servers card on Compute reads "all except <program>" on this machine and none of that program's new sprints land here. Then Config a remote server, turn All programs off and see Update blocked until a program is picked. Landed and deployed.
 
 ### O15. Remove a server with one button
 

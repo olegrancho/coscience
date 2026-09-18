@@ -1,3 +1,5 @@
+> **Superseded on 2026-09-17** by [2026-09-17-o14-plain-program-lists.md](2026-09-17-o14-plain-program-lists.md): the three access shapes and the `exclude_programs` key described below were replaced by one plain `programs:` list per server. Kept as the record of what shipped first.
+
 # O14 Choose Where Each Program May Run Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
