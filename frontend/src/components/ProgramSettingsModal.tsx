@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type Program } from "../api";
 import DirectoryPickerModal from "./DirectoryPickerModal";
-import { cutOffMessage, hostAllows, onlyProgram } from "./programAccess";
+import { cutOffMessage, hostAllows } from "./programAccess";
 import { MergePolicySelect, ModelSelect } from "./ui";
 
 interface Props {
@@ -206,15 +206,12 @@ export default function ProgramSettingsModal({ opened, onClose, program, onSaved
           <Stack gap={4}>
             {(ledger.data?.hosts ?? []).map((h) => {
               const checked = checkedHosts.has(h.name);
-              const locked = checked && onlyProgram(h, program.id);
               return (
                 <Checkbox
                   key={h.name}
                   label={h.name === "local" ? "this machine" : h.name}
                   aria-label={`may run on ${h.name}`}
                   checked={checked}
-                  disabled={locked}
-                  description={locked ? "the only program this server takes" : undefined}
                   onChange={() => setCheckedHosts((prev) => {
                     const next = new Set(prev);
                     if (next.has(h.name)) next.delete(h.name); else next.add(h.name);

@@ -255,7 +255,7 @@ def test_confirm_host_blocks_on_the_pool_file_lock(tmp_path):
 def test_set_host_programs_blocks_on_the_pool_file_lock(tmp_path):
     _write_pool(tmp_path)
     svc = Service(tmp_path)
-    _assert_blocks_on_pool_lock(tmp_path, lambda: svc.set_host_programs("a", ["p1"], []))
+    _assert_blocks_on_pool_lock(tmp_path, lambda: svc.set_host_programs("a", ["p1"]))
 
 
 def test_set_program_hosts_blocks_on_the_pool_file_lock(tmp_path):

@@ -33,15 +33,31 @@ beforeAll(() => {
   })) as unknown as typeof window.matchMedia);
 });
 
-/** Opens a ProgramAccessInput MultiSelect by its label and clicks each program id
- *  in `ids` from the dropdown, one at a time (Mantine re-renders the option list
- *  between picks). */
-async function pickPrograms(label: string, ids: string[]) {
-  await waitFor(() => expect(api.listPrograms).toHaveBeenCalled());
-  for (const id of ids) {
-    fireEvent.click(screen.getByRole("textbox", { name: label }));
-    fireEvent.click(await screen.findByRole("option", { name: id }));
-  }
+// The programs `listPrograms` resolves to in every test here — the default
+// list every "add" and "no list yet" seed ticks.
+const ALL_PROGRAM_IDS = ["p2", "p4", "p5"];
+
+/** Waits until the ProgramAccessInput has finished seeding: every id in
+ *  `ids` shows up as a ticked pill. Needed before reading or acting on the
+ *  program list — it seeds asynchronously, once `listPrograms` resolves. */
+async function awaitProgramsSeeded(ids: string[] = ALL_PROGRAM_IDS) {
+  await waitFor(() => {
+    const labels = [...document.querySelectorAll(".mantine-Pill-label")].map((el) => el.textContent);
+    ids.forEach((id) => expect(labels).toContain(id));
+  });
+}
+
+/** Opens the ProgramAccessInput dropdown and clicks one program's option. */
+async function pickProgram(id: string) {
+  fireEvent.click(screen.getByRole("textbox", { name: /Programs this server runs/ }));
+  fireEvent.click(await screen.findByRole("option", { name: id }));
+}
+
+/** Unticks one program by clicking its pill's remove button. */
+function untickProgram(id: string) {
+  const label = screen.getAllByText(id, { selector: ".mantine-Pill-label" })[0];
+  const pill = label.closest(".mantine-Pill-root") as HTMLElement;
+  fireEvent.click(pill.querySelector("button")!);
 }
 
 const OK_PROBE = {
@@ -55,7 +71,7 @@ const OK_PROBE = {
 };
 
 const REMOTE: LedgerHost = {
-  name: "gpu1", ssh: "gpu1", placeable: true, programs: ["p2"], exclude_programs: [], run_root: "~/coscience-runs",
+  name: "gpu1", ssh: "gpu1", placeable: true, programs: ["p2"], run_root: "~/coscience-runs",
   capacity: { cpu: 10, memory_gb: 50 }, available: {},
   gpus: [{ index: 0, model: "X", vram_gb: 10.8, whole: false, shared_gb: 0 }],
   shared: false, owner: "alice", notes: "business hours only",
@@ -63,7 +79,9 @@ const REMOTE: LedgerHost = {
 };
 
 const LOCAL: LedgerHost = {
-  name: "local", ssh: "", placeable: true, programs: [], exclude_programs: [], run_root: "",
+  // programs: null — this machine's list has never been set, so the dialog
+  // seeds every program ticked.
+  name: "local", ssh: "", placeable: true, programs: null, run_root: "",
   capacity: { cpu: 24, gpu: 1 }, available: {},
   gpus: [{ index: 0, model: "", vram_gb: null, whole: true, shared_gb: 0 }],
   drain: false, removing: false, waiting_on: [], used: {},
@@ -128,8 +146,7 @@ describe("AddHostModal", () => {
       expect(nameInput.disabled).toBe(true);
       expect((screen.getByLabelText(/^SSH target/) as HTMLInputElement).value).toBe("gpu1");
       expect((screen.getByLabelText(/^Run root/) as HTMLInputElement).value).toBe("~/coscience-runs");
-      expect((screen.getByLabelText("All programs") as HTMLInputElement).checked).toBe(false);
-      expect(screen.getAllByText("p2").length).toBeGreaterThan(0);
+      await awaitProgramsSeeded(["p2"]);
       expect((screen.getByLabelText(/^Owner/) as HTMLInputElement).value).toBe("alice");
       expect((screen.getByLabelText(/^Notes/) as HTMLInputElement).value).toBe("business hours only");
       expect((screen.getByLabelText("CPU cores") as HTMLInputElement).value).toBe("10");
@@ -141,7 +158,7 @@ describe("AddHostModal", () => {
       fireEvent.click(screen.getByRole("button", { name: "Update configuration" }));
       await waitFor(() => expect(api.updateHost).toHaveBeenCalled());
       expect(api.updateHost).toHaveBeenCalledWith("gpu1", expect.objectContaining({
-        notes: "24/7 now", capacity: { cpu: 12, memory_gb: 50 },
+        notes: "24/7 now", capacity: { cpu: 12, memory_gb: 50 }, programs: ["p2"],
       }));
       expect(onClose).toHaveBeenCalled();
     });
@@ -234,29 +251,24 @@ describe("AddHostModal", () => {
       }));
     });
 
-    it("shows the switch on and the exception selected for an 'all except' host, and sends it back on Update", async () => {
-      const excepting = { ...REMOTE, programs: [], exclude_programs: ["p4"] };
-      renderModal({ host: excepting });
-      expect((await screen.findByLabelText("All programs") as HTMLInputElement).checked).toBe(true);
-      expect(screen.getAllByText("p4").length).toBeGreaterThan(0);
-
+    it("shows every program ticked for a server with no list, and sends them all on Update", async () => {
+      const noList = { ...REMOTE, programs: null };
+      renderModal({ host: noList });
+      await awaitProgramsSeeded(ALL_PROGRAM_IDS);
       fireEvent.click(screen.getByRole("button", { name: "Update configuration" }));
       await waitFor(() => expect(api.updateHost).toHaveBeenCalled());
       expect(api.updateHost).toHaveBeenCalledWith("gpu1", expect.objectContaining({
-        programs: [], exclude_programs: ["p4"],
+        programs: ALL_PROGRAM_IDS,
       }));
     });
 
-    it("disables Update and shows the error text once All programs is off with nothing picked", async () => {
+    it("sends an empty list once every program is unticked", async () => {
       renderModal({ host: REMOTE });
-      fireEvent.click(await screen.findByLabelText("All programs")); // REMOTE has programs:["p2"], so this is off->on
-      expect((screen.getByRole("button", { name: "Update configuration" }) as HTMLButtonElement).disabled).toBe(false);
-
-      // Flip it back off: with the list cleared by the toggle, "Only these
-      // programs" now has nothing picked.
-      fireEvent.click(screen.getByLabelText("All programs"));
-      expect(screen.getByText("Pick at least one program, or turn on All programs")).toBeTruthy();
-      expect((screen.getByRole("button", { name: "Update configuration" }) as HTMLButtonElement).disabled).toBe(true);
+      await awaitProgramsSeeded(["p2"]);
+      fireEvent.click(screen.getByRole("button", { name: "clear" }));
+      fireEvent.click(screen.getByRole("button", { name: "Update configuration" }));
+      await waitFor(() => expect(api.updateHost).toHaveBeenCalled());
+      expect(api.updateHost).toHaveBeenCalledWith("gpu1", expect.objectContaining({ programs: [] }));
     });
 
     it("raises a notification when the update result cuts off pinned work", async () => {
@@ -395,19 +407,21 @@ describe("AddHostModal", () => {
       );
     });
 
-    it("does not call setHostPrograms when access is left unchanged", async () => {
+    it("does not call setHostPrograms when the program list is left unchanged", async () => {
       renderModal({ local: true, host: LOCAL, localCapacity });
+      await awaitProgramsSeeded(ALL_PROGRAM_IDS);
       fireEvent.click(screen.getByRole("button", { name: "Update configuration" }));
       await waitFor(() => expect(api.setCapacity).toHaveBeenCalled());
       expect(api.setHostPrograms).not.toHaveBeenCalled();
     });
 
-    it("calls setHostPrograms with the picked exception after setCapacity resolves", async () => {
+    it("calls setHostPrograms with the remaining programs after unticking one, once setCapacity resolves", async () => {
       renderModal({ local: true, host: LOCAL, localCapacity });
-      await pickPrograms("Except", ["p4"]);
+      await awaitProgramsSeeded(ALL_PROGRAM_IDS);
+      untickProgram("p4");
       fireEvent.click(screen.getByRole("button", { name: "Update configuration" }));
       await waitFor(() => expect(api.setHostPrograms).toHaveBeenCalled());
-      expect(api.setHostPrograms).toHaveBeenCalledWith("local", { programs: [], exclude_programs: ["p4"] });
+      expect(api.setHostPrograms).toHaveBeenCalledWith("local", ["p2", "p5"]);
       // setCapacity resolved first — setHostPrograms only fires once local
       // capacity is saved.
       const capacityOrder = vi.mocked(api.setCapacity).mock.invocationCallOrder[0];
@@ -417,35 +431,38 @@ describe("AddHostModal", () => {
   });
 
   describe("add mode", () => {
-    it("probes with what the human declared", async () => {
+    it("probes with every program ticked by default", async () => {
       vi.mocked(api.probeHost).mockResolvedValue(OK_PROBE as never);
       renderModal();
       declare();
-      fireEvent.click(screen.getByLabelText("All programs")); // switch to "Only these programs"
-      await pickPrograms("Only these programs", ["p2", "p5"]);
+      await awaitProgramsSeeded(ALL_PROGRAM_IDS);
       fireEvent.click(screen.getByRole("button", { name: "Probe" }));
       await waitFor(() => expect(api.probeHost).toHaveBeenCalled());
       expect(api.probeHost).toHaveBeenCalledWith({
         name: "gpu1", ssh: "gpu1", run_root: "~/coscience-runs", shared: false,
-        programs: ["p2", "p5"], exclude_programs: [], owner: "", notes: "" });
+        programs: ALL_PROGRAM_IDS, owner: "", notes: "" });
     });
 
-    it("sends exclude_programs in the probe body when All programs stays on with an exception", async () => {
+    it("probes with only the programs picked, after clearing the default list", async () => {
       vi.mocked(api.probeHost).mockResolvedValue(OK_PROBE as never);
       renderModal();
       declare();
-      await pickPrograms("Except", ["p4"]);
+      await awaitProgramsSeeded(ALL_PROGRAM_IDS);
+      fireEvent.click(screen.getByRole("button", { name: "clear" }));
+      await pickProgram("p2");
+      await pickProgram("p5");
       fireEvent.click(screen.getByRole("button", { name: "Probe" }));
       await waitFor(() => expect(api.probeHost).toHaveBeenCalled());
       expect(api.probeHost).toHaveBeenCalledWith({
         name: "gpu1", ssh: "gpu1", run_root: "~/coscience-runs", shared: false,
-        programs: [], exclude_programs: ["p4"], owner: "", notes: "" });
+        programs: ["p2", "p5"], owner: "", notes: "" });
     });
 
     it("shows the checks and warnings, and confirms the adjusted offer", async () => {
       vi.mocked(api.probeHost).mockResolvedValue(OK_PROBE as never);
       renderModal();
       declare();
+      await awaitProgramsSeeded(ALL_PROGRAM_IDS);
       fireEvent.click(screen.getByRole("button", { name: "Probe" }));
       expect(await screen.findByText(/rsync both ways/)).toBeTruthy();
       expect(screen.getByText(/glibc 2.17 is old/)).toBeTruthy();
@@ -462,7 +479,7 @@ describe("AddHostModal", () => {
       await waitFor(() => expect(api.confirmHost).toHaveBeenCalled());
       expect(api.confirmHost).toHaveBeenCalledWith({
         name: "gpu1", capacity: { cpu: 10, memory_gb: 55 },
-        gpus: [{ model: "X", vram_gb: 10.8 }], notes: "", probed_at: 1,
+        gpus: [{ model: "X", vram_gb: 10.8 }], notes: "", probed_at: 1, programs: ALL_PROGRAM_IDS,
       });
     });
 
@@ -589,6 +606,69 @@ describe("AddHostModal", () => {
       expect(screen.getByText(/Fix the failed checks/)).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Add with the agent's overrides" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Add to the pool" })).toBeNull();
+    });
+  });
+
+  // Fix round 1, Finding 1: `programs` seeds asynchronously once `listPrograms`
+  // resolves. A submit that beats that (or a `listPrograms` that never
+  // resolves, or rejects) must never send the not-yet-seeded `[]` — that
+  // would silently wipe an existing host's access, or start a new one
+  // admitting nothing — so `programs` must be omitted from the request body
+  // entirely instead. Every test here clicks/submits with no
+  // `awaitProgramsSeeded()` beforehand, on purpose.
+  describe("seeding race (fix round 1, Finding 1)", () => {
+    it("omits programs from the probe body before listPrograms resolves", async () => {
+      let resolvePrograms: (v: unknown) => void = () => {};
+      vi.mocked(api.listPrograms).mockImplementationOnce(
+        () => new Promise((resolve) => { resolvePrograms = resolve; }) as never,
+      );
+      vi.mocked(api.probeHost).mockResolvedValue(OK_PROBE as never);
+      renderModal();
+      declare();
+      fireEvent.click(screen.getByRole("button", { name: "Probe" }));
+      await waitFor(() => expect(api.probeHost).toHaveBeenCalled());
+      const [body] = vi.mocked(api.probeHost).mock.calls[0] as [Record<string, unknown>];
+      expect(body).not.toHaveProperty("programs");
+      await act(async () => { resolvePrograms([{ id: "p2" }]); });
+    });
+
+    it("omits programs from updateHost when Update is clicked before listPrograms resolves", async () => {
+      let resolvePrograms: (v: unknown) => void = () => {};
+      vi.mocked(api.listPrograms).mockImplementationOnce(
+        () => new Promise((resolve) => { resolvePrograms = resolve; }) as never,
+      );
+      renderModal({ host: REMOTE });
+      fireEvent.click(screen.getByRole("button", { name: "Update configuration" }));
+      await waitFor(() => expect(api.updateHost).toHaveBeenCalled());
+      const [, body] = vi.mocked(api.updateHost).mock.calls[0] as [string, Record<string, unknown>];
+      expect(body).not.toHaveProperty("programs");
+      await act(async () => { resolvePrograms([{ id: "p2" }]); });
+    });
+
+    it("omits programs from confirmHost when Add is confirmed before listPrograms resolves", async () => {
+      let resolvePrograms: (v: unknown) => void = () => {};
+      vi.mocked(api.listPrograms).mockImplementationOnce(
+        () => new Promise((resolve) => { resolvePrograms = resolve; }) as never,
+      );
+      vi.mocked(api.probeHost).mockResolvedValue(OK_PROBE as never);
+      renderModal();
+      declare();
+      fireEvent.click(screen.getByRole("button", { name: "Probe" }));
+      await screen.findByRole("button", { name: "Add to the pool" });
+      fireEvent.click(screen.getByRole("button", { name: "Add to the pool" }));
+      await waitFor(() => expect(api.confirmHost).toHaveBeenCalled());
+      const [body] = vi.mocked(api.confirmHost).mock.calls[0] as [Record<string, unknown>];
+      expect(body).not.toHaveProperty("programs");
+      await act(async () => { resolvePrograms([{ id: "p2" }]); });
+    });
+
+    it("never seeds and never sends an empty programs list once listPrograms rejects", async () => {
+      vi.mocked(api.listPrograms).mockRejectedValueOnce(new Error("network error"));
+      renderModal({ host: REMOTE });
+      fireEvent.click(screen.getByRole("button", { name: "Update configuration" }));
+      await waitFor(() => expect(api.updateHost).toHaveBeenCalled());
+      const [, body] = vi.mocked(api.updateHost).mock.calls[0] as [string, Record<string, unknown>];
+      expect(body).not.toHaveProperty("programs");
     });
   });
 });

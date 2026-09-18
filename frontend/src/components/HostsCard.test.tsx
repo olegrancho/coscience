@@ -24,7 +24,7 @@ beforeAll(() => {
 });
 
 const LOCAL: LedgerHost = {
-  name: "local", ssh: "", placeable: true, programs: [], exclude_programs: [], run_root: "",
+  name: "local", ssh: "", placeable: true, programs: null, run_root: "",
   capacity: { cpu: 24, gpu: 1 }, available: {},
   gpus: [{ index: 0, model: "", vram_gb: null, whole: true, shared_gb: 0 }],
   drain: false, removing: false, waiting_on: [],
@@ -35,7 +35,7 @@ const REMOTE: LedgerHost = {
   // placeable: true — this host is being actively health-checked (COSCIENCE_ALLOW_REMOTE
   // is on) and merely not answering right now; distinct from the non-placeable case
   // below, where remote launch itself is off and health is never consulted.
-  name: "gpu1", ssh: "gpu1", placeable: true, programs: ["p2"], exclude_programs: [], run_root: "~/coscience-runs",
+  name: "gpu1", ssh: "gpu1", placeable: true, programs: ["p2"], run_root: "~/coscience-runs",
   capacity: { cpu: 10, memory_gb: 50, gpu: 1 }, available: {},
   gpus: [{ index: 0, model: "X", vram_gb: 10.8, whole: false, shared_gb: 6 }],
   drain: false, removing: false, waiting_on: [],
@@ -49,7 +49,7 @@ const REMOTE: LedgerHost = {
 const REMOTE_OFF: LedgerHost = {
   // Fix C: remote placement is off (COSCIENCE_ALLOW_REMOTE unset) — the service
   // never checks this host, so it always sends "unchecked", not "not checked yet".
-  name: "gpu2", ssh: "gpu2", placeable: false, programs: [], exclude_programs: ["p4"], run_root: "~/runs",
+  name: "gpu2", ssh: "gpu2", placeable: false, programs: [], run_root: "~/runs",
   capacity: { cpu: 8 }, available: {}, gpus: [],
   drain: false, removing: false, waiting_on: [],
   health: { state: "unchecked", checked_at: 0, last_ok: 0, fail_since: 0, reason: "" },
@@ -90,7 +90,7 @@ describe("HostsCard", () => {
     renderCard([], [LOCAL, REMOTE, REMOTE_OFF]);
     expect(screen.getByText("all")).toBeTruthy();
     expect(screen.getByText("p2")).toBeTruthy();
-    expect(screen.getByText("all except p4")).toBeTruthy();
+    expect(screen.getByText("none")).toBeTruthy();
   });
 
   it("shows host errors from the pool file", () => {
@@ -233,7 +233,7 @@ describe("HostsCard", () => {
 
   it("falls back for an older backend that sends no health, use or leftover fields", () => {
     const OLD_REMOTE: LedgerHost = {
-      name: "oldgpu", ssh: "oldgpu", placeable: false, programs: [], exclude_programs: [], run_root: "~/runs",
+      name: "oldgpu", ssh: "oldgpu", placeable: false, programs: null, run_root: "~/runs",
       capacity: { cpu: 8 }, available: {}, gpus: [], removing: false, waiting_on: [],
     };
     renderCard([], [LOCAL, OLD_REMOTE]);

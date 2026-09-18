@@ -459,15 +459,13 @@ job fields (answers never write job fields, and the beat reloads before saving);
 check for claimed answers is a text heuristic.
 
 
-**O14 as built.** A server's program access has three shapes: no key (every program),
-`programs:` (only these) and `exclude_programs:` (every program but these). The third
-keeps a program off a server without freezing the list of every other program, so a
-program created later still runs there. This machine takes the same two keys at the
-top level of `resources.yaml`. Both are edited from the server dialog and from a
-program's settings (one checkbox per server); both write the same keys. Removing the
-last program from an "only these" list is refused rather than read as every program.
-Sprints pinned to a server that loses their program are reported back to whoever made
-the change and stay where they are.
+**O14 as built (reworked 2026-09-17).** A server stores one list: `programs:`, the programs
+it runs. An empty list means it takes none; a server whose key has never been set admits
+every program, and the dialog shows it with all of them ticked so the first save makes the
+list explicit. There is no "all programs" state and no exclusion list. A program's settings
+tick the servers it may run on, and creating a program asks which servers it may use,
+defaulting to all; both write the same per-server list. Nothing in either view is disabled:
+unticking a server's last program leaves it taking nothing, and the card says so.
 
 **O15 as built.** Drain and its two-minute remove wait are gone. Remove marks a server
 (`remove: true`): it takes no new grants, and the dispatcher deletes it at the start of

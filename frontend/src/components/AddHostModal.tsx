@@ -3,7 +3,7 @@ import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api, type HostProbe, type LedgerHost, type LocalDetect, type SurveyProposal } from "../api";
-import { accessFromHost, accessInvalid, accessPayload, cutOffMessage, sameAccess, type Access } from "./programAccess";
+import { cutOffMessage, programsForEdit } from "./programAccess";
 import ProgramAccessInput from "./ProgramAccessInput";
 import SurveyPanel from "./SurveyPanel";
 
@@ -16,6 +16,12 @@ interface CardRow { model: string; vram_gb: Amount }
 const DEFAULT_RUN_ROOT = "~/coscience-runs";
 const IN_USE_SUFFIX = "in use — lowering below that lets running work finish and blocks new grants.";
 
+const samePrograms = (a: string[], b: string[]) => {
+  if (a.length !== b.length) return false;
+  const setB = new Set(b);
+  return a.every((id) => setB.has(id));
+};
+
 export default function AddHostModal({ opened, onClose, host, local, localCapacity }: Props) {
   const qc = useQueryClient();
   const mode: "add" | "edit" | "local" = local ? "local" : host ? "edit" : "add";
@@ -23,13 +29,17 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
   const [ssh, setSsh] = useState("");
   const [runRoot, setRunRoot] = useState(DEFAULT_RUN_ROOT);
   const [shared, setShared] = useState(false);
-  const [access, setAccess] = useState<Access>({ all: true, list: [] });
+  const [programs, setPrograms] = useState<string[]>([]);
   const [owner, setOwner] = useState("");
   const [notes, setNotes] = useState("");
   const programsQuery = useQuery({ queryKey: ["programs"], queryFn: api.listPrograms });
-  // Local mode's change check: has access moved from what the server declared,
-  // seeded once on open (mirrors `wasOpened` below, not re-derived on rerender).
-  const initialAccess = useRef<Access>({ all: true, list: [] });
+  // Local mode's change check: has the program list moved from what the server
+  // declared, seeded once the program list is known while open (see the
+  // seeding effect below) — not re-derived on every rerender.
+  const initialPrograms = useRef<string[]>([]);
+  // Guards the program-list seeding effect so it runs once per open, after
+  // the program list has loaded — reset alongside `wasOpened` on close.
+  const seededPrograms = useRef(false);
   const [probe, setProbe] = useState<HostProbe | null>(null);
   const [detect, setDetect] = useState<LocalDetect | null>(null);
   const [cpu, setCpu] = useState<Amount>("");
@@ -50,31 +60,51 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
   const generation = useRef(0);
 
   // Start clean on each open, never on a background refresh while it is open.
+  // The program list itself is seeded separately below, once the program
+  // catalog has loaded.
   useEffect(() => {
     if (opened && !wasOpened.current) {
       generation.current += 1;
       setProbe(null); setDetect(null); setError(""); setUsedProposal(null);
+      setPrograms([]); seededPrograms.current = false;
       if (mode === "edit" && host) {
         setName(host.name); setSsh(host.ssh); setRunRoot(host.run_root); setShared(!!host.shared);
-        setAccess(accessFromHost(host)); setOwner(host.owner ?? ""); setNotes(host.notes ?? "");
+        setOwner(host.owner ?? ""); setNotes(host.notes ?? "");
         setCpu(host.capacity.cpu ?? ""); setMemory(host.capacity.memory_gb ?? "");
         setCards(host.gpus.map((g) => ({ model: g.model, vram_gb: g.vram_gb ?? "" })));
       } else if (mode === "local") {
         setName(host?.name ?? "local"); setSsh(""); setRunRoot(""); setShared(false);
-        const seeded = accessFromHost(host);
-        setAccess(seeded); initialAccess.current = seeded;
         setOwner(""); setNotes("");
         setCpu((localCapacity?.cpu as Amount) ?? "");
         setMemory((localCapacity?.memory_gb as Amount) ?? "");
         setCards((host?.gpus ?? []).map((g) => ({ model: g.model, vram_gb: g.vram_gb ?? "" })));
       } else {
         setName(""); setSsh(""); setRunRoot(DEFAULT_RUN_ROOT); setShared(false);
-        setAccess({ all: true, list: [] }); setOwner(""); setNotes("");
+        setOwner(""); setNotes("");
         setCpu(""); setMemory(""); setCards([]);
       }
     }
     wasOpened.current = opened;
   }, [opened, mode, host, localCapacity]);
+
+  // Seeds the ticked programs once the program catalog is loaded, at most once
+  // per open. Split from the reset effect above because the seed itself needs
+  // every program id (`programsForEdit`), which isn't known until the
+  // `listPrograms` query resolves — often after the very render that opens
+  // the dialog.
+  useEffect(() => {
+    if (!opened) { seededPrograms.current = false; return; }
+    if (seededPrograms.current || !programsQuery.data) return;
+    const allIds = programsQuery.data.map((p) => p.id);
+    if (mode === "add") {
+      setPrograms(allIds);
+    } else {
+      const seeded = programsForEdit(host, allIds);
+      setPrograms(seeded);
+      if (mode === "local") initialPrograms.current = seeded;
+    }
+    seededPrograms.current = true;
+  }, [opened, mode, host, programsQuery.data]);
 
   // In add mode every declared field invalidates the last probe: `confirmHost`
   // writes those declarations, and the probe record they came with is what
@@ -90,6 +120,13 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
     if (mode === "add") { setCpu(""); setMemory(""); setCards([]); }
   };
 
+  // Omits `programs` entirely (rather than sending the not-yet-seeded `[]`)
+  // from probe/confirm/update bodies until the program catalog has actually
+  // loaded — an unresolved (or failed) `listPrograms` must never look like an
+  // intentional "no programs" write. The backend takes an absent `programs`
+  // as "leave it alone" on update, and "use the declaration" on add/probe.
+  const programsField = () => (seededPrograms.current ? { programs } : {});
+
   const runProbe = async () => {
     generation.current += 1;
     const gen = generation.current;
@@ -97,7 +134,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
     try {
       const result = await api.probeHost({
         name: name.trim(), ssh: ssh.trim(), run_root: runRoot.trim(), shared,
-        ...accessPayload(access),
+        ...programsField(),
         owner: owner.trim(), notes: notes.trim(),
       });
       if (generation.current !== gen) return; // a field changed while this was in flight
@@ -147,6 +184,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
       await api.confirmHost({
         name: name.trim(), capacity, gpus: cardsPayload(), notes: notes.trim(),
         probed_at: probe?.probed_at,
+        ...programsField(),
         ...(acceptOverrides ? { accept_overrides: true } : {}),
       });
       qc.invalidateQueries({ queryKey: ["ledger"] });
@@ -202,7 +240,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
     try {
       const result = await api.updateHost(host.name, {
         ssh: ssh.trim(), run_root: runRoot.trim(), shared,
-        ...accessPayload(access),
+        ...programsField(),
         owner: owner.trim(), notes: notes.trim(),
         capacity, gpus: cardsPayload(),
         ...(probe?.probed_at ? { probed_at: probe.probed_at } : {}),
@@ -229,8 +267,8 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
     if (memory !== "" && memory > 0) capacity.memory_gb = memory;
     try {
       await api.setCapacity(capacity, cardsPayload());
-      if (!sameAccess(access, initialAccess.current)) {
-        const result = await api.setHostPrograms("local", accessPayload(access));
+      if (!samePrograms(programs, initialPrograms.current)) {
+        const result = await api.setHostPrograms("local", programs);
         if (result.cut_off?.length) {
           notifications.show({
             color: "yellow", title: "Pinned work is cut off", message: cutOffMessage(result.cut_off),
@@ -283,7 +321,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
   // record for. A human who re-probes an unchanged target just to look, then
   // edits notes or capacity, is not blocked by what it found.
   const needsProbe = mode === "edit" && (sshChanged || runRootChanged) && !hasPassingProbe;
-  const updateBlocked = needsProbe || (mode !== "add" && cardsInvalid) || accessInvalid(access);
+  const updateBlocked = needsProbe || (mode !== "add" && cardsInvalid);
   // The override path is only "in play" when it's the reason a changed
   // SSH/run-root target isn't blocking Update — an unchanged target's failed
   // checks never block anything, so there's nothing for overrides to unblock.
@@ -358,12 +396,12 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
                        value={runRoot} onChange={(e) => declare(setRunRoot, "run_root")(e.currentTarget.value)} />
             <Switch label="Shared with other people" checked={shared}
                     onChange={(e) => declare(setShared)(e.currentTarget.checked)} />
-            <ProgramAccessInput value={access} onChange={declare(setAccess)} programs={programsQuery.data ?? []} />
+            <ProgramAccessInput value={programs} onChange={declare(setPrograms)} programs={programsQuery.data ?? []} />
             <TextInput label="Owner or contact" value={owner} onChange={(e) => declare(setOwner)(e.currentTarget.value)} />
             <TextInput label="Notes" description="Usage rules, e.g. hours or longest job" value={notes}
                        onChange={(e) => declare(setNotes)(e.currentTarget.value)} />
             <Button onClick={runProbe} loading={busy && !probe}
-                    disabled={busy || !name.trim() || !ssh.trim() || accessInvalid(access)}>
+                    disabled={busy || !name.trim() || !ssh.trim()}>
               {mode === "edit" ? "Re-probe" : "Probe"}
             </Button>
           </>
@@ -396,8 +434,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
                 </Text>
               )}
               {(!checksFailed || overridesCoverFailedChecks) && (
-                <Button onClick={() => confirmAdd(overridesCoverFailedChecks)} loading={busy}
-                        disabled={accessInvalid(access)}>
+                <Button onClick={() => confirmAdd(overridesCoverFailedChecks)} loading={busy}>
                   {overridesCoverFailedChecks ? "Add with the agent's overrides" : "Add to the pool"}
                 </Button>
               )}
@@ -431,7 +468,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
             )}
             {cardRows}
             {mode === "local" && (
-              <ProgramAccessInput value={access} onChange={setAccess} programs={programsQuery.data ?? []} />
+              <ProgramAccessInput value={programs} onChange={setPrograms} programs={programsQuery.data ?? []} />
             )}
             {inUseWarnings.map((w) => <Text key={w} size="sm" c="dimmed">{w}</Text>)}
             {mode === "edit" && needsProbe && (

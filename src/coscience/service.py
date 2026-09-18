@@ -21,8 +21,8 @@ from coscience.ledger import Ledger
 from coscience.models import (DEFAULT_MODEL, Sprint, SprintStatus, Program, ProgramStatus,
                               Idea, ChatThread, set_status)
 from coscience.pause import is_paused
-from coscience.resources import (ACCESS_KEYS, GPU_KEY, GPU_VRAM_KEY, LOCAL, PLATFORM_KEYS,
-                                 ResourcePool, _parse_access, _parse_host, load_pool,
+from coscience.resources import (GPU_KEY, GPU_VRAM_KEY, LOCAL, PLATFORM_KEYS,
+                                 ResourcePool, _parse_programs, _parse_host, load_pool,
                                  pool_file_hosts, pool_file_lock, write_pool_file)
 from coscience.substrate import Substrate
 
@@ -677,10 +677,33 @@ class Service:
         spec = self.substrate.sprint_dir(sprint.id) / "sprint.md"
         return spec.stat().st_mtime if spec.is_file() else 0.0
 
-    def create_program(self, title: str, goals: str, workdir: str = "") -> dict:
+    def create_program(self, title: str, goals: str, workdir: str = "",
+                       hosts: list[str] | None = None) -> dict:
         """Create a program from the dashboard. Title and goals are required
         (blank after strip -> ValueError); the id is assigned server-side via
-        next_program_id(). Returns the same dict shape as get_program."""
+        next_program_id(). Returns the same dict shape as get_program.
+
+        `hosts`, when given, restricts which servers may run it: every server
+        not named ends up with the new program excluded from its list (an absent
+        list is reified to every program id first). `None` means every server,
+        and no access write happens — but the program file is still written
+        under `pool_file_lock` (see below), even on this path.
+
+        The program-file write always happens under one `pool_file_lock` hold,
+        together with the access write when `hosts` is given (fix round 1,
+        Finding 3; widened again in fix round 2, New Issue 1 — the first pass
+        only widened the `hosts is not None` branch, leaving the *more* common
+        `hosts=None` path exposed to exactly the same race): `save_program`
+        makes the new program visible to `iter_programs()`, and any concurrent,
+        unrelated `set_program_hosts`/`create_program` call that reifies an
+        absent-list server could take its `iter_programs()` snapshot before
+        that write lands if it weren't serialized against this one — baking a
+        list that omits the brand-new program forever, since nothing else ever
+        revisits an absent-list server on an existing program's behalf. One
+        `pool_file_lock` acquisition covers both writes on every path, and only
+        `_set_program_hosts_locked` (never `set_program_hosts`, which takes the
+        lock itself) is called from inside it, so there is still exactly one
+        `fcntl.flock` acquisition per call."""
         title = str(title or "").strip()
         goals = str(goals or "").strip()
         if not title:
@@ -689,7 +712,13 @@ class Service:
             raise ValueError("goals is required")
         program = Program(id=self.substrate.next_program_id(), title=title,
                           goals=goals, workdir=str(workdir or "").strip())
-        self.substrate.save_program(program)
+        changed = False
+        with pool_file_lock(self.repo_root):
+            self.substrate.save_program(program)
+            if hosts is not None:
+                changed = self._set_program_hosts_locked(program.id, hosts)
+        if changed:
+            self.substrate.commit(f"program {program.id} server access updated")
         return self.get_program(program.id)
 
     def get_program(self, program_id: str) -> dict:
@@ -1759,7 +1788,7 @@ class Service:
             "host_errors": list(ledger.pool.host_errors),
             "hosts": [
                 {"name": h.name, "ssh": h.ssh, "placeable": h.placeable,
-                 "programs": list(h.programs), "exclude_programs": list(h.exclude_programs),
+                 "programs": list(h.programs) if h.programs is not None else None,
                  "run_root": h.run_root,
                  "capacity": dict(h.capacity),
                  # A host that cannot take work has nothing available to grant.
@@ -1857,11 +1886,11 @@ class Service:
                         or loaded.get("hosts")
                     if hosts:
                         out["hosts"] = hosts
-                    for key in ("programs", "exclude_programs"):
-                        value = (wrapped.get(key) if isinstance(wrapped, dict) else None) \
-                            or loaded.get(key)
-                        if value:
-                            out[key] = value
+                    programs = (wrapped.get("programs") if isinstance(wrapped, dict) else None)
+                    if programs is None:
+                        programs = loaded.get("programs")
+                    if programs is not None:
+                        out["programs"] = programs
                     if gpus is None:
                         file_gpus = (wrapped.get("gpus") if isinstance(wrapped, dict) else None) \
                             or loaded.get("gpus")
@@ -1890,20 +1919,13 @@ class Service:
         See `resources.pool_file_hosts` for the shape."""
         return pool_file_hosts(self.repo_root)
 
-    def _apply_access(self, holder: dict, programs: list, excluded: list) -> None:
-        """Set one server's access keys on its YAML mapping (a `hosts:` entry, or the
-        top level for this machine). Empty lists remove their key: no key is every
-        program, and an empty `programs:` would read as every program too."""
-        programs = [str(p) for p in programs]
-        excluded = [str(p) for p in excluded]
-        if programs and excluded:
-            raise ValueError("programs and exclude_programs can't both be set; use one: "
-                             "only these programs, or every program but these")
-        for key, value in (("programs", programs), ("exclude_programs", excluded)):
-            if value:
-                holder[key] = value
-            else:
-                holder.pop(key, None)
+    def _apply_access(self, holder: dict, programs: list[str]) -> None:
+        """Set one server's `programs:` key on its YAML mapping (a `hosts:` entry, or
+        the top level for this machine). Always writes the key, even an empty list —
+        unlike a hand-edited file, where an absent key is the only way to admit
+        every program."""
+        holder["programs"] = [str(p) for p in programs]
+        holder.pop("exclude_programs", None)
 
     def _local_holder(self, loaded: dict) -> dict:
         """The mapping this machine's amounts live in: the `resources:` wrapper when
@@ -1925,10 +1947,11 @@ class Service:
                 out.append({"sprint_id": sprint.id, "host": pinned})
         return out
 
-    def set_host_programs(self, name: str, programs: list[str], exclude_programs: list[str]) -> dict:
-        """Set one server's program access from the server side. `name` may be
-        'local' (this machine, edited at the top level of resources.yaml) or a
-        remote server name already in `hosts:`."""
+    def set_host_programs(self, name: str, programs: list[str]) -> dict:
+        """Set one server's program list from the server side, always writing the
+        `programs:` key — an empty list included, so the server then admits none.
+        `name` may be 'local' (this machine, edited at the top level of
+        resources.yaml) or a remote server name already in `hosts:`."""
         changed = False
         with pool_file_lock(self.repo_root):
             loaded, hosts = self._resources_hosts()
@@ -1938,16 +1961,16 @@ class Service:
                 raise NotFoundError(f"no server {name!r} in the pool")
             else:
                 holder = dict(hosts[name]) if isinstance(hosts[name], dict) else {}
-            before = {k: holder.get(k) for k in ACCESS_KEYS}
-            self._apply_access(holder, programs, exclude_programs)
+            before = holder.get("programs")
+            self._apply_access(holder, programs)
             if name == LOCAL:
-                # Only this machine's own keys are checked: another server's broken entry
+                # Only this machine's own key is checked: another server's broken entry
                 # is already reported on Compute and must not block this edit.
-                _parse_access("", holder)
+                _parse_programs("", holder)
             else:
                 _parse_host(name, holder)                       # raises ValueError for a bad entry
                 hosts[name] = holder
-            changed = {k: holder.get(k) for k in ACCESS_KEYS} != before
+            changed = holder.get("programs") != before
             if changed:
                 self._write_resources(loaded)
         if changed:
@@ -1959,68 +1982,72 @@ class Service:
         the pool ends up allowing `program_id` iff its name is in `hosts_wanted`."""
         if not (self.substrate.program_dir(program_id) / "program.md").is_file():
             raise NotFoundError(program_id)
-        wanted = set(hosts_wanted)
-
-        # I2 (fix round 1): the read, the unknown-server check and the edit
-        # computation all happen under the lock, built from the very document the
-        # lock guards (`loaded`/`hosts`) — never from a `self.pool` read before it.
-        # A server deleted (e.g. by the dispatcher) between an earlier unlocked read
-        # and this write used to read as unrecognised-but-editable, recreating a
-        # bare entry the parser then refused with a baffling "needs ssh". Now a
-        # server that isn't in `hosts_wanted`'s pool is a clear "no server named X".
-        changed = False
         with pool_file_lock(self.repo_root):
-            loaded, hosts = self._resources_hosts()
-            pool = ResourcePool.from_dict(loaded)
-            pool_names = {h.name for h in pool.hosts}
-            unknown = [n for n in hosts_wanted if n not in pool_names]
-            if unknown:
-                raise ValueError(f"no server named {unknown[0]!r}")
-
-            # Compute every server's new (programs, excluded) lists before writing
-            # anything, so a refusal partway through never leaves a partial edit.
-            edits: list[tuple[str, list[str], list[str]]] = []
-            for host in pool.hosts:
-                want = host.name in wanted
-                has = host.allows(program_id)
-                if want == has:
-                    continue
-                programs = list(host.programs)
-                excluded = list(host.exclude_programs)
-                if programs:
-                    if want:
-                        programs = programs + [program_id]
-                    else:
-                        programs = [p for p in programs if p != program_id]
-                        if not programs:
-                            raise ValueError(f"{program_id} is the only program {host.name} takes; "
-                                             f"let another program use {host.name} first, or remove "
-                                             "the server")
-                elif excluded:
-                    if want:
-                        excluded = [p for p in excluded if p != program_id]
-                    else:
-                        excluded = excluded + [program_id]
-                else:
-                    # neither list set: currently allows everything, so `want` must be
-                    # False here (an equal `want`/`has` was skipped above)
-                    excluded = [program_id]
-                edits.append((host.name, programs, excluded))
-
-            if edits:
-                for name, programs, excluded in edits:
-                    if name == LOCAL:
-                        self._apply_access(self._local_holder(loaded), programs, excluded)
-                    else:
-                        entry = dict(hosts.get(name) or {})
-                        self._apply_access(entry, programs, excluded)
-                        _parse_host(name, entry)                    # raises ValueError for a bad entry
-                        hosts[name] = entry
-                self._write_resources(loaded)
-                changed = True
+            changed = self._set_program_hosts_locked(program_id, hosts_wanted)
         if changed:
             self.substrate.commit(f"program {program_id} server access updated")
         return {**self.ledger_status(), "cut_off": self._cut_off_pins()}
+
+    def _set_program_hosts_locked(self, program_id: str, hosts_wanted: list[str]) -> bool:
+        """The body of `set_program_hosts`, run with `pool_file_lock` already held.
+        Returns whether anything was written (the caller decides whether to commit).
+
+        Split out so `create_program` can hold one lock across both the program-file
+        write and this access write (fix round 1, Finding 3): `pool_file_lock` is an
+        `fcntl.flock`, so a second acquisition in the same process would deadlock —
+        the lock must be taken exactly once, by whichever caller owns the whole
+        transaction.
+
+        I2 (fix round 1): the read, the unknown-server check and the edit
+        computation all happen under the lock, built from the very document the
+        lock guards (`loaded`/`hosts`) — never from a `self.pool` read before it.
+        A server deleted (e.g. by the dispatcher) between an earlier unlocked read
+        and this write used to read as unrecognised-but-editable, recreating a
+        bare entry the parser then refused with a baffling "needs ssh". Now a
+        server that isn't in `hosts_wanted`'s pool is a clear "no server named X"."""
+        wanted = set(hosts_wanted)
+        loaded, hosts = self._resources_hosts()
+        pool = ResourcePool.from_dict(loaded)
+        pool_names = {h.name for h in pool.hosts}
+        unknown = [n for n in hosts_wanted if n not in pool_names]
+        if unknown:
+            raise ValueError(f"no server named {unknown[0]!r}")
+
+        # Every current program id, to reify an absent (every-program) list into
+        # an explicit one before editing it. Read under the same lock hold as the
+        # edit below, so a caller that also writes the program file first (e.g.
+        # create_program) sees its own new program here — never a stale snapshot
+        # taken before that program existed.
+        all_program_ids = [p.id for p in self.substrate.iter_programs()]
+
+        # Compute every server's new programs list before writing anything, so
+        # a refusal partway through never leaves a partial edit.
+        edits: list[tuple[str, list[str]]] = []
+        for host in pool.hosts:
+            want = host.name in wanted
+            has = host.allows(program_id)
+            if want == has:
+                continue
+            programs = list(host.programs) if host.programs is not None else list(all_program_ids)
+            if want:
+                if program_id not in programs:
+                    programs = programs + [program_id]
+            else:
+                programs = [p for p in programs if p != program_id]
+            edits.append((host.name, programs))
+
+        if not edits:
+            return False
+        for name, programs in edits:
+            if name == LOCAL:
+                self._apply_access(self._local_holder(loaded), programs)
+            else:
+                entry = dict(hosts.get(name) or {})
+                self._apply_access(entry, programs)
+                _parse_host(name, entry)                    # raises ValueError for a bad entry
+                hosts[name] = entry
+        self._write_resources(loaded)
+        return True
 
     def remove_host(self, name: str) -> dict:
         """Mark a server for removal: it takes no new grants, and the dispatcher
@@ -2109,7 +2136,7 @@ class Service:
         return host_survey.override_notes(record, proposal)
 
     def probe_host(self, *, name: str, ssh: str, run_root: str = "", shared: bool = False,
-                   programs: list | None = None, exclude_programs: list | None = None,
+                   programs: list | None = None,
                    owner: str = "", notes: str = "", runner=None) -> dict:
         """Probe a server and record what was found, for a human to confirm. Nothing
         enters the pool here."""
@@ -2121,9 +2148,13 @@ class Service:
         host_probe.ssh_argv(ssh)                           # refuses a bad target before anything runs
         run_root = host_probe.check_run_root(
             str(run_root or "").strip() or host_probe.DEFAULT_RUN_ROOT)  # refuses an unsafe run root
-        declared = {"ssh": ssh, "run_root": run_root,
-                    "shared": bool(shared), "programs": [str(p) for p in (programs or [])],
-                    "exclude_programs": [str(p) for p in (exclude_programs or [])],
+        declared = {"ssh": ssh, "run_root": run_root, "shared": bool(shared),
+                    # None (omitted) stays None here rather than collapsing to []:
+                    # the dashboard's pre-seed guard sends no `programs` at all when
+                    # it hasn't loaded the ledger yet, and that must read back as
+                    # "not specified," distinct from an explicit empty list (fix
+                    # round 2, New Issue 3).
+                    "programs": [str(p) for p in programs] if programs is not None else None,
                     "owner": str(owner or ""), "notes": str(notes or "")}
         result = host_probe.probe_host(ssh, declared["run_root"], shared=declared["shared"],
                                        runner=runner or host_probe.subprocess_runner)
@@ -2257,7 +2288,7 @@ class Service:
 
     def confirm_host(self, *, name: str, capacity: dict, gpus: list | None = None,
                      probed_at: float | None = None, accept_overrides: bool = False,
-                     notes: str | None = None) -> dict:
+                     notes: str | None = None, programs: list | None = None) -> dict:
         """Write a probed server into `resources.yaml` `hosts:`, keeping the rest of the
         file. The entry is checked by the same parser the pool uses, so what is written
         is what loads."""
@@ -2285,9 +2316,17 @@ class Service:
             proposed_capacity = record.get("proposal", {}).get("capacity", {})
             if "gpu" in proposed_capacity:
                 entry["capacity"].setdefault("gpu", proposed_capacity["gpu"])
-        for key in ("programs", "exclude_programs", "shared", "owner", "notes"):
+        for key in ("shared", "owner", "notes"):
             if declared.get(key):
                 entry[key] = declared[key]
+        # The program list is written whenever the caller gives one — the dashboard's Add
+        # form always does — including an empty list, which means the server takes no work.
+        # With no caller list, the declaration's is used, and a declaration with none
+        # leaves the key out, so the server admits every program until it is configured.
+        if programs is not None:
+            entry["programs"] = [str(p) for p in programs]
+        elif declared.get("programs"):
+            entry["programs"] = list(declared["programs"])
         # A caller-given `notes` (the dashboard's Add form, which may carry the
         # agent's survey notes) replaces whatever the declaration held, before any
         # override lines are appended below (review round 1, C2) — otherwise the
@@ -2316,7 +2355,6 @@ class Service:
 
     def update_host(self, name: str, *, ssh: str | None = None, run_root: str | None = None,
                     shared: bool | None = None, programs: list | None = None,
-                    exclude_programs: list | None = None,
                     owner: str | None = None, notes: str | None = None,
                     capacity: dict | None = None, gpus: list | None = None,
                     probed_at: float | None = None, accept_overrides: bool = False) -> dict:
@@ -2375,8 +2413,8 @@ class Service:
                     new_entry["notes"] = notes
                 else:
                     new_entry.pop("notes", None)
-            if programs is not None or exclude_programs is not None:
-                self._apply_access(new_entry, programs or [], exclude_programs or [])
+            if programs is not None:
+                self._apply_access(new_entry, programs)
             if capacity is not None:
                 new_entry["capacity"] = {str(k): float(v) for k, v in capacity.items()}
             if gpus is not None:

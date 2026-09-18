@@ -144,8 +144,7 @@ class HostProbeIn(BaseModel):
     ssh: str
     run_root: str = ""
     shared: bool = False
-    programs: list[str] = Field(default_factory=list)
-    exclude_programs: list[str] = Field(default_factory=list)
+    programs: list[str] | None = None
     owner: str = ""
     notes: str = ""
 
@@ -157,6 +156,7 @@ class HostConfirmIn(BaseModel):
     probed_at: float | None = None
     accept_overrides: bool = False
     notes: str | None = None
+    programs: list[str] | None = None
 
 
 class HostUpdateIn(BaseModel):
@@ -164,7 +164,6 @@ class HostUpdateIn(BaseModel):
     run_root: str | None = None
     shared: bool | None = None
     programs: list[str] | None = None
-    exclude_programs: list[str] | None = None
     owner: str | None = None
     notes: str | None = None
     capacity: dict[str, float] | None = None
@@ -179,7 +178,6 @@ class SurveyIn(BaseModel):
 
 class HostProgramsIn(BaseModel):
     programs: list[str] = Field(default_factory=list)
-    exclude_programs: list[str] = Field(default_factory=list)
 
 
 class ProgramHostsIn(BaseModel):
@@ -199,6 +197,7 @@ class ProgramCreateIn(BaseModel):
     title: str
     goals: str
     workdir: str = ""
+    hosts: list[str] | None = None
 
 
 class ProgramStatusIn(BaseModel):
@@ -1012,7 +1011,7 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     @api.put("/hosts/{name}/programs")
     def set_host_programs(name: str, body: HostProgramsIn) -> dict:
         try:
-            return service.set_host_programs(name, body.programs, body.exclude_programs)
+            return service.set_host_programs(name, body.programs)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         except ValueError as exc:
@@ -1089,7 +1088,7 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     @api.post("/programs", status_code=201)
     def create_program(body: ProgramCreateIn) -> dict:
         try:
-            return service.create_program(body.title, body.goals, body.workdir)
+            return service.create_program(body.title, body.goals, body.workdir, body.hosts)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 

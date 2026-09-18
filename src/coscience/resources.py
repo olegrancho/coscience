@@ -30,7 +30,10 @@ GPU_VRAM_KEY = "gpu_vram_gb"
 # request needs, and `gpu_vram_gb`, when present, the VRAM it needs on each of them.
 GPU_KEYS = frozenset({GPU_KEY, GPU_VRAM_KEY})
 
-ACCESS_KEYS = ("programs", "exclude_programs")
+# Both keys are popped off a spec while parsing: `programs` is the one shape that
+# still exists, `exclude_programs` is only checked for so a hand-edited file using
+# the old shape gets a clear error instead of being read as a capacity amount.
+_ACCESS_KEYS = ("programs", "exclude_programs")
 
 
 @dataclass
@@ -45,8 +48,7 @@ class Host:
     name: str
     capacity: dict[str, float] = field(default_factory=dict)
     ssh: str = ""                                        # "" = the dispatcher's own machine
-    programs: list[str] = field(default_factory=list)          # only these; [] = no "only" list
-    exclude_programs: list[str] = field(default_factory=list)  # every program but these
+    programs: list[str] | None = None                    # None = every program; else exactly these
     run_root: str = ""                                   # where sprint work goes on the host
     gpus: list[Gpu] = field(default_factory=list)
     shared: bool = False                                 # other people use this machine too
@@ -73,9 +75,9 @@ class Host:
         return self.is_local or os.environ.get(REMOTE_ENV) == "1"
 
     def allows(self, program: str | None) -> bool:
-        if self.programs:
-            return program is not None and program in self.programs
-        return program not in self.exclude_programs
+        if self.programs is None:
+            return True
+        return program is not None and program in self.programs
 
 
 @dataclass
@@ -121,11 +123,12 @@ class ResourcePool:
         if gpu_specs is None and raw is not d:
             gpu_specs = d.get("gpus")
         access_specs: dict[str, object] = {}
-        for key in ACCESS_KEYS:
+        for key in _ACCESS_KEYS:
             val = raw.pop(key, None)
             if val is None and raw is not d:
                 val = d.get(key)
-            access_specs[key] = val
+            if val is not None:
+                access_specs[key] = val
         host_specs = host_specs or {}
         host_errors: list[str] = []
         if not isinstance(host_specs, dict):
@@ -157,16 +160,13 @@ class ResourcePool:
             if v is not None and v != int(v):
                 host_errors.append(f"gpu: {v:g} is not a whole number of cards; using {int(v)}")
                 local_capacity[GPU_KEY] = float(int(v))
-        local_access = {k: v for k, v in access_specs.items() if v is not None}
-        local_programs: list[str] = []
-        local_excluded: list[str] = []
-        if local_access:
+        local_programs: list[str] | None = None
+        if access_specs:
             try:
-                local_programs, local_excluded = _parse_access("", local_access)
+                local_programs = _parse_programs("", access_specs)
             except ValueError as exc:
                 host_errors.append(str(exc))       # reported on Compute; local stays open
-        hosts = [Host(LOCAL, local_capacity, gpus=local_gpus,
-                      programs=local_programs, exclude_programs=local_excluded)]
+        hosts = [Host(LOCAL, local_capacity, gpus=local_gpus, programs=local_programs)]
         for name, spec in host_specs.items():
             try:
                 hosts.append(_parse_host(str(name), spec))
@@ -216,7 +216,7 @@ def _parse_host(name: str, spec) -> Host:
         raise ValueError(f"hosts.{name}.drain: must be true or false")
     if "remove" in spec and not isinstance(spec["remove"], bool):
         raise ValueError(f"hosts.{name}.remove: must be true or false")
-    programs, excluded = _parse_access(f"hosts.{name}.", spec)
+    programs = _parse_programs(f"hosts.{name}.", spec)
     gpus: list[Gpu] = []
     if spec.get("gpus") is not None:
         gpus = _parse_gpus(f"hosts.{name}.", spec["gpus"])
@@ -231,30 +231,27 @@ def _parse_host(name: str, spec) -> Host:
                   if isinstance(drained_at_raw, (int, float)) and not isinstance(drained_at_raw, bool)
                   else 0.0)
     return Host(name=name, capacity=capacity, ssh=ssh,
-                programs=programs, exclude_programs=excluded,
+                programs=programs,
                 run_root=str(spec.get("run_root") or ""), gpus=gpus,
                 shared=bool(spec.get("shared", False)), owner=str(spec.get("owner") or ""),
                 notes=str(spec.get("notes") or ""), drain=bool(spec.get("drain", False)),
                 drained_at=drained_at, removing=bool(spec.get("remove", False)))
 
 
-def _parse_access(where: str, spec: dict) -> tuple[list[str], list[str]]:
-    """A server's program access: `programs` (only these), `exclude_programs` (all but
-    these), or neither (every program). `where` prefixes messages, e.g. "hosts.a.". """
-    lists = []
-    for key in ACCESS_KEYS:
-        raw = spec.get(key)
-        if raw is None:
-            lists.append([])
-            continue
-        if not isinstance(raw, list):
-            raise ValueError(f"{where}{key}: must be a list of program ids")
-        lists.append([str(p) for p in raw])
-    programs, excluded = lists
-    if programs and excluded:
-        raise ValueError(f"{where}programs and exclude_programs can't both be set; "
-                         "use one: only these programs, or every program but these")
-    return programs, excluded
+def _parse_programs(where: str, spec: dict) -> list[str] | None:
+    """A server's program list: `programs:` names exactly the programs it runs;
+    an absent key admits every program. `where` prefixes messages, e.g. "hosts.a.".
+    `exclude_programs` is a removed shape, rejected outright rather than read as
+    a capacity amount or silently ignored."""
+    if spec.get("exclude_programs") is not None:
+        raise ValueError(f"{where}exclude_programs is no longer supported; "
+                         "list the programs the server runs under programs:")
+    raw = spec.get("programs")
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ValueError(f"{where}programs: must be a list of program ids")
+    return [str(p) for p in raw]
 
 
 def _parse_gpus(where: str, spec) -> list[Gpu]:

@@ -21,7 +21,7 @@ def test_a_probe_is_recorded_with_its_declaration(tmp_path):
                             runner=FakeRunner())
     assert record["ok"] is True
     assert record["declared"] == {"ssh": "gpu1", "run_root": "~/coscience-runs", "shared": False,
-                                  "programs": ["p2"], "exclude_programs": [],
+                                  "programs": ["p2"],
                                   "owner": "ops", "notes": ""}
     assert record["proposal"]["capacity"] == {"cpu": 12.0, "memory_gb": 55.0}
     stored = json.loads((tmp_path / ".coscience" / "host-probes" / "gpu1.json").read_text())

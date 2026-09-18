@@ -146,14 +146,13 @@ def test_ledger_status_lists_every_host(tmp_path):
     unchecked_health = {"state": "unchecked", "checked_at": 0.0, "last_ok": 0.0,
                         "fail_since": 0.0, "reason": ""}
     assert status["hosts"] == [
-        {"name": "local", "ssh": "", "placeable": True, "programs": [], "exclude_programs": [],
+        {"name": "local", "ssh": "", "placeable": True, "programs": None,
          "run_root": "",
          "capacity": {"cpu": 24.0}, "available": {"cpu": 24.0, "workers": 3.0}, "gpus": [],
          "shared": False, "owner": "", "notes": "", "drain": False, "drained_at": 0.0,
          "removing": False, "waiting_on": [], "health": local_health,
          "used": {}, "leases": 0, "leftover": []},
         {"name": "remote1", "ssh": "remote1", "placeable": False, "programs": ["p2"],
-         "exclude_programs": [],
          "run_root": "~/coscience-runs", "capacity": {"cpu": 28.0}, "available": {}, "gpus": [],
          "shared": False, "owner": "", "notes": "", "drain": False, "drained_at": 0.0,
          "removing": False, "waiting_on": [], "health": unchecked_health,

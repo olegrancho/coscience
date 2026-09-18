@@ -128,7 +128,9 @@ export interface HostLeftover { sprint_id: string; status: string; path: string 
 export interface StrandedLease { sprint_id: string; host: string; listed?: boolean }
 export interface HostBlocker { sprint_id: string; status: string; reason: string }
 export interface LedgerHost {
-  name: string; ssh: string; placeable: boolean; programs: string[]; exclude_programs: string[]; run_root: string;
+  // null: this server's program list has never been set, so it admits every
+  // program. A list (including empty) means exactly those programs.
+  name: string; ssh: string; placeable: boolean; programs: string[] | null; run_root: string;
   capacity: Record<string, number>; available: Record<string, number>; gpus: LedgerCard[];
   shared?: boolean; owner?: string; notes?: string;
   drain?: boolean; drained_at?: number;
@@ -137,7 +139,7 @@ export interface LedgerHost {
 }
 export interface HostCheck { name: string; ok: boolean; detail: string }
 export interface HostDeclaration {
-  ssh: string; run_root: string; shared: boolean; programs: string[]; exclude_programs: string[]; owner: string; notes: string;
+  ssh: string; run_root: string; shared: boolean; programs: string[]; owner: string; notes: string;
 }
 export interface HostProbe {
   name: string; declared: HostDeclaration; probed_at: number; ok: boolean; error: string;
@@ -152,7 +154,7 @@ export interface LocalDetect {
   proposal: { capacity?: Record<string, number>; gpus?: { model: string; vram_gb: number }[] };
 }
 export interface HostUpdate {
-  ssh?: string; run_root?: string; shared?: boolean; programs?: string[]; exclude_programs?: string[];
+  ssh?: string; run_root?: string; shared?: boolean; programs?: string[];
   owner?: string; notes?: string; capacity?: Record<string, number>;
   gpus?: { model: string; vram_gb: number }[]; probed_at?: number;
   // Set only when the write is authorized by an agent survey's written overrides
@@ -306,7 +308,7 @@ export const api = {
   logout: () => fetch("/api/logout", { method: "POST" }).then(j<{ ok: boolean }>),
   getVersion: () => fetch("/api/version").then(j<{ sha: string }>),
   listPrograms: () => fetch("/api/programs").then(j<ProgramRow[]>),
-  createProgram: (body: { title: string; goals: string; workdir?: string }) =>
+  createProgram: (body: { title: string; goals: string; workdir?: string; hosts?: string[] }) =>
     fetch("/api/programs", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -531,14 +533,19 @@ export const api = {
   listResults: () => fetch("/api/results").then(j<ResultRow[]>),
   getResult: (id: string) => fetch(`/api/results/${id}`).then(j<ResultRow>),
   getLedger: () => fetch("/api/ledger").then(j<Ledger>),
-  probeHost: (body: { name: string } & HostDeclaration) =>
+  // `programs` is optional here (unlike `HostDeclaration`, where a probe's own
+  // `declared` echo always carries a concrete list): the dialog omits it
+  // entirely — rather than sending a premature `[]` — while its program
+  // catalog hasn't seeded yet, and the backend takes an absent `programs` as
+  // "use the declaration"/"leave it alone".
+  probeHost: (body: { name: string } & Omit<HostDeclaration, "programs"> & { programs?: string[] }) =>
     fetch("/api/hosts/probe", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     }).then(j<HostProbe>),
   listHostProbes: () => fetch("/api/hosts/probes").then(j<HostProbe[]>),
   confirmHost: (body: {
     name: string; capacity: Record<string, number>; gpus?: { model: string; vram_gb: number }[];
-    notes?: string; probed_at?: number; accept_overrides?: boolean;
+    notes?: string; probed_at?: number; accept_overrides?: boolean; programs?: string[];
   }) =>
     fetch("/api/hosts", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -553,9 +560,9 @@ export const api = {
     }).then(j<HostSurvey>),
   getSurvey: (name: string) =>
     fetch(`/api/hosts/${encodeURIComponent(name)}/survey`).then(j<HostSurvey>),
-  setHostPrograms: (name: string, body: { programs: string[]; exclude_programs: string[] }) =>
+  setHostPrograms: (name: string, programs: string[]) =>
     fetch(`/api/hosts/${encodeURIComponent(name)}/programs`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ programs }),
     }).then(j<Ledger & { cut_off: CutOff[] }>),
   setProgramHosts: (id: string, hosts: string[]) =>
     fetch(`/api/programs/${encodeURIComponent(id)}/hosts`, {

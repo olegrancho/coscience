@@ -18,11 +18,11 @@ vi.mock("../api", () => ({
     getLedger: vi.fn().mockResolvedValue({
       capacity: {}, used: {}, available: {}, leases: [], paused: false,
       hosts: [
-        { name: "local", ssh: "", placeable: true, programs: [], exclude_programs: [], run_root: "",
+        { name: "local", ssh: "", placeable: true, programs: null, run_root: "",
           capacity: {}, available: {}, gpus: [] },
-        { name: "gpu1", ssh: "gpu1", placeable: true, programs: ["p1"], exclude_programs: [], run_root: "~/runs",
+        { name: "gpu1", ssh: "gpu1", placeable: true, programs: ["p1"], run_root: "~/runs",
           capacity: {}, available: {}, gpus: [] },
-        { name: "gpu2", ssh: "gpu2", placeable: true, programs: [], exclude_programs: ["p1"], run_root: "~/runs",
+        { name: "gpu2", ssh: "gpu2", placeable: true, programs: [], run_root: "~/runs",
           capacity: {}, available: {}, gpus: [] },
       ],
     }),
@@ -211,10 +211,10 @@ describe("ProgramSettingsModal", () => {
     expect((screen.getByLabelText("may run on gpu2") as HTMLInputElement).checked).toBe(false);
   });
 
-  it("disables the only-program server's checkbox", async () => {
+  it("never disables a server checkbox, even the only program a server takes", async () => {
     renderModal();
-    expect((await screen.findByLabelText("may run on gpu1") as HTMLInputElement).disabled).toBe(true);
-    expect(screen.getByText("the only program this server takes")).toBeTruthy();
+    expect((await screen.findByLabelText("may run on gpu1") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.queryByText("the only program this server takes")).toBeNull();
   });
 
   it("saves the remaining servers after unchecking one", async () => {
@@ -222,6 +222,13 @@ describe("ProgramSettingsModal", () => {
     fireEvent.click(await screen.findByLabelText("may run on local"));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.setProgramHosts).toHaveBeenCalledWith("p1", ["gpu1"]));
+  });
+
+  it("unticking the server whose list is exactly this program saves without it", async () => {
+    renderModal();
+    fireEvent.click(await screen.findByLabelText("may run on gpu1"));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.setProgramHosts).toHaveBeenCalledWith("p1", ["local"]));
   });
 
   it("does not call setProgramHosts when the server checkboxes are unchanged", async () => {
