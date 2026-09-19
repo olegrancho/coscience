@@ -519,6 +519,8 @@ export const api = {
     }).then(j<VoteTally>),
   wakeSprint: (id: string) =>
     fetch(`/api/sprints/${id}/wake`, { method: "POST" }).then(j<Sprint>),
+  stopSprint: (id: string) =>
+    fetch(`/api/sprints/${id}/stop`, { method: "POST" }).then(j<Sprint>),
   editSprint: (id: string, patch: SprintPatch) =>
     fetch(`/api/sprints/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },

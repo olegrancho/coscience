@@ -8,13 +8,14 @@ export type SprintStatus =
 // `resume` re-opens a done/failed sprint for more work (clears its result, re-queues).
 export type Action =
   | "approve" | "run" | "sendBack" | "reject" | "edit" | "demote"
-  | "park" | "unpark" | "cancel" | "resume";
+  | "park" | "unpark" | "cancel" | "resume" | "stop";
 
 export function availableActions(status: SprintStatus): Action[] {
   if (status === "proposed") return ["approve", "run", "edit", "reject", "demote", "park"];
   if (status === "approved") return ["run", "sendBack", "edit", "reject", "demote"];
   if (status === "queued") return ["reject", "edit"];
-  if (status === "executing") return ["edit"];
+  if (status === "executing") return ["stop", "edit"];
+  if (status === "hibernated") return ["stop"];
   if (status === "escalated") return [];   // answers live in EscalationPanel, not here
   if (status === "parked") return ["unpark", "demote", "cancel"];
   if (status === "done" || status === "failed") return ["resume"];

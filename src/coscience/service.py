@@ -467,7 +467,11 @@ class Service:
             "job": job,
             "started_at": progress.started_at,
             "activity": self._activity(sprint_id) if sprint.status == SprintStatus.EXECUTING else None,
-            "error": progress.last_error if (sprint.status == SprintStatus.FAILED
+            # A canceled sprint carries a note too: a human stop says what it ended and,
+            # when it could not reach a job on its host, says that instead of implying a
+            # clean stop (O18).
+            "error": progress.last_error if (sprint.status in (SprintStatus.FAILED,
+                                                               SprintStatus.CANCELED)
                                              or progress.last_error.startswith("beat failed:")) else "",
             "escalation": escalation,
             "lease": None if lease is None else {
@@ -488,6 +492,26 @@ class Service:
             self.substrate.save_progress(progress)
             self.substrate.commit(f"sprint {sprint_id}: wake requested")
         return self.get_sprint(sprint_id)
+
+    _STOPPABLE = (SprintStatus.EXECUTING, SprintStatus.HIBERNATED, SprintStatus.ESCALATED)
+    _FINISHED = (SprintStatus.DONE, SprintStatus.FAILED, SprintStatus.CANCELED)
+
+    def stop_sprint(self, sprint_id: str, by: str = "") -> dict:
+        """A human stops running work. Only records the request — sets the same
+        `progress.stop_requested` flag escalation.answer's own "stop" action sets —
+        the dispatcher carries it out (Worker.run_sprint_beat / run_escalated_beat),
+        exactly as it does for a stop that followed an escalation; the web process
+        must never kill agents itself."""
+        sprint = self._load_sprint(sprint_id)                 # NotFoundError if missing
+        if sprint.status in self._STOPPABLE:
+            progress = self.substrate.load_progress(sprint_id)
+            progress.stop_requested = True
+            self.substrate.save_progress(progress)
+            self.substrate.commit(f"sprint {sprint_id}: stop requested")
+            return self.get_sprint(sprint_id)
+        if sprint.status in self._FINISHED:
+            raise ValueError(f"{sprint_id} has already finished")
+        raise ValueError(f"{sprint_id} is not running yet; cancel it instead")
 
     def answer_escalation(self, sprint_id: str, action: str, *, instructions: str = "",
                           host: str = "", by: str = "", thread_id: str = "") -> dict:

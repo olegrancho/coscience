@@ -554,6 +554,40 @@ class Worker:
         progress = self.substrate.load_progress(sprint.id)
         sprint_dir = self.substrate.sprint_dir(sprint.id)
 
+        # A human asked to stop this sprint — honored FIRST, before the sleeping-
+        # on-a-job branch below, so a sprint asleep on a remote job is stopped too.
+        # Mirrors run_escalated_beat's stop block: a human stop of running work is
+        # a cancel, not a failure.
+        if progress.stop_requested:
+            last_error = "stopped by a human"
+            try:
+                self.stop_sprint(sprint)
+            except Exception as exc:
+                last_error += f" (stopping it also failed: {exc})"
+            sprint = self.substrate.load_sprint(sprint.id)        # reload: stop_sprint may
+            progress = self.substrate.load_progress(sprint.id)    # have taken a while
+            if sprint.status not in (SprintStatus.EXECUTING, SprintStatus.HIBERNATED):
+                # Someone else already moved this sprint on (e.g. a second dispatcher
+                # instance beat us to it) while stop_sprint ran — the stop we just did
+                # is harmless (idempotent once nothing is left running), but writing
+                # CANCELED over whatever it is now would clobber real state. Both
+                # EXECUTING and HIBERNATED are accepted: this beat runs for either
+                # (a hibernated sprint holds no lease, so the dispatcher reaches it
+                # through its own leaseless-stop loop, not the per-lease one).
+                return BeatOutcome.PROGRESSED
+            if progress.collect_note:
+                last_error += f"; {progress.collect_note}"
+            progress.last_error = last_error
+            progress.stop_requested = False
+            progress.escalation = {}
+            self._reap_job(progress)
+            set_status(sprint, SprintStatus.CANCELED)
+            artifacts.release_for_sprint(self.substrate, sprint, time.time())
+            self.substrate.save_sprint(sprint)
+            self.substrate.save_progress(progress)
+            self.substrate.commit(f"sprint {sprint.id}: CANCELED after a human stop")
+            return BeatOutcome.COMPLETED
+
         # A) sleeping on a tracked detached job (no agent runs it) — cheap check
         # only. If the agent process is (still) running, fall through to the
         # normal launched/running/collect handling below instead.

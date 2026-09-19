@@ -355,6 +355,28 @@ def test_stopping_a_sprint_names_a_job_it_could_not_stop(tmp_path):
     assert "The platform could not stop the job on gpu1" in prog.collect_note
 
 
+def test_a_human_stop_beat_names_a_job_it_could_not_stop_in_last_error(tmp_path):
+    # O18: run_sprint_beat's own stop path (not Worker.stop_sprint called directly)
+    # must fold whatever couldn't be stopped into last_error too.
+    sub = Substrate(tmp_path); _queued(sub)
+    s = sub.load_sprint("s1"); s.status = SprintStatus.EXECUTING; sub.save_sprint(s)
+    prog = sub.load_progress("s1")
+    prog.job_token, prog.job_host, prog.job_collect = "gpu1:4242::", "gpu1", ["~/runs/s1/work"]
+    prog.stop_requested = True
+    sub.save_progress(prog)
+    runner = ScriptRunner()
+    w = Worker(sub, FakeAgent(), slots=Slots(), runner=runner)
+
+    from coscience.models import BeatOutcome
+    outcome = w.run_sprint_beat(sub.load_sprint("s1"))
+    assert outcome == BeatOutcome.COMPLETED
+    sp = sub.load_sprint("s1")
+    prog = sub.load_progress("s1")
+    assert sp.status == SprintStatus.CANCELED
+    assert "stopped by a human" in prog.last_error
+    assert "could not stop the job on gpu1" in prog.last_error
+
+
 # --- M6: a raising terminate still notes the failed stop ---------------------------
 
 def test_a_raising_terminate_still_notes_the_failed_stop(tmp_path):

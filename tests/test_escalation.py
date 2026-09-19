@@ -657,6 +657,52 @@ def test_a_leaseless_escalated_sprint_with_a_pending_stop_fails_within_one_cycle
     assert substrate.load_sprint("s1").status == SprintStatus.FAILED
 
 
+# --- O18 fix round 1: a leaseless HIBERNATED sprint with a pending human stop is
+# still carried out ------------------------------------------------------------
+#
+# A hibernated sprint is intentionally leaseless (yielded at a safe point), so it
+# never reaches the per-lease beat loop — same shape as the leaseless ESCALATED
+# case above, mirrored onto run_sprint_beat via the dispatcher's own leaseless
+# stop loop for EXECUTING/HIBERNATED sprints.
+
+def test_a_leaseless_hibernated_sprint_with_a_pending_stop_is_canceled_within_one_cycle(substrate):
+    # Over-capacity resources_required so the grant step can't re-lease it this
+    # cycle either — it stays genuinely leaseless, exercising the new leaseless
+    # stop loop (not the ordinary per-lease beat loop).
+    sp = Sprint(id="s1", status=SprintStatus.HIBERNATED, goals="g", plan=["a"],
+               resources_required={"cpu": 100})
+    substrate.save_sprint(sp)
+    prog = substrate.load_progress("s1")
+    prog.stop_requested = True
+    substrate.save_progress(prog)
+
+    disp = _dispatcher(substrate, {"cpu": 4})
+    disp.run_one_cycle(now=0.0)
+    disp.ledger.load()
+    assert disp.ledger.lease_for("s1") is None
+    sp = substrate.load_sprint("s1")
+    prog = substrate.load_progress("s1")
+    assert sp.status == SprintStatus.CANCELED
+    assert "stopped by a human" in prog.last_error
+    assert prog.stop_requested is False
+
+
+def test_a_leaseless_hibernated_sprint_with_no_pending_stop_is_left_alone(substrate):
+    # Narrow scope: a leaseless hibernated sprint with nothing pending must not be
+    # beaten by the new loop (it is intentionally leaseless, waiting for capacity).
+    # Asks for more than the pool has, so the grant step can't re-lease it this
+    # cycle either — it stays genuinely leaseless.
+    sp = Sprint(id="s1", status=SprintStatus.HIBERNATED, goals="g", plan=["a"],
+               resources_required={"cpu": 100})
+    substrate.save_sprint(sp)
+
+    disp = _dispatcher(substrate, {"cpu": 4})
+    disp.run_one_cycle(now=0.0)
+    disp.ledger.load()
+    assert disp.ledger.lease_for("s1") is None
+    assert substrate.load_sprint("s1").status == SprintStatus.HIBERNATED
+
+
 # --- Fix B: a reallocation cannot strand the sprint ----------------------------
 
 def test_move_targets_excludes_current_drained_and_quiet_hosts(substrate, every_host_placeable):

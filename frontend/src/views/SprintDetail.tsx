@@ -348,6 +348,14 @@ export default function SprintDetail() {
     try { await api.wakeSprint(id); notifications.show({ color: "teal", title: "Waking the agent", message: "It'll check the job on the next beat." }); refresh(); }
     catch (e) { notifications.show({ color: "red", title: "Couldn't wake", message: String(e) }); }
   };
+  const stop = async () => {
+    if (!window.confirm(`Stop ${id}? Its agent is ended and any job on its host is stopped. What it has produced so far is kept.`)) return;
+    try {
+      await api.stopSprint(id);
+      notifications.show({ color: "gray", title: "Stop requested", message: "The platform will end its agent and stop any job on its host." });
+      refresh();
+    } catch (e) { notifications.show({ color: "red", title: "Couldn't stop", message: String(e) }); }
+  };
   const pmThreads = s.threads.filter((t) => t.target === "pm");
   const workerThreads = s.threads.filter((t) => t.target === "worker");
 
@@ -392,7 +400,8 @@ export default function SprintDetail() {
               </Tooltip>
             )}
             {(actions.includes("edit") || actions.includes("demote") || actions.includes("park")
-              || actions.includes("cancel") || (actions.includes("run") && s.status === "proposed")) && (
+              || actions.includes("cancel") || actions.includes("stop")
+              || (actions.includes("run") && s.status === "proposed")) && (
               <Menu position="bottom-end" withArrow>
                 <Menu.Target>
                   <Tooltip label="More actions" withArrow openDelay={300}>
@@ -410,6 +419,8 @@ export default function SprintDetail() {
                     <Menu.Item onClick={demote}>Demote to idea…</Menu.Item>}
                   {actions.includes("cancel") &&
                     <Menu.Item color="red" onClick={cancelParked}>Cancel…</Menu.Item>}
+                  {actions.includes("stop") &&
+                    <Menu.Item color="red" onClick={stop}>Stop…</Menu.Item>}
                 </Menu.Dropdown>
               </Menu>
             )}

@@ -11,9 +11,12 @@ describe("availableActions", () => {
   it("offers run + send back for approved", () => {
     expect(availableActions("approved").sort()).toEqual(["demote", "edit", "reject", "run", "sendBack"]);
   });
-  it("offers cancel + edit for queued, only edit for executing", () => {
+  it("offers cancel + edit for queued, stop + edit for executing", () => {
     expect(availableActions("queued").sort()).toEqual(["edit", "reject"]);
-    expect(availableActions("executing")).toEqual(["edit"]);
+    expect(availableActions("executing")).toEqual(["stop", "edit"]);
+  });
+  it("offers only stop for hibernated", () => {
+    expect(availableActions("hibernated")).toEqual(["stop"]);
   });
   it("offers resume for done/failed, nothing for canceled", () => {
     expect(availableActions("done")).toEqual(["resume"]);

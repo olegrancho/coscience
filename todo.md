@@ -1,25 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 109
-last_updated: 2026-09-17
+version: 112
+last_updated: 2026-09-18
 ---
 
 # To QC
-
-### O14. Choose where each program may run from either side
-
-Each server holds one list of the programs it runs, with select-all in the dropdown; a program's settings tick the servers it may use; creating a program asks which servers, all ticked. `exclude_programs` and the "all programs" state are gone, and nothing in either view is disabled.
-
-**Check:** in the test program's settings, untick the remote server and save — it should just work, and the servers card should then read "none" for it. Untick every program on a server in its Config dialog and see the card read "none". Create a program with one server unticked and confirm its sprints only go to the others. A server whose list was never set still shows every program ticked and admits everything until its first save. Built in a worktree, uncommitted.
-
-### O13. Document the remote-server switches for deployments
-
-`CLAUDE.md` § Deployment now has a "Remote servers" section: what `COSCIENCE_ALLOW_ONBOARDING`
-and `COSCIENCE_ALLOW_REMOTE` turn on, which processes need each, and how to switch them
-off. This host's setup file says where it sets them.
-
-**Check:** read `CLAUDE.md` § Remote servers and the environment-file paragraph in this
-host's `local_setup_*.md`. Both edits are uncommitted in the main checkout.
 
 ### O6. Place and run work on a remote host
 
@@ -109,6 +94,12 @@ After a probe, the server dialog can start an agent survey: a full-access sessio
 
 
 # To Do (sprint)
+
+### O18. Stop a running sprint from the dashboard
+
+Add a Stop action for a sprint that is executing or hibernated: it ends the agent, stops any job on its host, keeps what was produced and reports what it could not stop.
+
+Today the dashboard offers Cancel only while a sprint is queued; once it runs, the only action is Edit. The platform can stop work — `Worker.stop_sprint` exists — but the stop request is honoured only for a sprint that escalated first, so a human who starts remote work has no way to stop it. Found while QC-ing O6's stop path. Details: [.superpowers/sdd/2026-09-18-o18-stop-running-sprint/brief.md](.superpowers/sdd/2026-09-18-o18-stop-running-sprint/brief.md)
 
 ### O9. Keep per-program host notes the PM maintains
 
@@ -447,6 +438,14 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### O13. Document the remote-server switches for deployments
+
+CLAUDE.md names the two remote-server switches, what each turns on, which processes must have them, and how to turn one off; this host's setup file says where it sets them.
+
+### O14. Choose where each program may run from either side
+
+Each server holds one list of the programs it runs, edited from the server's dialog or from a program's settings, and creating a program asks which servers it may use.
+
 ### O5. Onboard a server and discover what it offers
 
 The Compute page's Add-server dialog probes a server over key-only SSH, runs four checks and adds it to the pool; the first real server was onboarded with it on the live platform.
@@ -481,13 +480,3 @@ waits were the wiki's 70% usage cutoff, recorded at `WIKI_THRESHOLD` in `wiki.py
 
 `docs/codex-backend.md` maps every `claude` coupling to `codex exec`, with a real run's
 event schema and quota windows; the build is planned as block C.
-
-### B2. Record ingest progress per object, not per run
-
-Ingest agents log each finished object to `progress.jsonl` (a test-wiki run did, before
-its report), and a cut-off run keeps those objects; the cut-off path is unit-tested only.
-
-### F5. Backfill the log from run history
-
-The call log now holds 31 rebuilt wiki calls from 08-26 to 09-04 ($57.70), visible on
-Compute; `python -m coscience.call_backfill` adds any others without duplicating.

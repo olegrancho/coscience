@@ -130,6 +130,60 @@ def test_reject_missing_raises_notfound(tmp_path):
         Service(tmp_path).reject_sprint("nope")
 
 
+def _at_status(svc, sid, status):
+    svc.submit_sprint(id=sid, goals="g", plan=["true"])
+    s = svc.substrate.load_sprint(sid)
+    s.status = status
+    svc.substrate.save_sprint(s)
+
+
+def test_stop_missing_raises_notfound(tmp_path):
+    with pytest.raises(NotFoundError):
+        Service(tmp_path).stop_sprint("nope")
+
+
+def test_stop_sets_the_flag_for_executing_hibernated_and_escalated(tmp_path):
+    svc = Service(tmp_path)
+    for status in (SprintStatus.EXECUTING, SprintStatus.HIBERNATED, SprintStatus.ESCALATED):
+        sid = f"sp-{status.value}"
+        _at_status(svc, sid, status)
+        result = svc.stop_sprint(sid, by="oleg")
+        assert svc.substrate.load_progress(sid).stop_requested is True
+        # same dict shape the other sprint actions return (get_sprint's own dict)
+        assert result == svc.get_sprint(sid)
+        assert result["status"] == status.value          # the service only records the request
+
+
+def test_a_stopped_sprints_note_reaches_the_page(tmp_path):
+    # A human stop that could not reach a job on the host must say so; a canceled
+    # sprint used to surface no note at all, so a half-stopped job looked clean (O18).
+    svc = Service(tmp_path)
+    _at_status(svc, "sp-note", SprintStatus.CANCELED)
+    progress = svc.substrate.load_progress("sp-note")
+    progress.last_error = "stopped by a human (could not stop the job on gpu1)"
+    svc.substrate.save_progress(progress)
+    assert svc.get_sprint("sp-note")["error"] == \
+        "stopped by a human (could not stop the job on gpu1)"
+
+
+def test_stop_not_running_yet_raises(tmp_path):
+    svc = Service(tmp_path)
+    for status in (SprintStatus.QUEUED, SprintStatus.APPROVED, SprintStatus.PROPOSED):
+        sid = f"sp-{status.value}"
+        _at_status(svc, sid, status)
+        with pytest.raises(ValueError, match="is not running yet; cancel it instead"):
+            svc.stop_sprint(sid)
+
+
+def test_stop_already_finished_raises(tmp_path):
+    svc = Service(tmp_path)
+    for status in (SprintStatus.DONE, SprintStatus.FAILED, SprintStatus.CANCELED):
+        sid = f"sp-{status.value}"
+        _at_status(svc, sid, status)
+        with pytest.raises(ValueError, match="has already finished"):
+            svc.stop_sprint(sid)
+
+
 def test_approve_run_send_back_flow(tmp_path):
     svc = Service(tmp_path)
     svc.submit_sprint(id="sp1", goals="g", plan=["true"])

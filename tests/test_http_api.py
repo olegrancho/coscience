@@ -199,6 +199,28 @@ def test_reject_missing_is_404(client):
     assert client.post("/api/sprints/nope/reject").status_code == 404
 
 
+def test_stop_via_http(client):
+    from coscience.models import SprintStatus
+    client.post("/api/sprints", json={"id": "sp1", "goals": "g", "plan": ["true"]})
+    s = client.svc.substrate.load_sprint("sp1")
+    s.status = SprintStatus.EXECUTING
+    client.svc.substrate.save_sprint(s)
+    r = client.post("/api/sprints/sp1/stop")
+    assert r.status_code == 200
+    # Only the request is recorded; the dispatcher carries it out.
+    assert r.json()["status"] == "executing"
+    assert client.svc.substrate.load_progress("sp1").stop_requested is True
+
+
+def test_stop_not_running_yet_is_422(client):
+    client.post("/api/sprints", json={"id": "sp1", "goals": "g", "plan": ["true"]})
+    assert client.post("/api/sprints/sp1/stop").status_code == 422
+
+
+def test_stop_missing_is_404(client):
+    assert client.post("/api/sprints/nope/stop").status_code == 404
+
+
 def test_patch_priority(client):
     client.post("/api/sprints", json={"id": "sp1", "goals": "g",
                                       "plan": ["true"]})

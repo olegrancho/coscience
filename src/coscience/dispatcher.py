@@ -415,6 +415,33 @@ class Dispatcher:
                 # release: there was never a lease to release.
                 report.beaten += 1
 
+        # --- a leaseless EXECUTING/HIBERNATED sprint with a pending human stop is
+        # still carried out (O18 fix round 1) --- same shape as the escalated case
+        # just above: a HIBERNATED sprint is intentionally leaseless (yielded at a
+        # safe point) and so never reaches the per-lease loop over `self.ledger.
+        # all_leases()`; without this, a human's stop on a hibernated sprint would
+        # sit pending until it happened to be re-granted. Narrow to sprints that
+        # actually have a pending stop — never widen this to beat every leaseless
+        # executing/hibernated sprint.
+        for sprint in eligible:
+            if sprint.status not in (SprintStatus.EXECUTING, SprintStatus.HIBERNATED):
+                continue
+            if self.ledger.lease_for(sprint.id) is not None:
+                continue                      # has a lease: already beaten above
+            if not self.substrate.load_progress(sprint.id).stop_requested:
+                continue
+            try:
+                self.worker.run_sprint_beat(sprint)
+            except Exception as exc:          # one sprint's fault must not stall the cycle
+                progress = self.substrate.load_progress(sprint.id)
+                progress.last_error = f"beat failed: {type(exc).__name__}: {exc}"
+                self.substrate.save_progress(progress)
+                report.beat_errors.append(sprint.id)
+            else:
+                # A COMPLETED result (the normal outcome here) needs no lease
+                # release: there was never a lease to release.
+                report.beaten += 1
+
         # A request above the pool's total is not waiting — no amount of waiting grants
         # it — so it is named separately instead of hiding inside the waiting count.
         for s in eligible:
