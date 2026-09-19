@@ -1,105 +1,36 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 112
-last_updated: 2026-09-18
+version: 122
+last_updated: 2026-09-19
 ---
 
 # To QC
 
-### O6. Place and run work on a remote host
+### O19. Collect a stopped job's outputs, or say they were left behind
 
-With `COSCIENCE_ALLOW_REMOTE=1`, a remote server takes grants and a sprint stays on
-the server it started on. The worker agent launches jobs there over SSH and declares
-them with `host` and `collect`. The platform watches them (an SSH failure is
-"unknown", a reboot is "lost"), stops them only by verified identity, and copies
-outputs into `collected/` before waking the agent.
+Stopping a sprint now copies the job's declared outputs into the sprint's `collected/`
+before it is canceled, and the sprint's error line carries the copy note — or says the job
+declared nothing to copy and its work is still on the server.
 
-**Check:** set up so far:
-- the page read as before with remote placement off;
-- `COSCIENCE_ALLOW_REMOTE=1` is now set for the backend and both loops;
-- a remote server is onboarded, answering, and reserved for the test program.
+**Check:** stop a sprint that is asleep on a remote job and read its error line on the
+sprint page: it should name each copied path, and `collected/` should hold the files.
+Collecting is the caller's to ask for, so the dispatcher's reconcile stop (a leaseless
+sprint that will run again) still copies nothing — `tests/test_remote_jobs.py`, the four
+tests under "O19".
 
-The test plan, waiting on Claude usage and a free worker slot (all three are busy):
-1. Create a test-program sprint with a small CPU request and **Memory (GB) = 4**. This machine declares no memory, so the sprint can only be placed on the remote server; until O14, nothing else keeps the program off this machine.
-2. Give it goals that launch a short job over SSH into its run folder, write an output, and declare the job with `host` and `collect`.
-3. Release it and watch:
-   - its lease names the remote server;
-   - the sprint sleeps on the job;
-   - it wakes with a note naming what was copied into `collected/`.
-4. Run a second one and stop it mid-job: the job must end on the server.
+### O20. Build the leftover list from what the server actually has
 
-Spreading one request across servers is not built. 1662 Python and 375 frontend tests passed at landing.
+Each server's health check now also lists the directories under its run root, and the
+servers card lists those, labelled from the sprint records — including a folder no sprint
+explains, as "no sprint record".
 
-### O7. Keep hosts healthy, visible and removable
-
-The dispatch loop checks each remote server once a minute. A server silent for 30
-minutes, or drained, takes no new sprints but keeps its running work. The Compute
-page's servers card shows health, what is in use, leftover run folders and stranded
-leases, and can drain and remove a server. One sprint's failing beat no longer stalls
-the others; after three in a row that sprint is failed.
-
-**Check:** checked so far on the live platform:
-- with remote placement off, the page read as before;
-- with it on, the remote server reads "answering" and its use and leftovers show;
-- an unreachable test server (reserved for the test program, its SSH target never resolves) reads "not answering since …" with the SSH reason.
-
-Left to check on the unreachable server:
-- it turns quiet 30 minutes after its first failure and says it takes no new work;
-- Drain then Remove: Remove stays disabled until drained and for 2 minutes after, then removes it (which also cleans up the test server).
-
-The failing-beat isolation and the three-strike cap are covered by tests only. The time reads `23.03` on a dot-separator locale (P2).
-
-Still open, listed in spec §11: copy-back inside the beat, the footprint record for
-collect paths outside the run directory, and ungated remove. 1712 Python and 388 frontend tests pass on the landed code.
-
-### O8. Let a worker agent pull the red button
-
-A worker agent writes `escalate.json`, or the platform raises one when a sprint sleeps on a
-quiet server's job. The sprint is then held as `escalated`, keeping its lease and job. The PM
-answers with resume, reallocate or to_human; a human can resume, move or stop from the sprint
-page. Human-level escalations show in the header and on the program's sprint list.
-
-**Check:** after it lands, write an `escalate.json` by hand in a test sprint's folder and let
-its agent end its turn. The sprint should turn `escalated`, its escalation should show on the
-sprint page, and the PM's next cycle should list it. Then answer Resume from the panel: the
-next run's instructions carry the answer. A second escalation on the same sprint goes to a
-human and shows "N need you" in the header. Landed and deployed.
-
-### O10. Configure each server from its card
-
-Every server card on Compute has a Config button. A remote server's dialog is prefilled,
-can be re-probed, and saves with "Update configuration"; only a new SSH target or run folder
-needs a passing probe. This machine's dialog has Detect, which fills the GPU cards with their
-VRAM. It shows the detected CPU and memory beside the declared values, each with a
-"use detected" link.
-
-**Check:** after it lands, open Config on this machine and press Detect. The GPU should show its real VRAM,
-CPU should stay at the declared count with the detected thread count beside it, and memory
-stay empty unless you use detected. Update, and confirm `resources.yaml` keeps workers and housekeepers.
-On a remote server, change notes and Update with no probe needed. Change its SSH target, and Update
-stays blocked until a re-probe passes. "Use detected" memory takes the full RAM, not a 90%
-share. Landed and deployed.
-
-### O15. Remove a server with one button
-
-The servers card has one Remove button: a server with nothing on it leaves the pool within a dispatch cycle, one with work on it takes no new work and leaves when that work ends, and Keep takes a removal back.
-
-**Check:** on Compute, Remove an idle test server and see it gone within seconds, with a "removed" commit in the substrate; Remove a server holding a sprint and see "removing — waiting on <sprint>", then Keep. Once deployed this replaces O7's Drain → Remove steps. Landed and deployed.
-
-### O11. Let an agent own server discovery
-
-After a probe, the server dialog can start an agent survey: a full-access session that checks the server over SSH and proposes capacity, GPU cards and notes, which the dialog can apply; a failed check is accepted only through the agent's written reasons plus an explicit "with the agent's overrides" click.
-
-**Check:** probe a test server, click Survey with an agent, wait for its reply and proposal, then Use proposal and Add: the pool entry carries the proposal's cards and notes. Re-probe it and confirm that its old overrides are refused as stale. Starts a real Claude session on this machine with this backend's SSH keys. Known and parked: a finished reply can be collected twice by the dashboard and the dispatcher at once, as in program chat today. Landed and deployed.
-
+**Check:** the Compute page's servers card against a listing of that server's run root —
+the two should agree within a minute, where before the card listed four folders that no
+longer existed. A server that has never been checked lists nothing rather than
+guessing. Note the listing survives a server going quiet (it shows what it last held), so
+a quiet server's list can be up to QUIET_AFTER old.
 
 # To Do (sprint)
-
-### O18. Stop a running sprint from the dashboard
-
-Add a Stop action for a sprint that is executing or hibernated: it ends the agent, stops any job on its host, keeps what was produced and reports what it could not stop.
-
-Today the dashboard offers Cancel only while a sprint is queued; once it runs, the only action is Edit. The platform can stop work — `Worker.stop_sprint` exists — but the stop request is honoured only for a sprint that escalated first, so a human who starts remote work has no way to stop it. Found while QC-ing O6's stop path. Details: [.superpowers/sdd/2026-09-18-o18-stop-running-sprint/brief.md](.superpowers/sdd/2026-09-18-o18-stop-running-sprint/brief.md)
 
 ### O9. Keep per-program host notes the PM maintains
 
@@ -123,7 +54,14 @@ reservations, health states, leftovers and notes will show whether it reads at a
 needs another layout, such as one card per server or a denser table. The outcome may be
 "keep it". Blocked on having servers onboarded and in use, not on code.
 
-### O16. Reserve memory for every sprint
+# To Do (backlog)
+
+## A. Memory management
+
+A sprint's memory is reserved before it runs, so two jobs on one server cannot
+promise themselves the same RAM.
+
+### A1. Reserve memory for every sprint
 
 Declare `memory_gb` on every server, this machine included, and give each server a
 default reservation for sprints that do not ask for memory.
@@ -133,20 +71,63 @@ memory is never counted here, and a sprint that asks for none reserves none on a
 even if it uses tens of GB. With memory declared everywhere and a default per server
 (e.g. 4 GB) charged when a request omits `memory_gb`, the ledger reflects every sprint.
 The PM's "never request: memory_gb" line then goes away, and the capacity editor and the
-server dialog show and edit the default.
+server dialog show and edit the default. Written up as O16 before this block existed.
 
-### O17. Tell the worker agent its memory budget
+Details: [docs/superpowers/plans/2026-09-15-o16-o17-memory.md](docs/superpowers/plans/2026-09-15-o16-o17-memory.md)
+
+### A2. Tell the worker agent its memory budget
 
 Add a memory line to the worker agent's instructions: the amount its sprint reserved and
 that its processes must stay under it.
 
-Blocked on O16, which makes every sprint's reservation real. The instructions already
+Blocked on A1, which makes every sprint's reservation real. The instructions already
 carry a GPU section naming the cards and VRAM share. Memory gets the same treatment on
 trust, with no enforcement: nothing stops a job from using more. Enforcing it (a cgroup
 or `MemoryMax`) and checking free memory at grant time stay unplanned until a job
-actually runs a server out of memory.
+actually runs a server out of memory. Written up as O17 before this block existed.
 
-# To Do (backlog)
+## B. Disk space
+
+No machine is given work it has no room for, and a machine that is running out says
+so on the dashboard before it stops working.
+
+### B1. Warn on the pulse zone when a machine is low on disk
+
+Show a warning in the pulse zone when a machine has under 2 GB free, and a severe
+warning under 500 MB. Per machine, this one included.
+
+Nothing on the platform watches free space. On 2026-09-19 this machine's root
+filesystem filled at 05:55: every PM cycle and every dispatcher cycle failed with
+`[Errno 28] No space left on device` for about 40 minutes (163 dispatcher cycles, 5
+programs' PM cycles), the usage rail went blank because its reading is written to the
+same disk, and nothing anywhere said "the disk is full" — the only evidence was in a
+log file nobody was reading. Free space is already asked for on every remote server by
+the health check, and locally it is one `statvfs` call.
+
+### B2. Stop giving work to a machine with under 500 MB free
+
+Under 500 MB, a server takes no new sprints, and on this machine no worker runs at
+all — only the PMs, which need almost nothing and are what recovers the situation.
+
+A full disk does not fail a sprint honestly: it corrupts whatever was mid-write. The
+gate belongs with the other reasons a server takes no work (quiet, draining,
+removing), so the Compute page explains it in the same place and it lifts by itself
+once space is freed. Keeping the PMs alive is deliberate — they are cheap, they are
+how the platform reports and re-plans, and silencing them would hide the outage that
+caused this. Depends on B1 for the reading.
+
+### B3. Retire a Claude call whose end was never written
+
+A call that never recorded its end must stop reading as `running` once the work it
+belonged to is over.
+
+The same outage left three PM calls shown as in flight eight hours later, which is
+what "several PMs are running" on the dashboard meant. A call is inferred `running`
+while the process named by its token is alive, but the PM's token is the loop's own
+pid (`pm_agent.py`, "this loop IS the process doing the call"), and the loop outlives
+every cycle — so once an end event is lost, to a full disk or a `kill -9`, the row can
+never retire. The fix is a token, or a rule, that belongs to the call rather than to
+the process that hosts it.
 
 ## D. Wiki content health
 
@@ -438,6 +419,34 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### O15. Remove a server with one button
+
+Remove marks a server and the dispatcher takes it out of the pool once nothing is on it; Keep undoes the mark, and the drain step is gone.
+
+### O11. Let an agent own server discovery
+
+After a probe, an agent surveys a server over SSH and proposes its capacity, cards and notes; a failed check is accepted only with the agent's written reason and an explicit human accept.
+
+### O10. Configure each server from its card
+
+Every server card has Config: a remote server is re-probed and updated in place, and this machine's dialog detects its own GPU cards.
+
+### O8. Let a worker agent pull the red button
+
+A worker agent or the platform can escalate a sprint; it is held with its lease and job while the planner or a human answers with resume, move or stop.
+
+### O7. Keep hosts healthy, visible and removable
+
+The dispatch loop checks each remote server every minute; a silent or drained server keeps its work but takes no new sprints, and the servers card shows health, use, leftovers and stranded leases.
+
+### O6. Place and run work on a remote host
+
+A sprint reserved for a remote server runs there: its agent launches a job over SSH, the platform watches it, copies its outputs back, wakes the agent, and stops the job when a human stops the sprint.
+
+### O18. Stop a running sprint from the dashboard
+
+Stop ends a running sprint's agent and any job on its host, keeps what it produced, and cancels it with a note; verified live against a remote job.
+
 ### O13. Document the remote-server switches for deployments
 
 CLAUDE.md names the two remote-server switches, what each turns on, which processes must have them, and how to turn one off; this host's setup file says where it sets them.
@@ -449,34 +458,3 @@ Each server holds one list of the programs it runs, edited from the server's dia
 ### O5. Onboard a server and discover what it offers
 
 The Compute page's Add-server dialog probes a server over key-only SSH, runs four checks and adds it to the pool; the first real server was onboarded with it on the live platform.
-
-### O4. Give a sprint's request the shape of real compute
-
-A request names `cpu`, `memory_gb`, `gpu` and `gpu_vram_gb`; the PM's COMPUTE block lists what each host can give, and the edit dialog and sprint page round-trip the same shape.
-
-### O3. Describe GPUs by their VRAM
-
-Hosts list GPUs as cards with VRAM and a lease holds whole cards or VRAM shares; this machine's GPU is declared with its VRAM and read back by the live Compute page.
-
-### O2. Model compute as hosts, not one flat pool
-
-The pool is a `local` host plus an optional `hosts:` section, every lease names its host, and a malformed host entry is reported in `host_errors` instead of stopping the platform.
-
-### O1. Decide the multi-host execution model
-
-The multi-host design is recorded in `docs/superpowers/specs/2026-09-14-multi-host-execution-design.md`, and every O item after it builds from that document.
-
-### D1. Fix the 29 dangling relations across three program wikis
-
-Lint reports no `rel/no-link` on any wiki, every ingest links its pages' declared
-relations at collect, and `# Related` now sits above `# Human notes` on all pages.
-
-### I1. Ingest a result when its sprint finishes
-
-Closed as not a problem: an ingest already launches within a 5s beat, and the 3h+
-waits were the wiki's 70% usage cutoff, recorded at `WIKI_THRESHOLD` in `wiki.py`.
-
-### H1. Work out what a Codex backend would take
-
-`docs/codex-backend.md` maps every `claude` coupling to `codex exec`, with a real run's
-event schema and quota windows; the build is planned as block C.
