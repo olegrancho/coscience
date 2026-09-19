@@ -109,3 +109,43 @@ def test_a_lease_file_with_fields_this_code_does_not_know_still_loads(tmp_path):
         ' "expires_at": 1e12, "priority": 0, "preemptible": true, "gpu_devices": [0]}]')
     led = _ledger(tmp_path, ResourcePool({"gpu": 1.0}))
     assert led.lease_for("sp1").host == LOCAL
+
+
+# --- platform-wide slots are not a program's work (2026-09-18 regression) ------
+
+def _all_hosts_restricted():
+    """Every server carries an explicit `programs:` list, so no server admits a
+    request that names no program — the state the dashboard produces once someone
+    keeps one program off this machine."""
+    return ResourcePool.from_dict(
+        {"cpu": 4, "workers": 2, "housekeepers": 2, "programs": ["p1"],
+         "hosts": {"big": {"ssh": "big", "capacity": {"cpu": 16}, "programs": ["p2"]}}})
+
+
+def test_a_housekeeper_slot_is_granted_when_no_server_admits_a_program_less_request(tmp_path):
+    # The PM and wiki loops take this slot before reasoning. It is pool-wide
+    # bookkeeping, so per-program server access must not gate it — when it did,
+    # both loops idled silently instead of running.
+    led = _ledger(tmp_path, _all_hosts_restricted())
+    assert led.pool.grantable_hosts(None) == []
+    lease = led.acquire("pm:p1", {"housekeepers": 1.0}, now=0.0, ttl=60.0)
+    assert lease is not None and lease.host == LOCAL
+
+
+def test_a_worker_slot_alone_is_granted_the_same_way(tmp_path):
+    led = _ledger(tmp_path, _all_hosts_restricted())
+    assert led.acquire("slot", {"workers": 1.0}, now=0.0, ttl=60.0) is not None
+
+
+def test_real_work_without_a_program_still_respects_server_access(tmp_path):
+    # Only platform keys bypass access: a request for actual resources does not.
+    led = _ledger(tmp_path, _all_hosts_restricted())
+    assert led.acquire("sp1", {"cpu": 1.0}, now=0.0, ttl=60.0) is None
+    assert led.acquire("sp2", {"cpu": 1.0, "workers": 1.0}, now=0.0, ttl=60.0) is None
+
+
+def test_a_housekeeper_slot_still_runs_out(tmp_path):
+    led = _ledger(tmp_path, _all_hosts_restricted())
+    assert led.acquire("h1", {"housekeepers": 1.0}, now=0.0, ttl=60.0) is not None
+    assert led.acquire("h2", {"housekeepers": 1.0}, now=0.0, ttl=60.0) is not None
+    assert led.acquire("h3", {"housekeepers": 1.0}, now=0.0, ttl=60.0) is None

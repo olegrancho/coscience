@@ -227,7 +227,17 @@ class Ledger:
         sprint whose agent or job is still physically running: a drained or quiet
         host still holds its room — only NEW grants are kept off such a host."""
         pending = _normalize(pending)
-        hosts = self.pool.placeable_hosts(program) if readopt else self.pool.grantable_hosts(program)
+        if amounts and all(k in PLATFORM_KEYS for k in amounts):
+            # A request made only of platform-wide keys (a worker or housekeeper slot)
+            # is the platform's own bookkeeping, not a program's work: it consumes
+            # pool-wide capacity that no host owns, so per-program server access must
+            # not gate it. Once every server carried an explicit `programs:` list, this
+            # went through `grantable_hosts(None)` — which no server admits — so the PM
+            # and wiki loops could not take a slot and idled silently (2026-09-18).
+            hosts = [h for h in self.pool.hosts if h.name == LOCAL] or list(self.pool.hosts)
+        else:
+            hosts = (self.pool.placeable_hosts(program) if readopt
+                     else self.pool.grantable_hosts(program))
         for h in hosts:
             if host is not None and h.name != host:
                 continue
