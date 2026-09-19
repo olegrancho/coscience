@@ -83,7 +83,7 @@ def acquire(repo_root, holder: str, now: float, ttl: float = SLOT_TTL) -> bool:
                 return True
             led.expire(now)
             lease = led.acquire(holder, {HOUSEKEEPER_KEY: 1.0}, now, ttl,
-                                priority=SLOT_PRIORITY, preemptible=True)
+                                priority=SLOT_PRIORITY, preemptible=True, platform=True)
             return lease is not None
     except (OSError, ValueError):
         return True

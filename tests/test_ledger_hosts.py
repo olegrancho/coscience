@@ -128,17 +128,20 @@ def test_a_housekeeper_slot_is_granted_when_no_server_admits_a_program_less_requ
     # both loops idled silently instead of running.
     led = _ledger(tmp_path, _all_hosts_restricted())
     assert led.pool.grantable_hosts(None) == []
-    lease = led.acquire("pm:p1", {"housekeepers": 1.0}, now=0.0, ttl=60.0)
+    lease = led.acquire("pm:p1", {"housekeepers": 1.0}, now=0.0, ttl=60.0, platform=True)
     assert lease is not None and lease.host == LOCAL
 
 
-def test_a_worker_slot_alone_is_granted_the_same_way(tmp_path):
+def test_the_bypass_is_the_callers_to_ask_for_not_a_property_of_the_amounts(tmp_path):
+    # A sprint that declares no resources still costs exactly one worker slot, so its
+    # amounts look like the platform's own. It must not reach a server its program may
+    # not use, so the caller — not the request's shape — decides.
     led = _ledger(tmp_path, _all_hosts_restricted())
-    assert led.acquire("slot", {"workers": 1.0}, now=0.0, ttl=60.0) is not None
+    assert led.acquire("sp1", {"workers": 1.0}, now=0.0, ttl=60.0, program="p9") is None
+    assert led.acquire("sp1", {"workers": 1.0}, now=0.0, ttl=60.0) is None
 
 
 def test_real_work_without_a_program_still_respects_server_access(tmp_path):
-    # Only platform keys bypass access: a request for actual resources does not.
     led = _ledger(tmp_path, _all_hosts_restricted())
     assert led.acquire("sp1", {"cpu": 1.0}, now=0.0, ttl=60.0) is None
     assert led.acquire("sp2", {"cpu": 1.0, "workers": 1.0}, now=0.0, ttl=60.0) is None
@@ -146,6 +149,6 @@ def test_real_work_without_a_program_still_respects_server_access(tmp_path):
 
 def test_a_housekeeper_slot_still_runs_out(tmp_path):
     led = _ledger(tmp_path, _all_hosts_restricted())
-    assert led.acquire("h1", {"housekeepers": 1.0}, now=0.0, ttl=60.0) is not None
-    assert led.acquire("h2", {"housekeepers": 1.0}, now=0.0, ttl=60.0) is not None
-    assert led.acquire("h3", {"housekeepers": 1.0}, now=0.0, ttl=60.0) is None
+    for h in ("h1", "h2"):
+        assert led.acquire(h, {"housekeepers": 1.0}, now=0.0, ttl=60.0, platform=True) is not None
+    assert led.acquire("h3", {"housekeepers": 1.0}, now=0.0, ttl=60.0, platform=True) is None

@@ -218,7 +218,7 @@ class Ledger:
     def fit(self, amounts: dict[str, float], program: str | None = None,
             pending: Iterable[tuple] = (), exclude=frozenset(),
             host: str | None = None, prefer: Iterable[int] = (),
-            readopt: bool = False) -> tuple[str, list[int]] | None:
+            readopt: bool = False, platform: bool = False) -> tuple[str, list[int]] | None:
         """(host, card indices) on the first placeable host `program` may use that holds
         ALL of `amounts`, or None. `pending` is what this cycle has granted but not yet
         acquired, so one pass of grants never books the same room twice; `exclude`
@@ -227,13 +227,14 @@ class Ledger:
         sprint whose agent or job is still physically running: a drained or quiet
         host still holds its room — only NEW grants are kept off such a host."""
         pending = _normalize(pending)
-        if amounts and all(k in PLATFORM_KEYS for k in amounts):
-            # A request made only of platform-wide keys (a worker or housekeeper slot)
-            # is the platform's own bookkeeping, not a program's work: it consumes
-            # pool-wide capacity that no host owns, so per-program server access must
-            # not gate it. Once every server carried an explicit `programs:` list, this
-            # went through `grantable_hosts(None)` — which no server admits — so the PM
-            # and wiki loops could not take a slot and idled silently (2026-09-18).
+        if platform:
+            # The platform's own bookkeeping (a PM or wiki housekeeper slot): pool-wide
+            # capacity no host owns, and no program's work, so per-program server access
+            # must not gate it. Once every server carried an explicit `programs:` list,
+            # this went through `grantable_hosts(None)` — which no server admits — so both
+            # loops could not take a slot and idled silently (2026-09-18). The caller says
+            # so explicitly: a sprint that happens to declare no resources still costs only
+            # a worker slot, and it must NOT slip past its program's access this way.
             hosts = [h for h in self.pool.hosts if h.name == LOCAL] or list(self.pool.hosts)
         else:
             hosts = (self.pool.placeable_hosts(program) if readopt
@@ -261,11 +262,12 @@ class Ledger:
 
     # --- mutations ---
     def acquire(self, sprint_id, amounts, now, ttl, priority=0, preemptible=True,
-                program=None, prefer_cards=(), host=None, readopt=False):
+                program=None, prefer_cards=(), host=None, readopt=False, platform=False):
         existing = self._leases.get(sprint_id)
         if existing is not None:
             return existing
-        placed = self.fit(amounts, program, prefer=prefer_cards, host=host, readopt=readopt)
+        placed = self.fit(amounts, program, prefer=prefer_cards, host=host, readopt=readopt,
+                          platform=platform)
         if placed is None:
             return None
         host, cards = placed
