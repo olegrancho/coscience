@@ -276,6 +276,58 @@ def test_due_hosts_are_checked_concurrently(tmp_path, every_host_placeable):
     assert entries["h4"] == {"checked_at": 1000.0, "last_ok": 0.0, "fail_since": 1000.0, "reason": "h4 down"}
 
 
+# --- O20: the same check lists what the run root actually holds ---------------------
+
+RUNS_POOL = {"cpu": 4, "hosts": {"big": {"ssh": "big", "run_root": "~/runs",
+                                         "capacity": {"cpu": 16}}}}
+
+
+def test_the_check_lists_the_run_directories_the_host_holds(tmp_path, every_host_placeable):
+    pool = ResourcePool.from_dict(RUNS_POOL)
+    runner = ScriptRunner({"big": (0, "s1\ns2\n\n", "")})
+    entries = host_health.check(tmp_path, pool, now=1000.0, runner=runner)
+    assert entries["big"]["run_dirs"] == ["s1", "s2"]
+    command = runner.calls[0][-1]
+    assert command.startswith("bash -c ") and "~/runs/*/" in command
+    # Still a liveness check: the listing must not decide whether the host answered.
+    assert entries["big"]["fail_since"] == 0.0 and entries["big"]["last_ok"] == 1000.0
+
+
+def test_an_empty_run_root_is_recorded_as_empty_not_as_unknown(tmp_path, every_host_placeable):
+    # "" and a missing key are different facts: nothing there vs. nobody looked.
+    pool = ResourcePool.from_dict(RUNS_POOL)
+    entries = host_health.check(tmp_path, pool, now=1000.0, runner=ScriptRunner({"big": (0, "", "")}))
+    assert entries["big"]["run_dirs"] == []
+
+
+def test_a_host_that_stops_answering_keeps_the_listing_it_last_gave(tmp_path, every_host_placeable):
+    pool = ResourcePool.from_dict(RUNS_POOL)
+    host_health.check(tmp_path, pool, now=1000.0, runner=ScriptRunner({"big": (0, "s1\n", "")}))
+    entries = host_health.check(tmp_path, pool, now=1100.0,
+                                runner=ScriptRunner({"big": (255, "", "timed out")}))
+    assert entries["big"]["run_dirs"] == ["s1"]      # last known, not dropped on one failure
+    assert entries["big"]["fail_since"] == 1100.0
+
+
+def test_a_host_with_no_run_root_is_only_asked_whether_it_answers(tmp_path, every_host_placeable):
+    pool = ResourcePool.from_dict({"cpu": 4, "hosts": {"big": {"ssh": "big", "capacity": {"cpu": 1}}}})
+    runner = ScriptRunner({"big": (0, "unexpected\n", "")})
+    entries = host_health.check(tmp_path, pool, now=1000.0, runner=runner)
+    assert runner.calls[0][-1] == "bash -c true"
+    assert "run_dirs" not in entries["big"]
+
+
+def test_a_run_root_the_platform_will_not_name_is_never_pasted_into_a_command(
+        tmp_path, every_host_placeable):
+    # Same rule as a collect path: under ~/ or absolute, safe characters, no `..`.
+    pool = ResourcePool.from_dict({"cpu": 4, "hosts": {
+        "big": {"ssh": "big", "run_root": "~/runs; rm -rf ~", "capacity": {"cpu": 1}}}})
+    runner = ScriptRunner({"big": (0, "", "")})
+    entries = host_health.check(tmp_path, pool, now=1000.0, runner=runner)
+    assert runner.calls[0][-1] == "bash -c true"
+    assert "run_dirs" not in entries["big"]
+
+
 # --- O7 task 2: stranded leases, an isolated beat, and a stop that failed is named -
 
 def test_a_lease_on_a_removed_host_is_stranded_and_leaves_pool_wide_use(tmp_path, every_host_placeable):
@@ -379,9 +431,9 @@ def test_a_beat_that_always_fails_gives_up_after_the_cap(substrate, monkeypatch)
     # released lease is provably never renewed again.
     stopped = []
     real_stop = disp.worker.stop_sprint
-    def stop_sprint(sprint):
+    def stop_sprint(sprint, **kw):
         stopped.append(sprint.id)
-        return real_stop(sprint)
+        return real_stop(sprint, **kw)
     monkeypatch.setattr(disp.worker, "stop_sprint", stop_sprint)
 
     renewed = []
@@ -447,7 +499,7 @@ def test_a_raising_stop_sprint_does_not_abort_the_cycle(substrate, monkeypatch):
         return "idle"
     monkeypatch.setattr(disp.worker, "run_sprint_beat", beat)
 
-    def stop_sprint(sprint):
+    def stop_sprint(sprint, **kw):
         raise RuntimeError("cannot stop it")
     monkeypatch.setattr(disp.worker, "stop_sprint", stop_sprint)
 

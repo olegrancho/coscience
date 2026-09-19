@@ -142,15 +142,39 @@ def test_ledger_status_waiting_on_is_empty_for_an_unmarked_host(tmp_path, every_
     assert big["waiting_on"] == []
 
 
-def test_finished_sprints_list_the_run_directories_they_left(tmp_path, every_host_placeable):
+def _health(tmp_path, name="big", **entry):
+    path = tmp_path / ".coscience" / "host-health.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    base = {"checked_at": time.time(), "last_ok": time.time(), "fail_since": 0.0, "reason": ""}
+    path.write_text(json.dumps({name: {**base, **entry}}))
+
+
+# --- O20: the leftover list is what the server holds, not what the records imply ---
+
+def test_the_run_directories_a_host_holds_are_listed_and_labelled(tmp_path, every_host_placeable):
     svc = _svc(tmp_path)
     sub = svc.substrate
-    for sid, status in (("s1", SprintStatus.DONE), ("s2", SprintStatus.EXECUTING), ("s3", SprintStatus.FAILED)):
+    for sid, status in (("s1", SprintStatus.DONE), ("s2", SprintStatus.EXECUTING),
+                        ("s3", SprintStatus.FAILED)):
         sub.save_sprint(Sprint(id=sid, status=status, goals="g", plan=["a"]))
         sub.save_progress(ProgressState(sprint_id=sid, host="big"))
+    # s3 finished and tidied up after itself, so it is NOT on the host; "junk" is.
+    _health(tmp_path, run_dirs=["s1", "s2", "junk"])
     assert _host(svc.ledger_status(), "big")["leftover"] == [
-        {"sprint_id": "s1", "status": "done", "path": "~/runs/s1"},
-        {"sprint_id": "s3", "status": "failed", "path": "~/runs/s3"}]
+        {"sprint_id": "", "status": "unknown", "path": "~/runs/junk"},
+        {"sprint_id": "s1", "status": "done", "path": "~/runs/s1"}]
+
+
+def test_a_host_nobody_has_listed_leaves_the_leftovers_unstated(tmp_path, every_host_placeable):
+    # The old list was built from sprint records alone and named folders that had
+    # already been cleaned up. With no listing on record there is nothing to say.
+    svc = _svc(tmp_path)
+    sub = svc.substrate
+    sub.save_sprint(Sprint(id="s1", status=SprintStatus.DONE, goals="g", plan=["a"]))
+    sub.save_progress(ProgressState(sprint_id="s1", host="big"))
+    assert _host(svc.ledger_status(), "big")["leftover"] == []
+    _health(tmp_path, run_dirs=[])                  # asked, and the run root is empty
+    assert _host(svc.ledger_status(), "big")["leftover"] == []
 
 
 def test_a_lease_on_a_removed_host_is_listed_as_stranded(tmp_path, every_host_placeable):

@@ -1759,26 +1759,42 @@ class Service:
         return sorted(str(p.relative_to(work)) for p in work.rglob("*") if p.is_file())
 
     # --- ledger ---
-    def _leftover_by_host(self, pool) -> dict[str, list[dict]]:
-        """{host name: [{"sprint_id", "status", "path"}]} for finished sprints whose run
-        directory is still sitting on a remote host, sorted by sprint id. Skipped
-        entirely (no substrate walk) when the pool has no host with `ssh` — a local-only
-        deployment never leaves anything to list."""
-        if not any(h.ssh for h in pool.hosts):
+    def _leftover_by_host(self, pool, health: dict[str, dict]) -> dict[str, list[dict]]:
+        """{host name: [{"sprint_id", "status", "path"}]} — the run directories a host
+        ACTUALLY holds, as named by its last health check, labelled from the sprint
+        records (O20).
+
+        The sprint records say what a host was asked to run, not what is still on its
+        disk: an agent that tidies up after itself used to be listed anyway, which sent
+        people to delete folders that were already gone. So the listing decides what is
+        there and the records only explain it. A folder a live sprint is using is not a
+        leftover; a folder no record explains is listed as "unknown", which is the case
+        the old list could never show. A host with no listing on record — never checked,
+        or checked by an older build — contributes nothing: an empty listing means the
+        run root is empty, a missing one means nobody has looked, and guessing is what
+        this replaced."""
+        listed = {h.name: (h, health.get(h.name, {}).get("run_dirs"))
+                  for h in pool.hosts if h.ssh and h.run_root}
+        listed = {name: (h, dirs) for name, (h, dirs) in listed.items()
+                  if isinstance(dirs, list) and dirs}
+        if not listed:
             return {}
+        wanted = {name for _, dirs in listed.values() for name in dirs}
+        # One walk, and only for the ids actually on a disk somewhere.
+        status_of = {s.id: s.status for s in self.substrate.iter_sprints() if s.id in wanted}
+        finished = (SprintStatus.DONE, SprintStatus.CANCELED, SprintStatus.FAILED)
         out: dict[str, list[dict]] = {}
-        for sprint in self.substrate.iter_sprints():
-            if sprint.status not in (SprintStatus.DONE, SprintStatus.CANCELED, SprintStatus.FAILED):
-                continue
-            progress = self.substrate.load_progress(sprint.id)
-            host = pool.host(progress.host) if progress.host else None
-            if host is None or not host.run_root:
-                continue
-            out.setdefault(host.name, []).append(
-                {"sprint_id": sprint.id, "status": sprint.status.value,
-                 "path": f"{host.run_root.rstrip('/')}/{sprint.id}"})
-        for rows in out.values():
-            rows.sort(key=lambda r: r["sprint_id"])
+        for name, (host, dirs) in listed.items():
+            rows = []
+            for folder in sorted(set(dirs)):
+                status = status_of.get(folder)
+                if status is not None and status not in finished:
+                    continue               # a running sprint's folder is in use, not left
+                rows.append({"sprint_id": folder if status is not None else "",
+                             "status": status.value if status is not None else "unknown",
+                             "path": f"{host.run_root.rstrip('/')}/{folder}"})
+            if rows:
+                out[name] = rows
         return out
 
     def ledger_status(self) -> dict:
@@ -1786,7 +1802,7 @@ class Service:
         ledger = self._ledger()
         health = host_health.load(self.repo_root)
         now = time.time()
-        leftover = self._leftover_by_host(ledger.pool)
+        leftover = self._leftover_by_host(ledger.pool, health)
         # One pass over every sprint/progress for every marked-or-drained host,
         # rather than one pass per host — the dashboard polls this (fix round 1, M7).
         waiting_names = {h.name for h in ledger.pool.hosts if h.removing or h.drain}

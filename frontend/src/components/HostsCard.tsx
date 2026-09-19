@@ -19,6 +19,12 @@ export function hostOffer(host: LedgerHost): string {
   return parts.join(" · ") || "nothing declared";
 }
 
+/** How a run directory found on the server is labelled (O20). The list comes from
+ *  the server itself, so it can hold a folder no sprint record explains. */
+export function leftoverLabel(status: string): string {
+  return status === "unknown" ? "no sprint record" : status;
+}
+
 const DRAIN_SUFFIX = "draining — takes no new work";
 
 /** What a removing server's status line ends with: what it is still waiting on,
@@ -166,8 +172,8 @@ export default function HostsCard(
                 <Table.Tr>
                   <Table.Td colSpan={7}>
                     <Text size="sm" c="dimmed">
-                      Left on the server by finished sprints (remove by hand):{" "}
-                      {h.leftover.map((l) => `${l.path} (${l.status})`).join(", ")}
+                      On the server now, with no sprint still using it (remove by hand):{" "}
+                      {h.leftover.map((l) => `${l.path} (${leftoverLabel(l.status)})`).join(", ")}
                     </Text>
                   </Table.Td>
                 </Table.Tr>

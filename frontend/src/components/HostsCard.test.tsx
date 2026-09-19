@@ -122,6 +122,14 @@ describe("HostsCard", () => {
     expect(screen.getByText(/~\/coscience-runs\/s9/)).toBeTruthy();
   });
 
+  it("says plainly when a run directory on the server matches no sprint (O20)", () => {
+    renderCard([], [LOCAL, {
+      ...REMOTE,
+      leftover: [{ sprint_id: "", status: "unknown", path: "~/coscience-runs/junk" }],
+    }]);
+    expect(screen.getByText(/~\/coscience-runs\/junk \(no sprint record\)/)).toBeTruthy();
+  });
+
   it("shows one enabled Remove button and no Drain or Take back button for an untouched remote server", () => {
     renderCard();
     const btn = screen.getByRole("button", { name: "Remove gpu1" }) as HTMLButtonElement;

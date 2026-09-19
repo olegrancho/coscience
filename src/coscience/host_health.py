@@ -1,17 +1,23 @@
 """Is each remote host answering? (O7)
 
-The dispatch loop asks every placeable remote host `bash -c true` over key-only SSH at
-most once a minute and records the answer in `.coscience/host-health.json`, which the
-HTTP server reads too. A host failing for QUIET_AFTER is quiet: it takes no new grants.
-Nothing here kills a job or releases a lease (spec §7)."""
+The dispatch loop asks every placeable remote host over key-only SSH at most once a
+minute and records the answer in `.coscience/host-health.json`, which the HTTP server
+reads too. A host failing for QUIET_AFTER is quiet: it takes no new grants. Nothing
+here kills a job or releases a lease (spec §7).
+
+The same call lists the run directories under the host's run root (O20), so the
+dashboard can show what a server really holds instead of what sprint records imply.
+It costs nothing extra: one ssh round trip either way."""
 from __future__ import annotations
 
 import json
 import os
+import shlex
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from coscience.host_probe import Runner, ssh_argv, subprocess_runner
+from coscience.remote_exec import check_remote_path
 
 HEALTH_FILE = ".coscience/host-health.json"
 CHECK_INTERVAL = 60.0
@@ -67,9 +73,36 @@ def quiet(entries: dict[str, dict], now: float) -> set[str]:
     return {name for name, entry in entries.items() if state(entry, now) == "quiet"}
 
 
-def _ask(host, runner: Runner) -> tuple[int, str, str]:
+# Name the immediate subdirectories of the run root, in plain bash so no GNU-only
+# flag is assumed, and always exit 0: a host that answers is reachable even when the
+# run root does not exist yet, and only ssh's own 255 (or a failure to run bash at
+# all) means the host is not answering.
+_LIST_RUN_DIRS = ('for d in {root}/*/; do [ -d "$d" ] || continue; d=${{d%/}}; '
+                  'echo "${{d##*/}}"; done; true')
+MAX_RUN_DIRS = 200
+
+
+def _list_command(run_root: str) -> str:
+    """The remote command for a host: a plain liveness check, or that plus a listing
+    of the run root when the host declares one the platform is willing to name."""
     try:
-        return runner(ssh_argv(host.ssh) + ["bash -c true"], None, CHECK_TIMEOUT)
+        root = check_remote_path(run_root)
+    except ValueError:
+        return "true"          # no run root, or one this platform will not name
+    return _LIST_RUN_DIRS.format(root=root)
+
+
+def _run_dirs(out: str) -> list[str]:
+    """Folder names from the listing: one per line, no path separators, capped so a
+    run root nobody ever cleans cannot grow the health file without bound."""
+    names = [line.strip() for line in str(out).splitlines()]
+    return [n for n in names if n and "/" not in n][:MAX_RUN_DIRS]
+
+
+def _ask(host, runner: Runner) -> tuple[int, str, str]:
+    command = _list_command(host.run_root)
+    try:
+        return runner(ssh_argv(host.ssh) + [f"bash -c {shlex.quote(command)}"], None, CHECK_TIMEOUT)
     except ValueError as exc:
         return 255, "", str(exc)
 
@@ -95,16 +128,25 @@ def check(repo_root, pool, now: float, runner: Runner | None = None) -> dict[str
     if due:
         with ThreadPoolExecutor(max_workers=min(8, len(due))) as pool_exec:
             answers = zip(due, pool_exec.map(lambda h: _ask(h, runner), due))
-        for host, (code, _, err) in answers:
+        for host, (code, out, err) in answers:
             prev = entries.get(host.name, {})
             if code == 0:
                 entries[host.name] = {"checked_at": now, "last_ok": now, "fail_since": 0.0, "reason": ""}
+                if _list_command(host.run_root) != "true":
+                    # Present and empty ("nothing is there") is not the same fact as
+                    # absent ("nobody has looked"), so the key is written only when
+                    # the host was actually asked, and readers must tell them apart.
+                    entries[host.name]["run_dirs"] = _run_dirs(out)
             else:
                 lines = [line for line in str(err).strip().splitlines() if line.strip()]
                 entries[host.name] = {
                     "checked_at": now, "last_ok": _num(prev.get("last_ok")),
                     "fail_since": _num(prev.get("fail_since")) or now,
                     "reason": lines[-1] if lines else f"ssh exited {code}"}
+                if isinstance(prev.get("run_dirs"), list):
+                    # A host that stopped answering still held these when it last did;
+                    # dropping them would make the list flicker with the connection.
+                    entries[host.name]["run_dirs"] = list(prev["run_dirs"])
     if entries != old:
         _save(repo_root, entries)
     return entries
