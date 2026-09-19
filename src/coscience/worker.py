@@ -47,6 +47,16 @@ def _could_not_stop_line(host: str) -> str:
             "whether it is still running and stop it yourself.")
 
 
+def _nothing_to_collect_line(host: str) -> str:
+    """A stopped job that copied nothing back says why (O19): silence reads as work
+    thrown away, when in fact there was either nothing declared or nothing to move."""
+    if not host:
+        return ("The job was stopped. It ran on this machine, so whatever it wrote is "
+                "already in the sprint folder.")
+    return (f"The job on {host} was stopped. It declared no paths to copy back, so "
+            f"anything it wrote is still on {host} and was not collected.")
+
+
 def _read_cost(sprint_dir) -> dict:
     """Best-effort usage from the agent's cost sidecar; {} if absent (an interrupted
     run, or the fake agent in tests). Returns the whole sidecar so the per-component
@@ -234,10 +244,17 @@ class Worker:
         else:
             self._last_terminate_ok = False
 
-    def _collect_job(self, progress, sprint_dir) -> None:
+    def _collect_job(self, progress, sprint_dir, *, stopping: bool = False) -> None:
         """Copy a remote job's declared outputs into the sprint's `collected/` folder
-        before the agent is woken, and leave a note saying exactly what was copied."""
+        before the agent is woken, and leave a note saying exactly what was copied.
+
+        `stopping` says the sprint is ending instead of being woken, so the note is
+        written for the human who stopped it — and a job with nothing to copy says so
+        rather than returning silently, because from the outside "no note" and "the
+        work was thrown away" look the same (O19)."""
         if not progress.job_host or not progress.job_collect:
+            if stopping and progress.job_token:
+                progress.collect_note = _nothing_to_collect_line(progress.job_host)
             return
         ssh = self._slots.ssh_for(progress.job_host)
         dest = Path(sprint_dir) / "collected"
@@ -267,10 +284,12 @@ class Worker:
             return f"{base} — {r['detail']}" if r["detail"] else base
 
         lines = [_line(r) for r in results]
-        progress.collect_note = (
-            f"Before waking you, the platform copied these paths from {progress.job_host}. Read "
-            "the results there; you do not need to copy them yourself. Nothing else was copied.\n"
-            + "\n".join(lines))
+        lead = (f"The sprint was stopped. After stopping the job, the platform copied these paths "
+                f"from {progress.job_host} into {dest}. Nothing else was copied."
+                if stopping else
+                f"Before waking you, the platform copied these paths from {progress.job_host}. Read "
+                "the results there; you do not need to copy them yourself. Nothing else was copied.")
+        progress.collect_note = lead + "\n" + "\n".join(lines)
 
     def _build_context(self, sprint: Sprint) -> ExecutionContext:
         """Gather the program goal, sprint description and prior results so the
@@ -561,7 +580,7 @@ class Worker:
         if progress.stop_requested:
             last_error = "stopped by a human"
             try:
-                self.stop_sprint(sprint)
+                self.stop_sprint(sprint, collect=True)
             except Exception as exc:
                 last_error += f" (stopping it also failed: {exc})"
             sprint = self.substrate.load_sprint(sprint.id)        # reload: stop_sprint may
@@ -933,7 +952,7 @@ class Worker:
             what = str((progress.escalation or {}).get("what", ""))
             last_error = "stopped by a human after an escalation: " + what
             try:
-                self.stop_sprint(sprint)
+                self.stop_sprint(sprint, collect=True)
             except Exception as exc:
                 last_error += f" (stopping it also failed: {exc})"
             sprint = self.substrate.load_sprint(sprint.id)        # reload: stop_sprint may
@@ -944,6 +963,8 @@ class Worker:
                 # is harmless (idempotent once nothing is left running), but writing
                 # FAILED over whatever it is now would clobber real state.
                 return BeatOutcome.PROGRESSED
+            if progress.collect_note:
+                last_error += f"; {progress.collect_note}"
             progress.last_error = last_error
             progress.escalation = {}
             progress.stop_requested = False
@@ -966,10 +987,16 @@ class Worker:
         self._slots.release(sprint.id)
         return BeatOutcome.PROGRESSED
 
-    def stop_sprint(self, sprint: Sprint) -> list[str]:
+    def stop_sprint(self, sprint: Sprint, *, collect: bool = False) -> list[str]:
         """Stop the sprint's running agent and/or its tracked detached job, and
         clear whichever was set so a later beat relaunches (the agent resumes
-        from its scratchpad). Returns [sprint.id] if either was stopped, else []."""
+        from its scratchpad). Returns [sprint.id] if either was stopped, else [].
+
+        `collect` copies the job's declared outputs back before the job fields are
+        cleared, and is the caller's to ask for: a stop that ends the sprint (a human
+        pressing Stop) keeps what the job produced, while a stop that only pauses the
+        work — the dispatcher reconciling a leaseless sprint — leaves the outputs where
+        they are for the relaunch to find. May rsync for minutes when asked."""
         progress = self.substrate.load_progress(sprint.id)
         stopped = False
         if progress.agent_token:
@@ -981,6 +1008,12 @@ class Worker:
                 self._terminate(progress.job_token)
             except Exception:
                 self._last_terminate_ok = False
+            if collect:
+                # After the kill, so nothing is still being written mid-copy; the
+                # could-not-stop line below is appended after, since a collect writes
+                # `collect_note` outright.
+                self._collect_job(progress, self.substrate.sprint_dir(sprint.id),
+                                  stopping=True)
             if not self._last_terminate_ok:
                 line = _could_not_stop_line(progress.job_host)
                 progress.collect_note = (f"{progress.collect_note}\n{line}"

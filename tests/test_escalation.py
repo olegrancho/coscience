@@ -838,7 +838,7 @@ def test_a_stop_beat_skips_setting_failed_if_the_sprint_moved_on(tmp_path, monke
 
     w = Worker(sub, FakeAgent())
 
-    def fake_stop(sprint):
+    def fake_stop(sprint, **kw):
         # A second dispatcher instance already moved this sprint on while this
         # one was mid-stop.
         moved = sub.load_sprint("s1")

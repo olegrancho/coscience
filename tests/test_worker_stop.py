@@ -84,7 +84,7 @@ def test_run_sprint_beat_stop_skips_canceling_if_the_sprint_moved_on(substrate, 
 
     worker = Worker(substrate, FakeAgent())
 
-    def fake_stop(sprint):
+    def fake_stop(sprint, **kw):
         # A second dispatcher instance already moved this sprint on while
         # stop_sprint (this call) ran.
         moved = substrate.load_sprint("sp1")
@@ -109,7 +109,7 @@ def test_run_sprint_beat_stop_leaves_a_finished_sprint_alone(substrate, monkeypa
 
     worker = Worker(substrate, FakeAgent())
 
-    def fake_stop(sprint):
+    def fake_stop(sprint, **kw):
         moved = substrate.load_sprint("sp1")
         moved.status = SprintStatus.DONE
         substrate.save_sprint(moved)

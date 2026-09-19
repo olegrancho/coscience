@@ -377,6 +377,75 @@ def test_a_human_stop_beat_names_a_job_it_could_not_stop_in_last_error(tmp_path)
     assert "could not stop the job on gpu1" in prog.last_error
 
 
+# --- O19: a stopped job's outputs come back, or the note says they didn't ----------
+
+def _executing_with_a_job(sub, collect=("~/runs/s1/work",)):
+    s = sub.load_sprint("s1"); s.status = SprintStatus.EXECUTING; sub.save_sprint(s)
+    prog = sub.load_progress("s1")
+    prog.job_token, prog.job_host = "gpu1:4242:777:boot-1", "gpu1"
+    prog.job_collect = list(collect)
+    prog.stop_requested = True
+    sub.save_progress(prog)
+
+
+def test_a_human_stop_copies_the_jobs_outputs_back_before_canceling(tmp_path):
+    sub = Substrate(tmp_path); _queued(sub); _executing_with_a_job(sub)
+    runner = ScriptRunner((0, "", ""),      # terminate
+                          (0, "", ""))      # collect's rsync
+    w = Worker(sub, FakeAgent(), slots=Slots(), runner=runner)
+    w.run_sprint_beat(sub.load_sprint("s1"))
+    rsync = [c for c in runner.calls if c[0] == "rsync"]
+    assert rsync and rsync[0][-2] == "gpu1:~/runs/s1/work"
+    assert rsync[0][-1] == f"{sub.sprint_dir('s1') / 'collected'}/"
+    assert (sub.sprint_dir("s1") / "collected").is_dir()
+    prog = sub.load_progress("s1")
+    assert sub.load_sprint("s1").status == SprintStatus.CANCELED
+    assert "stopped by a human" in prog.last_error
+    assert "The sprint was stopped" in prog.last_error      # the note is written for a human,
+    assert "waking you" not in prog.last_error              # not for an agent that is not coming
+    assert "~/runs/s1/work" in prog.last_error
+
+
+def test_a_stopped_job_that_declared_nothing_says_the_work_stayed_there(tmp_path):
+    # Silence is the failure O19 exists for: with nothing copied and nothing said, a
+    # stopped sprint looks like its work was thrown away.
+    sub = Substrate(tmp_path); _queued(sub); _executing_with_a_job(sub, collect=())
+    runner = ScriptRunner((0, "", ""))
+    w = Worker(sub, FakeAgent(), slots=Slots(), runner=runner)
+    w.run_sprint_beat(sub.load_sprint("s1"))
+    assert not any(c[0] == "rsync" for c in runner.calls)
+    last_error = sub.load_progress("s1").last_error
+    assert "declared no paths to copy back" in last_error and "still on gpu1" in last_error
+
+
+def test_a_human_stop_after_an_escalation_collects_too(tmp_path):
+    sub = Substrate(tmp_path); _queued(sub); _executing_with_a_job(sub)
+    s = sub.load_sprint("s1"); s.status = SprintStatus.ESCALATED; sub.save_sprint(s)
+    prog = sub.load_progress("s1")
+    prog.escalation = {"what": "the run needs a bigger GPU"}
+    sub.save_progress(prog)
+    runner = ScriptRunner((0, "", ""), (0, "", ""))
+    w = Worker(sub, FakeAgent(), slots=Slots(), runner=runner)
+    w.run_escalated_beat(sub.load_sprint("s1"))
+    assert any(c[0] == "rsync" for c in runner.calls)
+    prog = sub.load_progress("s1")
+    assert sub.load_sprint("s1").status == SprintStatus.FAILED
+    assert "stopped by a human after an escalation" in prog.last_error
+    assert "~/runs/s1/work" in prog.last_error
+
+
+def test_the_dispatchers_reconcile_stop_copies_nothing_back(tmp_path):
+    # Collecting is the caller's to ask for. A leaseless sprint is stopped to match
+    # physical use to the ledger and runs again later, so its outputs stay on the host
+    # for the relaunch — and the cycle never waits on an rsync it didn't ask for.
+    sub = Substrate(tmp_path); _queued(sub); _executing_with_a_job(sub)
+    runner = ScriptRunner((0, "", ""))
+    w = Worker(sub, FakeAgent(), slots=Slots(), runner=runner)
+    assert w.stop_sprint(sub.load_sprint("s1")) == ["s1"]
+    assert not any(c[0] == "rsync" for c in runner.calls)
+    assert sub.load_progress("s1").collect_note == ""
+
+
 # --- M6: a raising terminate still notes the failed stop ---------------------------
 
 def test_a_raising_terminate_still_notes_the_failed_stop(tmp_path):
