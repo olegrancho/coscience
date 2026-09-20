@@ -91,6 +91,23 @@ describe("server notes", () => {
     renderAt();
     await screen.findByText(/works from the goals/i);        // the page is up
     expect(screen.queryByText(/server notes/)).toBeNull();
+    expect(screen.queryByRole("link", { name: "Server notes" })).toBeNull();   // nor in the nav
+  });
+
+  it("lists itself in the nav, after the science, once there is one", async () => {
+    mockProgram("");
+    mockHostNotes({ gpu1: "Use conda env torch2." }, [
+      { name: "gpu1", ssh: "gpu1", placeable: true, programs: ["p"], run_root: "",
+        capacity: {}, available: {}, gpus: [], removing: false, waiting_on: [] },
+    ]);
+    renderAt();
+    const entry = await screen.findByText("Server notes");
+    expect(entry).toBeTruthy();
+    // Housekeeping sits below the science it is not part of: Lineage is the last
+    // science section, and both housekeeping entries follow it.
+    const nav = entry.closest("nav") ?? entry.parentElement!.parentElement!;
+    const labels = [...nav.querySelectorAll("a, button")].map((e) => e.textContent);
+    expect(labels.indexOf("Server notes")).toBeGreaterThan(labels.indexOf("Lineage"));
   });
 });
 

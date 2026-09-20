@@ -56,6 +56,13 @@ describe("noteRows", () => {
     expect(rows[0].label).toBe("this machine");
   });
 
+  it("calls this machine by its display name once someone sets one", () => {
+    const named = { ...LOCAL, label: "avatar" };
+    expect(noteRows([named], "p1", { notes: {}, reports: [] })[0].label).toBe("avatar");
+    // Only until then does it read as "this machine".
+    expect(noteRows([LOCAL], "p1", { notes: {}, reports: [] })[0].label).toBe("this machine");
+  });
+
   it("calls a server by its display name when someone set one", () => {
     const rows = noteRows([host({ name: "gpu1", ssh: "gpu1", label: "the big one" })], "p1", notes());
     expect(rows[0].label).toBe("the big one");

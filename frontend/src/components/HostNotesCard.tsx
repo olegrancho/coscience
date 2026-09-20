@@ -38,7 +38,10 @@ export function noteRows(
       const h = known.get(name);
       return {
         host: name,
-        label: name === "local" ? "this machine" : h ? hostLabel(h) : name,
+        // A display name is what a human chose to call the machine, so it wins even
+        // for this one; "this machine" is only the fallback when nobody named it.
+        label: h ? (h.label?.trim() || (name === "local" ? "this machine" : h.name))
+                 : (name === "local" ? "this machine" : name),
         note: data.notes[name] ?? "",
         reports: data.reports.filter((r) => r.host === name),
         stale: !h || !hostAllows(h, programId),

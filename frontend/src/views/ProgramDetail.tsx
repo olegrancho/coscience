@@ -12,7 +12,7 @@ import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteC
 import ProposeSprintModal from "../components/ProposeSprintModal";
 import ProgramSettingsModal from "../components/ProgramSettingsModal";
 import LineageCard from "../components/LineageCard";
-import HostNotesCard from "../components/HostNotesCard";
+import HostNotesCard, { noteRows } from "../components/HostNotesCard";
 import type { ArtifactRow, WikiSummary } from "../api";
 import { TYPE_HUE } from "../components/wikiGraphStyle";
 import { isUnseen, seedIfNew } from "../sprintSeen";
@@ -58,6 +58,13 @@ export default function ProgramDetail() {
   const ideas = useQuery({ queryKey: ["ideas", id], queryFn: () => api.listIdeas(id) });
   const artifacts = useQuery({ queryKey: ["artifacts", id], queryFn: () => api.listArtifacts(id) });
   const wiki = useQuery({ queryKey: ["wiki", id], queryFn: () => api.getWikiSummary(id) });
+  // The same two queries the server-notes card uses, by the same keys — React Query
+  // hands back the one cached result, so this costs no extra request. The nav needs
+  // to know whether that card will draw anything, and `noteRows` is what decides.
+  const hostNotes = useQuery({ queryKey: ["host-notes", id], queryFn: () => api.getHostNotes(id) });
+  const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.getLedger });
+  const hasServerNotes = !!hostNotes.data && !!ledger.data
+    && noteRows(ledger.data.hosts ?? [], id, hostNotes.data).length > 0;
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["program", id] });
     qc.invalidateQueries({ queryKey: ["guidance", id] });
@@ -74,7 +81,6 @@ export default function ProgramDetail() {
     if (!d) return [];
     return [
       { id: "sec-report", label: "Report" },
-      ...(d.activations?.length > 0 ? [{ id: "sec-activity", label: "PM activity" }] : []),
       { id: "sec-instructions", label: "Instructions" },
       { id: "sec-guidance", label: "Guidance" },
       { id: "sec-experiments", label: "Experiments" },
@@ -82,8 +88,14 @@ export default function ProgramDetail() {
       { id: "sec-artifacts", label: "Artifacts" },
       { id: "sec-wiki", label: "Wiki" },
       { id: "sec-lineage", label: "Lineage" },
+      // Housekeeping, last and in page order. Server notes is listed whenever this
+      // program has a server to speak of — which is what the card itself decides, so
+      // the entry is gated on the same fact (`hosts` from the ledger) rather than on
+      // the card having drawn, which the nav cannot see.
+      ...(d.activations?.length > 0 ? [{ id: "sec-activity", label: "PM activity" }] : []),
+      ...(hasServerNotes ? [{ id: "sec-host-notes", label: "Server notes" }] : []),
     ];
-  }, [program.data]);
+  }, [program.data, hasServerNotes]);
 
   if (program.isLoading) return <Loader color="machine" />;
   // A failed poll must NEVER replace loaded content: every query polls on a 10s
@@ -254,36 +266,6 @@ export default function ProgramDetail() {
         {p.report ? <div className="report-leaf"><Md components={reportComponents}>{p.report}</Md></div>
           : <Text size="sm" c="dimmed">No report yet — the AI writes one each planning cycle.</Text>}
       </Card>
-
-      {/* Draws its own card, and nothing at all while there is no server to
-          speak of — so it is not gated here. */}
-      <HostNotesCard programId={id} />
-
-      {p.activations?.length > 0 && (
-        <Card id="sec-activity" padding="lg" radius="md" style={cardStyle}>
-          <div className="eyebrow" style={{ marginBottom: 10 }}>PM activity — when it planned and why</div>
-          <Stack gap={7}>
-            {(pmExpanded ? p.activations.slice(0, 12) : p.activations.slice(0, 3)).map((a, i) => (
-              <Group key={i} justify="space-between" wrap="nowrap" align="baseline"
-                style={{ borderBottom: "1px solid var(--hairline)", paddingBottom: 6 }}>
-                <Text size="sm" style={{ minWidth: 0 }}>
-                  <span className="mono" style={{ color: "var(--ink-faint)" }}>#{a.cycle}</span>{" "}
-                  {(a.triggers?.length ? a.triggers.join(", ") : "reasoned")}
-                  {a.forced && a.triggers?.[0] !== "manual replan" && " · manual"}
-                  {a.submitted?.length ? <span style={{ color: "var(--machine)" }}> → proposed {a.submitted.length}</span> : null}
-                </Text>
-                <RelTime at={a.at} />
-              </Group>
-            ))}
-          </Stack>
-          {p.activations.length > 3 && (
-            <button type="button" className="linklike" style={{ alignSelf: "flex-start", marginTop: 8 }}
-              onClick={() => setPmExpanded((v) => !v)}>
-              {pmExpanded ? "Show fewer" : `Show all (${Math.min(12, p.activations.length) - 3} more)`}
-            </button>
-          )}
-        </Card>
-      )}
 
       <Card id="sec-instructions" padding="lg" radius="md" style={cardStyle}>
         <Group justify="space-between" align="baseline" mb={4} wrap="nowrap">
@@ -504,6 +486,36 @@ export default function ProgramDetail() {
       </Card>
 
       <div id="sec-lineage"><LineageCard programId={id} /></div>
+
+      {p.activations?.length > 0 && (
+        <Card id="sec-activity" padding="lg" radius="md" style={cardStyle}>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>PM activity — when it planned and why</div>
+          <Stack gap={7}>
+            {(pmExpanded ? p.activations.slice(0, 12) : p.activations.slice(0, 3)).map((a, i) => (
+              <Group key={i} justify="space-between" wrap="nowrap" align="baseline"
+                style={{ borderBottom: "1px solid var(--hairline)", paddingBottom: 6 }}>
+                <Text size="sm" style={{ minWidth: 0 }}>
+                  <span className="mono" style={{ color: "var(--ink-faint)" }}>#{a.cycle}</span>{" "}
+                  {(a.triggers?.length ? a.triggers.join(", ") : "reasoned")}
+                  {a.forced && a.triggers?.[0] !== "manual replan" && " · manual"}
+                  {a.submitted?.length ? <span style={{ color: "var(--machine)" }}> → proposed {a.submitted.length}</span> : null}
+                </Text>
+                <RelTime at={a.at} />
+              </Group>
+            ))}
+          </Stack>
+          {p.activations.length > 3 && (
+            <button type="button" className="linklike" style={{ alignSelf: "flex-start", marginTop: 8 }}
+              onClick={() => setPmExpanded((v) => !v)}>
+              {pmExpanded ? "Show fewer" : `Show all (${Math.min(12, p.activations.length) - 3} more)`}
+            </button>
+          )}
+        </Card>
+      )}
+
+      {/* Housekeeping, kept below the science: how the planner has been running,
+          then what this program knows about each server it runs on. */}
+      <HostNotesCard programId={id} />
 
       <ProposeSprintModal programId={id} opened={proposing} onClose={() => setProposing(false)} onDone={refresh} />
     </Stack>
