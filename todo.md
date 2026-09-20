@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 143
+version: 144
 last_updated: 2026-09-20
 ---
 
@@ -506,6 +506,19 @@ and a "Show all" toggle (`views/ProgramDetail.tsx`), so this is a third control 
 them and has to compose with both. Note the "new" flag is per-browser localStorage, not
 substrate state, so the filter cannot be server-side and the count will differ between
 machines — and decide what the check shows when nothing is new.
+
+### P7. Never hide an experiment that is new
+
+The list's automatic cap must exempt highlighted rows, so nothing the platform did
+since you last looked is folded away behind "Show all".
+
+Unless "show all" is on, the experiments list caps the noisy terminal statuses — done
+and canceled — at their three most recent (`views/ProgramDetail.tsx`). The rows are
+sorted newest-first, so one sprint finishing stays visible; a burst does not. Four
+sprints finishing overnight puts the fourth behind the fold while it is still unseen,
+and a hidden highlight is worse than no highlight: the count says something happened and
+the list does not show it. The cap is the platform's choice, not the viewer's, so it is
+the one that must yield — a status filter the human set is theirs to live with.
 
 ## Q. Code rot
 
