@@ -12,6 +12,7 @@ import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteC
 import ProposeSprintModal from "../components/ProposeSprintModal";
 import ProgramSettingsModal from "../components/ProgramSettingsModal";
 import LineageCard from "../components/LineageCard";
+import HostNotesCard from "../components/HostNotesCard";
 import type { ArtifactRow, WikiSummary } from "../api";
 import { TYPE_HUE } from "../components/wikiGraphStyle";
 import { isUnseen, seedIfNew } from "../sprintSeen";
@@ -253,6 +254,10 @@ export default function ProgramDetail() {
         {p.report ? <div className="report-leaf"><Md components={reportComponents}>{p.report}</Md></div>
           : <Text size="sm" c="dimmed">No report yet — the AI writes one each planning cycle.</Text>}
       </Card>
+
+      {/* Draws its own card, and nothing at all while there is no server to
+          speak of — so it is not gated here. */}
+      <HostNotesCard programId={id} />
 
       {p.activations?.length > 0 && (
         <Card id="sec-activity" padding="lg" radius="md" style={cardStyle}>

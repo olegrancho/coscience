@@ -179,6 +179,32 @@ def render_prompt(context: PMContext) -> str:
             "someone on a machine, the program's data may be damaged, or you are not confident it "
             "can be fixed easily.\n" + "\n".join(_escalation_lines(e) for e in context.escalations))
 
+    # This program's own knowledge of the machines it runs on, beside COMPUTE (which
+    # says what the machines are). Rendered only when there is something to show, so a
+    # program that keeps no notes never carries the block or its instructions.
+    host_notes_block = ""
+    if context.host_notes or context.host_reports:
+        parts = []
+        if context.host_notes:
+            parts.append(
+                "\n\nHOST NOTES: this program's own notes per server. Workers placed on a "
+                "server read its note; keep each one short, current and specific to this "
+                "program's work (environments that work, what the server is good or bad "
+                "for, quirks).\n"
+                + "\n".join(f"### {host}\n{text}"
+                            for host, text in sorted(context.host_notes.items())))
+        if context.host_reports:
+            parts.append(
+                "\n\nHOST REPORTS: what finished or escalated sprints learned about a "
+                "server, not yet in its note.\n"
+                + "\n".join(f"- {r.get('sprint_id', '')} on {r.get('host', '')} "
+                            f"({r.get('source', '')}): {r.get('text', '')}"
+                            for r in context.host_reports)
+                + "\nFor every server with reports, add one entry to host_notes: with "
+                  '"text" (the whole new note) to fold them in, or without "text" to mark '
+                  "them read with no change.")
+        host_notes_block = "".join(parts)
+
     # The clip markers point at absolute paths under this directory. It sits in the
     # substrate, which for a program with its own workdir is nowhere near the session's
     # cwd — so the location has to be stated, not implied.
@@ -267,7 +293,7 @@ SPRINT CAP: at most {context.max_proposed} sprints may await review. {context.pr
 pending now, so you have {context.free_slots} free slot(s). Propose/promote AT MOST {context.free_slots};
 if that is 0, propose nothing and instead curate the idea pool.
 
-{render_compute(context)}
+{render_compute(context)}{host_notes_block}
 
 HOW TO ACT — read this before you write anything. You act ONLY by filling fields in the
 JSON object below. Prose is not an action: "report" is stored verbatim for a human to read
@@ -281,6 +307,7 @@ do maps to exactly one field:
   record a new direction                     -> text in "new_ideas"
   answer an open feedback thread             -> an entry in "thread_replies"
   answer an escalation                       -> an entry in "escalation_answers"
+  fold a server's reports into its notes     -> an entry in "host_notes"
   file output that ALREADY EXISTS as an artifact -> an entry in "adopt_artifacts"
   commission output that must be COMPUTED    -> an entry in "artifact_tasks"
   record a relationship between two nodes    -> an entry in "edge_ops"
@@ -322,6 +349,8 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
                           "thread_id": "<the escalation's thread_id, from ESCALATIONS above —
                                         copy it back exactly so a stale answer to an
                                         already-resolved escalation is never applied>"}}],
+  "host_notes": [{{"host": "<server name or local>",
+                  "text": "<optional: the whole new note>"}}],
   "edge_ops": [
     {{"op": "add",
       "type": "<one of: inspired_by | builds_on | supersedes | confirms | refutes>",
@@ -557,6 +586,17 @@ def parse_response(text: str) -> PMCycleOutput:
             for a in data.get("escalation_answers", [])
             if isinstance(a, dict) and str(a.get("sprint_id") or "").strip()
             and str(a.get("action") or "").strip()
+        ],
+        # "text" is kept only when the model sent a STRING: its absence means "reports
+        # read, note unchanged", so an added empty default would silently wipe the note
+        # — and `"text": null` is how a model most often writes that same intent, so it
+        # must mean the same thing. Coercing it would write the note "None" over real
+        # knowledge and drop the reports that held it.
+        host_notes=[
+            ({"host": str(n["host"]).strip(), "text": n["text"]}
+             if isinstance(n.get("text"), str) else {"host": str(n["host"]).strip()})
+            for n in data.get("host_notes", [])
+            if isinstance(n, dict) and str(n.get("host") or "").strip()
         ],
         edge_ops=[dict(o) for o in data.get("edge_ops", [])
                   if isinstance(o, dict) and o.get("op") and o.get("type")],

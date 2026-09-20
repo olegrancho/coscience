@@ -9,11 +9,14 @@ import json
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 
 from coscience import artifacts, escalation, graph, housekeeping, threads, usage_meter
 from coscience.models import Sprint, SprintStatus, Idea, set_status
 from coscience.pm_reasoner import PMContext, PMCycleOutput, ProposedSprint, coerce_resources
+# A module-level function, not a Substrate method: the host-notes apply below validates
+# a name the reasoner wrote before it decides whether to touch the substrate at all.
+from coscience.substrate import check_host_name
 
 # The PM may not push the program past this many sprints awaiting human review.
 # Humans can propose beyond it; this only gates the PM's own proposing/promoting.
@@ -109,11 +112,14 @@ def actions_ledger(actions: dict) -> str:
     for key, label in (("ideas_added", "Ideas added"), ("ideas_removed", "Ideas pruned")):
         if actions.get(key):
             lines.append(f"- {label}: {actions[key]}")
+    if actions.get("host_notes_updated"):
+        lines.append(f"- Host notes updated: {_ids('host_notes_updated')}")
     for sid, action in actions.get("escalations_answered") or ():
         lines.append(f"- Escalation answered: `{sid}` ({action})")
     for key, label in (("release_skipped", "Release FAILED"), ("reopen_skipped", "Reopen FAILED"),
                        ("adopt_skipped", "Adopt FAILED"),
-                       ("escalation_skipped", "Escalation answer FAILED")):
+                       ("escalation_skipped", "Escalation answer FAILED"),
+                       ("host_note_skipped", "Host note FAILED")):
         for skip in actions.get(key) or ():
             lines.append(f"- {label}: `{skip['id']}` — {skip['why']}")
     for claim in actions.get("unbacked_claims") or ():
@@ -160,6 +166,11 @@ def _context_payload(context: PMContext) -> dict:
     # PM re-reasons the moment one appears, not on every unrelated detail.
     if context.escalations:
         payload["escalations"] = sorted((e["sprint_id"], e["thread_id"]) for e in context.escalations)
+    # Same reasoning again, plus one of its own: the REPORTS' ids, never the notes'
+    # texts. A new report is news the PM must react to; the note it then writes is its
+    # own output, and keying on the text would have every fold-in wake the next cycle.
+    if context.host_reports:
+        payload["host_reports"] = sorted(str(r.get("id") or "") for r in context.host_reports)
     return payload
 
 
@@ -182,6 +193,7 @@ _TRIGGER_LABELS = {
     "idea_comments": "comment on an idea",
     "artifact_feedback": "comment on an artifact",
     "escalations": "sprint escalated",
+    "host_reports": "a sprint reported on a host",
 }
 
 
@@ -353,6 +365,8 @@ def gather_context(substrate, program_id: str) -> PMContext:
         artifacts=artifact_dicts, artifact_feedback=artifact_feedback,
         compute_capacity=capacity, compute_leased=leased, compute_hosts=hosts,
         escalations=escalations,
+        host_notes=substrate.list_host_notes(program_id),
+        host_reports=substrate.load_host_reports(program_id),
     )
 
 
@@ -414,6 +428,14 @@ class StagedCycle:
     output: PMCycleOutput
     fingerprint: str = ""
     directive: str = ""       # "compress"/"brainstorm"/"" — carried so a resumed cycle applies the same rules
+    # {server: [report ids]} the cycle was shown. The apply clears exactly these, so a
+    # report filed while the reasoner ran (minutes) is not thrown away unread — and a
+    # staged cycle re-applied after a restart still only clears what it saw.
+    host_report_ids: dict = field(default_factory=dict)
+    # The fingerprint this context WILL have once those reports are folded in. Stored
+    # instead of the pre-apply one when the fold-in happens as staged, so the planner
+    # wakes once for a report rather than twice (the second time for its own work).
+    fingerprint_after: str = ""
 
 
 def proposal_id(program_id: str, cycle: int, suffix: str) -> str:
@@ -453,12 +475,15 @@ def _staging_path(substrate, program_id: str):
 
 
 def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
-                  fingerprint: str = "", directive: str = "") -> None:
+                  fingerprint: str = "", directive: str = "",
+                  host_report_ids: dict | None = None, fingerprint_after: str = "") -> None:
     path = _staging_path(substrate, program_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "cycle": cycle,
         "fingerprint": fingerprint,
+        "fingerprint_after": fingerprint_after,
+        "host_report_ids": dict(host_report_ids or {}),
         "directive": directive,
         "report": output.report,
         "ideas_summary": output.ideas_summary,
@@ -470,6 +495,7 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
         "release_ids": list(output.release_ids),
         "thread_replies": list(output.thread_replies),
         "escalation_answers": list(output.escalation_answers),
+        "host_notes": list(output.host_notes),
         "edge_ops": list(output.edge_ops),
         "artifact_tasks": list(output.artifact_tasks),
         "adopt_artifacts": list(output.adopt_artifacts),
@@ -503,6 +529,7 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         release_ids=list(data.get("release_ids", [])),
         thread_replies=list(data.get("thread_replies", [])),
         escalation_answers=list(data.get("escalation_answers", [])),
+        host_notes=list(data.get("host_notes", [])),
         edge_ops=list(data.get("edge_ops", [])),
         artifact_tasks=list(data.get("artifact_tasks", [])),
         adopt_artifacts=list(data.get("adopt_artifacts", [])),
@@ -512,7 +539,9 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
     )
     return StagedCycle(cycle=int(data["cycle"]), output=output,
                        fingerprint=data.get("fingerprint", ""),
-                       directive=data.get("directive", ""))
+                       directive=data.get("directive", ""),
+                       host_report_ids=dict(data.get("host_report_ids") or {}),
+                       fingerprint_after=data.get("fingerprint_after", ""))
 
 
 def clear_staging(substrate, program_id: str) -> None:
@@ -738,8 +767,24 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             substrate.save_pm_state(pm)
             raise
         _record(ok=True)
-        write_staging(substrate, program_id, cycle, output, fingerprint, directive)  # COMMIT POINT
-        staged = StagedCycle(cycle=cycle, output=output, fingerprint=fingerprint, directive=directive)
+        # What this cycle was shown, per server, and the fingerprint the context will
+        # have once those reports are folded in — both decided here, where the context
+        # the reasoner actually saw is still in hand (a resumed cycle has no context).
+        seen_reports: dict[str, list[str]] = {}
+        for report in context.host_reports:
+            seen_reports.setdefault(str(report.get("host") or ""), []).append(
+                str(report.get("id") or ""))
+        folded = {str(n.get("host") or "").strip() for n in output.host_notes
+                  if isinstance(n, dict)}
+        after = ""
+        if context.host_reports and folded:
+            left = [r for r in context.host_reports if str(r.get("host") or "") not in folded]
+            after = context_fingerprint(replace(context, host_reports=left))
+        write_staging(substrate, program_id, cycle, output, fingerprint, directive,
+                      host_report_ids=seen_reports, fingerprint_after=after)  # COMMIT POINT
+        staged = StagedCycle(cycle=cycle, output=output, fingerprint=fingerprint,
+                             directive=directive, host_report_ids=seen_reports,
+                             fingerprint_after=after)
 
     cycle = staged.cycle
     now_ts = time.time() if now is None else now
@@ -1036,6 +1081,54 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         else:
             escalations_answered.append((sid, action))
 
+    # --- host notes: the program's own knowledge of each server. An entry says the PM
+    # has read that server's pending reports (they are dropped); a "text" also rewrites
+    # the note. Writing is allowed only for a server this program may actually use, so
+    # one program's planner can never leave notes about a machine it has no access to.
+    # A bad entry never raises: the cycle's other actions must still apply. ---
+    host_notes_updated: list[str] = []
+    host_note_skipped: list[dict] = []
+    host_notes_folded: list[str] = []     # servers whose reports this cycle cleared
+    pool = None
+    for entry in staged.output.host_notes:
+        if not isinstance(entry, dict):
+            continue
+        host = entry.get("host")
+        if not isinstance(host, str) or not host.strip():
+            continue                       # malformed, like a malformed escalation answer
+        host = host.strip()
+        try:
+            check_host_name(host)
+        except ValueError:
+            host_note_skipped.append({"id": host, "why": "invalid server name"})
+            continue
+        if pool is None:
+            from coscience.resources import load_pool
+            pool = load_pool(substrate.repo_root)
+        # `local` is a host in the pool like any other, and its top-level `programs:`
+        # governs access the same way — so one check covers both.
+        h = pool.host(host)
+        if h is None or not h.allows(program_id):
+            host_note_skipped.append({"id": host, "why": f"this program may not use {host}"})
+            continue
+        try:
+            if isinstance(entry.get("text"), str):
+                # Only a real string rewrites the note. Anything else (a null, a number)
+                # means the entry carries no text at all — see the parser.
+                substrate.save_host_note(program_id, host, entry["text"])
+                host_notes_updated.append(host)
+            # Only the reports this cycle was actually shown: one filed while the reasoner
+            # ran has not been read by anyone yet, and clearing it would lose it unread.
+            substrate.clear_host_reports(program_id, host,
+                                         ids=staged.host_report_ids.get(host, []))
+            host_notes_folded.append(host)
+        except OSError as exc:
+            # A note that cannot be written (a full disk, a name the filesystem refuses)
+            # must not abort the apply: the cycle's releases, replies and report are
+            # worth more than one note, and an unhandled raise here would re-apply this
+            # same staged cycle every beat and wedge the program's planner for good.
+            host_note_skipped.append({"id": host, "why": f"could not be written: {exc}"})
+
     # --- release: put an APPROVED sprint into production (-> queued). The approved
     # pool is the PM's managed queue; it releases items here as it sees need, and the
     # dispatcher runs queued sprints by priority as compute frees. Guarded to this
@@ -1087,14 +1180,25 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                "release_skipped": release_skipped, "reopen_skipped": reopen_skipped,
                "adopt_skipped": adopt_skipped,
                "escalations_answered": escalations_answered,
-               "escalation_skipped": escalation_skipped}
+               "escalation_skipped": escalation_skipped,
+               "host_notes_updated": host_notes_updated,
+               "host_note_skipped": host_note_skipped}
     actions["unbacked_claims"] = unbacked_claims(staged.output.report, actions)
     # The reasoner's prose, then the platform's own record of what it applied.
     substrate.save_report(program_id, staged.output.report + actions_ledger(actions))
 
     pm.cycle = cycle + 1
     pm.last_run = now_ts
-    pm.last_fingerprint = staged.fingerprint
+    # A report wakes the planner ONCE. The stored fingerprint is the pre-apply one, so
+    # folding reports in would otherwise change the context by the planner's own hand
+    # and buy a second cycle with nothing new in it. When the fold-in went as staged,
+    # store the fingerprint that context will now have instead.
+    folded_as_staged = (staged.fingerprint_after
+                        and set(host_notes_folded) == {h for h in staged.host_report_ids
+                                                       if staged.host_report_ids[h]}
+                        & {str(n.get("host") or "").strip()
+                           for n in staged.output.host_notes if isinstance(n, dict)})
+    pm.last_fingerprint = staged.fingerprint_after if folded_as_staged else staged.fingerprint
     for sid in proposed:
         if sid not in pm.proposed_ids:
             pm.proposed_ids.append(sid)
@@ -1138,4 +1242,6 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             "adopt_skipped": adopt_skipped,
             "escalations_answered": escalations_answered,
             "escalation_skipped": escalation_skipped,
+            "host_notes_updated": host_notes_updated,
+            "host_note_skipped": host_note_skipped,
             "unbacked_claims": actions["unbacked_claims"]}

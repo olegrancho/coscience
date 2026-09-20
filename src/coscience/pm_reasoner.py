@@ -79,6 +79,12 @@ class PMContext:
     # may_have_broken_something, needs, hosts_allowed}]. A human-level escalation
     # never appears here — the PM does not see it (see docs/sprint-lifecycle.md).
     escalations: list[dict] = field(default_factory=list)
+    # This program's own note per server ({host: text}), and what finished/escalated
+    # sprints reported about a server and nobody has folded in yet. The notes are the
+    # program's knowledge of the machines; the server entry's `notes` in resources.yaml
+    # stay machine-wide and are never merged into these.
+    host_notes: dict[str, str] = field(default_factory=dict)
+    host_reports: list[dict] = field(default_factory=list)
 
     @property
     def free_slots(self) -> int:
@@ -113,6 +119,9 @@ class PMCycleOutput:
     release_ids: list[str] = field(default_factory=list)     # approved sprints to release into production (-> queued)
     thread_replies: list[dict] = field(default_factory=list)  # [{thread_id, text}] PM answers to open feedback threads
     escalation_answers: list[dict] = field(default_factory=list)  # [{sprint_id, action, instructions, host}]
+    # [{host, text?}] — one entry per server whose pending reports the PM has read; a
+    # "text" also rewrites that server's note (the whole note, not an addition).
+    host_notes: list[dict] = field(default_factory=list)
     edge_ops: list[dict] = field(default_factory=list)  # [{op:"add"|"delete", type, src, dst, rationale, confidence?, evidence?}]
     artifact_tasks: list[dict] = field(default_factory=list)  # [{suffix, artifact_ids, create:[{title,kind}], instructions}]
     adopt_artifacts: list[dict] = field(default_factory=list)  # [{aid, title, kind, files:[...], content, filename, note}]

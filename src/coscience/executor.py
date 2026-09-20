@@ -42,6 +42,7 @@ class ExecutionContext:
     host_run_dir: str = ""        # this sprint's working directory on the host
     host_facts: str = ""          # one line from the host's onboarding probe
     host_notes: str = ""          # the host entry's notes
+    program_host_notes: str = ""  # this program's own note on that host ("" = none)
     collect_note: str = ""        # what the platform copied back before this run
     resume_note: str = ""         # the PM/human's note handed down after an escalation answer
 

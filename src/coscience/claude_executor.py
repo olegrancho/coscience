@@ -90,6 +90,12 @@ def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
         if context.host_ssh:
             facts = f"\nWhat the host is: {context.host_facts}." if context.host_facts else ""
             notes = f"\nNotes on this host: {context.host_notes}" if context.host_notes else ""
+            # The program's own note comes after the machine-wide one and says so: the
+            # two are different kinds of knowledge and are never merged.
+            program_notes = (
+                "\nThis program's notes on this host (kept from earlier sprints' "
+                f"reports; trust them over guesses):\n{context.program_host_notes}"
+                if context.program_host_notes else "")
             host_section = f"""
 
 ## Where this sprint's heavy work runs
@@ -97,7 +103,7 @@ This sprint holds host `{context.host_name}`. Your own shell runs on the platfor
 and run quick commands here, and run anything heavy on the host over SSH (`ssh {context.host_ssh} '<command>'`).
 Use {context.host_run_dir} on the host as this sprint's working directory. Paths, environments and
 installed software there differ from this machine, and nothing is shared unless you copy it there:
-a job only sees what is on the host when it starts.{facts}{notes}
+a job only sees what is on the host when it starts.{facts}{notes}{program_notes}
 Long jobs on the host follow the DETACHED-JOB PROTOCOL below with two changes. Launch with
 `ssh {context.host_ssh} 'mkdir -p {context.host_run_dir}/work && cd {context.host_run_dir} && setsid nohup <cmd> > work/<out_file> 2>&1 < /dev/null & echo $!'`
 and add `"host": "{context.host_name}"` and `"collect": ["{context.host_run_dir}/work"]` to job.json (out_file is
@@ -105,6 +111,12 @@ then the path on the host). Before waking you, the platform copies each collect 
 `collected/` folder — that folder is a scratch copy not kept in the sprint's history, so copy or summarise
 anything you need from it elsewhere in the sprint folder. Before you finish, make sure the results you need
 are in this sprint's folder, then delete what you created on the host."""
+        elif context.program_host_notes:
+            host_section = f"""
+
+## This program's notes on this machine
+Kept from earlier sprints' reports; trust them over guesses:
+{context.program_host_notes}"""
         if context.assess_reason:
             assess_section = f"""
 ## Resuming to check a detached job ({_assess_reason_label(context.assess_reason)})
@@ -188,6 +200,9 @@ Objective:
        of findings / numbers / caveats. Put REAL blank lines in the JSON string
        (escaped as \\n\\n). Do NOT write one long run-on paragraph. Cover the
        answer, how you reached it, the key evidence/numbers, and caveats.>"}}
+   Add `"host_notes": "<what the next sprint on this host should know: environments
+   that work, quirks, what it is good or bad for>"` when you learned something about
+   the host worth keeping; leave it out otherwise.
    This file is the ONLY thing the platform accepts as "done"; also print the same
    findings as your final message. If you end your turn WITHOUT finished.json (and
    without a job.json declaring a still-running detached job), the platform assumes
@@ -219,7 +234,9 @@ then exit. Backgrounding without step 2 loses your work.
 Sometimes you cannot proceed and should NOT keep trying. Write `{{sprint_dir}}/escalate.json`:
   {{"what": "<what happened>", "tried": "<what you already tried>",
    "may_have_broken_something": true|false, "needs": "<what would unblock you>"}}
-then end your turn. Do this — instead of continuing to retry, improvising a workaround, or
+Add `"host_notes": "<what the next sprint on this host should know: environments that work,
+quirks, what it is good or bad for>"` when you learned something about the host worth
+keeping; leave it out otherwise. Then end your turn. Do this — instead of continuing to retry, improvising a workaround, or
 declaring the sprint done/failed on your own — when:
 - a host you need is unreachable and stays unreachable after a reasonable retry,
 - a failure you cannot explain after a genuine attempt to diagnose it,

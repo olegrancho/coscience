@@ -24,7 +24,7 @@ from coscience.pause import is_paused
 from coscience.resources import (GPU_KEY, GPU_VRAM_KEY, LOCAL, PLATFORM_KEYS,
                                  ResourcePool, _parse_programs, _parse_host, load_pool,
                                  pool_file_hosts, pool_file_lock, write_pool_file)
-from coscience.substrate import Substrate
+from coscience.substrate import Substrate, check_host_name
 
 
 def service_from_env() -> "Service":
@@ -953,6 +953,30 @@ class Service:
         self.substrate.save_instructions(program_id, str(text or ""))
         self.substrate.commit(f"program {program_id}: instructions updated")
         return self.get_program(program_id)
+
+    def get_host_notes(self, program_id: str) -> dict:
+        """This program's own note per server, plus the reports workers filed that the
+        PM has not folded in yet (O9)."""
+        self._require_program(program_id)
+        return {"notes": self.substrate.list_host_notes(program_id),
+                "reports": self.substrate.load_host_reports(program_id)}
+
+    def set_host_note(self, program_id: str, host: str, text: str,
+                      report_ids: list[str] | None = None) -> dict:
+        """Replace one server's note by hand. Saving clears that server's pending
+        reports: a human who read them and wrote the note has folded them in, and
+        nothing else should show them to the PM again.
+
+        `report_ids` names the reports the page actually showed. A sprint can file one
+        between the page loading and Save landing, and that one has been read by nobody
+        — it stays pending. An older dashboard sends nothing and clears the server, as
+        it always did."""
+        self._require_program(program_id)
+        check_host_name(host)
+        self.substrate.save_host_note(program_id, host, str(text or ""))
+        self.substrate.clear_host_reports(program_id, host, ids=report_ids)
+        self.substrate.commit(f"program {program_id}: notes on {host} updated")
+        return self.get_host_notes(program_id)
 
     def _require_program(self, program_id: str) -> None:
         if not (self.substrate.program_dir(program_id) / "program.md").is_file():

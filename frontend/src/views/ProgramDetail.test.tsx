@@ -17,6 +17,16 @@ beforeEach(() => {
   } as any);
 });
 
+// The server-notes card sits on this page and reads both of these. Empty here:
+// with no server and no note it draws nothing, which is the state most of these
+// tests want to ignore.
+function mockHostNotes(notes: Record<string, string> = {}, hosts: any[] = []) {
+  vi.spyOn(api, "getHostNotes").mockResolvedValue({ notes, reports: [] });
+  vi.spyOn(api, "getLedger").mockResolvedValue({
+    capacity: {}, used: {}, available: {}, leases: [], paused: false, hosts,
+  } as any);
+}
+
 function mockProgram(instructions: string) {
   vi.spyOn(api, "getProgram").mockResolvedValue({
     id: "p", title: "P", status: "active", goals: "g", report: "", cycle: 0,
@@ -27,6 +37,7 @@ function mockProgram(instructions: string) {
   vi.spyOn(api, "listIdeas").mockResolvedValue({ summary: "", ideas: [] } as any);
   vi.spyOn(api, "listArtifacts").mockResolvedValue([]);
   vi.spyOn(api, "getWikiSummary").mockResolvedValue({ pending: 0, pages: 0 } as any);
+  mockHostNotes();
 }
 
 function renderAt() {
@@ -60,6 +71,26 @@ describe("general instructions", () => {
     fireEvent.click(screen.getByText("Save"));
 
     await waitFor(() => expect(save).toHaveBeenCalledWith("p", "Be terse."));
+  });
+});
+
+describe("server notes", () => {
+  it("shows a note for each server the program runs on", async () => {
+    mockProgram("");
+    mockHostNotes({ gpu1: "Use conda env torch2." }, [
+      { name: "gpu1", ssh: "gpu1", placeable: true, programs: ["p"], run_root: "",
+        capacity: {}, available: {}, gpus: [], removing: false, waiting_on: [] },
+    ]);
+    renderAt();
+    expect(await screen.findByText("Use conda env torch2.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit notes on gpu1" })).toBeTruthy();
+  });
+
+  it("leaves the page alone when no server has a note", async () => {
+    mockProgram("");
+    renderAt();
+    await screen.findByText(/works from the goals/i);        // the page is up
+    expect(screen.queryByText(/server notes/)).toBeNull();
   });
 });
 
@@ -150,6 +181,7 @@ describe("a transient fetch failure", () => {
     vi.spyOn(api, "listGuidance").mockResolvedValue([]);
     vi.spyOn(api, "listIdeas").mockResolvedValue({ summary: "", ideas: [] } as any);
     vi.spyOn(api, "listArtifacts").mockResolvedValue([]);
+    mockHostNotes();
   }
 
   function renderWith(qc: QueryClient) {
@@ -204,6 +236,7 @@ describe("experiments list", () => {
     vi.spyOn(api, "listIdeas").mockResolvedValue({ summary: "", ideas: [] } as any);
     vi.spyOn(api, "listArtifacts").mockResolvedValue([]);
     vi.spyOn(api, "getWikiSummary").mockResolvedValue({ pending: 0, pages: 0 } as any);
+    mockHostNotes();
   }
 
   it("offers escalated and hibernated in the status filter", async () => {

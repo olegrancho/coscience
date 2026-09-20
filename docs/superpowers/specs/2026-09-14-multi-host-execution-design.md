@@ -485,3 +485,13 @@ as an error and never applied. A failed check stays failed: the server enters th
 over it only when the human accepts overrides and every failed check has the agent's
 written reason, and those reasons are kept in the server's notes. Behind
 `COSCIENCE_ALLOW_ONBOARDING`. This machine's Detect is unchanged.
+
+**O9 as built.** A program keeps one markdown note per server at
+`programs/<id>/hosts/<host>.md` (`local` is this machine), separate from the server
+entry's machine-wide `notes`. A worker placed on a server reads its program's note there.
+A worker reports what it learned in `finished.json` (`host_notes`), and an escalation's
+`host_notes` is a report too. Reports wait in `programs/<id>/hosts/reports.json` until the
+PM folds them in: its cycle output `host_notes: [{host, text?}]` clears a server's reports,
+and a `text` rewrites the note. The PM writes notes only for servers this program may use.
+A human reads and edits the notes on the program page, and saving a note clears that
+server's reports.

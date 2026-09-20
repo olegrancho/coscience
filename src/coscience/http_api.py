@@ -226,6 +226,11 @@ class ProgramInstructionsIn(BaseModel):
     text: str = ""                 # "" clears them
 
 
+class HostNoteIn(BaseModel):
+    text: str = ""                 # "" deletes the note
+    reports: list[str] | None = None   # the report ids the page showed; None clears the server
+
+
 class ProgramGoalsIn(BaseModel):
     goals: str
 
@@ -1196,6 +1201,22 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             return service.set_program_instructions(program_id, body.text)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.get("/programs/{program_id}/host-notes")
+    def get_host_notes(program_id: str) -> dict:
+        try:
+            return service.get_host_notes(program_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.put("/programs/{program_id}/host-notes/{host}")
+    def set_host_note(program_id: str, host: str, body: HostNoteIn) -> dict:
+        try:
+            return service.set_host_note(program_id, host, body.text, body.reports)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     @api.post("/programs/{program_id}/goals")
     def set_program_goals(program_id: str, body: ProgramGoalsIn) -> dict:

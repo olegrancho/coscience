@@ -1,15 +1,34 @@
 """Read/write the OKF substrate (a directory of markdown files)."""
 from __future__ import annotations
 
+import contextlib
+import fcntl
+import json
+import os
 import re
 import subprocess
 import time
 from pathlib import Path
+from uuid import uuid4
 
 from coscience.frontmatter_io import parse, serialize
 from coscience.models import (Sprint, SprintStatus, ProgressState, Result, Program,
                               ProgramStatus, PMState, Idea, ChatThread, Artifact,
                               ArtifactVersion)
+
+
+_HOST_NAME = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def check_host_name(host: str) -> str:
+    """A server's name, as it is allowed to appear in a path. Every host-notes call
+    goes through here because the name becomes a file name under the program's
+    `hosts/` dir: `../x` or `a/b` would write the note into another program, or out
+    of the substrate entirely. A name the pool cannot hold is a caller's bug, not a
+    path to sanitise, so it raises."""
+    if not _HOST_NAME.fullmatch(str(host or "")):
+        raise ValueError(f"invalid server name: {host!r}")
+    return str(host)
 
 
 def _ts(value, default: float = 0.0) -> float:
@@ -426,6 +445,119 @@ class Substrate:
     def load_instructions(self, program_id: str) -> str:
         path = self.program_dir(program_id) / "instructions.md"
         return path.read_text().strip() if path.is_file() else ""
+
+    # --- per-server notes this program keeps about the machines it runs on (O9) ---
+    def host_notes_dir(self, program_id: str) -> Path:
+        return self.program_dir(program_id) / "hosts"
+
+    def load_host_note(self, program_id: str, host: str) -> str:
+        """This program's own note on one server ("" when it has none). Never the
+        server entry's machine-wide `notes` in resources.yaml: the two are kept apart
+        and neither is written from the other."""
+        path = self.host_notes_dir(program_id) / f"{check_host_name(host)}.md"
+        return path.read_text().strip() if path.is_file() else ""
+
+    def save_host_note(self, program_id: str, host: str, text: str) -> None:
+        """Replace the note. Empty text removes the file, so "no note" has one
+        representation (same rule as save_instructions)."""
+        d = self.host_notes_dir(program_id)
+        d.mkdir(parents=True, exist_ok=True)
+        path = d / f"{check_host_name(host)}.md"
+        text = str(text or "").strip()
+        if text:
+            # tmp + replace, like reports.json: write_text truncates first, so a kill
+            # mid-write (a deploy restarts the loops) or a full disk would leave the
+            # one file in this feature that accumulates knowledge empty or half-written.
+            tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
+            tmp.write_text(text + "\n")
+            os.replace(tmp, path)
+        elif path.is_file():
+            path.unlink()
+
+    def list_host_notes(self, program_id: str) -> dict[str, str]:
+        d = self.host_notes_dir(program_id)
+        return {p.stem: p.read_text().strip()
+                for p in sorted(d.glob("*.md")) if p.is_file()}
+
+    def _host_reports_path(self, program_id: str) -> Path:
+        return self.host_notes_dir(program_id) / "reports.json"
+
+    def load_host_reports(self, program_id: str) -> list[dict]:
+        """What finished and escalated sprints said about a server, not yet folded
+        into its note. A malformed file reads as no reports: a hand-edited or
+        half-written reports.json must never stop a completion from being recorded."""
+        path = self._host_reports_path(program_id)
+        if not path.is_file():
+            return []
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, ValueError, OSError):
+            return []
+        return [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
+
+    @contextlib.contextmanager
+    def host_reports_lock(self, program_id: str):
+        """Exclusive flock around a read-modify-write of one program's reports.json.
+
+        Three processes write this file — the dispatch loop when a sprint finishes or
+        escalates, the PM loop when it folds reports in, and the HTTP server when a
+        human saves a note — so without it one writer's load-append-write races
+        another's load-filter-write and a report is lost or resurrected. Same shape as
+        `resources.pool_file_lock`."""
+        d = self.host_notes_dir(program_id)
+        d.mkdir(parents=True, exist_ok=True)
+        with open(d / "reports.lock", "w") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+    def _save_host_reports(self, program_id: str, reports: list[dict]) -> None:
+        d = self.host_notes_dir(program_id)
+        d.mkdir(parents=True, exist_ok=True)
+        path = self._host_reports_path(program_id)
+        # A tmp name of this process's own: a shared one lets one writer's os.replace
+        # pull the file out from under another's write (the bug resources.py already
+        # carries a comment about), and a torn read here reads as NO pending reports.
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid4().hex}.tmp")
+        tmp.write_text(json.dumps(reports, indent=2))
+        os.replace(tmp, path)  # atomic on POSIX: a reader never sees a partial file
+
+    def add_host_report(self, program_id: str, *, sprint_id: str, host: str, text: str,
+                        source: str, now: float) -> dict:
+        """File one report. Empty text files nothing and returns {} — a sprint that
+        learned nothing about its server must not wake the PM."""
+        host = check_host_name(host)
+        text = str(text or "").strip()
+        if not text:
+            return {}
+        report = {"id": f"{sprint_id}:{source}:{int(now)}", "sprint_id": sprint_id,
+                  "host": host, "text": text, "source": source, "at": float(now)}
+        with self.host_reports_lock(program_id):
+            self._save_host_reports(program_id, self.load_host_reports(program_id) + [report])
+        return report
+
+    def clear_host_reports(self, program_id: str, host: str,
+                           ids: list[str] | None = None) -> int:
+        """Drop one server's pending reports and say how many went. Only a PM
+        host_notes entry or a human saving that server's note calls this.
+
+        `ids` names the reports the caller actually read — everything else on that
+        server is left pending. A planner cycle takes minutes, and a sprint that
+        finishes inside that window files a report nobody has seen yet: clearing the
+        whole server would throw it away unread. `None` clears the server outright,
+        which only a caller with nothing to go on should ask for."""
+        host = check_host_name(host)
+        seen = None if ids is None else {str(i) for i in ids}
+        with self.host_reports_lock(program_id):
+            reports = self.load_host_reports(program_id)
+            kept = [r for r in reports
+                    if r.get("host") != host
+                    or (seen is not None and str(r.get("id") or "") not in seen)]
+            if len(kept) != len(reports):
+                self._save_host_reports(program_id, kept)
+        return len(reports) - len(kept)
 
     def load_pm_state(self, program_id: str) -> PMState:
         path = self.program_dir(program_id) / "pm.md"

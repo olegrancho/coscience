@@ -175,6 +175,15 @@ export interface HostSurvey {
   proposal: SurveyProposal | null; proposal_error: string;
 }
 export interface CutOff { sprint_id: string; host: string }
+// What a finished or escalated sprint learned about the server it ran on, waiting
+// to be folded into that server's note for the program (O9).
+export interface HostReport {
+  id: string; sprint_id: string; host: string; text: string;
+  source: "finished" | "escalation"; at: number;
+}
+// A program's own notes per server — `local` is this machine. Separate from the
+// server entry's machine-wide `notes` in the ledger.
+export interface HostNotes { notes: Record<string, string>; reports: HostReport[] }
 export interface Ledger {
   capacity: Record<string, number>; used: Record<string, number>;
   available: Record<string, number>; leases: unknown[];
@@ -404,6 +413,16 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
     }).then(j<Program>),
+  getHostNotes: (id: string) =>
+    fetch(`/api/programs/${id}/host-notes`).then(j<HostNotes>),
+  // Saving a note also clears that server's pending reports — the human has read them.
+  // `reports` names the report ids this page showed. One filed between the page
+  // loading and Save landing has been read by nobody, so it stays pending.
+  setHostNote: (id: string, host: string, text: string, reports: string[]) =>
+    fetch(`/api/programs/${id}/host-notes/${encodeURIComponent(host)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, reports }),
+    }).then(j<HostNotes>),
   setProgramMaxProposed: (id: string, n: number) =>
     fetch(`/api/programs/${id}/max_proposed`, {
       method: "POST", headers: { "Content-Type": "application/json" },

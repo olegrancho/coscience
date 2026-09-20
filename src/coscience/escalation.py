@@ -64,6 +64,19 @@ def raise_escalation(substrate, sprint, progress, record: dict, now: float | Non
                            **{k: record.get(k, "") for k in FIELDS}}
     substrate.save_sprint(sprint)
     substrate.save_progress(progress)
+    host_notes = str(record.get("host_notes") or "").strip()
+    if host_notes and sprint.program:
+        # Filed once, here, where the escalation itself is recorded: what the agent
+        # learned about the machine outlives this escalation and is the next sprint's
+        # to read, whatever answer the PM gives (O9). It goes AFTER the escalation is
+        # saved, and never raises: this is the red button, and it must still be pulled
+        # when a full disk or a host name the notes layer refuses stops the report.
+        try:
+            substrate.add_host_report(sprint.program, sprint_id=sprint.id,
+                                      host=progress.host or "local", text=host_notes,
+                                      source="escalation", now=now)
+        except (OSError, ValueError):
+            pass
 
 
 def move_targets(pool, program, current_host: str, repo_root) -> list[str]:

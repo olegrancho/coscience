@@ -334,6 +334,13 @@ class Worker:
         gpu_devices, gpu_vram_gb = self._slots.gpus(sprint.id)
         host = self._slots.host(sprint.id)
         host_run_dir = f"{host['run_root'].rstrip('/')}/{sprint.id}" if host["ssh"] and host["run_root"] else ""
+        program_host_notes = ""
+        if sprint.program:
+            try:
+                program_host_notes = self.substrate.load_host_note(
+                    sprint.program, host["name"] or LOCAL)
+            except (OSError, ValueError):
+                pass
         return ExecutionContext(
             program_title=program_title, program_goal=program_goal,
             sprint_title=sprint.title, sprint_summary=sprint.summary,
@@ -356,6 +363,7 @@ class Worker:
             gpu_vram_gb=gpu_vram_gb,
             host_name=host["name"], host_ssh=host["ssh"], host_run_dir=host_run_dir,
             host_facts=host["facts"], host_notes=host["notes"],
+            program_host_notes=program_host_notes,
             collect_note=progress.collect_note,
             resume_note=progress.resume_note,
         )
@@ -435,21 +443,24 @@ class Worker:
             return None
 
     def _read_finished_json(self, sprint_dir):
-        """The agent's completion sentinel. Returns {"summary": str} if finished.json
-        exists (the ONLY accepted done signal), else None. Presence IS the signal — a
-        malformed/empty file still counts as done, with an empty summary (the result
-        then falls back to the agent's final message)."""
+        """The agent's completion sentinel. Returns {"summary": str, "host_notes": str}
+        if finished.json exists (the ONLY accepted done signal), else None. Presence IS
+        the signal — a malformed/empty file still counts as done, with an empty summary
+        (the result then falls back to the agent's final message). A host_notes that is
+        missing or not a string is no report: completion never depends on it."""
         f = sprint_dir / "finished.json"
         if not f.is_file():
             return None
-        summary = ""
+        summary = host_notes = ""
         try:
             d = json.loads(f.read_text())
             if isinstance(d, dict):
                 summary = str(d.get("summary", "")).strip()
+                raw = d.get("host_notes")
+                host_notes = raw.strip() if isinstance(raw, str) else ""
         except (json.JSONDecodeError, ValueError, OSError):
             pass
-        return {"summary": summary}
+        return {"summary": summary, "host_notes": host_notes}
 
     def _sprint_cwd(self, sprint: Sprint):
         """The agent's working directory for a resume: the program's project folder if
@@ -846,6 +857,19 @@ class Worker:
             set_status(sprint, SprintStatus.DONE)
             sprint.results = [result.id]
             self.substrate.save_sprint(sprint)
+            if sprint.program and finished["host_notes"]:
+                # What this sprint learned about the machine it ran on. It waits as a
+                # report until the PM folds it into the program's note for that server.
+                # Filed AFTER the sprint is done and best-effort: a note is an extra,
+                # and a full disk or a host name the notes layer refuses must never
+                # turn a finished sprint into a failing beat (O9).
+                try:
+                    self.substrate.add_host_report(
+                        sprint.program, sprint_id=sprint.id,
+                        host=self._slots.host(sprint.id)["name"] or LOCAL,
+                        text=finished["host_notes"], source="finished", now=time.time())
+                except (OSError, ValueError):
+                    pass
             progress.agent_token = ""
             self._reap_job(progress)          # kill + clear any still-tracked detached job
             self.substrate.save_progress(progress)
