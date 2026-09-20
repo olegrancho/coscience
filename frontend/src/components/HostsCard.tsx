@@ -1,9 +1,8 @@
 import { Button, Card, Group, Table, Text } from "@mantine/core";
-import { useQueryClient } from "@tanstack/react-query";
-import { Fragment, useState } from "react";
-import type { LedgerHost, StrandedLease } from "../api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { api, type LedgerHost, type ProgramRow, type StrandedLease } from "../api";
 import AddHostModal from "./AddHostModal";
-import { accessLabel } from "./programAccess";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
@@ -120,6 +119,40 @@ export function cardSlots(host: LedgerHost): CardSlot[] {
   });
 }
 
+export interface ProgramsCell { text: string; title: string }
+
+/** A server's program access for the table: the ids it runs, with paused and closed
+ *  programs left out — they cannot take work, so listing them only lengthens the
+ *  cell (they are still ticked in the server's dialog, which edits the real list).
+ *  Hovering names them in full. While the program list is still loading, every id
+ *  is shown rather than a filtered-down list that would be briefly wrong. */
+export function programsCell(host: LedgerHost, programs: ProgramRow[] | undefined): ProgramsCell {
+  const byId = new Map((programs ?? []).map((p) => [p.id, p]));
+  const name = (id: string) => (byId.get(id)?.title ? `${id} — ${byId.get(id)!.title}` : id);
+  if (host.programs === null) {
+    const active = (programs ?? []).filter((p) => p.status === "active");
+    return {
+      text: "all",
+      title: active.length ? `every program:\n${active.map((p) => `${p.id} — ${p.title}`).join("\n")}`
+                           : "every program",
+    };
+  }
+  if (!host.programs.length) return { text: "none", title: "this server runs no program's work" };
+  if (!programs) return { text: host.programs.join(", "), title: host.programs.map(name).join("\n") };
+  const active = host.programs.filter((id) => byId.get(id)?.status === "active");
+  const hidden = host.programs.filter((id) => !active.includes(id));
+  const note = hidden.length
+    ? `\nnot shown (paused or closed): ${hidden.map(name).join(", ")}`
+    : "";
+  if (!active.length) {
+    return { text: "—", title: `no program that can take work${note}` };
+  }
+  return { text: active.join(", "), title: active.map(name).join("\n") + note };
+}
+
+// Two short lines: the pips and the memory line a server may or may not have.
+const ROW_CONTENT_HEIGHT = 32;
+
 const PIP = { width: 7, height: 11, borderRadius: 1, display: "inline-block" } as const;
 const PIP_FILL: Record<string, string> = {
   full: "var(--machine)",
@@ -147,8 +180,18 @@ export default function HostsCard(
   const [adding, setAdding] = useState(false);
   const [configuring, setConfiguring] = useState<LedgerHost | null>(null);
   const qc = useQueryClient();
+  const programs = useQuery({ queryKey: ["programs"], queryFn: api.listPrograms });
 
   const open = (host: LedgerHost) => setConfiguring(host);
+
+  // One line for the whole pool instead of a paragraph under every server: the
+  // paths are reference material for a cleanup, not something to read each visit.
+  const leftovers = hosts.flatMap((h) => (h.leftover ?? []).map((l) => ({ host: h.name, ...l })));
+  const leftoverCounts = hosts
+    .filter((h) => (h.leftover ?? []).length)
+    .map((h) => `${h.leftover!.length} on ${h.name}`)
+    .join(", ");
+  const leftoverPaths = leftovers.map((l) => `${l.path} (${leftoverLabel(l.status)})`).join("\n");
 
   return (
     <Card padding="lg" radius="md" style={cardStyle}>
@@ -170,16 +213,19 @@ export default function HostsCard(
             const mem = "memory_gb" in h.capacity
               ? slots(h.capacity.memory_gb, h.used?.memory_gb ?? 0) : null;
             const cards = cardSlots(h);
+            const access = programsCell(h, programs.data);
             return (
-              <Fragment key={h.name}>
-                <Table.Tr role="button" tabIndex={0} aria-label={`Configure ${h.name}`}
-                          style={{ cursor: "pointer" }}
-                          onClick={() => open(h)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(h); }
-                          }}>
-                  <Table.Td className="mono">{h.name}</Table.Td>
-                  <Table.Td>
+              <Table.Tr key={h.name} role="button" tabIndex={0} aria-label={`Configure ${h.name}`}
+                        style={{ cursor: "pointer" }}
+                        onClick={() => open(h)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(h); }
+                        }}>
+                <Table.Td className="mono">{h.name}</Table.Td>
+                <Table.Td>
+                  {/* Every row is as tall as a row that declares memory, so the table
+                      does not step up and down as servers differ. */}
+                  <div style={{ minHeight: ROW_CONTENT_HEIGHT }}>
                     <Group gap={6} wrap="nowrap">
                       <Pips states={cpu.pips}
                             title={cpu.per > 1 ? `${cpu.label} cores — one square is ${cpu.per} cores`
@@ -187,34 +233,29 @@ export default function HostsCard(
                       <Text size="xs" c="dimmed">{cpu.label}</Text>
                     </Group>
                     {mem && <Text size="xs" c="dimmed">{mem.label} GB memory</Text>}
-                  </Table.Td>
-                  <Table.Td>
-                    <Pips states={cards.map((c) => c.state)}
-                          title={cards.map((c) => c.title).join("\n")} />
-                  </Table.Td>
-                  <Table.Td>{accessLabel(h)}</Table.Td>
-                  <Table.Td>
-                    <span title={status.detail} style={{ whiteSpace: "nowrap" }}>
-                      <span style={{ color: status.color, marginRight: 6 }}>{status.mark}</span>
-                      {status.key}
-                    </span>
-                  </Table.Td>
-                </Table.Tr>
-                {h.leftover && h.leftover.length > 0 && (
-                  <Table.Tr>
-                    <Table.Td colSpan={5}>
-                      <Text size="xs" c="dimmed">
-                        On the server now, with no sprint still using it (remove by hand):{" "}
-                        {h.leftover.map((l) => `${l.path} (${leftoverLabel(l.status)})`).join(", ")}
-                      </Text>
-                    </Table.Td>
-                  </Table.Tr>
-                )}
-              </Fragment>
+                  </div>
+                </Table.Td>
+                <Table.Td>
+                  <Pips states={cards.map((c) => c.state)}
+                        title={cards.map((c) => c.title).join("\n")} />
+                </Table.Td>
+                <Table.Td><span title={access.title}>{access.text}</span></Table.Td>
+                <Table.Td>
+                  <span title={status.detail} style={{ whiteSpace: "nowrap" }}>
+                    <span style={{ color: status.color, marginRight: 6 }}>{status.mark}</span>
+                    {status.key}
+                  </span>
+                </Table.Td>
+              </Table.Tr>
             );
           })}
         </Table.Tbody>
       </Table>
+      {leftovers.length > 0 && (
+        <Text size="xs" c="dimmed" style={{ marginTop: 8 }} title={leftoverPaths}>
+          Run directories no sprint is using: {leftoverCounts} — hover for the paths, remove by hand.
+        </Text>
+      )}
       {errors.map((e, i) => (
         <Text key={`${i}-${e}`} size="xs" c="red" style={{ marginTop: 8 }}>{e}</Text>
       ))}

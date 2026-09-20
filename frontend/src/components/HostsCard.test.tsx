@@ -7,13 +7,16 @@ vi.mock("../api", () => ({
   api: {
     probeHost: vi.fn(), confirmHost: vi.fn(), removeHost: vi.fn(), keepHost: vi.fn(),
     updateHost: vi.fn(), detectLocal: vi.fn(), setCapacity: vi.fn(),
-    listPrograms: vi.fn().mockResolvedValue([]),
+    listPrograms: vi.fn().mockResolvedValue([
+      { id: "p2", title: "Lead Finder optimization", status: "active", goals: "" },
+      { id: "p4", title: "Test", status: "paused", goals: "" },
+    ]),
   },
 }));
 
 import { api } from "../api";
 import type { LedgerHost, StrandedLease } from "../api";
-import HostsCard, { cardSlots, hostStatus, slots } from "./HostsCard";
+import HostsCard, { cardSlots, hostStatus, programsCell, slots } from "./HostsCard";
 
 beforeAll(() => {
   window.matchMedia = window.matchMedia || (((query: string) => ({
@@ -208,14 +211,41 @@ describe("HostsCard", () => {
     expect(await screen.findByLabelText("SSH target")).toBeTruthy();
   });
 
-  it("lists run directories left on a server, naming one no sprint explains", () => {
-    renderCard();
-    expect(screen.getByText(/~\/coscience-runs\/s9/)).toBeTruthy();
+  it("sums run directories into one line under the table, paths on hover", () => {
+    // They used to be a paragraph under every server, repeating the same sentence.
     renderCard([], [LOCAL, {
       ...REMOTE,
-      leftover: [{ sprint_id: "", status: "unknown", path: "~/coscience-runs/junk" }],
+      leftover: [
+        { sprint_id: "s9", status: "done", path: "~/coscience-runs/s9" },
+        { sprint_id: "", status: "unknown", path: "~/coscience-runs/tools" },
+      ],
     }]);
-    expect(screen.getByText(/~\/coscience-runs\/junk \(no sprint record\)/)).toBeTruthy();
+    const line = screen.getByText(/Run directories no sprint is using/);
+    expect(line.textContent).toMatch(/2 on gpu1/);
+    expect(line.textContent).not.toMatch(/coscience-runs/);      // compressed, not listed
+    expect(line.getAttribute("title")).toMatch(/~\/coscience-runs\/s9 \(done\)/);
+    expect(line.getAttribute("title")).toMatch(/~\/coscience-runs\/tools \(no sprint record\)/);
+  });
+
+  it("says nothing at all when no server holds anything unused", () => {
+    renderCard([], [LOCAL, { ...REMOTE, leftover: [] }]);
+    expect(screen.queryByText(/Run directories no sprint is using/)).toBeNull();
+  });
+
+  it("gives every row the same height, memory line or not", () => {
+    const { container } = renderCard();
+    const cells = container.querySelectorAll("tbody tr td:nth-child(2) > div");
+    expect(cells.length).toBe(2);
+    cells.forEach((c) => expect((c as HTMLElement).style.minHeight).toBe("32px"));
+  });
+
+  it("names each allowed program on hover, and hides the ones that cannot take work", async () => {
+    const both = { ...REMOTE, programs: ["p2", "p4"] };
+    renderCard([], [LOCAL, both]);
+    // p4 is paused, so the cell shows p2 alone and the hover says where p4 went.
+    const cell = await screen.findByText("p2");
+    expect(cell.getAttribute("title")).toMatch(/p2 — Lead Finder optimization/);
+    expect(cell.getAttribute("title")).toMatch(/not shown \(paused or closed\): p4 — Test/);
   });
 
   it("warns about leases on servers that left the pool", () => {
@@ -227,5 +257,40 @@ describe("HostsCard", () => {
     renderCard([], [LOCAL, REMOTE], [{ sprint_id: "s4", host: "gpu1", listed: true }]);
     expect(screen.getByText(/s4 still holds a lease on gpu1, which takes no work while remote placement is off/))
       .toBeTruthy();
+  });
+});
+
+describe("programsCell", () => {
+  const PROGRAMS = [
+    { id: "p2", title: "Lead Finder optimization", status: "active", goals: "" },
+    { id: "p4", title: "Test", status: "paused", goals: "" },
+    { id: "p5", title: "Kernels", status: "closed", goals: "" },
+  ];
+
+  it("shows only programs that can take work, and names the rest on hover", () => {
+    const cell = programsCell({ ...REMOTE, programs: ["p2", "p4", "p5"] }, PROGRAMS);
+    expect(cell.text).toBe("p2");
+    expect(cell.title).toMatch(/p2 — Lead Finder optimization/);
+    expect(cell.title).toMatch(/not shown \(paused or closed\): p4 — Test, p5 — Kernels/);
+  });
+
+  it("does not claim 'none' when the list holds only paused or closed programs", () => {
+    // "none" means the server runs nothing by decision; this is a different fact.
+    const cell = programsCell({ ...REMOTE, programs: ["p4"] }, PROGRAMS);
+    expect(cell.text).toBe("—");
+    expect(cell.title).toMatch(/no program that can take work/);
+  });
+
+  it("reads all for a server that never set a list, and none for an empty one", () => {
+    expect(programsCell({ ...REMOTE, programs: null }, PROGRAMS).text).toBe("all");
+    expect(programsCell({ ...REMOTE, programs: null }, PROGRAMS).title)
+      .toMatch(/every program:\np2 — Lead Finder optimization/);
+    expect(programsCell({ ...REMOTE, programs: [] }, PROGRAMS).text).toBe("none");
+  });
+
+  it("shows every id while the program list is still loading", () => {
+    // Filtering against a list that has not arrived would briefly show the wrong
+    // access — the same race that cut a live server off in O14.
+    expect(programsCell({ ...REMOTE, programs: ["p2", "p4"] }, undefined).text).toBe("p2, p4");
   });
 });
