@@ -1,24 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 141
+version: 142
 last_updated: 2026-09-20
 ---
 
 # To QC
-
-### P3. Highlight only the experiments the platform moved
-
-A sprint summary says who made its last status change; the highlight skips a change the
-viewer made themselves, and a sprint that appeared since they last looked now lights up.
-
-**Check:** approve or park an experiment — its row must not light up. A sprint the PM
-proposes must, on the next poll. Opening a program for the FIRST time in a browser must
-light up nothing, however many sprints it holds (clear `coscience:program-seen` and
-`coscience:sprint-seen` in localStorage to retest that).
-
-Round 2: QC found a new proposal never highlighted — both proposal paths were born with
-an anonymous history entry, and `seedIfNew` silenced every unknown sprint on every load
-rather than only on a program's first visit.
 
 ### E3. Stop flagging a declined action as an unbacked claim
 
@@ -530,6 +516,10 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### P3. Highlight only the experiments the platform moved
+
+The program page highlights only what the platform did — a sprint the planner proposed, released or finished — and stays quiet for the viewer's own clicks and for a program's first visit.
+
 ### P4. Let a human restore a canceled experiment
 
 A canceled experiment can be put back where it was canceled from, keeping its goals, plan, comments and votes — except a demoted one, whose life continued as an idea.
@@ -569,8 +559,4 @@ Every server card has Config: a remote server is re-probed and updated in place,
 ### O8. Let a worker agent pull the red button
 
 A worker agent or the platform can escalate a sprint; it is held with its lease and job while the planner or a human answers with resume, move or stop.
-
-### O7. Keep hosts healthy, visible and removable
-
-The dispatch loop checks each remote server every minute; a silent or drained server keeps its work but takes no new sprints, and the servers card shows health, use, leftovers and stranded leases.
 
