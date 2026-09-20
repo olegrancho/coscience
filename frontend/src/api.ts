@@ -4,8 +4,11 @@ export interface ProgramRow { id: string; title: string; status: string; goals: 
 /** Who made a sprint's last status change. The dashboard highlights what it did not
  *  ask for, so a human's own click must be distinguishable from the platform's. */
 export type StatusActor = "human" | "pm" | "platform";
+/** The planner's "not yet" on an approved sprint: it stays approved and unreleased,
+ *  carrying the reason. Absent/undefined means no hold. */
+export interface SprintHold { why: string; at: number; by: string }
 export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string; last_status_at: number | null; last_status_by?: StatusActor;
-  votes: VoteTally; escalation_level: "" | "pm" | "human" }
+  hold?: SprintHold; votes: VoteTally; escalation_level: "" | "pm" | "human" }
 export interface PMActivation { at: number; cycle: number; triggers: string[]; submitted: string[]; forced: boolean }
 export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
@@ -47,7 +50,7 @@ export interface SprintRow {
   escalation_level: "" | "pm" | "human";
   unrunnable?: string;    // why it can never be granted (asks above total capacity); "" if it can
   started_at: number | null; last_status_at: number | null;
-  last_status_by?: StatusActor;
+  last_status_by?: StatusActor; hold?: SprintHold;
   model: string; activity: SprintActivity | null;
   votes: VoteTally;
 }
@@ -119,6 +122,7 @@ export interface Sprint {
   artifacts_bound: string[];
   artifacts_create: { aid: string; title: string; kind: string;
                       exists?: boolean; version?: string }[];
+  hold?: SprintHold;
 }
 export interface SprintFile {
   name: string; label: string; kind: string; size: number;
@@ -542,6 +546,8 @@ export const api = {
     fetch(`/api/sprints/${id}/resume`, { method: "POST" }).then(j<Sprint>),
   restoreSprint: (id: string) =>
     fetch(`/api/sprints/${id}/restore`, { method: "POST" }).then(j<Sprint>),
+  clearSprintHold: (id: string) =>
+    fetch(`/api/sprints/${id}/hold/clear`, { method: "POST" }).then(j<Sprint>),
   voteSprint: (id: string, by: string, value: number) =>
     fetch(`/api/sprints/${id}/vote`, {
       method: "POST", headers: { "Content-Type": "application/json" },

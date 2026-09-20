@@ -279,3 +279,45 @@ describe("experiments list", () => {
     expect(pmRow?.parentElement?.textContent).not.toMatch(/needs you/);
   });
 });
+
+describe("a held experiment on the list", () => {
+  const WHY = "Waiting on checkpoint recovery before the headline is written.";
+
+  function progWith(sprints: SprintRef[]) {
+    return {
+      id: "p", title: "Embeddings program", status: "active", goals: "g", report: "",
+      cycle: 0, sprints, pm_model: "", workdir: "", activations: [], last_run: null,
+      instructions: "",
+    } as never;
+  }
+  function row(over: Partial<SprintRef> = {}): SprintRef {
+    return { id: "p-s1", status: "approved", goals: "g", title: "Revise the manuscript",
+             results: [], model: "m", last_status_at: 1_700_000_000,
+             votes: { up: 0, down: 0, mine: 0 }, escalation_level: "", ...over } as SprintRef;
+  }
+  function renderProg(sprints: SprintRef[]) {
+    vi.spyOn(api, "getProgram").mockResolvedValue(progWith(sprints));
+    vi.spyOn(api, "listGuidance").mockResolvedValue([]);
+    vi.spyOn(api, "listIdeas").mockResolvedValue({ summary: "", ideas: [] } as never);
+    vi.spyOn(api, "listArtifacts").mockResolvedValue([]);
+    mockHostNotes();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}><MantineProvider>
+        <MemoryRouter initialEntries={["/programs/p"]}>
+          <Routes><Route path="/programs/:id" element={<ProgramDetail />} /></Routes>
+        </MemoryRouter>
+      </MantineProvider></QueryClientProvider>);
+  }
+
+  it("marks a held row, so the hold shows without opening the sprint", async () => {
+    renderProg([row({ hold: { why: WHY, at: 1_700_000_500, by: "pm" } })]);
+    expect(await screen.findByText("held")).toBeTruthy();
+  });
+
+  it("leaves an ordinary approved row unmarked", async () => {
+    renderProg([row()]);
+    await screen.findByText("Revise the manuscript");
+    expect(screen.queryByText("held")).toBeNull();
+  });
+});

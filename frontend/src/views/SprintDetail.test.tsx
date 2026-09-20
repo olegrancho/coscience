@@ -231,3 +231,54 @@ describe("restore a canceled sprint", () => {
     expect(screen.queryByRole("button", { name: "Restore" })).toBeNull();
   });
 });
+
+describe("the planner's hold", () => {
+  const held = { why: "Waiting on checkpoint recovery — the full-run result can change the headline.",
+                 at: 1_700_000_500, by: "pm" };
+
+  it("shows the planner's reason on the sprint it is about", async () => {
+    renderSprintPage(sprint({ status: "approved", agent_running: false, hold: held }));
+
+    expect(await screen.findByText(/Held by the planner — approved, not released yet/)).toBeTruthy();
+    expect(screen.getByText(/Waiting on checkpoint recovery/)).toBeTruthy();
+    // The status itself must still read approved: a hold never moves the sprint.
+    expect(screen.getByText("approved")).toBeTruthy();
+  });
+
+  it("clears the hold and says the sprint is still approved", async () => {
+    const show = vi.spyOn(notifications, "show").mockImplementation(() => "" as never);
+    vi.spyOn(api, "clearSprintHold").mockResolvedValue(
+      sprint({ status: "approved", agent_running: false }));
+    renderSprintPage(sprint({ status: "approved", agent_running: false, hold: held }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Clear hold" }));
+    await waitFor(() => expect(api.clearSprintHold).toHaveBeenCalledWith("sp1"));
+    await waitFor(() => expect(show).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Hold cleared",
+      message: expect.stringContaining("Still approved"),
+    })));
+  });
+
+  it("surfaces a refusal rather than pretending the hold went", async () => {
+    const show = vi.spyOn(notifications, "show").mockImplementation(() => "" as never);
+    vi.spyOn(api, "clearSprintHold").mockRejectedValue(new Error("sp1 is not held"));
+    renderSprintPage(sprint({ status: "approved", agent_running: false, hold: held }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Clear hold" }));
+    await waitFor(() => expect(show).toHaveBeenCalledWith(expect.objectContaining({
+      color: "red", title: "Couldn't clear the hold",
+    })));
+  });
+
+  it("shows nothing at all when the sprint is not held", async () => {
+    renderSprintPage(sprint({ status: "approved", agent_running: false }));
+    await screen.findByText("Train the model");
+    expect(screen.queryByText(/Held by the planner/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear hold" })).toBeNull();
+  });
+
+  it("keeps Run offered, so a human can always override the hold", async () => {
+    renderSprintPage(sprint({ status: "approved", agent_running: false, hold: held }));
+    expect(await screen.findByRole("button", { name: "Run" })).toBeTruthy();
+  });
+});

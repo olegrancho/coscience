@@ -318,6 +318,14 @@ export default function SprintDetail() {
       refresh();
     } catch (e) { notifications.show({ color: "red", title: "Couldn't restore", message: String(e) }); }
   };
+  const clearHold = async () => {
+    try {
+      await api.clearSprintHold(id);
+      notifications.show({ color: "teal", title: "Hold cleared",
+        message: "Still approved, and releasable now — by you or the planner." });
+      refresh();
+    } catch (e) { notifications.show({ color: "red", title: "Couldn't clear the hold", message: String(e) }); }
+  };
   const setModel = async (model: string) => {
     const live = s.status === "executing" && s.agent_running;
     try {
@@ -454,9 +462,37 @@ export default function SprintDetail() {
           {s.status === "queued" && (
             <span style={{ fontSize: 12, color: "var(--st-queued)" }}>waiting for a compute slot…</span>
           )}
+          {s.hold?.why && (
+            <Tooltip label="The planner is deliberately not releasing this yet. It stays approved — clear the hold, or Run it, to override." withArrow openDelay={300}>
+              <span style={{ fontSize: 12, color: "var(--ink-faint)", borderBottom: "1px dotted var(--hairline)", cursor: "help" }}>
+                · held by the planner
+              </span>
+            </Tooltip>
+          )}
           {s.status === "executing" && <LiveActivity activity={s.activity} agentRunning={s.agent_running} />}
           <span style={{ marginLeft: "auto" }}><VoteControl votes={s.votes} onVote={vote} /></span>
         </Group>
+        {s.hold?.why && (
+          // The planner's reason, on the sprint it is about — the whole point of the
+          // hold. Before it, a sprint that was not being released said nothing at all,
+          // and the planner reached for un-approving it to make "not yet" visible.
+          <Card withBorder padding="sm" mt={10} style={{ background: "var(--paper)" }}>
+            <Group justify="space-between" wrap="nowrap" align="flex-start">
+              <div>
+                <Text size="sm" fw={600}>Held by the planner — approved, not released yet</Text>
+                <Text size="sm" mt={3} style={{ color: "var(--ink-muted)", lineHeight: 1.5 }}>
+                  {s.hold.why}
+                </Text>
+                {s.hold.at ? (
+                  <Text size="xs" c="dimmed" mt={4}>said <AbsTime at={s.hold.at} /></Text>
+                ) : null}
+              </div>
+              <Tooltip label="Lift the hold. The sprint stays approved and can be released — by you with Run, or by the planner on its next cycle." withArrow openDelay={300}>
+                <Button size="xs" variant="default" onClick={clearHold}>Clear hold</Button>
+              </Tooltip>
+            </Group>
+          </Card>
+        )}
         {s.agent_state === "sleeping" && s.job && (
           <Card withBorder padding="sm" mt={10} style={{ background: "var(--paper)" }}>
             <Group justify="space-between" wrap="nowrap">
