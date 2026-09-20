@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 139
+version: 140
 last_updated: 2026-09-20
 ---
 
@@ -14,16 +14,6 @@ change the viewer made themselves.
 **Check:** on a program page, approve or park an experiment — its row must not light up.
 Then let the planner release one, or a worker finish one, and that row must. `curl
 /api/programs/<id>` shows `last_status_by` per sprint: human / pm / platform.
-
-### P4. Let a human restore a canceled experiment
-
-A canceled experiment has a Restore button that returns it to where it was canceled
-from, keeping goals, plan, comments and votes.
-
-**Check:** cancel a proposed one and restore it — back to proposed, record intact. Cancel
-an approved one and restore it — back to **approved**, not proposed. Stop one mid-run and
-restore it — back to queued, and it must not be stopped again on the next beat. Demote one
-and try: it must refuse, saying the idea is where its life continued.
 
 ### E3. Stop flagging a declined action as an unbacked claim
 
@@ -535,6 +525,10 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### P4. Let a human restore a canceled experiment
+
+A canceled experiment can be put back where it was canceled from, keeping its goals, plan, comments and votes — except a demoted one, whose life continued as an idea.
+
 ### O9. Keep per-program host notes the PM maintains
 
 Each program keeps its own note per server, read by every worker placed there and kept current by the planner from what finished and escalated sprints report; a human reads and edits them low on the program page, beside the planner's activity.
@@ -575,6 +569,3 @@ A worker agent or the platform can escalate a sprint; it is held with its lease 
 
 The dispatch loop checks each remote server every minute; a silent or drained server keeps its work but takes no new sprints, and the servers card shows health, use, leftovers and stranded leases.
 
-### O6. Place and run work on a remote host
-
-A sprint reserved for a remote server runs there: its agent launches a job over SSH, the platform watches it, copies its outputs back, wakes the agent, and stops the job when a human stops the sprint.
