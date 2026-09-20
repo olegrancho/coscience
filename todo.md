@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 146
+version: 147
 last_updated: 2026-09-20
 ---
 
@@ -169,6 +169,37 @@ needs its planner mid-sprint has only the escalation, which stops the sprint —
 heavy for a question. The inbox is the light path: leave it, keep working, read the
 reply next beat. Needs a delivery rule (does an unread message wake a cycle?) and a
 decision on whether worker-to-worker is in scope. Blocked on F1.
+
+## G. Where capacity is declared
+
+Capacity is declared and edited in the place it actually belongs: how many agent
+processes the platform may run, set once for the platform; real CPUs, memory and
+cards, set on the machine that has them.
+
+### G1. Make the global capacity editor the platform's own limits, and nothing else
+
+Reduce "Edit capacity" to the pool-wide process limits — workers and housekeepers —
+instead of a free-form key/value list over the whole pool.
+
+`workers` and `housekeepers` bound how many agent processes run at once on the
+dispatcher's machine wherever their work lands, so they are pool-wide by definition —
+`resources.yaml` even refuses them inside a host (`"{key} is platform-wide, not per
+host"`). But the editor (`components/CapacityModal.tsx`) is a generic
+name/value table over one flat map, so those two sit undifferentiated beside this
+machine's `cpu` and `memory_gb`, and any name at all can be typed in. Two named fields
+with real labels would say what each one governs and make an invented key impossible.
+
+### G2. Edit every machine's real capacity only on its own card, this one included
+
+Take CPUs, memory and cards out of the global editor; each server's own dialog is
+where they are set.
+
+Each machine's card already opens a dialog that edits its cpu, memory and GPU cards —
+this machine included — so the same numbers currently have two editors that can
+disagree, and the flat map is why `set_capacity` needs a fragile branch to avoid
+dropping this machine's cards when an unrelated field is saved. Depends on G1, which
+decides what is left in the global editor. Worth checking what happens to a resource
+someone invented through the old free-form editor before the two are separated.
 
 ## J. Wiki run cost
 
