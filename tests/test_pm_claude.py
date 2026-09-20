@@ -98,10 +98,24 @@ def test_parse_response_takes_first_of_multiple_blocks():
     assert parse_response(text).report == "real"
 
 
-def test_parse_response_reads_reopen_ids():
+def test_parse_response_reads_holds():
+    out = parse_response(json.dumps({"report": "r", "proposals": [], "holds": [
+        {"id": "p1-c0-a", "why": "waiting on the checkpoint recovery"}]}))
+    assert out.holds == [{"id": "p1-c0-a", "why": "waiting on the checkpoint recovery"}]
+
+
+def test_parse_response_drops_a_hold_with_no_id():
     out = parse_response(json.dumps({"report": "r", "proposals": [],
-                                     "reopen_ids": ["p1-c0-a", "p1-c1-b"]}))
-    assert out.reopen_ids == ["p1-c0-a", "p1-c1-b"]
+                                     "holds": [{"why": "no id here"}, "not an object"]}))
+    assert out.holds == []
+
+
+def test_parse_response_keeps_a_hold_with_no_reason_for_the_apply_to_refuse():
+    """Parsed, then skipped at apply with "no reason given" — so a reasonless hold is
+    reported to the human rather than vanishing between the two layers."""
+    out = parse_response(json.dumps({"report": "r", "proposals": [],
+                                     "holds": [{"id": "p1-c0-a"}]}))
+    assert out.holds == [{"id": "p1-c0-a", "why": ""}]
 
 
 def test_parse_response_reads_release_ids():
@@ -120,7 +134,7 @@ def test_render_prompt_maps_every_action_to_its_field():
     # lists empty, so nothing happened. The prompt must state the mechanism, not just the
     # policy: each action names the field that performs it.
     p = render_prompt(_ctx())
-    for field in ("release_ids", "reopen_ids", "sprint_edits", "proposals",
+    for field in ("release_ids", "holds", "sprint_edits", "proposals",
                   "delete_idea_ids", "new_ideas", "thread_replies",
                   "adopt_artifacts", "artifact_tasks", "edge_ops"):
         assert f'"{field}"' in p, field

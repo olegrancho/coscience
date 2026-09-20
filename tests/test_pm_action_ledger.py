@@ -70,12 +70,12 @@ def test_release_of_a_non_approved_sprint_names_the_status(substrate):
         {"id": "p1-b", "why": "status is proposed, not approved"}]
 
 
-def test_reopen_skips_are_reported_too(substrate):
+def test_hold_skips_are_reported_too(substrate):
     _prog(substrate)
     summary = pm_beat(substrate, "p1", FakeReasoner([
-        PMCycleOutput(report="r", reopen_ids=["ghost"])]), force=True)
-    assert summary["reopen_skipped"] == [{"id": "ghost", "why": "no such sprint"}]
-    assert "Reopen FAILED: `ghost`" in substrate.load_report("p1")
+        PMCycleOutput(report="r", holds=[{"id": "ghost", "why": "waiting"}])]), force=True)
+    assert summary["hold_skipped"] == [{"id": "ghost", "why": "no such sprint"}]
+    assert "Hold FAILED: `ghost`" in substrate.load_report("p1")
 
 
 # --- the claim check: prose that describes an action nobody submitted ---
@@ -187,11 +187,11 @@ def test_beat_line_names_a_program_that_stood_down():
 
 
 def test_ledger_lists_each_kind_of_action():
-    text = actions_ledger({"released": ["s1"], "reopened": ["s2"], "submitted": ["s3"],
+    text = actions_ledger({"released": ["s1"], "held": ["s2"], "submitted": ["s3"],
                            "adopted": ["a1"], "dropped": ["s4"], "ideas_added": 2,
-                           "ideas_removed": 1, "release_skipped": [], "reopen_skipped": [],
+                           "ideas_removed": 1, "release_skipped": [], "hold_skipped": [],
                            "unbacked_claims": []})
-    for expected in ("Released: s1", "Reopened: s2", "Proposed: s3", "Adopted: a1",
+    for expected in ("Released: s1", "Held back: s2", "Proposed: s3", "Adopted: a1",
                      "Not proposed (over the cap): s4", "Ideas added: 2", "Ideas pruned: 1"):
         assert expected in text
 

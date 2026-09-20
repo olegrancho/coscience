@@ -31,7 +31,7 @@ Three actors move sprints, and they own different edges:
 | **`approved` → `queued`** | **PM** | **`release_ids` in the cycle JSON (`pm_agent.py:780-802`)** |
 | `approved` → `queued` | human (override) | `run_sprint` (`service.py:98`), POST `/api/sprints/<id>/run` |
 | `proposed` → `queued` | human | `run_sprint` — one-step authorize+run |
-| `approved` → `proposed` | PM | `reopen_ids` in the cycle JSON (`pm_agent.py:804-825`) |
+| `approved` stays `approved`, held | PM | `holds` in the cycle JSON — the planner's "not yet", with a reason shown on the sprint. It replaced a PM `reopen`: the planner can un-approve but cannot approve, so sending a sprint back to `proposed` spent a human decision it could not restore |
 | `approved` → `proposed` | human | `send_back_sprint` (`service.py:108`) |
 | `proposed` → `parked` → `proposed` | human | `park_sprint` / `unpark_sprint` |
 | `queued` → `executing` | dispatcher | lease granted; eligible states are `queued`, `executing`, `hibernated` (`dispatcher.py:18`) |

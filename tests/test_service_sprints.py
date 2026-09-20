@@ -60,6 +60,7 @@ def test_submit_then_list_and_get(tmp_path):
                    # Nobody has moved it yet. The highlight rule reads that as "not
                    # the viewer's own click"; a first encounter is suppressed anyway.
                    "last_status_by": "platform",
+                   "hold": {},
                    "votes": {"up": 0, "down": 0, "mine": 0}}
     detail = svc.get_sprint("sp1")
     assert detail["status"] == "proposed"

@@ -115,7 +115,10 @@ class PMCycleOutput:
     delete_idea_ids: list[str] = field(default_factory=list)  # PM ideas to prune (protected ones ignored)
     idea_order: list[str] = field(default_factory=list)      # desired pool order, most-promising first (compress re-rank)
     sprint_edits: list[dict] = field(default_factory=list)   # revisions to still-proposed sprints (from PM feedback)
-    reopen_ids: list[str] = field(default_factory=list)      # approved sprints to send back to proposed (now obsolete)
+    # [{id, why}] — approved sprints the PM is deliberately NOT releasing yet, with the
+    # reason. Replaced reopen_ids: the PM can un-approve but cannot approve, so sending
+    # a sprint back to proposed destroyed an authorization it had no power to restore.
+    holds: list[dict] = field(default_factory=list)
     release_ids: list[str] = field(default_factory=list)     # approved sprints to release into production (-> queued)
     thread_replies: list[dict] = field(default_factory=list)  # [{thread_id, text}] PM answers to open feedback threads
     escalation_answers: list[dict] = field(default_factory=list)  # [{sprint_id, action, instructions, host}]

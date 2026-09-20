@@ -75,6 +75,11 @@ class Sprint:
     edges: list[dict] = field(default_factory=list)  # outbound lineage/evidential edges (see coscience.graph)
     artifacts_bound: list[str] = field(default_factory=list)   # existing artifact ids this sprint edits (locked as a resource)
     artifacts_create: list[dict] = field(default_factory=list)  # new artifacts to produce: [{aid, title, kind}]
+    # The planner's "not yet", on an APPROVED sprint it is deliberately not releasing:
+    # {why, at, by}. Empty means no hold. It never changes the status — an approved
+    # sprint is the planner's queue, and holding one is the queue working, not a
+    # decision being reversed. Cleared when the sprint is released, or by a human.
+    hold: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.model:
@@ -282,7 +287,7 @@ class PMState:
     # per-category signatures of the last reasoned context, so the next cycle can
     # name WHAT changed; and a capped timeline of activations for the dashboard.
     last_signals: dict = field(default_factory=dict)
-    # [{at, cycle, triggers, submitted, forced, released, reopened, release_skipped,
+    # [{at, cycle, triggers, submitted, forced, released, held, release_skipped,
     #   unbacked_claims}] — the actions carry the cycle's own record of what it applied,
     # so a release the reasoner claimed but never submitted stays visible in the substrate.
     activations: list[dict] = field(default_factory=list)

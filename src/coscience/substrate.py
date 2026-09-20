@@ -100,6 +100,7 @@ class Substrate:
             edges=list(fm.get("edges", [])),
             artifacts_bound=[str(a) for a in fm.get("artifacts_bound", [])],
             artifacts_create=[dict(c) for c in fm.get("artifacts_create", [])],
+            hold=dict(fm.get("hold") or {}),
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
@@ -163,6 +164,8 @@ class Substrate:
             fm["artifacts_bound"] = list(sprint.artifacts_bound)
         if sprint.artifacts_create:
             fm["artifacts_create"] = [dict(c) for c in sprint.artifacts_create]
+        if sprint.hold:
+            fm["hold"] = dict(sprint.hold)
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))
 

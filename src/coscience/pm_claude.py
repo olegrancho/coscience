@@ -51,7 +51,7 @@ def _result_path(context: PMContext, item: dict) -> str:
 def _history_block(items: list[dict], recent_fmt) -> str:
     """Recent entries with detail, older ones as one line each. Older entries keep
     their id and title rather than being dropped: the lineage graph and the
-    release_ids/reopen_ids instructions both tell the PM to copy ids EXACTLY, so an
+    release_ids/holds instructions both tell the PM to copy ids EXACTLY, so an
     id the prompt never shows is an action it can never take."""
     if not items:
         return "(none)"
@@ -237,7 +237,11 @@ run and in what order. TO RELEASE ONE INTO PRODUCTION, COPY ITS EXACT ID INTO TH
 next thing (dependencies satisfied, worth the compute); retune ordering with priority in
 sprint_edits. You need not release them all at once — sequence them as results land. And if
 an approved sprint no longer makes sense to run or needs serious rework, put its id in
-"reopen_ids" (back to 'proposed') instead of releasing it.
+"holds" with a one-sentence reason, and it stays approved, unreleased, with your reason
+shown on it. You CANNOT approve a sprint — only a human can — so you must never try to
+send one back to 'proposed'; holding is how you say "not yet" without spending a decision
+that is not yours to spend. If an approved sprint should not run AT ALL, hold it saying so
+and recommend cancelling it in your report; the human cancels.
 {open_block}
 
 COMPLETED SPRINTS AND RESULTS (use these to decide what is most valuable next):
@@ -300,7 +304,7 @@ JSON object below. Prose is not an action: "report" is stored verbatim for a hum
 and is NEVER parsed, so describing a change there does not perform it. Each thing you can
 do maps to exactly one field:
   release an approved sprint into production -> its exact id in "release_ids"
-  send an approved sprint back for rework    -> its exact id in "reopen_ids"
+  hold an approved sprint back for now       -> its id + why in "holds"
   revise or reprioritise a proposed sprint   -> an entry in "sprint_edits"
   propose a new experiment                   -> an entry in "proposals"
   prune an idea                              -> its id in "delete_idea_ids"
@@ -333,10 +337,9 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
       "artifacts_bound": ["<existing artifact id(s) this sprint should now edit — optional>"],
       "artifacts_create": [{{"title": "<new artifact this sprint should produce>", "kind": "md|data|figure|page"}}]}}
   ],
-  "reopen_ids": ["<id of an APPROVED sprint (see OPEN SPRINTS) to send back to 'proposed' for
-                 reconsideration: results made it obsolete/redundant, it no longer makes sense
-                 to run at all, or it needs serious rework before it's worth running. Only
-                 approved sprints — never queued/running ones. Omit/empty if none.>"],
+  "holds": [{{"id": "<id of an APPROVED sprint (see OPEN SPRINTS) you are deliberately NOT
+                 releasing yet>", "why": "<one sentence a human will read on that sprint:
+                 what it is waiting for, or why it may no longer be worth running>"}}],
   "release_ids": ["<id of an APPROVED sprint to release into production now — it becomes
                  'queued' and the scheduler runs it as compute frees. Release the ones whose
                  time has come; hold the rest. Only approved sprints. Omit/empty if none.>"],
@@ -575,7 +578,9 @@ def parse_response(text: str) -> PMCycleOutput:
         delete_idea_ids=[str(s) for s in data.get("delete_idea_ids", [])],
         idea_order=[str(s) for s in data.get("idea_order", [])],
         sprint_edits=edits,
-        reopen_ids=[str(s) for s in data.get("reopen_ids", [])],
+        holds=[{"id": str(h["id"]).strip(), "why": str(h.get("why") or "").strip()}
+               for h in data.get("holds", [])
+               if isinstance(h, dict) and str(h.get("id") or "").strip()],
         release_ids=[str(s) for s in data.get("release_ids", [])],
         thread_replies=[dict(r) for r in data.get("thread_replies", [])
                         if isinstance(r, dict) and r.get("thread_id")],

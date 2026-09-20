@@ -35,6 +35,8 @@ def program_cap(program) -> int:
     return program.max_proposed or MAX_PROPOSED
 
 
+HOLD_REASON_MAX = 400   # a hold is one sentence of why, not an essay
+
 MAX_EDGE_OPS = 100   # bound the edges the PM may add per cycle (headroom for lineage back-fill)
 
 # A cycle once wrote a report saying it had released a sprint, pruned the idea pool and
@@ -124,7 +126,7 @@ def actions_ledger(actions: dict) -> str:
         return ", ".join(str(i) for i in actions.get(key) or ())
 
     lines = []
-    for label, key in (("Released", "released"), ("Reopened", "reopened"),
+    for label, key in (("Released", "released"), ("Held back", "held"),
                        ("Proposed", "submitted"), ("Adopted", "adopted")):
         if actions.get(key):
             lines.append(f"- {label}: {_ids(key)}")
@@ -137,7 +139,7 @@ def actions_ledger(actions: dict) -> str:
         lines.append(f"- Host notes updated: {_ids('host_notes_updated')}")
     for sid, action in actions.get("escalations_answered") or ():
         lines.append(f"- Escalation answered: `{sid}` ({action})")
-    for key, label in (("release_skipped", "Release FAILED"), ("reopen_skipped", "Reopen FAILED"),
+    for key, label in (("release_skipped", "Release FAILED"), ("hold_skipped", "Hold FAILED"),
                        ("adopt_skipped", "Adopt FAILED"),
                        ("escalation_skipped", "Escalation answer FAILED"),
                        ("host_note_skipped", "Host note FAILED")):
@@ -512,7 +514,7 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
         "delete_idea_ids": list(output.delete_idea_ids),
         "idea_order": list(output.idea_order),
         "sprint_edits": list(output.sprint_edits),
-        "reopen_ids": list(output.reopen_ids),
+        "holds": list(output.holds),
         "release_ids": list(output.release_ids),
         "thread_replies": list(output.thread_replies),
         "escalation_answers": list(output.escalation_answers),
@@ -546,7 +548,7 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         delete_idea_ids=list(data.get("delete_idea_ids", [])),
         idea_order=list(data.get("idea_order", [])),
         sprint_edits=list(data.get("sprint_edits", [])),
-        reopen_ids=list(data.get("reopen_ids", [])),
+        holds=list(data.get("holds", [])),
         release_ids=list(data.get("release_ids", [])),
         thread_replies=list(data.get("thread_replies", [])),
         escalation_answers=list(data.get("escalation_answers", [])),
@@ -1171,34 +1173,50 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             release_skipped.append({"id": sid, "why": f"status is {sp.status.value}, not approved"})
             continue
         set_status(sp, SprintStatus.QUEUED, by="pm", action="run")
+        sp.hold = {}          # releasing it IS the answer to whatever it was held for
         substrate.save_sprint(sp)
         released.append(sid)
 
-    # --- reopen: pull an APPROVED sprint back to PROPOSED when results made it
-    # obsolete. Guarded to approved sprints of this program only — the PM must not
-    # touch queued/executing work (a human deliberately released those).
-    reopened: list[str] = []
-    reopen_skipped: list[dict] = []
-    for sid in staged.output.reopen_ids:
-        sid = str(sid)
+    # --- hold: say why an APPROVED sprint is deliberately not being released yet.
+    # The status does not move. This replaced `reopen`, which sent the sprint back to
+    # PROPOSED: the PM can un-approve but cannot approve, so reopening destroyed a
+    # human authorization it had no power to restore, and every reopen ever recorded
+    # did exactly that — to sequence work, which holding does without the damage.
+    # Guarded to this program's approved sprints; queued/executing work is already
+    # released and is not the PM's to hold.
+    held: list[str] = []
+    hold_skipped: list[dict] = []
+    for entry in staged.output.holds:
+        if not isinstance(entry, dict):
+            hold_skipped.append({"id": str(entry), "why": "not an object with id and why"})
+            continue
+        sid = str(entry.get("id") or "")
+        why = str(entry.get("why") or "").strip()
         if not (substrate.sprint_dir(sid) / "sprint.md").is_file():
-            reopen_skipped.append({"id": sid, "why": "no such sprint"})
+            hold_skipped.append({"id": sid, "why": "no such sprint"})
+            continue
+        if not why:
+            # A hold with no reason is the invisible non-action it replaced.
+            hold_skipped.append({"id": sid, "why": "no reason given for the hold"})
             continue
         sp = substrate.load_sprint(sid)
         if sp.program != program_id:
-            reopen_skipped.append({"id": sid, "why": f"belongs to program {sp.program}"})
+            hold_skipped.append({"id": sid, "why": f"belongs to program {sp.program}"})
             continue
         if sp.status != SprintStatus.APPROVED:
-            reopen_skipped.append({"id": sid, "why": f"status is {sp.status.value}, not approved"})
+            hold_skipped.append({"id": sid, "why": f"status is {sp.status.value}, not approved"})
             continue
-        set_status(sp, SprintStatus.PROPOSED, by="pm", action="reopen")
+        if sid in released:
+            hold_skipped.append({"id": sid, "why": "released this cycle"})
+            continue
+        sp.hold = {"why": why[:HOLD_REASON_MAX], "at": time.time(), "by": "pm"}
         substrate.save_sprint(sp)
-        reopened.append(sid)
+        held.append(sid)
 
-    actions = {"released": released, "reopened": reopened, "submitted": submitted,
+    actions = {"released": released, "held": held, "submitted": submitted,
                "dropped": dropped, "adopted": adopted,
                "ideas_added": ideas_added, "ideas_removed": ideas_removed,
-               "release_skipped": release_skipped, "reopen_skipped": reopen_skipped,
+               "release_skipped": release_skipped, "hold_skipped": hold_skipped,
                "adopt_skipped": adopt_skipped,
                "escalations_answered": escalations_answered,
                "escalation_skipped": escalation_skipped,
@@ -1225,7 +1243,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             pm.proposed_ids.append(sid)
     pm.log.append(f"cycle {cycle}: proposed {proposed}"
                   + (f", released {released}" if released else "")
-                  + (f", reopened {reopened}" if reopened else "")
+                  + (f", held {held}" if held else "")
                   + (f", dropped {dropped} (cap)" if dropped else "")
                   + (f", FAILED to release {[s['id'] for s in release_skipped]}"
                      if release_skipped else "")
@@ -1242,8 +1260,9 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         pm.activations.append({
             "at": now_ts, "cycle": cycle, "triggers": trigger_labels,
             "submitted": list(submitted), "forced": bool(force),
-            "released": list(released), "reopened": list(reopened),
+            "released": list(released), "held": list(held),
             "release_skipped": [dict(s) for s in release_skipped],
+            "hold_skipped": [dict(s) for s in hold_skipped],
             "adopt_skipped": [dict(s) for s in adopt_skipped],
             "escalations_answered": list(escalations_answered),
             "escalation_skipped": [dict(s) for s in escalation_skipped],
@@ -1258,8 +1277,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             "ideas_added": ideas_added, "ideas_removed": ideas_removed,
             "pool_size": len(ideas_by_id), "adopted": adopted,
             "edges_added": edges_added, "edges_removed": edges_removed,
-            "released": released, "reopened": reopened,
-            "release_skipped": release_skipped, "reopen_skipped": reopen_skipped,
+            "released": released, "held": held,
+            "release_skipped": release_skipped, "hold_skipped": hold_skipped,
             "adopt_skipped": adopt_skipped,
             "escalations_answered": escalations_answered,
             "escalation_skipped": escalation_skipped,

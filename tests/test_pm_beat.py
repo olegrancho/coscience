@@ -128,9 +128,9 @@ def test_the_result_file_pointer_is_not_a_fingerprint_input(substrate):
     assert context_signals(ctx) == context_signals(gather_context(substrate, "p1"))
 
 
-def test_pm_reopens_approved_only(substrate):
-    # The PM may pull an APPROVED sprint back to PROPOSED (obsolete), but must not
-    # touch a QUEUED one (a human deliberately released it).
+def test_pm_holds_approved_only(substrate):
+    # A hold says "not yet" on an APPROVED sprint without moving it. A QUEUED one is
+    # already released — a human or the PM let it go, and it is not the PM's to hold.
     from coscience.models import Sprint
     from coscience.pm_reasoner import FakeReasoner
     _prog(substrate)
@@ -138,10 +138,24 @@ def test_pm_reopens_approved_only(substrate):
                                  goals="g", plan=["x"], program="p1"))
     substrate.save_sprint(Sprint(id="p1-queued", status=SprintStatus.QUEUED,
                                  goals="g", plan=["x"], program="p1"))
-    out = PMCycleOutput(report="r", reopen_ids=["p1-appr", "p1-queued"])
-    pm_beat(substrate, "p1", FakeReasoner([out]), force=True)
-    assert substrate.load_sprint("p1-appr").status == SprintStatus.PROPOSED
-    assert substrate.load_sprint("p1-queued").status == SprintStatus.QUEUED  # untouched
+    out = PMCycleOutput(report="r", holds=[{"id": "p1-appr", "why": "waiting on recovery"},
+                                           {"id": "p1-queued", "why": "too late"}])
+    summary = pm_beat(substrate, "p1", FakeReasoner([out]), force=True)
+    appr = substrate.load_sprint("p1-appr")
+    assert appr.status == SprintStatus.APPROVED           # the hold never moves it
+    assert appr.hold["why"] == "waiting on recovery"
+    assert appr.hold["by"] == "pm"
+    queued = substrate.load_sprint("p1-queued")
+    assert queued.status == SprintStatus.QUEUED and queued.hold == {}
+    assert summary["hold_skipped"] == [
+        {"id": "p1-queued", "why": "status is queued, not approved"}]
+
+
+def test_the_pm_can_no_longer_send_an_approved_sprint_back_to_proposed(substrate):
+    """It can un-approve but cannot approve, so reopening spent a human decision it
+    had no power to restore. There is no field for it any more."""
+    from coscience.pm_reasoner import PMCycleOutput as Out
+    assert not hasattr(Out(), "reopen_ids")
 
 
 def test_pm_releases_approved_into_production(substrate):

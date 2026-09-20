@@ -183,7 +183,19 @@ class Service:
         if sprint.status not in (SprintStatus.PROPOSED, SprintStatus.APPROVED):
             raise ValueError(f"can only run a proposed or approved sprint; {sprint_id} is {sprint.status.value}")
         set_status(sprint, SprintStatus.QUEUED, by=by, action="run")
+        sprint.hold = {}        # running it answers whatever the planner held it for
         self.substrate.save_sprint(sprint)
+
+    def clear_sprint_hold(self, sprint_id: str, by: str = "") -> None:
+        """Lift the planner's hold, leaving the sprint approved and releasable. The
+        human's override of a "not yet": the sprint does not move, so this is not a
+        lifecycle transition and writes no status_history entry."""
+        sprint = self._load_sprint(sprint_id)
+        if not sprint.hold:
+            raise ValueError(f"{sprint_id} is not held")
+        sprint.hold = {}
+        self.substrate.save_sprint(sprint)
+        self.substrate.commit(f"sprint {sprint_id}: hold cleared by {by or 'human'}")
 
     def send_back_sprint(self, sprint_id: str, by: str = "") -> None:
         """Return an approved sprint to proposed for reconsideration."""
@@ -191,6 +203,7 @@ class Service:
         if sprint.status != SprintStatus.APPROVED:
             raise ValueError(f"can only send back an approved sprint; {sprint_id} is {sprint.status.value}")
         set_status(sprint, SprintStatus.PROPOSED, by=by, action="send_back")
+        sprint.hold = {}        # it is no longer approved, so there is nothing to hold
         self.substrate.save_sprint(sprint)
 
     _REJECTABLE = (SprintStatus.PROPOSED, SprintStatus.APPROVED, SprintStatus.QUEUED)
@@ -421,6 +434,7 @@ class Service:
                 "started_at": started,
                 "last_status_at": self._last_status_at(sprint),
                 "last_status_by": self._last_status_by(sprint),
+                "hold": dict(sprint.hold),
                 "model": sprint.model,
                 "activity": activity,
                 "escalation_level": escalation_level,
@@ -556,6 +570,7 @@ class Service:
             "plan": list(sprint.plan),
             "artifacts_bound": list(sprint.artifacts_bound),
             "artifacts_create": self._create_specs(sprint),
+            "hold": dict(sprint.hold),
             "threads": [threads.public(t) for t in sprint.threads],
             "decisions": list(sprint.decisions),
             "status_history": list(sprint.status_history),
@@ -867,6 +882,7 @@ class Service:
                          "title": s.title, "results": list(s.results), "model": s.model,
                          "last_status_at": self._last_status_at(s),
                          "last_status_by": self._last_status_by(s),
+                         "hold": dict(s.hold),
                          "escalation_level": (
                              str((self.substrate.load_progress(s.id).escalation or {}).get("level") or "")
                              if s.status == SprintStatus.ESCALATED else ""),

@@ -45,9 +45,9 @@ def pm_beat_line(summaries: list[dict], reasoned: int) -> str:
     errors = [f"ERROR {s['program']}: {s['error']}" for s in summaries if s.get("error")]
     ids = [sid for s in summaries for sid in s["submitted"]]
     released = [sid for s in summaries for sid in s.get("released") or ()]
-    reopened = [sid for s in summaries for sid in s.get("reopened") or ()]
+    held = [sid for s in summaries for sid in s.get("held") or ()]
     missed = [k for s in summaries
-              for k in list(s.get("release_skipped") or ()) + list(s.get("reopen_skipped") or ())
+              for k in list(s.get("release_skipped") or ()) + list(s.get("hold_skipped") or ())
               + list(s.get("adopt_skipped") or ())]
     unbacked = [c for s in summaries for c in s.get("unbacked_claims") or ()]
     # A backed-off program is stuck, not idle: it stopped calling the reasoner after
@@ -58,8 +58,8 @@ def pm_beat_line(summaries: list[dict], reasoned: int) -> str:
         parts.append(f"proposed {', '.join(ids)}")
     if released:
         parts.append(f"released {', '.join(released)}")
-    if reopened:
-        parts.append(f"reopened {', '.join(reopened)}")
+    if held:
+        parts.append(f"held {', '.join(held)}")
     parts += [f"SKIPPED {k['id']} ({k['why']})" for k in missed]
     if unbacked:
         parts.append("WARNING report claims it " + "; ".join(unbacked)
