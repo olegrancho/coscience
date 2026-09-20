@@ -1,34 +1,22 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 122
+version: 125
 last_updated: 2026-09-19
 ---
 
 # To QC
 
-### O19. Collect a stopped job's outputs, or say they were left behind
+### O12. Review the server cards against real servers
 
-Stopping a sprint now copies the job's declared outputs into the sprint's `collected/`
-before it is canceled, and the sprint's error line carries the copy note — or says the job
-declared nothing to copy and its work is still on the server.
+The servers table is now name, CPU and GPU as filled slots, programs, and one status
+word; the row itself opens the server's configuration, which carries Remove and Keep.
 
-**Check:** stop a sprint that is asleep on a remote job and read its error line on the
-sprint page: it should name each copied path, and `collected/` should hold the files.
-Collecting is the caller's to ask for, so the dispatcher's reconcile stop (a leaseless
-sprint that will run again) still copies nothing — `tests/test_remote_jobs.py`, the four
-tests under "O19".
-
-### O20. Build the leftover list from what the server actually has
-
-Each server's health check now also lists the directories under its run root, and the
-servers card lists those, labelled from the sprint records — including a folder no sprint
-explains, as "no sprint record".
-
-**Check:** the Compute page's servers card against a listing of that server's run root —
-the two should agree within a minute, where before the card listed four folders that no
-longer existed. A server that has never been checked lists nothing rather than
-guessing. Note the listing survives a server going quiet (it shows what it last held), so
-a quiet server's list can be up to QUIET_AFTER old.
+**Check:** the Compute page — every server should read at a glance, with the pips
+matching the numbers beside them and the status word matching what the server is
+doing. Hover a status for the whole truth (since when, why, waiting on what), and
+hover the GPU pips for each card's model and share. Clicking any row must open that
+server's dialog, Remove and Keep must work from inside it, and nothing may offer to
+remove this machine.
 
 # To Do (sprint)
 
@@ -43,16 +31,6 @@ A shared server can be fungible CPU for one program's batch runs while its old G
 driver and C library rule out current PyTorch builds for another. Worker agents find such quirks and report them; the PM folds the reports
 into the notes, so the next sprint on that host starts from what the last one
 learned.
-
-### O12. Review the server cards against real servers
-
-Once O8–O11 work and a few real servers run sprints, review the Compute page's server
-cards and redesign them if they don't hold up.
-
-The current card was designed against test fixtures. Several real servers with GPUs,
-reservations, health states, leftovers and notes will show whether it reads at a glance or
-needs another layout, such as one card per server or a denser table. The outcome may be
-"keep it". Blocked on having servers onboarded and in use, not on code.
 
 # To Do (backlog)
 
@@ -300,6 +278,20 @@ Any server someone onboards becomes schedulable compute — its CPUs, memory and
 GPU with its VRAM join one pool — and every sprint lands on a machine its request
 actually fits.
 
+### O21. Show the agent a launch command that lets go of the ssh channel
+
+Put a launch line in the worker's instructions that returns at once, instead of leaving
+each agent to discover why its ssh call hangs.
+
+Three remote sprints in a row have hit the same thing: backgrounding a whole
+`cd … && … && setsid nohup … &` list runs the list in one subshell, which holds the ssh
+channel until the 60-second timeout even when every stream is redirected. The job itself
+starts fine, so this costs a minute and a confusing report rather than the run — but the
+last two sprints only avoided it because their goals carried a paragraph of warning,
+which is a sign the instructions are wrong, not the agents. The remote section of
+`claude_executor.build_instructions` already shows a launch command; it should show one
+that works, with the write-the-script call and the launch call kept separate.
+
 ## C. Codex as a second agent backend
 
 Any agent kind in any program can run on Codex instead of Claude, with its tokens,
@@ -419,6 +411,18 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### O19. Collect a stopped job's outputs, or say they were left behind
+
+Stopping a sprint copies the job's declared paths into the sprint's `collected/` and says
+in the sprint's note what was copied, or that the job declared nothing; verified live by
+stopping a ticking remote job at 165 of 600 ticks and finding all three of its files back.
+
+### O20. Build the leftover list from what the server actually has
+
+The health check lists each server's run root and the servers card shows what is really
+there, labelling a folder no sprint explains as "no sprint record"; verified live against
+the server, four phantom folders down to the one that exists.
+
 ### O15. Remove a server with one button
 
 Remove marks a server and the dispatcher takes it out of the pool once nothing is on it; Keep undoes the mark, and the drain step is gone.
@@ -450,11 +454,3 @@ Stop ends a running sprint's agent and any job on its host, keeps what it produc
 ### O13. Document the remote-server switches for deployments
 
 CLAUDE.md names the two remote-server switches, what each turns on, which processes must have them, and how to turn one off; this host's setup file says where it sets them.
-
-### O14. Choose where each program may run from either side
-
-Each server holds one list of the programs it runs, edited from the server's dialog or from a program's settings, and creating a program asks which servers it may use.
-
-### O5. Onboard a server and discover what it offers
-
-The Compute page's Add-server dialog probes a server over key-only SSH, runs four checks and adds it to the pool; the first real server was onboarded with it on the live platform.
