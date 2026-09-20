@@ -57,9 +57,10 @@ def test_submit_then_list_and_get(tmp_path):
                    "unrunnable": "needs gpu 1 but capacity is 0",
                    "started_at": None, "model": DEFAULT_MODEL, "activity": None,
                    "escalation_level": "",
-                   # Nobody has moved it yet. The highlight rule reads that as "not
-                   # the viewer's own click"; a first encounter is suppressed anyway.
-                   "last_status_by": "platform",
+                   # Submitted through the API is a human writing it, so the program
+                   # page does not light the row up at whoever just typed it. A PM
+                   # proposal records "pm" here instead, and does light up.
+                   "last_status_by": "human",
                    "hold": {},
                    "votes": {"up": 0, "down": 0, "mine": 0}}
     detail = svc.get_sprint("sp1")

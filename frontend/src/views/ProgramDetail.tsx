@@ -73,7 +73,7 @@ export default function ProgramDetail() {
   };
 
   useEffect(() => {
-    if (program.data) seedIfNew(program.data.sprints);
+    if (program.data) seedIfNew(program.data.sprints, program.data.id);
   }, [program.data]);
 
   const tocEntries = useMemo<TocEntry[]>(() => {

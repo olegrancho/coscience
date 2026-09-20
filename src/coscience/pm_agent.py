@@ -38,6 +38,15 @@ def program_cap(program) -> int:
 HOLD_REASON_MAX = 400   # hard cap, after the one-sentence trim below
 
 
+def _proposed_by_pm(sprint: Sprint) -> Sprint:
+    """Stamp a PM proposal as the PM's. save_sprint backfills an anonymous history
+    entry when there is none, which made a PM proposal indistinguishable from a human
+    writing one in the dashboard — and the program page highlights only what the
+    viewer did not do, so a new proposal has to say whose it is (P3)."""
+    set_status(sprint, sprint.status, by="pm", action="propose")
+    return sprint
+
+
 def hold_reason(text: str) -> str:
     """The rationale for keeping a sprint held, trimmed to its FIRST SENTENCE.
 
@@ -860,7 +869,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             if slots <= 0:
                 dropped.append(sid)                    # over the cap -> not proposed
                 continue
-            substrate.save_sprint(Sprint(
+            substrate.save_sprint(_proposed_by_pm(Sprint(
                 id=sid, status=SprintStatus.PROPOSED, goals=prop.goals,
                 plan=list(prop.plan),
                 program=program_id, priority=prop.priority,
@@ -870,7 +879,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 title=prop.title,
                 summary=prop.summary,
                 model=prop.model or worker_model,
-            ))
+            )))
             slots -= 1
         proposed.append(sid)
         if sid not in pm.proposed_ids:
@@ -904,11 +913,11 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             elif bound:
                 title = "Update " + ", ".join(bound)
             title = title[:80]
-        substrate.save_sprint(Sprint(
+        substrate.save_sprint(_proposed_by_pm(Sprint(
             id=sid, status=SprintStatus.PROPOSED, title=title,
             goals=str(task.get("instructions") or "Update the artifact."),
             plan=[], program=program_id, model=worker_model,
-            artifacts_bound=bound, artifacts_create=create))
+            artifacts_bound=bound, artifacts_create=create)))
         slots -= 1
         proposed.append(sid)
         if sid not in pm.proposed_ids:

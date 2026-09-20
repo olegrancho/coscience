@@ -90,7 +90,8 @@ class Service:
                       artifacts_bound: list | None = None,
                       artifacts_create: list | None = None,
                       status: str = "proposed", from_idea: str = "",
-                      title: str = "", summary: str = "", rationale: str = "") -> str:
+                      title: str = "", summary: str = "", rationale: str = "",
+                      by: str = "") -> str:
         if not plan:
             raise ValueError("plan must have at least one suggested step")
         if (self.substrate.sprint_dir(id) / "sprint.md").is_file():
@@ -116,6 +117,10 @@ class Service:
             model=self._worker_default(program),
             title=str(title or ""), summary=str(summary or ""), rationale=str(rationale or ""),
         )
+        # Record who wrote it, so the program page can tell a proposal the viewer made
+        # from one the PM brought them (P3). save_sprint only backfills a history entry
+        # when there is none, so this is the one that survives.
+        set_status(sprint, sprint.status, by=by, action="propose")
         self.substrate.save_sprint(sprint)
         if from_idea:
             self._promote_idea(program, from_idea, id)

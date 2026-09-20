@@ -110,6 +110,10 @@ def set_status(sprint: "Sprint", new_status: "SprintStatus",
 HUMAN_ACTIONS = frozenset({
     "approve", "run", "send_back", "reject", "park", "unpark", "cancel", "resume",
     "demote", "restore", "reallocate", "stop", "to_human",
+    # A sprint's birth. The PM's proposals carry by="pm" and are caught before this;
+    # what is left is a human writing one in the dashboard, which must not highlight
+    # itself back at them — while a PM proposal is exactly what should.
+    "propose",
 })
 
 

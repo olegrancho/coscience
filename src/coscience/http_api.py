@@ -363,9 +363,11 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc))
 
     @api.post("/sprints", status_code=201)
-    def submit_sprint(body: SprintSubmit) -> dict:
+    def submit_sprint(body: SprintSubmit,
+                      user: "auth.User | None" = Depends(current_user)) -> dict:
         try:
             service.submit_sprint(
+                by=(user.username if user else ""),
                 id=body.id, goals=body.goals,
                 plan=list(body.plan),
                 program=body.program, priority=body.priority,
