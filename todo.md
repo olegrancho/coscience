@@ -1,39 +1,26 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 126
+version: 128
 last_updated: 2026-09-19
 ---
 
 # To QC
 
-### O12. Review the server cards against real servers
-
-The servers table is now name, CPU and GPU as filled slots, programs, and one status
-word; the row itself opens the server's configuration, which carries Remove, Keep and
-a display name. Leftover run directories are one line under the table.
-
-**Check:** the Compute page — every server should read at a glance, with the pips
-matching the numbers beside them and the status word matching what the server is
-doing. Hover anything with a dotted underline: the status gives the whole truth
-(since when, why, waiting on what), a program id gives its title, the GPU pips give
-each card, the leftover line gives the paths. Clicking any row must open that
-server's dialog; Remove and Keep must work from inside it and never appear for this
-machine. Give a server a display name and it should read that way everywhere on the
-page while the sprint records keep the filed-under name.
-
-# To Do (sprint)
-
 ### O9. Keep per-program host notes the PM maintains
 
-Give each program a notes page per host — its Python environments and what the host
-is good for in this program's work — that the PM curates and every worker agent
-placed there reads.
+Each program keeps one note per server at `programs/<id>/hosts/<server>.md`: a worker
+placed there reads it, what a worker learns comes back as a report, and the PM folds
+the reports in. A human reads and edits the notes on the program page.
 
-Probed facts are the same for every program; what a host is for is not.
-A shared server can be fungible CPU for one program's batch runs while its old GPU
-driver and C library rule out current PyTorch builds for another. Worker agents find such quirks and report them; the PM folds the reports
-into the notes, so the next sprint on that host starts from what the last one
-learned.
+**Check:** the new "server notes" card on a program page — each server it runs on, the
+note, and any reports waiting. Write a note by hand and confirm the next sprint placed
+on that server has it in its instructions. Then let a sprint finish with `host_notes` in
+its `finished.json` and watch the report appear on the card and, after the next planner
+cycle, be folded into the note (the cycle's actions say "Host notes updated"). The
+planner must write a note only for a server the program may use; a server it may not
+shows as a skip line instead.
+
+# To Do (sprint)
 
 # To Do (backlog)
 
@@ -281,6 +268,31 @@ Any server someone onboards becomes schedulable compute — its CPUs, memory and
 GPU with its VRAM join one pool — and every sprint lands on a machine its request
 actually fits.
 
+### O22. Tidy the edges of the server notes
+
+Three small ways the notes misbehave at the margins, all found in review and none of
+them data loss.
+
+A server a program may no longer use keeps its pending reports forever: the planner is
+told to fold them in, the apply refuses because the program has no access, and the
+cycle report carries a skip line every cycle from then on. A human can clear it from
+the program page, and nothing says so. The human save has no pool check at all, so a
+mistyped host in a URL can create a note the planner may then never touch. And two
+people (or a person and the planner) editing one note overwrite each other silently —
+the save carries no version. The card also has no entry in the page's section nav,
+because that list is built before the card knows whether it will draw anything.
+
+### O23. Stop every program page polling the whole ledger
+
+The server-notes card reads the ledger to know which servers a program may use, so every
+open program page now asks for it every ten seconds.
+
+`ledger_status` parses every sprint on the box on each call — `blockers_by_host` starts by
+loading them all — so this is a real cost that grows with the substrate, paid per open
+tab. The card needs three fields per server (name, display name, program access). Either
+a smaller endpoint, or a slower poll for this query, or the program payload carrying the
+servers it may use.
+
 ### O21. Show the agent a launch command that lets go of the ssh channel
 
 Put a launch line in the worker's instructions that returns at once, instead of leaving
@@ -414,6 +426,10 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### O12. Review the server cards against real servers
+
+A server is one row — name, cores and cards as filled slots, programs, one status word — with everything else on hover, the row itself opening its configuration, and an optional display name so "local" can read as whatever the machine is called.
+
 ### O19. Collect a stopped job's outputs, or say they were left behind
 
 Stopping a sprint copies the job's declared paths into the sprint's `collected/` and says
@@ -453,7 +469,3 @@ A sprint reserved for a remote server runs there: its agent launches a job over 
 ### O18. Stop a running sprint from the dashboard
 
 Stop ends a running sprint's agent and any job on its host, keeps what it produced, and cancels it with a note; verified live against a remote job.
-
-### O13. Document the remote-server switches for deployments
-
-CLAUDE.md names the two remote-server switches, what each turns on, which processes must have them, and how to turn one off; this host's setup file says where it sets them.
