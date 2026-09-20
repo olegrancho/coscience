@@ -1,49 +1,70 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 131
+version: 135
 last_updated: 2026-09-20
 ---
 
 # To QC
 
+### P3. Highlight only the experiments the platform moved
+
+A sprint summary now says who made its last status change, and the highlight skips a
+change the viewer made themselves.
+
+**Check:** on a program page, approve or park an experiment — its row must not light up.
+Then let the planner release one, or a worker finish one, and that row must. `curl
+/api/programs/<id>` shows `last_status_by` per sprint: human / pm / platform.
+
+### P4. Let a human restore a canceled experiment
+
+A canceled experiment has a Restore button that returns it to where it was canceled
+from, keeping goals, plan, comments and votes.
+
+**Check:** cancel a proposed one and restore it — back to proposed, record intact. Cancel
+an approved one and restore it — back to **approved**, not proposed. Stop one mid-run and
+restore it — back to queued, and it must not be stopped again on the next beat. Demote one
+and try: it must refuse, saying the idea is where its life continued.
+
 # To Do (sprint)
 
-# To Do (backlog)
+### E1. Replace the planner's reopen with a hold that keeps the approval
 
-## A. Memory management
+Take `reopen` off the planner and give it a hold instead: the sprint stays approved,
+carries the planner's reason, and simply is not released.
 
-A sprint's memory is reserved before it runs, so two jobs on one server cannot
-promise themselves the same RAM.
+The planner can un-approve but cannot approve — only a human can — so reopen is a
+one-way door that destroys an authorization it cannot restore. All three reopens ever
+recorded undid a human approval, one of them eight minutes after the click and twice on
+the same sprint; the approval is itself what wakes the cycle that reverses it. Holding
+was always the right move (an approved sprint is the planner's queue and holding costs
+nothing), but holding is a non-action and leaves no trace, so "not yet" had no way to
+show itself and the planner reached for the lever that did. The hold is that expression:
+sprint page reads `approved · held by the planner` with the reason and when, Release
+clears it, and a human can clear it too.
 
-### A1. Reserve memory for every sprint
+### E2. Keep a planner cycle's reasoning after the next cycle runs
 
-Declare `memory_gb` on every server, this machine included, and give each server a
-default reservation for sprints that do not ask for memory.
+Write each cycle's reasoning somewhere it survives, and put a sprint's share of it on
+that sprint.
 
-The ledger gates memory only where a server declares it: this machine declares none, so
-memory is never counted here, and a sprint that asks for none reserves none on any server
-even if it uses tens of GB. With memory declared everywhere and a default per server
-(e.g. 4 GB) charged when a request omits `memory_gb`, the ledger reflects every sprint.
-The PM's "never request: memory_gb" line then goes away, and the capacity editor and the
-server dialog show and edit the default. Written up as O16 before this block existed.
+`report.md` is overwritten every cycle, so the why behind any planner decision is gone
+as soon as the next cycle runs — the reasoning for a reversal was already unrecoverable
+hours later, leaving a status change nobody could explain. The per-cycle actions are
+kept in `pm.md` activations, but only as lists of ids: what was done, never why. A
+sprint touched by a cycle should carry the sentence that touched it, and the cycle's
+full report should be retrievable rather than replaced.
 
-Details: [docs/superpowers/plans/2026-09-15-o16-o17-memory.md](docs/superpowers/plans/2026-09-15-o16-o17-memory.md)
+### E3. Stop flagging a declined action as an unbacked claim
 
-### A2. Tell the worker agent its memory budget
+Teach the unbacked-claim check that "nothing to release" is a denial, so declining to
+act stops being reported as a false claim of acting.
 
-Add a memory line to the worker agent's instructions: the amount its sprint reserved and
-that its processes must stay under it.
-
-Blocked on A1, which makes every sprint's reservation real. The instructions already
-carry a GPU section naming the cards and VRAM share. Memory gets the same treatment on
-trust, with no enforcement: nothing stops a job from using more. Enforcing it (a cgroup
-or `MemoryMax`) and checking free memory at grant time stay unplanned until a job
-actually runs a server out of memory. Written up as O17 before this block existed.
-
-## B. Disk space
-
-No machine is given work it has no room for, and a machine that is running out says
-so on the dashboard before it stops working.
+`_NEGATION_RE` (`pm_agent.py`) knows `not`, `n't` and `never` — not `nothing`, `no` or
+`none`. So the sentence "No sprint is in the approved-and-waiting state this cycle, so
+there is nothing for me to release" is stamped "⚠️ the report above says it released an
+approved sprint, but no such action was submitted". It has fired on 18 of 29 recorded
+cycles, which is a safeguard against the planner taking credit it did not earn now
+spending most of its firings punishing the planner for honesty.
 
 ### B1. Warn on the pulse zone when a machine is low on disk
 
@@ -82,6 +103,48 @@ pid (`pm_agent.py`, "this loop IS the process doing the call"), and the loop out
 every cycle — so once an end event is lost, to a full disk or a `kill -9`, the row can
 never retire. The fix is a token, or a rule, that belongs to the call rather than to
 the process that hosts it.
+
+# To Do (backlog)
+
+## A. Memory management
+
+A sprint's memory is reserved before it runs, so two jobs on one server cannot
+promise themselves the same RAM.
+
+### A1. Reserve memory for every sprint
+
+Declare `memory_gb` on every server, this machine included, and give each server a
+default reservation for sprints that do not ask for memory.
+
+The ledger gates memory only where a server declares it: this machine declares none, so
+memory is never counted here, and a sprint that asks for none reserves none on any server
+even if it uses tens of GB. With memory declared everywhere and a default per server
+(e.g. 4 GB) charged when a request omits `memory_gb`, the ledger reflects every sprint.
+The PM's "never request: memory_gb" line then goes away, and the capacity editor and the
+server dialog show and edit the default. Written up as O16 before this block existed.
+
+Details: [docs/superpowers/plans/2026-09-15-o16-o17-memory.md](docs/superpowers/plans/2026-09-15-o16-o17-memory.md)
+
+### A2. Tell the worker agent its memory budget
+
+Add a memory line to the worker agent's instructions: the amount its sprint reserved and
+that its processes must stay under it.
+
+Blocked on A1, which makes every sprint's reservation real. The instructions already
+carry a GPU section naming the cards and VRAM share. Memory gets the same treatment on
+trust, with no enforcement: nothing stops a job from using more. Enforcing it (a cgroup
+or `MemoryMax`) and checking free memory at grant time stay unplanned until a job
+actually runs a server out of memory. Written up as O17 before this block existed.
+
+## B. Disk space
+
+No machine is given work it has no room for, and a machine that is running out says
+so on the dashboard before it stops working.
+
+## E. The planner's record
+
+What the planner decided about a sprint is readable on that sprint, truthful about what
+it actually did, and never a human authorization it has no power to give back.
 
 ## D. Wiki content health
 
@@ -389,32 +452,6 @@ dot. The same locale formatting is used for the exact times in tooltips and the 
 (`components/ui.tsx`), the call log's timestamps (`CallLog.tsx`) and the servers card
 (`HostsCard.tsx`). One shared formatter used everywhere fixes all of them, and does not
 depend on which locale a viewer's browser reports.
-
-### P3. Highlight only the experiments the platform moved
-
-Highlight an experiment whose status the PM or its worker changed, and not one the human
-operator just moved themselves.
-
-The highlight fires on any status change: `isUnseen` (`sprintSeen.ts`) compares the
-sprint's last status time against a per-browser "seen" time, so approving or parking an
-experiment makes the row announce itself back at the person who did it. The transition's
-actor is already recorded in each `status_history` entry, but the sprint summary the
-program page reads carries only `last_status_at` — so the list payload needs the actor
-beside the time, and the highlight then keys on it.
-
-### P4. Let a human restore a canceled experiment
-
-Give a canceled experiment a way back — to proposed, or to wherever it was canceled
-from — instead of leaving cancel as the one irreversible human action.
-
-Cancel is a dead end today. `resume_sprint` re-opens `done` and `failed` only;
-`edit_sprint` treats canceled as read-only; nothing else moves a sprint out of it. So
-a misclick, or a change of mind, costs the whole record — its goals, plan, threads and
-votes — and the only recovery is to propose it again by hand. Cancel is reached from
-four places (reject a proposed/approved/queued one, cancel a parked one, demote, and a
-human stop mid-run), and they do not all deserve the same way back: a stopped
-mid-execution sprint is not the same as one rejected before it ever ran. Deciding which
-restore each earns is most of this item; the button is the small part.
 
 ## Q. Code rot
 
