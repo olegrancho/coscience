@@ -322,7 +322,7 @@ export default function SprintDetail() {
     try {
       await api.clearSprintHold(id);
       notifications.show({ color: "teal", title: "Hold cleared",
-        message: "Still approved, and releasable now — by you or the planner." });
+        message: "Still approved, and releasable now — by you or the PM." });
       refresh();
     } catch (e) { notifications.show({ color: "red", title: "Couldn't clear the hold", message: String(e) }); }
   };
@@ -463,9 +463,9 @@ export default function SprintDetail() {
             <span style={{ fontSize: 12, color: "var(--st-queued)" }}>waiting for a compute slot…</span>
           )}
           {s.hold?.why && (
-            <Tooltip label="The planner is deliberately not releasing this yet. It stays approved — clear the hold, or Run it, to override." withArrow openDelay={300}>
+            <Tooltip label="The PM is deliberately not releasing this yet. It stays approved — clear the hold, or Run it, to override." withArrow openDelay={300}>
               <span style={{ fontSize: 12, color: "var(--ink-faint)", borderBottom: "1px dotted var(--hairline)", cursor: "help" }}>
-                · held by the planner
+                · held by the PM
               </span>
             </Tooltip>
           )}
@@ -479,7 +479,7 @@ export default function SprintDetail() {
           <Card withBorder padding="sm" mt={10} style={{ background: "var(--paper)" }}>
             <Group justify="space-between" wrap="nowrap" align="flex-start">
               <div>
-                <Text size="sm" fw={600}>Held by the planner — approved, not released yet</Text>
+                <Text size="sm" fw={600}>Held by the PM — approved, not released yet</Text>
                 <Text size="sm" mt={3} style={{ color: "var(--ink-muted)", lineHeight: 1.5 }}>
                   {s.hold.why}
                 </Text>
@@ -487,7 +487,7 @@ export default function SprintDetail() {
                   <Text size="xs" c="dimmed" mt={4}>said <AbsTime at={s.hold.at} /></Text>
                 ) : null}
               </div>
-              <Tooltip label="Lift the hold. The sprint stays approved and can be released — by you with Run, or by the planner on its next cycle." withArrow openDelay={300}>
+              <Tooltip label="Lift the hold. The sprint stays approved and can be released — by you with Run, or by the PM on its next cycle." withArrow openDelay={300}>
                 <Button size="xs" variant="default" onClick={clearHold}>Clear hold</Button>
               </Tooltip>
             </Group>

@@ -28,6 +28,7 @@ RECENT_HISTORY = 8      # completed/failed sprints shown with detail
 RESULT_CHARS = 800      # per-result / per-error excerpt cap
 GOAL_CHARS = 400        # per-history-entry goal excerpt cap
 PRIOR_SHOWN = 20        # prior proposal ids rendered; the full list stays in pm.md
+HOLD_WHY_CHARS = 200    # a hold's reason, shown back to the planner that wrote it
 
 
 def _clip(text: str, limit: int, source: str = "") -> str:
@@ -71,8 +72,13 @@ def render_prompt(context: PMContext) -> str:
     def _lines(items, fmt):
         return "\n".join(fmt(i) for i in items) or "(none)"
 
-    open_block = _lines(context.open_sprints,
-                        lambda s: f"- {s['id']} [{s['status']}, priority {s.get('priority', 0)}]: {s['goals']}")
+    def _open_line(s):
+        # A held sprint says so, and says what YOU said: the hold is the planner's own
+        # note to its next cycle, and it is useless if the next cycle cannot read it.
+        held = f', HELD by PM: "{_clip(s["hold"], HOLD_WHY_CHARS)}"' if s.get("hold") else ""
+        return f"- {s['id']} [{s['status']}, priority {s.get('priority', 0)}{held}]: {s['goals']}"
+
+    open_block = _lines(context.open_sprints, _open_line)
     done_block = _history_block(
         context.completed,
         lambda s: (f"- {s['id']}: {_clip(s['goals'], GOAL_CHARS)}"
@@ -237,8 +243,10 @@ run and in what order. TO RELEASE ONE INTO PRODUCTION, COPY ITS EXACT ID INTO TH
 next thing (dependencies satisfied, worth the compute); retune ordering with priority in
 sprint_edits. You need not release them all at once — sequence them as results land. And if
 an approved sprint no longer makes sense to run or needs serious rework, put its id in
-"holds" with a one-sentence reason, and it stays approved, unreleased, with your reason
-shown on it. You CANNOT approve a sprint — only a human can — so you must never try to
+"holds" with a ONE-SENTENCE rationale for keeping it waiting, and it stays approved,
+unreleased, with that rationale shown on it. A sprint you already hold is marked HELD in
+OPEN SPRINTS with what you last said: re-state it (revised if the reason has changed) for
+as long as it stays held, so a human reading it always sees why it is still waiting. You CANNOT approve a sprint — only a human can — so you must never try to
 send one back to 'proposed'; holding is how you say "not yet" without spending a decision
 that is not yours to spend. If an approved sprint should not run AT ALL, hold it saying so
 and recommend cancelling it in your report; the human cancels.
@@ -338,8 +346,11 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
       "artifacts_create": [{{"title": "<new artifact this sprint should produce>", "kind": "md|data|figure|page"}}]}}
   ],
   "holds": [{{"id": "<id of an APPROVED sprint (see OPEN SPRINTS) you are deliberately NOT
-                 releasing yet>", "why": "<one sentence a human will read on that sprint:
-                 what it is waiting for, or why it may no longer be worth running>"}}],
+                 releasing yet>", "why": "<EXACTLY ONE SENTENCE, no more — the rationale a
+                 human reads on that sprint to understand why it is still waiting: what it
+                 is waiting FOR, or why it may no longer be worth running. Anything past
+                 the first sentence is discarded. Re-state it each cycle it stays held, so
+                 the reason stays current rather than going stale.>"}}],
   "release_ids": ["<id of an APPROVED sprint to release into production now — it becomes
                  'queued' and the scheduler runs it as compute frees. Release the ones whose
                  time has come; hold the rest. Only approved sprints. Omit/empty if none.>"],

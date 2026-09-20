@@ -35,7 +35,24 @@ def program_cap(program) -> int:
     return program.max_proposed or MAX_PROPOSED
 
 
-HOLD_REASON_MAX = 400   # a hold is one sentence of why, not an essay
+HOLD_REASON_MAX = 400   # hard cap, after the one-sentence trim below
+
+
+def hold_reason(text: str) -> str:
+    """The rationale for keeping a sprint held, trimmed to its FIRST SENTENCE.
+
+    One sentence is the whole point: it is read at a glance on the sprint and beside
+    every other open sprint in the planner's own context, and a paragraph there stops
+    being read at all. Enforced here rather than asked for in the prompt, because a
+    prompt instruction is a request and this is a guarantee."""
+    text = " ".join((text or "").split())
+    # A sentence ends at .!? followed by a capital, or at the end of the text. Requiring
+    # the capital is what keeps "Lead Finder (i.e. the baseline) has not reported" whole
+    # — a bare "[.!?]\s" cut it at "i.e.".
+    m = re.search(r"[.!?](?:\s+(?=[A-Z])|\s*$)", text)
+    if m:
+        text = text[:m.start() + 1]
+    return text[:HOLD_REASON_MAX].rstrip()
 
 MAX_EDGE_OPS = 100   # bound the edges the PM may add per cycle (headroom for lineage back-fill)
 
@@ -299,7 +316,13 @@ def gather_context(substrate, program_id: str) -> PMContext:
                           SprintStatus.QUEUED, SprintStatus.EXECUTING,
                           SprintStatus.HIBERNATED):
             open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals,
-                                 "priority": s.priority})
+                                 "priority": s.priority,
+                                 # A hold the PM itself set last cycle. Without it the
+                                 # planner cannot tell a sprint it is already waiting on
+                                 # from one it has never considered — so it would either
+                                 # re-hold blindly or forget and release early, and a
+                                 # human clearing a hold would be invisible to it.
+                                 "hold": str((s.hold or {}).get("why") or "")})
         elif s.status == SprintStatus.ESCALATED:
             # A human-level escalation is not the PM's to answer (see
             # docs/sprint-lifecycle.md) — only "pm" ones reach its context.
@@ -1209,7 +1232,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         if sid in released:
             hold_skipped.append({"id": sid, "why": "released this cycle"})
             continue
-        sp.hold = {"why": why[:HOLD_REASON_MAX], "at": time.time(), "by": "pm"}
+        sp.hold = {"why": hold_reason(why), "at": time.time(), "by": "pm"}
         substrate.save_sprint(sp)
         held.append(sid)
 

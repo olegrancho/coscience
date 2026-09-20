@@ -239,7 +239,7 @@ describe("the planner's hold", () => {
   it("shows the planner's reason on the sprint it is about", async () => {
     renderSprintPage(sprint({ status: "approved", agent_running: false, hold: held }));
 
-    expect(await screen.findByText(/Held by the planner — approved, not released yet/)).toBeTruthy();
+    expect(await screen.findByText(/Held by the PM — approved, not released yet/)).toBeTruthy();
     expect(screen.getByText(/Waiting on checkpoint recovery/)).toBeTruthy();
     // The status itself must still read approved: a hold never moves the sprint.
     expect(screen.getByText("approved")).toBeTruthy();
@@ -273,7 +273,7 @@ describe("the planner's hold", () => {
   it("shows nothing at all when the sprint is not held", async () => {
     renderSprintPage(sprint({ status: "approved", agent_running: false }));
     await screen.findByText("Train the model");
-    expect(screen.queryByText(/Held by the planner/)).toBeNull();
+    expect(screen.queryByText(/Held by the PM/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Clear hold" })).toBeNull();
   });
 

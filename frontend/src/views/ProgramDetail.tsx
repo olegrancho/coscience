@@ -384,7 +384,7 @@ export default function ProgramDetail() {
                         </Text>
                       ) : null}
                       {s.hold?.why && (
-                        <Tooltip label={`Held by the planner: ${s.hold.why}`} withArrow openDelay={300} multiline w={280}>
+                        <Tooltip label={`Held by the PM: ${s.hold.why}`} withArrow openDelay={300} multiline w={280}>
                           <Badge size="xs" color="gray" variant="light" style={{ cursor: "help" }}>held</Badge>
                         </Tooltip>
                       )}

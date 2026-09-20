@@ -98,3 +98,101 @@ def test_the_clear_route_404s_and_422s(substrate):
     r = client.post("/api/sprints/s1/hold/clear")
     assert r.status_code == 422
     assert "not held" in r.json()["detail"]
+
+
+# --- the planner has to be able to read its own hold -------------------------------
+
+def test_the_planner_sees_a_sprint_it_is_already_holding(substrate):
+    """Found at QC. Without this the planner cannot tell a sprint it is waiting on from
+    one it has never considered, so it re-holds blindly or forgets and releases early —
+    and a human clearing a hold is invisible to it."""
+    from coscience.pm_agent import gather_context
+    from coscience.pm_claude import render_prompt
+
+    svc = _svc(substrate, hold={"why": "waiting on the recovery run", "at": 1.0, "by": "pm"})
+    ctx = gather_context(svc.substrate, "p")
+    row = next(s for s in ctx.open_sprints if s["id"] == "s1")
+    assert row["hold"] == "waiting on the recovery run"
+    assert 'HELD by PM: "waiting on the recovery run"' in render_prompt(ctx)
+
+
+def test_an_unheld_sprint_says_nothing_about_a_hold(substrate):
+    from coscience.pm_agent import gather_context
+    from coscience.pm_claude import render_prompt
+
+    svc = _svc(substrate)
+    ctx = gather_context(svc.substrate, "p")
+    assert next(s for s in ctx.open_sprints if s["id"] == "s1")["hold"] == ""
+    assert "HELD by PM" not in render_prompt(ctx)
+
+
+def test_a_cleared_hold_disappears_from_the_planners_view(substrate):
+    """A human's override has to reach the planner, or it re-applies the hold."""
+    from coscience.pm_agent import gather_context
+    from coscience.pm_claude import render_prompt
+
+    svc = _svc(substrate, hold={"why": "waiting on the recovery run", "at": 1.0, "by": "pm"})
+    svc.clear_sprint_hold("s1", by="olegs")
+    assert "HELD by PM" not in render_prompt(gather_context(svc.substrate, "p"))
+
+
+def test_a_hold_does_not_wake_a_cycle(substrate):
+    """Holding is the planner's own note, not new input — it must not re-trigger the
+    planner and buy itself another call."""
+    from coscience.pm_agent import context_fingerprint, gather_context
+
+    svc = _svc(substrate)
+    before = context_fingerprint(gather_context(svc.substrate, "p"))
+    s = substrate.load_sprint("s1")
+    s.hold = {"why": "waiting on the recovery run", "at": 1.0, "by": "pm"}
+    substrate.save_sprint(s)
+    assert context_fingerprint(gather_context(svc.substrate, "p")) == before
+
+
+# --- the rationale is one sentence, and the platform guarantees it ------------------
+
+@pytest.mark.parametrize("written,kept", [
+    # everything past the first sentence is dropped
+    ("Waiting on checkpoint recovery. It also needs the seed ensemble. And more.",
+     "Waiting on checkpoint recovery."),
+    # no full stop at all is still one sentence
+    ("Waiting on the recovery run", "Waiting on the recovery run"),
+    # line breaks and runs of whitespace collapse
+    ("  Waiting on\n  the recovery run.  Second dropped.  ", "Waiting on the recovery run."),
+    # an abbreviation is not a sentence end: a bare [.!?]\s cut this at "i.e."
+    ("Held because Lead Finder (i.e. the baseline) has not reported yet.",
+     "Held because Lead Finder (i.e. the baseline) has not reported yet."),
+    # nor is a decimal point
+    ("The hit-rate is 0.847 and that settles it.", "The hit-rate is 0.847 and that settles it."),
+    ("Why bother? The result already answers it.", "Why bother?"),
+])
+def test_a_hold_rationale_is_trimmed_to_one_sentence(written, kept):
+    from coscience.pm_agent import hold_reason
+    assert hold_reason(written) == kept
+
+
+def test_a_very_long_single_sentence_is_still_capped():
+    from coscience.pm_agent import HOLD_REASON_MAX, hold_reason
+    assert len(hold_reason("x" * 900)) == HOLD_REASON_MAX
+
+
+def test_the_apply_path_stores_only_the_first_sentence(substrate):
+    """The prompt asks for one sentence; this is what makes it true."""
+    from coscience.pm_agent import pm_beat
+    from coscience.pm_reasoner import FakeReasoner, PMCycleOutput
+
+    svc = _svc(substrate)
+    pm_beat(substrate, "p", FakeReasoner([PMCycleOutput(report="r", holds=[
+        {"id": "s1", "why": "Waiting on the recovery run. Plus a second thought."}])]),
+        force=True)
+    assert substrate.load_sprint("s1").hold["why"] == "Waiting on the recovery run."
+
+
+def test_the_prompt_asks_for_exactly_one_sentence(substrate):
+    from coscience.pm_agent import gather_context
+    from coscience.pm_claude import render_prompt
+    # The prompt wraps, so compare on collapsed whitespace rather than raw text.
+    p = " ".join(render_prompt(gather_context(_svc(substrate).substrate, "p")).split())
+    assert "EXACTLY ONE SENTENCE, no more" in p
+    assert "Anything past the first sentence is discarded" in p
+    assert "Re-state it each cycle it stays held" in p
