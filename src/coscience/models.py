@@ -97,6 +97,31 @@ def set_status(sprint: "Sprint", new_status: "SprintStatus",
     sprint.status = new_status
 
 
+# Every verb a human reaches a transition by, across the service API and an
+# escalation answer. A human action is recorded with `by` = their username, which
+# is "" on a dashboard with no login — so the verb, not `by`, is what identifies
+# them. "run" and "resume" appear here AND as the PM's own verbs; `by == "pm"`
+# settles those, and is checked first.
+HUMAN_ACTIONS = frozenset({
+    "approve", "run", "send_back", "reject", "park", "unpark", "cancel", "resume",
+    "demote", "restore", "reallocate", "stop", "to_human",
+})
+
+
+def status_actor(entry: dict) -> str:
+    """Who made this status_history transition: "human", "pm" or "platform".
+
+    Derived from what is already recorded, so it reads sprints written before this
+    existed. "platform" covers the worker and the dispatcher — every transition
+    nobody asked for: executing, done, failed, hibernate, and an agent's escalate."""
+    by = str(entry.get("by") or "")
+    if by == "pm":
+        return "pm"
+    if by == "dispatcher":
+        return "platform"
+    return "human" if str(entry.get("action") or "") in HUMAN_ACTIONS else "platform"
+
+
 @dataclass
 class ChatThread:
     """One interactive PM chat: a resumable Claude session in the program workdir.

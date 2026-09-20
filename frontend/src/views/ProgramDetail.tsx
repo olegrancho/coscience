@@ -366,7 +366,7 @@ export default function ProgramDetail() {
               <Stack gap={2}>
                 {shown.map((s) => (
                   <div key={s.id}
-                    className={isUnseen(s.id, s.last_status_at) ? "sprint-unseen" : undefined}
+                    className={isUnseen(s.id, s.last_status_at, s.last_status_by) ? "sprint-unseen" : undefined}
                     style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 6px", borderBottom: "1px solid var(--hairline)" }}>
                     <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
                       <Link to={`/sprints/${s.id}`} style={{ minWidth: 0, textDecoration: "none", color: "inherit" }}>

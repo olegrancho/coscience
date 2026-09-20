@@ -19,7 +19,7 @@ from coscience import graph, host_health, host_removal, threads
 from coscience.artifacts import DESCRIPTION_FILE, FIGURE_DESCRIPTION_NOTE
 from coscience.ledger import Ledger
 from coscience.models import (DEFAULT_MODEL, Sprint, SprintStatus, Program, ProgramStatus,
-                              Idea, ChatThread, set_status)
+                              Idea, ChatThread, set_status, status_actor)
 from coscience.pause import is_paused
 from coscience.resources import (GPU_KEY, GPU_VRAM_KEY, LOCAL, PLATFORM_KEYS,
                                  ResourcePool, _parse_programs, _parse_host, load_pool,
@@ -241,6 +241,14 @@ class Service:
         for rid in list(sprint.results):
             self.substrate.delete_result(rid)
         sprint.results = []
+        self._clear_for_relaunch(sprint_id)
+        set_status(sprint, SprintStatus.QUEUED, by=by, action="resume")
+        self.substrate.save_sprint(sprint)
+        self.substrate.commit(f"sprint {sprint_id}: resumed by {by or 'human'} (re-queued)")
+
+    def _clear_for_relaunch(self, sprint_id: str) -> None:
+        """Wipe everything a past life left in progress, so a re-queued sprint starts
+        as a fresh run. Shared by resume (done/failed) and restore (canceled)."""
         # Clear the completion sentinel so the fresh run must signal done anew.
         (self.substrate.sprint_dir(sprint_id) / "finished.json").unlink(missing_ok=True)
         progress = self.substrate.load_progress(sprint_id)
@@ -258,11 +266,60 @@ class Service:
         progress.escalation = {}
         progress.resume_note = ""
         progress.reallocate_to = ""
+        # A sprint canceled by a human stop still carries the stop that killed it.
+        # Left set, the very next beat would stop the restored sprint again.
         progress.stop_requested = False
         self.substrate.save_progress(progress)
-        set_status(sprint, SprintStatus.QUEUED, by=by, action="resume")
+
+    # Where a restore puts a sprint back, by the status it was canceled from. The
+    # pre-run statuses go back untouched; anything that was live when it was canceled
+    # is re-queued, because its agent is gone and its lease released — there is no
+    # "executing" left to return to, only a fresh run.
+    _RESTORE_TO = {
+        SprintStatus.PROPOSED.value: SprintStatus.PROPOSED,
+        SprintStatus.APPROVED.value: SprintStatus.APPROVED,
+        SprintStatus.QUEUED.value: SprintStatus.QUEUED,
+        SprintStatus.PARKED.value: SprintStatus.PARKED,
+        SprintStatus.EXECUTING.value: SprintStatus.QUEUED,
+        SprintStatus.ESCALATED.value: SprintStatus.QUEUED,
+        SprintStatus.HIBERNATED.value: SprintStatus.QUEUED,
+    }
+
+    def restore_sprint(self, sprint_id: str, by: str = "") -> str:
+        """Undo a cancel: put a canceled sprint back where it was canceled from, and
+        return the status it landed in. A human decision only — the PM reaches neither
+        this nor any other route out of `canceled`.
+
+        Cancel was the one human action with no way back, so a misclick cost the whole
+        record: goals, plan, threads, votes and lineage. The exception is a demoted
+        sprint, whose life continued as an idea; restoring it would leave both."""
+        sprint = self._load_sprint(sprint_id)
+        if sprint.status != SprintStatus.CANCELED:
+            raise ValueError(
+                f"can only restore a canceled sprint; {sprint_id} is {sprint.status.value}")
+        history = sprint.status_history
+        cancel_at = max((i for i, e in enumerate(history)
+                         if e.get("status") == SprintStatus.CANCELED.value), default=-1)
+        if cancel_at >= 0 and str(history[cancel_at].get("action") or "") == "demote":
+            raise ValueError(
+                f"{sprint_id} was demoted to an idea, and the idea is where its life "
+                "continued; restoring it would leave both. Promote the idea instead.")
+        was = str(history[cancel_at - 1].get("status") or "") if cancel_at > 0 else ""
+        target = self._RESTORE_TO.get(was, SprintStatus.PROPOSED)
+        if target == SprintStatus.QUEUED:
+            self._clear_for_relaunch(sprint_id)
+        else:
+            # Even a pre-run cancel can carry a pending stop (a human stop races the
+            # beat that cancels), and nothing else would ever clear it.
+            progress = self.substrate.load_progress(sprint_id)
+            if progress.stop_requested:
+                progress.stop_requested = False
+                self.substrate.save_progress(progress)
+        set_status(sprint, target, by=by, action="restore")
         self.substrate.save_sprint(sprint)
-        self.substrate.commit(f"sprint {sprint_id}: resumed by {by or 'human'} (re-queued)")
+        self.substrate.commit(
+            f"sprint {sprint_id}: restored by {by or 'human'} to {target.value}")
+        return target.value
 
     def vote_sprint(self, sprint_id: str, by: str, value: int) -> dict:
         """Record a 👍/👎 on a sprint. `value` is +1, -1, or 0 (clear). One vote
@@ -363,6 +420,7 @@ class Service:
                 "unrunnable": self._unrunnable(sprint, pool),
                 "started_at": started,
                 "last_status_at": self._last_status_at(sprint),
+                "last_status_by": self._last_status_by(sprint),
                 "model": sprint.model,
                 "activity": activity,
                 "escalation_level": escalation_level,
@@ -377,6 +435,14 @@ class Service:
         if sprint.status_history:
             return float(sprint.status_history[-1]["at"])
         return self._appeared_at(sprint)
+
+    def _last_status_by(self, sprint: Sprint) -> str:
+        """Who made the most recent status change: "human", "pm" or "platform".
+        The dashboard highlights what it did not ask for, so it needs the actor
+        beside the time (P3). A sprint with no history was never moved by anyone."""
+        if not sprint.status_history:
+            return "platform"
+        return status_actor(sprint.status_history[-1])
 
     def _activity(self, sprint_id: str) -> dict | None:
         from coscience.claude_executor import read_activity
@@ -800,6 +866,7 @@ class Service:
             "sprints": [{"id": s.id, "status": s.status.value, "goals": s.goals,
                          "title": s.title, "results": list(s.results), "model": s.model,
                          "last_status_at": self._last_status_at(s),
+                         "last_status_by": self._last_status_by(s),
                          "escalation_level": (
                              str((self.substrate.load_progress(s.id).escalation or {}).get("level") or "")
                              if s.status == SprintStatus.ESCALATED else ""),

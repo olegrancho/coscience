@@ -1,3 +1,5 @@
+import type { StatusActor } from "./api";
+
 const KEY = "coscience:sprint-seen";
 
 function load(): Record<string, number> {
@@ -11,9 +13,19 @@ function save(data: Record<string, number>) {
 
 function now() { return Date.now() / 1000; }
 
-/** True when the sprint's status changed after the user last viewed it. */
-export function isUnseen(sprintId: string, lastStatusAt: number | null): boolean {
+/** True when the sprint was moved by the platform after the user last viewed it.
+ *
+ *  The highlight is for work the viewer did not ask for — the PM releasing a sprint,
+ *  a worker finishing or failing one, an agent escalating. A transition the human made
+ *  themselves (approve, park, reject, restore) never highlights: announcing someone's
+ *  own click back at them is noise, and it drowns out the changes that matter.
+ *
+ *  An actor of undefined is a backend that predates the field; treat it as the
+ *  platform, which is how every sprint behaved before this. */
+export function isUnseen(sprintId: string, lastStatusAt: number | null,
+                         actor?: StatusActor): boolean {
   if (!lastStatusAt) return false;
+  if (actor === "human") return false;
   const seenAt = load()[sprintId];
   if (seenAt === undefined) return false;
   return lastStatusAt > seenAt;

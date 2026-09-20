@@ -1,7 +1,11 @@
 export interface CurrentUser { username: string; name: string; initials: string }
 export interface MeResponse { user: CurrentUser | null; required: boolean }
 export interface ProgramRow { id: string; title: string; status: string; goals: string }
-export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string; last_status_at: number | null; votes: VoteTally; escalation_level: "" | "pm" | "human" }
+/** Who made a sprint's last status change. The dashboard highlights what it did not
+ *  ask for, so a human's own click must be distinguishable from the platform's. */
+export type StatusActor = "human" | "pm" | "platform";
+export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string; last_status_at: number | null; last_status_by?: StatusActor;
+  votes: VoteTally; escalation_level: "" | "pm" | "human" }
 export interface PMActivation { at: number; cycle: number; triggers: string[]; submitted: string[]; forced: boolean }
 export interface Program extends ProgramRow {
   report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
@@ -43,6 +47,7 @@ export interface SprintRow {
   escalation_level: "" | "pm" | "human";
   unrunnable?: string;    // why it can never be granted (asks above total capacity); "" if it can
   started_at: number | null; last_status_at: number | null;
+  last_status_by?: StatusActor;
   model: string; activity: SprintActivity | null;
   votes: VoteTally;
 }
@@ -535,6 +540,8 @@ export const api = {
     fetch(`/api/sprints/${id}/cancel`, { method: "POST" }).then(j<Sprint>),
   resumeSprint: (id: string) =>
     fetch(`/api/sprints/${id}/resume`, { method: "POST" }).then(j<Sprint>),
+  restoreSprint: (id: string) =>
+    fetch(`/api/sprints/${id}/restore`, { method: "POST" }).then(j<Sprint>),
   voteSprint: (id: string, by: string, value: number) =>
     fetch(`/api/sprints/${id}/vote`, {
       method: "POST", headers: { "Content-Type": "application/json" },
