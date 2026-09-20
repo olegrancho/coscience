@@ -9,6 +9,7 @@ vi.mock("../api", () => ({
     updateHost: vi.fn().mockResolvedValue({}), detectLocal: vi.fn(),
     setCapacity: vi.fn().mockResolvedValue({}),
     setHostPrograms: vi.fn().mockResolvedValue({}),
+    removeHost: vi.fn().mockResolvedValue({}), keepHost: vi.fn().mockResolvedValue({}),
     listPrograms: vi.fn().mockResolvedValue([{ id: "p2" }, { id: "p4" }, { id: "p5" }]),
     // SurveyPanel's own query/mutation — given a default in this file's
     // beforeEach so it renders quietly under the probe result block.
@@ -669,6 +670,53 @@ describe("AddHostModal", () => {
       await waitFor(() => expect(api.updateHost).toHaveBeenCalled());
       const [, body] = vi.mocked(api.updateHost).mock.calls[0] as [string, Record<string, unknown>];
       expect(body).not.toHaveProperty("programs");
+    });
+  });
+  // --- O12: taking a server out of the pool moved in here, off the table row ---
+
+  describe("taking it out of the pool", () => {
+    it("removes the server, confirming with what stays behind (M5, O15)", async () => {
+      const onClose = vi.fn();
+      const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+      const withLeftover = {
+        ...REMOTE,
+        leftover: [{ sprint_id: "s9", status: "done", path: "~/coscience-runs/s9" }],
+      };
+      renderModal({ host: withLeftover, onClose });
+      fireEvent.click(screen.getByRole("button", { name: "Remove gpu1" }));
+      expect(confirmSpy.mock.calls[0][0])
+        .toMatch(/takes no new work now and leaves the pool as soon as nothing runs there/);
+      expect(confirmSpy.mock.calls[0][0]).toMatch(/~\/coscience-runs\/s9/);
+      await waitFor(() => expect(api.removeHost).toHaveBeenCalledWith("gpu1"));
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+    });
+
+    it("does not remove when the confirm is declined", () => {
+      vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderModal({ host: REMOTE });
+      fireEvent.click(screen.getByRole("button", { name: "Remove gpu1" }));
+      expect(api.removeHost).not.toHaveBeenCalled();
+    });
+
+    it("offers Keep instead, and says why, for a server already marked", async () => {
+      renderModal({ host: { ...REMOTE, removing: true } });
+      expect(screen.queryByRole("button", { name: "Remove gpu1" })).toBeNull();
+      expect(screen.getByText(/leaves the pool once nothing runs on it/)).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Keep gpu1" }));
+      await waitFor(() => expect(api.keepHost).toHaveBeenCalledWith("gpu1"));
+    });
+
+    it("offers Keep for a legacy draining server too", async () => {
+      renderModal({ host: { ...REMOTE, drain: true } });
+      expect(screen.getByText(/what is already running finishes/)).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Keep gpu1" }));
+      await waitFor(() => expect(api.keepHost).toHaveBeenCalledWith("gpu1"));
+    });
+
+    it("never offers to remove this machine", () => {
+      renderModal({ local: true, host: LOCAL, localCapacity: LOCAL.capacity });
+      expect(screen.queryByRole("button", { name: /^Remove local/ })).toBeNull();
+      expect(screen.queryByText(/Taking it out of the pool/)).toBeNull();
     });
   });
 });

@@ -13,7 +13,7 @@ vi.mock("../api", () => ({
 
 import { api } from "../api";
 import type { LedgerHost, StrandedLease } from "../api";
-import HostsCard, { hostOffer } from "./HostsCard";
+import HostsCard, { cardSlots, hostStatus, slots } from "./HostsCard";
 
 beforeAll(() => {
   window.matchMedia = window.matchMedia || (((query: string) => ({
@@ -67,30 +67,134 @@ function renderCard(errors: string[] = [], hosts: LedgerHost[] = [LOCAL, REMOTE]
   );
 }
 
-describe("hostOffer", () => {
-  it("reads cores, memory and each card", () => {
-    expect(hostOffer(LOCAL)).toBe("24 CPU cores · GPU (VRAM not declared)");
-    expect(hostOffer(REMOTE)).toBe("10 CPU cores · 50 GB memory · 10.8 GB GPU");
+describe("hostStatus", () => {
+  it("reads working when work is on it and ready when it is idle", () => {
+    expect(hostStatus(LOCAL).key).toBe("working");
+    expect(hostStatus({ ...LOCAL, leases: 0 }).key).toBe("ready");
+    expect(hostStatus({ ...LOCAL, leases: 0 }).detail).toMatch(/nothing running/);
+  });
+
+  it("reads offline for a server that is not answering, and says since when", () => {
+    const status = hostStatus({ ...REMOTE, leases: 0 });
+    expect(status.key).toBe("offline");
+    expect(status.detail).toMatch(/not answering since/);
+    expect(status.detail).toMatch(/No route to host/);
+    expect(status.detail).toMatch(/takes no new work/);      // quiet, so placement stops
+  });
+
+  it("does not say a merely failing server has stopped taking work", () => {
+    // Failing is the first 30 minutes; only quiet closes it to new grants.
+    const failing = { ...REMOTE, health: { ...REMOTE.health!, state: "failing" as const } };
+    expect(hostStatus(failing).detail).not.toMatch(/takes no new work/);
+  });
+
+  it("lets a human's decision outrank how the server is answering", () => {
+    // A removing server that is also offline reads "removing": that is the fact
+    // that decides what happens to it next.
+    expect(hostStatus({ ...REMOTE, removing: true }).key).toBe("removing");
+    expect(hostStatus({ ...REMOTE, drain: true }).key).toBe("draining");
+    expect(hostStatus({ ...REMOTE, removing: true }).detail).toMatch(/not answering since/);
+  });
+
+  it("says what a removing server waits on, or that it leaves next cycle", () => {
+    expect(hostStatus({ ...REMOTE, removing: true, waiting_on: [] }).detail)
+      .toMatch(/leaves the pool on the dispatcher's next cycle/);
+    expect(hostStatus({
+      ...REMOTE, removing: true,
+      waiting_on: [{ sprint_id: "p1-c3", status: "executing", reason: "holds a lease here" }],
+    }).detail).toMatch(/waiting on p1-c3 \(executing, holds a lease here\)/);
+  });
+
+  it("reads unchecked while remote placement is off, and says so", () => {
+    const status = hostStatus(REMOTE_OFF);
+    expect(status.key).toBe("unchecked");
+    expect(status.detail).toMatch(/remote placement is off/);
+  });
+
+  it("falls back for an older backend that sends no health at all", () => {
+    const old = { ...REMOTE_OFF, health: undefined };
+    expect(hostStatus(old).key).toBe("unchecked");
+    expect(hostStatus({ ...LOCAL, health: undefined, leases: 0 }).key).toBe("ready");
+  });
+});
+
+describe("slots", () => {
+  it("draws one pip per core, filled up to what is reserved", () => {
+    const s = slots(24, 20);
+    expect(s.pips.length).toBe(24);
+    expect(s.pips.filter((p) => p === "full").length).toBe(20);
+    expect(s.label).toBe("20/24");
+    expect(s.per).toBe(1);
+  });
+
+  it("groups cores past the pip cap instead of drawing an uncountable row", () => {
+    const s = slots(128, 32);
+    expect(s.pips.length).toBeLessThanOrEqual(32);
+    expect(s.per).toBe(4);
+    expect(s.label).toBe("32/128");          // the number stays exact
+  });
+
+  it("says nothing is declared rather than drawing an empty row", () => {
+    expect(slots(0, 0)).toEqual({ pips: [], label: "—", per: 1 });
+  });
+
+  it("rounds a partial pip up, so any use at all shows", () => {
+    expect(slots(24, 0.5).pips.filter((p) => p === "full").length).toBe(1);
+  });
+});
+
+describe("cardSlots", () => {
+  it("fills a whole card, half-fills a shared one and leaves a free one empty", () => {
+    expect(cardSlots(LOCAL)).toEqual([{ state: "full", title: "GPU 0: in use" }]);
+    expect(cardSlots(REMOTE)).toEqual([
+      { state: "part", title: "GPU 0 — X, 10.8 GB: 6 GB lent out in shares" }]);
+    const free = { ...REMOTE, gpus: [{ index: 0, model: "X", vram_gb: 10.8, whole: false, shared_gb: 0 }] };
+    expect(cardSlots(free)[0].state).toBe("empty");
   });
 });
 
 describe("HostsCard", () => {
-  it("lists every server with how it is reached, what it offers and whether it takes work", () => {
+  it("lists every server by name, with its programs and status", () => {
     renderCard();
-    // "Reached by" reads "this machine" for the local host (no ssh); "Status"
-    // reads "takes work" for health.state "local" — distinct strings, so
-    // "this machine" appears exactly once.
-    expect(screen.getByText("takes work")).toBeTruthy();
-    expect(screen.getAllByText("this machine").length).toBe(1);
-    expect(screen.getByText("10 CPU cores · 50 GB memory · 10.8 GB GPU")).toBeTruthy();
-    expect(screen.getByText("p2")).toBeTruthy();
-  });
-
-  it("labels each server's program access", () => {
-    renderCard([], [LOCAL, REMOTE, REMOTE_OFF]);
+    expect(screen.getByText("local")).toBeTruthy();
+    expect(screen.getByText("gpu1")).toBeTruthy();
     expect(screen.getByText("all")).toBeTruthy();
     expect(screen.getByText("p2")).toBeTruthy();
-    expect(screen.getByText("none")).toBeTruthy();
+    expect(screen.getByText("working")).toBeTruthy();
+    expect(screen.getByText("offline")).toBeTruthy();
+  });
+
+  it("no longer shows how a server is reached, nor a wall of offers and use", () => {
+    renderCard();
+    expect(screen.queryByText("this machine")).toBeNull();
+    expect(screen.queryByText(/10 CPU cores · 50 GB memory/)).toBeNull();
+    expect(screen.queryByText("4 of 10 CPU cores")).toBeNull();
+  });
+
+  it("shows memory under the cores only where a server declares it", () => {
+    renderCard();
+    expect(screen.getByText("0/50 GB memory")).toBeTruthy();   // gpu1 declares memory
+    expect(screen.queryByText(/GB memory/)).toBeTruthy();
+    expect(screen.getAllByText(/GB memory/).length).toBe(1);   // local declares none
+  });
+
+  it("opens the config dialog by clicking anywhere on the row", async () => {
+    renderCard();
+    fireEvent.click(screen.getByRole("button", { name: "Configure gpu1" }));
+    expect(await screen.findByText("Configure gpu1")).toBeTruthy();
+    expect((screen.getByLabelText(/^SSH target/) as HTMLInputElement).value).toBe("gpu1");
+  });
+
+  it("opens the config dialog from the keyboard", async () => {
+    renderCard();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Configure local" }), { key: "Enter" });
+    expect(await screen.findByText("Configure this machine")).toBeTruthy();
+  });
+
+  it("keeps no Remove or Keep button on the row itself (O12)", () => {
+    renderCard([], [LOCAL, { ...REMOTE, removing: true }]);
+    expect(screen.queryByRole("button", { name: "Remove gpu1" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Keep gpu1" })).toBeNull();
   });
 
   it("shows host errors from the pool file", () => {
@@ -104,25 +208,9 @@ describe("HostsCard", () => {
     expect(await screen.findByLabelText("SSH target")).toBeTruthy();
   });
 
-  it("says how each server is answering", () => {
-    renderCard();
-    expect(screen.getByText(/not answering since/)).toBeTruthy();
-    expect(screen.getByText(/No route to host/)).toBeTruthy();
-    expect(screen.getByText(/takes no new work/)).toBeTruthy();
-  });
-
-  it("shows what is in use on each server, including shared VRAM", () => {
-    renderCard();
-    expect(screen.getByText("4 of 10 CPU cores")).toBeTruthy();
-    expect(screen.getByText("GPU 0: 6 of 10.8 GB shared")).toBeTruthy();
-  });
-
-  it("lists run directories finished sprints left on a server", () => {
+  it("lists run directories left on a server, naming one no sprint explains", () => {
     renderCard();
     expect(screen.getByText(/~\/coscience-runs\/s9/)).toBeTruthy();
-  });
-
-  it("says plainly when a run directory on the server matches no sprint (O20)", () => {
     renderCard([], [LOCAL, {
       ...REMOTE,
       leftover: [{ sprint_id: "", status: "unknown", path: "~/coscience-runs/junk" }],
@@ -130,123 +218,14 @@ describe("HostsCard", () => {
     expect(screen.getByText(/~\/coscience-runs\/junk \(no sprint record\)/)).toBeTruthy();
   });
 
-  it("shows one enabled Remove button and no Drain or Take back button for an untouched remote server", () => {
-    renderCard();
-    const btn = screen.getByRole("button", { name: "Remove gpu1" }) as HTMLButtonElement;
-    expect(btn.disabled).toBe(false);
-    expect(screen.queryByRole("button", { name: "Drain gpu1" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Take back gpu1" })).toBeNull();
-  });
-
-  it("removes a server, confirming with what waiting for the pool means (M5, O15)", async () => {
-    vi.mocked(api.removeHost).mockResolvedValue({} as never);
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
-    renderCard();
-    fireEvent.click(screen.getByRole("button", { name: "Remove gpu1" }));
-    expect(confirmSpy.mock.calls[0][0]).toMatch(/takes no new work now and leaves the pool as soon as nothing runs there/);
-    expect(confirmSpy.mock.calls[0][0]).toMatch(/~\/coscience-runs\/s9/);
-    await waitFor(() => expect(api.removeHost).toHaveBeenCalledWith("gpu1"));
-  });
-
-  it("does not remove when the confirm is declined", () => {
-    vi.mocked(api.removeHost).mockClear();
-    vi.spyOn(window, "confirm").mockReturnValue(false);
-    renderCard();
-    fireEvent.click(screen.getByRole("button", { name: "Remove gpu1" }));
-    expect(api.removeHost).not.toHaveBeenCalled();
-  });
-
-  it("shows Keep instead of Remove for a server marked removing, and keeps it", async () => {
-    vi.mocked(api.keepHost).mockResolvedValue({} as never);
-    const removing = { ...REMOTE, removing: true };
-    renderCard([], [LOCAL, removing]);
-    expect(screen.queryByRole("button", { name: "Remove gpu1" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Keep gpu1" }));
-    await waitFor(() => expect(api.keepHost).toHaveBeenCalledWith("gpu1"));
-  });
-
-  it("shows Keep instead of Remove for a legacy drained server, and keeps it", async () => {
-    vi.mocked(api.keepHost).mockResolvedValue({} as never);
-    const drained = { ...REMOTE, drain: true };
-    renderCard([], [LOCAL, drained]);
-    expect(screen.queryByRole("button", { name: "Remove gpu1" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Keep gpu1" }));
-    await waitFor(() => expect(api.keepHost).toHaveBeenCalledWith("gpu1"));
-  });
-
-  it("says a removing server with nothing to wait on leaves on the dispatcher's next cycle", () => {
-    const removing = { ...REMOTE, removing: true, waiting_on: [] };
-    renderCard([], [LOCAL, removing]);
-    expect(screen.getByText(/removing — leaves the pool on the dispatcher's next cycle/)).toBeTruthy();
-  });
-
-  it("says what a removing server is still waiting on", () => {
-    const removing = {
-      ...REMOTE, removing: true,
-      waiting_on: [{ sprint_id: "p1-c3", status: "executing", reason: "holds a lease here" }],
-    };
-    renderCard([], [LOCAL, removing]);
-    expect(screen.getByText(/removing — waiting on p1-c3 \(executing, holds a lease here\)/)).toBeTruthy();
-  });
-
   it("warns about leases on servers that left the pool", () => {
     renderCard([], [LOCAL, REMOTE], [{ sprint_id: "s4", host: "old1", listed: false }]);
     expect(screen.getByText(/s4 still holds a lease on old1, which is no longer in the pool/)).toBeTruthy();
   });
 
-  it("warns differently about a stranded lease on a server that is merely not taking work (Fix C)", () => {
+  it("warns differently about a stranded lease on a server that is merely not taking work", () => {
     renderCard([], [LOCAL, REMOTE], [{ sprint_id: "s4", host: "gpu1", listed: true }]);
     expect(screen.getByText(/s4 still holds a lease on gpu1, which takes no work while remote placement is off/))
       .toBeTruthy();
-  });
-
-  it("reads 'waits for remote launch' for a checked-but-not-placeable host (Fix C)", () => {
-    renderCard([], [LOCAL, REMOTE_OFF]);
-    expect(screen.getByText("waits for remote launch")).toBeTruthy();
-  });
-
-  it("says 'takes no new work' once for a quiet, drained host (M8b)", () => {
-    const drained = { ...REMOTE, drain: true };
-    renderCard([], [LOCAL, drained]);
-    const text = screen.getByText(/not answering since/).textContent ?? "";
-    expect(text.match(/takes no new work/g)?.length).toBe(1);
-    expect(text).toMatch(/draining — takes no new work/);
-  });
-
-  it("offers neither Remove nor Keep for this machine", () => {
-    renderCard();
-    expect(screen.queryByRole("button", { name: "Remove local" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Keep local" })).toBeNull();
-  });
-
-  it("gives every row a Config button", () => {
-    renderCard();
-    expect(screen.getByRole("button", { name: "Configure local" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Configure gpu1" })).toBeTruthy();
-  });
-
-  it("opens the dialog to edit a remote server", async () => {
-    renderCard();
-    fireEvent.click(screen.getByRole("button", { name: "Configure gpu1" }));
-    expect(await screen.findByText("Configure gpu1")).toBeTruthy();
-    expect((screen.getByLabelText(/^SSH target/) as HTMLInputElement).value).toBe("gpu1");
-  });
-
-  it("opens the dialog to configure this machine", async () => {
-    renderCard();
-    fireEvent.click(screen.getByRole("button", { name: "Configure local" }));
-    expect(await screen.findByText("Configure this machine")).toBeTruthy();
-    expect(screen.queryByLabelText(/^SSH target/)).toBeNull();
-  });
-
-  it("falls back for an older backend that sends no health, use or leftover fields", () => {
-    const OLD_REMOTE: LedgerHost = {
-      name: "oldgpu", ssh: "oldgpu", placeable: false, programs: null, run_root: "~/runs",
-      capacity: { cpu: 8 }, available: {}, gpus: [], removing: false, waiting_on: [],
-    };
-    renderCard([], [LOCAL, OLD_REMOTE]);
-    expect(screen.getByText("waits for remote launch")).toBeTruthy();
-    const remove = screen.getByRole("button", { name: "Remove oldgpu" }) as HTMLButtonElement;
-    expect(remove.disabled).toBe(false);
   });
 });

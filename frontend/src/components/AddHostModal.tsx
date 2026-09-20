@@ -193,6 +193,38 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
     finally { setBusy(false); }
   };
 
+  // O12: taking a server out of the pool lives here, beside its configuration,
+  // rather than as a button on every row of the servers table.
+  const removeThis = async () => {
+    const leftover = host?.leftover ?? [];
+    // M5: name what stays behind, so the confirm prompt isn't a leap of faith.
+    const extra = leftover.length
+      ? ` It leaves behind: ${leftover.slice(0, 5).map((l) => l.path).join(", ")}`
+        + (leftover.length > 5 ? ` and ${leftover.length - 5} more.` : ".")
+      : "";
+    if (!window.confirm(
+      `Remove ${host!.name}? It takes no new work now and leaves the pool as soon as nothing runs there. `
+      + `Its run directories stay on the server.${extra}`,
+    )) return;
+    setBusy(true); setError("");
+    try {
+      await api.removeHost(host!.name);
+      qc.invalidateQueries({ queryKey: ["ledger"] });
+      onClose();
+    } catch (e) { setError(String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const keepThis = async () => {
+    setBusy(true); setError("");
+    try {
+      await api.keepHost(host!.name);
+      qc.invalidateQueries({ queryKey: ["ledger"] });
+      onClose();
+    } catch (e) { setError(String(e)); }
+    finally { setBusy(false); }
+  };
+
   // Fills in what the survey agent proposed. Direct setters (not `declare`),
   // so in add mode this doesn't clear the very probe the proposal came from.
   const use = (p: SurveyProposal) => {
@@ -486,6 +518,37 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
                     loading={busy} disabled={updateBlocked}>
               {overrideUnblocksUpdate ? "Update with the agent's overrides" : "Update configuration"}
             </Button>
+            {mode === "edit" && (
+              <Stack gap={4} style={{ borderTop: "1px solid var(--hairline)", paddingTop: 12 }}>
+                <Text size="xs" c="dimmed" fw={600}>Taking it out of the pool</Text>
+                {host!.removing || host!.drain ? (
+                  <>
+                    <Text size="xs" c="dimmed">
+                      {host!.removing
+                        ? "Marked for removal: it takes no new work and leaves the pool once nothing runs on it."
+                        : "Draining: it takes no new work, and what is already running finishes."}
+                    </Text>
+                    <Button variant="default" size="xs" style={{ alignSelf: "flex-start" }}
+                            aria-label={`Keep ${host!.name}`} loading={busy}
+                            onClick={() => void keepThis()}>
+                      Keep it in the pool
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Text size="xs" c="dimmed">
+                      It takes no new work from the moment you press this, and leaves the pool as soon
+                      as nothing runs on it. Its run directories stay on the server.
+                    </Text>
+                    <Button variant="default" color="red" size="xs" style={{ alignSelf: "flex-start" }}
+                            aria-label={`Remove ${host!.name}`} loading={busy}
+                            onClick={() => void removeThis()}>
+                      Remove this server
+                    </Button>
+                  </>
+                )}
+              </Stack>
+            )}
           </>
         )}
 
