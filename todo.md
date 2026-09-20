@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 147
+version: 148
 last_updated: 2026-09-20
 ---
 
@@ -529,6 +529,31 @@ sprints finishing overnight puts the fourth behind the fold while it is still un
 and a hidden highlight is worse than no highlight: the count says something happened and
 the list does not show it. The cap is the platform's choice, not the viewer's, so it is
 the one that must yield — a status filter the human set is theirs to live with.
+
+### P8. Show how long each running experiment has been going, on Compute
+
+Give the "running now" table on Compute a column with each experiment's elapsed run
+time, the way the pulse zone already shows it.
+
+The table lists the experiment and what it is using and nothing about time, so the one
+question you ask of a running job — how long has this been going — is the one it does
+not answer. The pulse zone answers it with `<Running since={…}/>` (`components/ui.tsx`),
+and the ledger payload already carries each lease's `granted_at`; the Compute view
+simply drops it, casting the lease to `{id, sprint_id, amounts, host}`. While there:
+the row shows the bare sprint id where every other list shows a title.
+
+### P9. Name the experiments behind the workers gauge
+
+Hovering the workers gauge in the pulse zone should say which experiments are using
+them, by title.
+
+The compute card renders one `Gauge` per capacity key and a gauge has no tooltip at
+all, so "workers 3 / 4" names nothing — you can see the platform is nearly out of
+agent slots and not what is holding them. Each lease carries its `sprint_id` and its
+`amounts`, so the three using a worker are already known; the titles are the missing
+half, and the same view resolves them for its own running-now list. Worth deciding
+whether the other gauges get the same treatment, since cpu and memory have the same
+question behind them.
 
 ## Q. Code rot
 
