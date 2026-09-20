@@ -8,7 +8,7 @@ import Md from "../components/Md";
 import { FeedbackThread } from "../components/FeedbackThread";
 import DirectoryPickerModal from "../components/DirectoryPickerModal";
 import { api } from "../api";
-import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl, ZoomableImg, isImageName, liveChatId } from "../components/ui";
+import { AbsTime, BackLink, EmptyState, ModelSelect, RelTime, StatusBadge, VoteControl, ZoomableImg, isImageName, liveChatId, sendOnCtrlEnter } from "../components/ui";
 import ProposeSprintModal from "../components/ProposeSprintModal";
 import ProgramSettingsModal from "../components/ProgramSettingsModal";
 import LineageCard from "../components/LineageCard";
@@ -311,10 +311,11 @@ export default function ProgramDetail() {
               onDelete={() => deleteGuidance(t.id)}
               onSeen={() => seenGuidance(t.id)} />
           ))}
-          <Group gap={8}>
-            <TextInput style={{ flex: 1 }} placeholder="Add a note for the AI…" value={note}
+          <Group gap={8} align="flex-end">
+            <Textarea style={{ flex: 1 }} autosize minRows={1}
+              placeholder="Add a note for the AI… (⌘↵ to send)" value={note}
               onChange={(e) => setNote(e.currentTarget.value)}
-              onKeyDown={(e) => e.key === "Enter" && addNote()} />
+              onKeyDown={sendOnCtrlEnter(addNote)} />
             <Button variant="light" color="machine" onClick={addNote}>Add</Button>
           </Group>
         </Stack>

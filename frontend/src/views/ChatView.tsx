@@ -6,7 +6,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
 import { api, type ChatScope } from "../api";
-import { BackLink, DESCRIPTION_FILE, RelTime, ZoomableImg, canvasBreakout, isImageName } from "../components/ui";
+import { BackLink, DESCRIPTION_FILE, RelTime, ZoomableImg, canvasBreakout, isImageName, sendOnCtrlEnter } from "../components/ui";
 import { UserChip, useIsMine, OTHER_SHADE } from "../auth";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -313,7 +313,7 @@ export default function ChatView() {
                     placeholder={busy ? "PM is working — wait for it to finish…" : "Ask the planner… (⌘↵ to send)"}
                     autosize minRows={2} value={draft} disabled={busy}
                     onChange={(e) => setDraft(e.currentTarget.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit(); }}
+                    onKeyDown={sendOnCtrlEnter(submit)}
                   />
                   <Button color="machine" loading={send.isPending} disabled={busy}
                           onClick={submit} style={{ alignSelf: "flex-end" }}>

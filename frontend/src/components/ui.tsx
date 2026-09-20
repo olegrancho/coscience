@@ -17,6 +17,21 @@ export const canvasBreakout: CSSProperties = {
 
 /** A stable per-browser id so 👍/👎 counts reflect distinct people without auth.
  *  Not identifying — just enough to enforce one vote per browser and toggle it. */
+/** ⌘/Ctrl+Enter sends; plain Enter is a newline.
+ *
+ *  Every multi-line box a person writes prose into uses this, so the key that sends is
+ *  the same one everywhere. Plain Enter must NOT send: these are notes and replies
+ *  people write in more than one line, and a bare Enter posts half a thought. */
+export function sendOnCtrlEnter(send: () => void) {
+  return (e: KeyboardEvent | { key: string; metaKey: boolean; ctrlKey: boolean;
+                               preventDefault: () => void }) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      send();
+    }
+  };
+}
+
 export function voterId(): string {
   const KEY = "coscience.voter";
   let v = localStorage.getItem(KEY);

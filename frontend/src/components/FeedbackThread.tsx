@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ActionIcon, Button, Checkbox, Group, Stack, Text, Textarea, Tooltip } from "@mantine/core";
 import Md from "./Md";
-import { RelTime } from "./ui";
+import { RelTime, sendOnCtrlEnter } from "./ui";
 import { UserChip, useIsMine, OTHER_SHADE } from "../auth";
 import type { FeedbackThreadT } from "../api";
 
@@ -13,6 +13,7 @@ export function FeedbackThread({ thread, onReply, onComplete, onReopen, onDelete
   const isMine = useIsMine();
   const first = thread.messages[0];
   const toggle = () => { const n = !open; setOpen(n); if (n && thread.agent_unseen) onSeen(); };
+  const reply = () => { if (draft.trim()) { onReply(draft.trim()); setDraft(""); } };
   const del = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm("Permanently delete this thread?")) onDelete();
@@ -56,9 +57,10 @@ export function FeedbackThread({ thread, onReply, onComplete, onReopen, onDelete
           {!respondsNow && <Text size="xs" c="dimmed" mt={7}>The agent will respond when this sprint runs.</Text>}
           {thread.status === "open" && (
             <Group gap={8} mt={9} align="flex-end">
-              <Textarea style={{ flex: 1 }} autosize minRows={1} placeholder="Reply…"
-                value={draft} onChange={(e) => setDraft(e.currentTarget.value)} />
-              <Button size="xs" disabled={!draft.trim()} onClick={() => { onReply(draft.trim()); setDraft(""); }}>Send</Button>
+              <Textarea style={{ flex: 1 }} autosize minRows={1} placeholder="Reply… (⌘↵ to send)"
+                value={draft} onChange={(e) => setDraft(e.currentTarget.value)}
+                onKeyDown={sendOnCtrlEnter(reply)} />
+              <Button size="xs" disabled={!draft.trim()} onClick={reply}>Send</Button>
             </Group>
           )}
         </div>

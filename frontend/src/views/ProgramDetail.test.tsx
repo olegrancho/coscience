@@ -321,3 +321,49 @@ describe("a held experiment on the list", () => {
     expect(screen.queryByText("held")).toBeNull();
   });
 });
+
+describe("guidance to the AI", () => {
+  function renderProg() {
+    vi.spyOn(api, "getProgram").mockResolvedValue({
+      id: "p", title: "Embeddings program", status: "active", goals: "g", report: "",
+      cycle: 0, sprints: [], pm_model: "", workdir: "", activations: [], last_run: null,
+      instructions: "",
+    } as never);
+    vi.spyOn(api, "listGuidance").mockResolvedValue([]);
+    vi.spyOn(api, "listIdeas").mockResolvedValue({ summary: "", ideas: [] } as never);
+    vi.spyOn(api, "listArtifacts").mockResolvedValue([]);
+    mockHostNotes();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}><MantineProvider>
+        <MemoryRouter initialEntries={["/programs/p"]}>
+          <Routes><Route path="/programs/:id" element={<ProgramDetail />} /></Routes>
+        </MemoryRouter>
+      </MantineProvider></QueryClientProvider>);
+  }
+
+  it("sends the note on Ctrl+Enter", async () => {
+    const add = vi.spyOn(api, "addGuidance").mockResolvedValue({} as never);
+    renderProg();
+    const box = await screen.findByPlaceholderText(/Add a note for the AI/);
+    fireEvent.change(box, { target: { value: "weigh the homology split" } });
+    fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(add).toHaveBeenCalledWith("p", "weigh the homology split"));
+  });
+
+  it("lets a bare Enter write a second line instead of sending", async () => {
+    // It was a single-line input where Enter sent, so a note could only ever be one
+    // line long — and half a thought went to the planner on a stray keystroke.
+    const add = vi.spyOn(api, "addGuidance").mockResolvedValue({} as never);
+    renderProg();
+    const box = await screen.findByPlaceholderText(/Add a note for the AI/);
+    fireEvent.change(box, { target: { value: "first line" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it("says which key sends", async () => {
+    renderProg();
+    expect(await screen.findByPlaceholderText(/⌘↵ to send/)).toBeTruthy();
+  });
+});
