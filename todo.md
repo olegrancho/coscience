@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 140
+version: 141
 last_updated: 2026-09-20
 ---
 
@@ -8,12 +8,17 @@ last_updated: 2026-09-20
 
 ### P3. Highlight only the experiments the platform moved
 
-A sprint summary now says who made its last status change, and the highlight skips a
-change the viewer made themselves.
+A sprint summary says who made its last status change; the highlight skips a change the
+viewer made themselves, and a sprint that appeared since they last looked now lights up.
 
-**Check:** on a program page, approve or park an experiment — its row must not light up.
-Then let the planner release one, or a worker finish one, and that row must. `curl
-/api/programs/<id>` shows `last_status_by` per sprint: human / pm / platform.
+**Check:** approve or park an experiment — its row must not light up. A sprint the PM
+proposes must, on the next poll. Opening a program for the FIRST time in a browser must
+light up nothing, however many sprints it holds (clear `coscience:program-seen` and
+`coscience:sprint-seen` in localStorage to retest that).
+
+Round 2: QC found a new proposal never highlighted — both proposal paths were born with
+an anonymous history entry, and `seedIfNew` silenced every unknown sprint on every load
+rather than only on a program's first visit.
 
 ### E3. Stop flagging a declined action as an unbacked claim
 
