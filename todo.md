@@ -1,22 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 145
+version: 146
 last_updated: 2026-09-20
 ---
 
 # To QC
-
-### E1. Replace the planner's reopen with a hold that keeps the approval
-
-The planner can no longer send an approved sprint back to proposed; it holds one instead,
-with a reason that shows on the sprint while the sprint stays approved.
-
-**Check:** `holds` appears in the planner prompt where `reopen_ids` was, and `reopen_ids`
-appears nowhere in `src/`. On a held approved sprint the page reads "Held by the planner —
-approved, not released yet" with the reason and time, the program list badges the row
-"held", Clear hold lifts it leaving the status approved, and Run still overrides it in one
-click. A hold submitted with no reason must be refused and reported as "Hold FAILED" in the
-cycle's actions, not silently dropped.
 
 # To Do (sprint)
 
@@ -533,6 +521,10 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### E1. Replace the planner's reopen with a hold that keeps the approval
+
+The planner can no longer un-approve anything: it holds an approved sprint instead, with a one-sentence rationale shown on the sprint, which release or a human clears.
+
 ### E3. Stop flagging a declined action as an unbacked claim
 
 A planner explaining that it had nothing to do is no longer stamped as claiming it acted: the check reads the whole sentence and requires a past-tense verb, so it fires on a real claim and not on an honest one.
@@ -572,8 +564,4 @@ Remove marks a server and the dispatcher takes it out of the pool once nothing i
 ### O11. Let an agent own server discovery
 
 After a probe, an agent surveys a server over SSH and proposes its capacity, cards and notes; a failed check is accepted only with the agent's written reason and an explicit human accept.
-
-### O10. Configure each server from its card
-
-Every server card has Config: a remote server is re-probed and updated in place, and this machine's dialog detects its own GPU cards.
 
