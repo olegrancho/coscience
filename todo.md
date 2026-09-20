@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 138
+version: 139
 last_updated: 2026-09-20
 ---
 
@@ -500,6 +500,18 @@ dot. The same locale formatting is used for the exact times in tooltips and the 
 (`components/ui.tsx`), the call log's timestamps (`CallLog.tsx`) and the servers card
 (`HostsCard.tsx`). One shared formatter used everywhere fixes all of them, and does not
 depend on which locale a viewer's browser reports.
+
+### P5. Come back to the experiments list, not the top of the program
+
+Returning from an experiment to its program should land on the experiments section,
+with the row you came from in view.
+
+Opening an experiment and going back costs a scroll every time, and on a program with
+33 proposed sprints the row you were reading is well down the page. The back link
+(`BackLink` in `components/ui.tsx`) navigates to a bare `/programs/<id>`, which always
+renders at the top; the experiments card already has the `sec-experiments` anchor the
+ToC scrolls to, so the target exists. Worth deciding whether it restores the exact
+scroll position or just the section, and whether the row you visited is marked.
 
 ## Q. Code rot
 
