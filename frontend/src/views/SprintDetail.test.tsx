@@ -4,6 +4,7 @@ import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import SprintDetail, { ResultCitations } from "./SprintDetail";
+import { notifications } from "@mantine/notifications";
 import { api, type Sprint } from "../api";
 
 // jsdom has no matchMedia; MantineProvider's color-scheme effect needs it.
@@ -176,5 +177,57 @@ describe("artifacts card", () => {
     expect((await screen.findByRole("link", { name: "manuscript" })).getAttribute("href"))
       .toBe("/programs/p1/artifacts/manuscript");
     expect(screen.getByRole("link", { name: "Kernel shape" })).toBeTruthy();
+  });
+});
+
+describe("restore a canceled sprint", () => {
+  const spyShow = () =>
+    vi.spyOn(notifications, "show").mockImplementation(() => "" as never);
+
+  it("offers Restore and says which status it came back as", async () => {
+    const show = spyShow();
+    vi.spyOn(api, "restoreSprint").mockResolvedValue(
+      sprint({ status: "proposed", agent_running: false }));
+    renderSprintPage(sprint({ status: "canceled", agent_running: false }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(api.restoreSprint).toHaveBeenCalledWith("sp1"));
+    // Where it lands depends on how it was canceled, so the message must come from
+    // the status the backend returned, never from a guess made here.
+    await waitFor(() => expect(show).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Restored",
+      message: expect.stringContaining("Back in proposed, where it was canceled from"),
+    })));
+  });
+
+  it("says a mid-run cancel comes back as a fresh run, not just 'queued'", async () => {
+    const show = spyShow();
+    vi.spyOn(api, "restoreSprint").mockResolvedValue(
+      sprint({ status: "queued", agent_running: false }));
+    renderSprintPage(sprint({ status: "canceled", agent_running: false }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(show).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining("fresh run"),
+    })));
+  });
+
+  it("surfaces a refusal instead of pretending it worked", async () => {
+    // A demoted sprint cannot come back: its life continued as an idea.
+    const show = spyShow();
+    vi.spyOn(api, "restoreSprint").mockRejectedValue(new Error("was demoted to an idea"));
+    renderSprintPage(sprint({ status: "canceled", agent_running: false }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(show).toHaveBeenCalledWith(expect.objectContaining({
+      color: "red", title: "Couldn't restore",
+      message: expect.stringContaining("demoted to an idea"),
+    })));
+  });
+
+  it("offers no Restore on a sprint that was never canceled", async () => {
+    renderSprintPage(sprint({ status: "done", agent_running: false }));
+    await screen.findByText("Train the model");
+    expect(screen.queryByRole("button", { name: "Restore" })).toBeNull();
   });
 });

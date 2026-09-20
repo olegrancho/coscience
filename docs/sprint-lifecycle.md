@@ -19,7 +19,7 @@ Three actors move sprints, and they own different edges:
 | `executing` | Lease granted; the worker agent is running. |
 | `parked` | Human shelved a proposed sprint. Inert, and off the PM's cap. |
 | `hibernated` | Dispatcher yielded it at a safe point to free capacity; resumes later. |
-| `done` / `failed` / `canceled` | Terminal until a human acts. |
+| `done` / `failed` / `canceled` | Terminal until a human acts. `canceled` is reversible: see `restore_sprint`. |
 
 ## Transitions
 
@@ -39,6 +39,7 @@ Three actors move sprints, and they own different edges:
 | `executing` → `done` / `failed` | worker | `worker.py:417` / `worker.py:366`, `463` |
 | `proposed` / `approved` / `queued` → `canceled` | human | `reject_sprint` |
 | `done` / `failed` → `queued` | human | `resume_sprint` — drops results, resets counters, re-queues |
+| `canceled` → where it was canceled from | **human only** | `restore_sprint` — undoes a cancel; a sprint canceled mid-run returns to `queued` as a fresh run, and one demoted to an idea is refused |
 
 ## The part that surprises people
 

@@ -6,9 +6,10 @@ export type SprintStatus =
 // the rest are secondary and live in the ⋯ overflow menu. `reject` reads as
 // "Cancel" once a sprint is queued. `park`/`unpark`/`delete` are the human shelf.
 // `resume` re-opens a done/failed sprint for more work (clears its result, re-queues).
+// `restore` undoes a cancel, putting the sprint back where it was canceled from.
 export type Action =
   | "approve" | "run" | "sendBack" | "reject" | "edit" | "demote"
-  | "park" | "unpark" | "cancel" | "resume" | "stop";
+  | "park" | "unpark" | "cancel" | "resume" | "restore" | "stop";
 
 export function availableActions(status: SprintStatus): Action[] {
   if (status === "proposed") return ["approve", "run", "edit", "reject", "demote", "park"];
@@ -19,6 +20,7 @@ export function availableActions(status: SprintStatus): Action[] {
   if (status === "escalated") return [];   // answers live in EscalationPanel, not here
   if (status === "parked") return ["unpark", "demote", "cancel"];
   if (status === "done" || status === "failed") return ["resume"];
+  if (status === "canceled") return ["restore"];
   return [];
 }
 

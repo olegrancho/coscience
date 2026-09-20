@@ -18,10 +18,12 @@ describe("availableActions", () => {
   it("offers only stop for hibernated", () => {
     expect(availableActions("hibernated")).toEqual(["stop"]);
   });
-  it("offers resume for done/failed, nothing for canceled", () => {
+  it("offers resume for done/failed", () => {
     expect(availableActions("done")).toEqual(["resume"]);
     expect(availableActions("failed")).toEqual(["resume"]);
-    expect(availableActions("canceled")).toEqual([]);
+  });
+  it("offers restore for canceled — cancel is not a dead end", () => {
+    expect(availableActions("canceled")).toEqual(["restore"]);
   });
   it("offers nothing for escalated — answers live in the escalation panel", () => {
     expect(availableActions("escalated")).toEqual([]);

@@ -306,6 +306,18 @@ export default function SprintDetail() {
       refresh();
     } catch (e) { notifications.show({ color: "red", title: "Couldn't resume", message: String(e) }); }
   };
+  const restore = async () => {
+    // Where it lands depends on where it was canceled from, and the backend is the
+    // one that knows — so report the status it comes back as, never a guess.
+    try {
+      const back = await api.restoreSprint(id);
+      notifications.show({ color: "teal", title: "Restored",
+        message: back.status === "queued"
+          ? "Back in the run queue — the worker picks it up and starts a fresh run."
+          : `Back in ${back.status}, where it was canceled from.` });
+      refresh();
+    } catch (e) { notifications.show({ color: "red", title: "Couldn't restore", message: String(e) }); }
+  };
   const setModel = async (model: string) => {
     const live = s.status === "executing" && s.agent_running;
     try {
@@ -397,6 +409,11 @@ export default function SprintDetail() {
             {actions.includes("resume") && (
               <Tooltip label="Re-open this sprint for more work — clears its result and re-queues it; the agent picks up from its scratchpad. Use it if the sprint was marked done before the work actually finished." withArrow openDelay={300}>
                 <Button color="signal" onClick={resume}>Resume</Button>
+              </Tooltip>
+            )}
+            {actions.includes("restore") && (
+              <Tooltip label="Undo the cancel — the sprint goes back where it was canceled from, keeping its goals, plan, comments and votes. One canceled mid-run returns to the queue as a fresh run." withArrow openDelay={300}>
+                <Button color="signal" onClick={restore}>Restore</Button>
               </Tooltip>
             )}
             {(actions.includes("edit") || actions.includes("demote") || actions.includes("park")
