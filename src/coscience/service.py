@@ -47,6 +47,19 @@ def _is_image_name(name: str) -> bool:
     return Path(name).suffix.lower() in _IMAGE_SUFFIXES
 
 
+LABEL_MAX = 60
+
+
+def _clean_label(value) -> str:
+    """A server's display name: one line of ordinary text, or "" to go by the name.
+    It is never an identity — nothing is keyed on it — so the only rules are that it
+    fits on a card and cannot smuggle in line breaks."""
+    text = " ".join(str(value or "").split())
+    if len(text) > LABEL_MAX:
+        raise ValueError(f"a display name is at most {LABEL_MAX} characters")
+    return text
+
+
 class Service:
     def __init__(self, repo_root, pool: ResourcePool | None = None):
         self.repo_root = Path(repo_root)
@@ -1827,7 +1840,7 @@ class Service:
                                **(ledger.pool.host(LOCAL).capacity if ledger.pool.host(LOCAL) else {})},
             "host_errors": list(ledger.pool.host_errors),
             "hosts": [
-                {"name": h.name, "ssh": h.ssh, "placeable": h.placeable,
+                {"name": h.name, "label": h.label, "ssh": h.ssh, "placeable": h.placeable,
                  "programs": list(h.programs) if h.programs is not None else None,
                  "run_root": h.run_root,
                  "capacity": dict(h.capacity),
@@ -1871,7 +1884,8 @@ class Service:
         self.substrate.commit("paused" if paused else "resumed")
         return self.ledger_status()
 
-    def set_capacity(self, capacity: dict, gpus: list | None = None) -> dict:
+    def set_capacity(self, capacity: dict, gpus: list | None = None,
+                     label: str | None = None) -> dict:
         """Replace the declared resource pool. Validates, writes
         .coscience/resources.yaml atomically, commits, and returns fresh ledger
         status. Lowering a limit below what is currently leased is allowed and
@@ -1931,6 +1945,13 @@ class Service:
                         programs = loaded.get("programs")
                     if programs is not None:
                         out["programs"] = programs
+                    # This machine's display name is not a capacity amount, so the
+                    # rebuilt document would drop it unless it is carried over.
+                    on_file = (wrapped.get("label") if isinstance(wrapped, dict) else None)
+                    if on_file is None:
+                        on_file = loaded.get("label")
+                    if on_file:
+                        out["label"] = str(on_file)
                     if gpus is None:
                         file_gpus = (wrapped.get("gpus") if isinstance(wrapped, dict) else None) \
                             or loaded.get("gpus")
@@ -1941,6 +1962,11 @@ class Service:
                             # dropping it beside a malformed one would leave no GPU at all.
                             if not ResourcePool.from_dict({"gpus": file_gpus}).host_errors:
                                 out.pop(GPU_KEY, None)
+            if label is not None:
+                if _clean_label(label):
+                    out["label"] = _clean_label(label)
+                else:
+                    out.pop("label", None)
             if gpus is not None:
                 if clean_gpus:
                     out["gpus"] = clean_gpus
@@ -2397,6 +2423,7 @@ class Service:
                     shared: bool | None = None, programs: list | None = None,
                     owner: str | None = None, notes: str | None = None,
                     capacity: dict | None = None, gpus: list | None = None,
+                    label: str | None = None,
                     probed_at: float | None = None, accept_overrides: bool = False) -> dict:
         """Edit a remote host's entry in place, keeping `drain` and anything not
         given here. A new SSH target or run root is refused unless a probe of it is
@@ -2453,6 +2480,12 @@ class Service:
                     new_entry["notes"] = notes
                 else:
                     new_entry.pop("notes", None)
+            if label is not None:
+                # What a human calls it, never what anything keys on: the name stays
+                # the identity every lease, progress file and probe is written under.
+                new_entry["label"] = _clean_label(label)
+                if not new_entry["label"]:
+                    new_entry.pop("label")
             if programs is not None:
                 self._apply_access(new_entry, programs)
             if capacity is not None:

@@ -54,6 +54,7 @@ class Host:
     shared: bool = False                                 # other people use this machine too
     owner: str = ""                                      # who to ask about it
     notes: str = ""                                      # usage rules, e.g. hours or longest job
+    label: str = ""                                      # what a human calls it; "" = go by the name
     drain: bool = False                                  # takes no new grants; running work finishes
     drained_at: float = 0.0                              # time.time() when drain was set; 0.0 = unknown/long ago
     removing: bool = False                               # marked for removal; the dispatcher deletes it once empty
@@ -122,6 +123,11 @@ class ResourcePool:
         gpu_specs = raw.pop("gpus", None)
         if gpu_specs is None and raw is not d:
             gpu_specs = d.get("gpus")
+        # Popped before `flat`, which reads every remaining top-level key as a
+        # number: a label left in there would abort the whole pool file.
+        local_label = raw.pop("label", None)
+        if local_label is None and raw is not d:
+            local_label = d.get("label")
         access_specs: dict[str, object] = {}
         for key in _ACCESS_KEYS:
             val = raw.pop(key, None)
@@ -166,7 +172,8 @@ class ResourcePool:
                 local_programs = _parse_programs("", access_specs)
             except ValueError as exc:
                 host_errors.append(str(exc))       # reported on Compute; local stays open
-        hosts = [Host(LOCAL, local_capacity, gpus=local_gpus, programs=local_programs)]
+        hosts = [Host(LOCAL, local_capacity, gpus=local_gpus, programs=local_programs,
+                      label=str(local_label or "").strip())]
         for name, spec in host_specs.items():
             try:
                 hosts.append(_parse_host(str(name), spec))
@@ -234,7 +241,8 @@ def _parse_host(name: str, spec) -> Host:
                 programs=programs,
                 run_root=str(spec.get("run_root") or ""), gpus=gpus,
                 shared=bool(spec.get("shared", False)), owner=str(spec.get("owner") or ""),
-                notes=str(spec.get("notes") or ""), drain=bool(spec.get("drain", False)),
+                notes=str(spec.get("notes") or ""), label=str(spec.get("label") or "").strip(),
+                drain=bool(spec.get("drain", False)),
                 drained_at=drained_at, removing=bool(spec.get("remove", False)))
 
 

@@ -31,6 +31,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
   const [shared, setShared] = useState(false);
   const [programs, setPrograms] = useState<string[]>([]);
   const [owner, setOwner] = useState("");
+  const [label, setLabel] = useState("");
   const [notes, setNotes] = useState("");
   const programsQuery = useQuery({ queryKey: ["programs"], queryFn: api.listPrograms });
   // Local mode's change check: has the program list moved from what the server
@@ -69,18 +70,18 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
       setPrograms([]); seededPrograms.current = false;
       if (mode === "edit" && host) {
         setName(host.name); setSsh(host.ssh); setRunRoot(host.run_root); setShared(!!host.shared);
-        setOwner(host.owner ?? ""); setNotes(host.notes ?? "");
+        setOwner(host.owner ?? ""); setNotes(host.notes ?? ""); setLabel(host.label ?? "");
         setCpu(host.capacity.cpu ?? ""); setMemory(host.capacity.memory_gb ?? "");
         setCards(host.gpus.map((g) => ({ model: g.model, vram_gb: g.vram_gb ?? "" })));
       } else if (mode === "local") {
         setName(host?.name ?? "local"); setSsh(""); setRunRoot(""); setShared(false);
-        setOwner(""); setNotes("");
+        setOwner(""); setNotes(""); setLabel(host?.label ?? "");
         setCpu((localCapacity?.cpu as Amount) ?? "");
         setMemory((localCapacity?.memory_gb as Amount) ?? "");
         setCards((host?.gpus ?? []).map((g) => ({ model: g.model, vram_gb: g.vram_gb ?? "" })));
       } else {
         setName(""); setSsh(""); setRunRoot(DEFAULT_RUN_ROOT); setShared(false);
-        setOwner(""); setNotes("");
+        setOwner(""); setNotes(""); setLabel("");
         setCpu(""); setMemory(""); setCards([]);
       }
     }
@@ -271,6 +272,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
     if (memory !== "" && memory > 0) capacity.memory_gb = memory;
     try {
       const result = await api.updateHost(host.name, {
+        label: label.trim(),
         ssh: ssh.trim(), run_root: runRoot.trim(), shared,
         ...programsField(),
         owner: owner.trim(), notes: notes.trim(),
@@ -298,7 +300,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
     if (cpu !== "") capacity.cpu = cpu;
     if (memory !== "" && memory > 0) capacity.memory_gb = memory;
     try {
-      await api.setCapacity(capacity, cardsPayload());
+      await api.setCapacity(capacity, cardsPayload(), label.trim());
       if (!samePrograms(programs, initialPrograms.current)) {
         const result = await api.setHostPrograms("local", programs);
         if (result.cut_off?.length) {
@@ -414,6 +416,14 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
   return (
     <Modal opened={opened} onClose={onClose} title={title} size="lg">
       <Stack>
+        {mode !== "add" && (
+          <TextInput label="Display name"
+                     description={`What the dashboard calls it. Leave it empty to go by "${name}", `
+                                  + "which is the name every lease, sprint record and probe is filed "
+                                  + "under and never changes."}
+                     placeholder={name}
+                     value={label} onChange={(e) => setLabel(e.currentTarget.value)} />
+        )}
         {mode === "edit" && <TextInput label="Name" value={name} disabled />}
         {mode === "add" && (
           <TextInput label="Name" description="How the platform refers to it" value={name}

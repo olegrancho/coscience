@@ -125,6 +125,7 @@ class SprintPatch(BaseModel):
 class CapacityUpdate(BaseModel):
     capacity: dict[str, float] = Field(default_factory=dict)
     gpus: list[dict] | None = None
+    label: str | None = None       # this machine's display name; "" goes back to "local"
 
 
 ONBOARDING_ENV = "COSCIENCE_ALLOW_ONBOARDING"
@@ -160,6 +161,7 @@ class HostConfirmIn(BaseModel):
 
 
 class HostUpdateIn(BaseModel):
+    label: str | None = None
     ssh: str | None = None
     run_root: str | None = None
     shared: bool | None = None
@@ -959,7 +961,7 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     @api.put("/capacity")
     def set_capacity(body: CapacityUpdate) -> dict:
         try:
-            return service.set_capacity(body.capacity, body.gpus)
+            return service.set_capacity(body.capacity, body.gpus, body.label)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 

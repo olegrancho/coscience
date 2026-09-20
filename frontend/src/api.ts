@@ -131,6 +131,9 @@ export interface LedgerHost {
   // null: this server's program list has never been set, so it admits every
   // program. A list (including empty) means exactly those programs.
   name: string; ssh: string; placeable: boolean; programs: string[] | null; run_root: string;
+  // What a human calls this server. "" means go by the name, which is what every
+  // lease, progress file and probe is keyed on and never changes.
+  label?: string;
   capacity: Record<string, number>; available: Record<string, number>; gpus: LedgerCard[];
   shared?: boolean; owner?: string; notes?: string;
   drain?: boolean; drained_at?: number;
@@ -154,7 +157,7 @@ export interface LocalDetect {
   proposal: { capacity?: Record<string, number>; gpus?: { model: string; vram_gb: number }[] };
 }
 export interface HostUpdate {
-  ssh?: string; run_root?: string; shared?: boolean; programs?: string[];
+  label?: string; ssh?: string; run_root?: string; shared?: boolean; programs?: string[];
   owner?: string; notes?: string; capacity?: Record<string, number>;
   gpus?: { model: string; vram_gb: number }[]; probed_at?: number;
   // Set only when the write is authorized by an agent survey's written overrides
@@ -573,10 +576,13 @@ export const api = {
   detectLocal: () => fetch("/api/hosts/local/detect", { method: "POST" }).then(j<LocalDetect>),
   // `gpus` is sent only when this machine's own cards are being written — most
   // capacity edits (workers, housekeepers, custom keys) have nothing to do with them.
-  setCapacity: (capacity: Record<string, number>, gpus?: { model: string; vram_gb: number }[]) =>
+  setCapacity: (capacity: Record<string, number>, gpus?: { model: string; vram_gb: number }[],
+                label?: string) =>
     fetch("/api/capacity", {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(gpus ? { capacity, gpus } : { capacity }),
+      body: JSON.stringify({
+        capacity, ...(gpus ? { gpus } : {}), ...(label === undefined ? {} : { label }),
+      }),
     }).then(j<Ledger>),
   setPause: (paused: boolean) =>
     fetch("/api/pause", {

@@ -1,4 +1,4 @@
-import { Button, Card, Group, Table, Text } from "@mantine/core";
+import { Button, Card, Group, Table, Text, Tooltip } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type LedgerHost, type ProgramRow, type StrandedLease } from "../api";
@@ -34,6 +34,13 @@ export interface HostStatus {
   mark: string;      // the dot, so the column reads at a glance
   color: string;
   detail: string;    // the whole truth, on hover — every fact the word folds up
+}
+
+/** What to call a server on screen: its display name when someone set one, else
+ *  the name it is filed under. The name itself never changes — leases, sprint
+ *  records, probes and surveys are all keyed on it. */
+export function hostLabel(host: LedgerHost): string {
+  return (host.label ?? "").trim() || host.name;
 }
 
 const MARKS: Record<HostStatusKey, { mark: string; color: string }> = {
@@ -160,14 +167,32 @@ const PIP_FILL: Record<string, string> = {
   empty: "var(--hairline)",
 };
 
-function Pips({ states, title }: { states: string[]; title: string }) {
+/** A hover explanation, the way the rest of the dashboard does them (a real
+ *  tooltip, not the browser's `title`, which needs a long pause and often never
+ *  shows at all). Multi-line labels keep their line breaks. */
+function Hover({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <Tooltip withArrow multiline w={340} openDelay={120}
+             transitionProps={{ duration: 0 }}
+             label={<span style={{ whiteSpace: "pre-line" }}>{label}</span>}>
+      {children}
+    </Tooltip>
+  );
+}
+
+/** Text that says "there is more on hover", as the call log's headers do. */
+const hoverable = { borderBottom: "1px dotted currentColor", cursor: "help" } as const;
+
+function Pips({ states, label }: { states: string[]; label: string }) {
   if (!states.length) return <Text size="xs" c="dimmed">—</Text>;
   return (
-    <span style={{ display: "inline-flex", gap: 2, alignItems: "center" }} title={title}>
-      {states.map((s, i) => (
-        <span key={i} style={{ ...PIP, background: PIP_FILL[s] }} />
-      ))}
-    </span>
+    <Hover label={label}>
+      <span style={{ display: "inline-flex", gap: 2, alignItems: "center", cursor: "help" }}>
+        {states.map((s, i) => (
+          <span key={i} style={{ ...PIP, background: PIP_FILL[s] }} />
+        ))}
+      </span>
+    </Hover>
   );
 }
 
@@ -221,15 +246,24 @@ export default function HostsCard(
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(h); }
                         }}>
-                <Table.Td className="mono">{h.name}</Table.Td>
+                <Table.Td className="mono">
+                  {hostLabel(h) === h.name ? h.name : (
+                    <Hover label={`filed under "${h.name}"`}>
+                      <span style={hoverable}>{hostLabel(h)}</span>
+                    </Hover>
+                  )}
+                </Table.Td>
                 <Table.Td>
-                  {/* Every row is as tall as a row that declares memory, so the table
-                      does not step up and down as servers differ. */}
-                  <div style={{ minHeight: ROW_CONTENT_HEIGHT }}>
+                  {/* Every row is as tall as a row that declares memory, and its
+                      content sits in the middle of that height — a server with no
+                      memory line must not leave a blank line hanging under it. */}
+                  <div style={{ minHeight: ROW_CONTENT_HEIGHT, display: "flex",
+                                flexDirection: "column", justifyContent: "center" }}>
                     <Group gap={6} wrap="nowrap">
                       <Pips states={cpu.pips}
-                            title={cpu.per > 1 ? `${cpu.label} cores — one square is ${cpu.per} cores`
-                                               : `${cpu.label} cores in use`} />
+                            label={cpu.per > 1
+                              ? `${cpu.label} cores in use — one square is ${cpu.per} cores`
+                              : `${cpu.label} cores in use`} />
                       <Text size="xs" c="dimmed">{cpu.label}</Text>
                     </Group>
                     {mem && <Text size="xs" c="dimmed">{mem.label} GB memory</Text>}
@@ -237,14 +271,18 @@ export default function HostsCard(
                 </Table.Td>
                 <Table.Td>
                   <Pips states={cards.map((c) => c.state)}
-                        title={cards.map((c) => c.title).join("\n")} />
+                        label={cards.map((c) => c.title).join("\n")} />
                 </Table.Td>
-                <Table.Td><span title={access.title}>{access.text}</span></Table.Td>
                 <Table.Td>
-                  <span title={status.detail} style={{ whiteSpace: "nowrap" }}>
-                    <span style={{ color: status.color, marginRight: 6 }}>{status.mark}</span>
-                    {status.key}
-                  </span>
+                  <Hover label={access.title}><span style={hoverable}>{access.text}</span></Hover>
+                </Table.Td>
+                <Table.Td>
+                  <Hover label={status.detail}>
+                    <span style={{ ...hoverable, whiteSpace: "nowrap" }}>
+                      <span style={{ color: status.color, marginRight: 6 }}>{status.mark}</span>
+                      {status.key}
+                    </span>
+                  </Hover>
                 </Table.Td>
               </Table.Tr>
             );
@@ -252,8 +290,11 @@ export default function HostsCard(
         </Table.Tbody>
       </Table>
       {leftovers.length > 0 && (
-        <Text size="xs" c="dimmed" style={{ marginTop: 8 }} title={leftoverPaths}>
-          Run directories no sprint is using: {leftoverCounts} — hover for the paths, remove by hand.
+        <Text size="xs" c="dimmed" style={{ marginTop: 8 }}>
+          <Hover label={leftoverPaths}>
+            <span style={hoverable}>Run directories no sprint is using: {leftoverCounts}</span>
+          </Hover>
+          {" — hover for the paths, remove by hand."}
         </Text>
       )}
       {errors.map((e, i) => (

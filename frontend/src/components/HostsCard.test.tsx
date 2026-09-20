@@ -16,7 +16,7 @@ vi.mock("../api", () => ({
 
 import { api } from "../api";
 import type { LedgerHost, StrandedLease } from "../api";
-import HostsCard, { cardSlots, hostStatus, programsCell, slots } from "./HostsCard";
+import HostsCard, { cardSlots, hostLabel, hostStatus, programsCell, slots } from "./HostsCard";
 
 beforeAll(() => {
   window.matchMedia = window.matchMedia || (((query: string) => ({
@@ -211,7 +211,7 @@ describe("HostsCard", () => {
     expect(await screen.findByLabelText("SSH target")).toBeTruthy();
   });
 
-  it("sums run directories into one line under the table, paths on hover", () => {
+  it("sums run directories into one line under the table, paths on hover", async () => {
     // They used to be a paragraph under every server, repeating the same sentence.
     renderCard([], [LOCAL, {
       ...REMOTE,
@@ -223,8 +223,9 @@ describe("HostsCard", () => {
     const line = screen.getByText(/Run directories no sprint is using/);
     expect(line.textContent).toMatch(/2 on gpu1/);
     expect(line.textContent).not.toMatch(/coscience-runs/);      // compressed, not listed
-    expect(line.getAttribute("title")).toMatch(/~\/coscience-runs\/s9 \(done\)/);
-    expect(line.getAttribute("title")).toMatch(/~\/coscience-runs\/tools \(no sprint record\)/);
+    fireEvent.mouseEnter(line);
+    expect(await screen.findByText(/~\/coscience-runs\/s9 \(done\)/)).toBeTruthy();
+    expect(screen.getByText(/~\/coscience-runs\/tools \(no sprint record\)/)).toBeTruthy();
   });
 
   it("says nothing at all when no server holds anything unused", () => {
@@ -236,7 +237,13 @@ describe("HostsCard", () => {
     const { container } = renderCard();
     const cells = container.querySelectorAll("tbody tr td:nth-child(2) > div");
     expect(cells.length).toBe(2);
-    cells.forEach((c) => expect((c as HTMLElement).style.minHeight).toBe("32px"));
+    cells.forEach((c) => {
+      const style = (c as HTMLElement).style;
+      expect(style.minHeight).toBe("32px");
+      // ...and the content is centred in it, so a server with no memory line
+      // does not read as a row with a blank line hanging under it.
+      expect(style.justifyContent).toBe("center");
+    });
   });
 
   it("names each allowed program on hover, and hides the ones that cannot take work", async () => {
@@ -244,8 +251,9 @@ describe("HostsCard", () => {
     renderCard([], [LOCAL, both]);
     // p4 is paused, so the cell shows p2 alone and the hover says where p4 went.
     const cell = await screen.findByText("p2");
-    expect(cell.getAttribute("title")).toMatch(/p2 — Lead Finder optimization/);
-    expect(cell.getAttribute("title")).toMatch(/not shown \(paused or closed\): p4 — Test/);
+    fireEvent.mouseEnter(cell);
+    const tip = await screen.findByText(/p2 — Lead Finder optimization/);
+    expect(tip.textContent).toMatch(/not shown \(paused or closed\): p4 — Test/);
   });
 
   it("warns about leases on servers that left the pool", () => {
@@ -292,5 +300,27 @@ describe("programsCell", () => {
     // Filtering against a list that has not arrived would briefly show the wrong
     // access — the same race that cut a live server off in O14.
     expect(programsCell({ ...REMOTE, programs: ["p2", "p4"] }, undefined).text).toBe("p2, p4");
+  });
+});
+
+describe("display names (O12)", () => {
+  it("calls a server what a human called it, with the filed-under name on hover", async () => {
+    renderCard([], [{ ...LOCAL, label: "Avatar" }, REMOTE]);
+    const shown = screen.getByText("Avatar");
+    expect(screen.queryByText("local")).toBeNull();
+    fireEvent.mouseEnter(shown);
+    expect(await screen.findByText(/filed under "local"/)).toBeTruthy();
+  });
+
+  it("goes by the name when nobody set one, with no tooltip to chase", () => {
+    renderCard();
+    expect(screen.getByText("local")).toBeTruthy();
+    expect(screen.getByText("gpu1")).toBeTruthy();
+  });
+
+  it("ignores a display name that is only spaces", () => {
+    expect(hostLabel({ ...LOCAL, label: "   " })).toBe("local");
+    expect(hostLabel({ ...LOCAL, label: undefined })).toBe("local");
+    expect(hostLabel({ ...LOCAL, label: "Avatar" })).toBe("Avatar");
   });
 });

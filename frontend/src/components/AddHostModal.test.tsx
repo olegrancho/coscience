@@ -405,6 +405,7 @@ describe("AddHostModal", () => {
       expect(api.setCapacity).toHaveBeenCalledWith(
         { cpu: 32, workers: 3, housekeepers: 2 },
         [{ model: "NVIDIA GeForce RTX 4090", vram_gb: 24 }],
+        "",                       // display name: none set, so it goes by "local"
       );
     });
 
