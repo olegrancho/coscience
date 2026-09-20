@@ -579,9 +579,17 @@ export default function SprintDetail() {
               </Group>
             ))}
             {s.artifacts_create?.map((a, i) => (
-              <Text key={i} size="sm" c="dimmed">
-                {a.title} ({a.kind}) — will be created
-              </Text>
+              // Once the artifact exists this is no longer a promise: link it, and say
+              // which version, so a finished sprint leads to what it made.
+              <Group key={i} gap={6}>
+                <Text size="sm" c="dimmed">
+                  {a.exists ? (a.version || "no version yet") : "will be created"} —
+                </Text>
+                {a.exists
+                  ? <Link to={`/programs/${prog}/artifacts/${a.aid}`} className="view">{a.title}</Link>
+                  : <Text size="sm" c="dimmed">{a.title}</Text>}
+                <Text size="sm" c="dimmed">({a.kind})</Text>
+              </Group>
             ))}
           </Stack>
         </Card>

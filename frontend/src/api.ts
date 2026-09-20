@@ -112,7 +112,8 @@ export interface Sprint {
   job?: { note: string; out_file: string; started_at: number | null;
           expected_seconds: number; next_wake: number; max_seconds: number } | null;
   artifacts_bound: string[];
-  artifacts_create: { aid: string; title: string; kind: string }[];
+  artifacts_create: { aid: string; title: string; kind: string;
+                      exists?: boolean; version?: string }[];
 }
 export interface SprintFile {
   name: string; label: string; kind: string; size: number;

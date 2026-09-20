@@ -382,6 +382,26 @@ class Service:
         from coscience.claude_executor import read_activity
         return read_activity(self.substrate.sprint_dir(sprint_id))
 
+    def _create_specs(self, sprint: Sprint) -> list[dict]:
+        """The sprint's create-targets, each said whether it exists yet and at which
+        version. The spec itself is never rewritten once the artifact is made, so
+        without this a finished sprint still reads "will be created" and offers no
+        way to the thing it made."""
+        out = []
+        for spec in sprint.artifacts_create:
+            c = dict(spec)
+            aid = str(c.get("aid") or "").strip()
+            c["exists"], c["version"] = False, ""
+            if sprint.program and aid:
+                try:
+                    art = self.substrate.load_artifact(sprint.program, aid)
+                except (OSError, ValueError, yaml.YAMLError):
+                    pass          # never made, or unreadable: it reads as a promise
+                else:
+                    c["exists"], c["version"] = True, art.current
+            out.append(c)
+        return out
+
     def _unrunnable(self, sprint: Sprint, pool) -> str:
         """Why this sprint can never be granted, or "". Only for sprints still headed
         for a grant: a finished one's request no longer matters."""
@@ -469,7 +489,7 @@ class Service:
             "results": list(sprint.results),
             "plan": list(sprint.plan),
             "artifacts_bound": list(sprint.artifacts_bound),
-            "artifacts_create": [dict(c) for c in sprint.artifacts_create],
+            "artifacts_create": self._create_specs(sprint),
             "threads": [threads.public(t) for t in sprint.threads],
             "decisions": list(sprint.decisions),
             "status_history": list(sprint.status_history),

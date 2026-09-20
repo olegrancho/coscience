@@ -77,7 +77,11 @@ def build_instructions(sprint: Sprint, context: "ExecutionContext | None",
                 "the current files in place. Write NOTHING else under the artifact: no "
                 "`meta.md`, no version directory of your own. Those are the platform's to "
                 "write, and a hand-written one carrying an invented or empty `created_at` "
-                "breaks every later read of that artifact.\n" + alines + figure_note)
+                "breaks every later read of that artifact.\n\n"
+                "The working directory is removed once it has been snapshotted. So when "
+                "you say what you produced — in `finished.json`, in an escalation, in your "
+                "final message — name the artifact and its files, never the working path: "
+                "it will not exist for whoever reads you.\n" + alines + figure_note)
         if context.gpu_devices:
             ids = ",".join(str(d) for d in context.gpu_devices)
             share = (f"up to {context.gpu_vram_gb:g} GB of VRAM on each; other jobs may share "

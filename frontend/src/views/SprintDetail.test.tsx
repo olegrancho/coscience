@@ -129,3 +129,52 @@ describe("stop action", () => {
     expect(await screen.findByText("Stop…")).toBeTruthy();
   });
 });
+
+describe("artifacts card", () => {
+  const fig = { aid: "kernel-shape", title: "Kernel shape", kind: "figure" };
+
+  it("links a promised artifact once it exists, naming its version", async () => {
+    renderSprintPage(sprint({ status: "done", agent_running: false,
+                              artifacts_create: [{ ...fig, exists: true, version: "v1" }] }));
+
+    const link = await screen.findByRole("link", { name: "Kernel shape" });
+    expect(link.getAttribute("href")).toBe("/programs/p1/artifacts/kernel-shape");
+    expect(screen.getByText("v1 —")).toBeTruthy();
+    // The promise is gone: a sprint that made the thing must not still advertise it.
+    expect(screen.queryByText(/will be created/)).toBeNull();
+  });
+
+  it("still reads as a promise, with no link, when the artifact was never made", async () => {
+    renderSprintPage(sprint({ status: "done", agent_running: false,
+                              artifacts_create: [{ ...fig, exists: false, version: "" }] }));
+
+    await screen.findByText("Train the model");
+    expect(screen.getByText("will be created —")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Kernel shape" })).toBeNull();
+  });
+
+  it("links an artifact that exists but has no version cut yet", async () => {
+    renderSprintPage(sprint({ artifacts_create: [{ ...fig, exists: true, version: "" }] }));
+
+    const link = await screen.findByRole("link", { name: "Kernel shape" });
+    expect(link.getAttribute("href")).toBe("/programs/p1/artifacts/kernel-shape");
+    expect(screen.getByText("no version yet —")).toBeTruthy();
+  });
+
+  it("treats a spec from a backend that says nothing about existence as a promise", async () => {
+    renderSprintPage(sprint({ artifacts_create: [fig] }));
+
+    await screen.findByText("Train the model");
+    expect(screen.getByText("will be created —")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Kernel shape" })).toBeNull();
+  });
+
+  it("keeps bound artifacts linked by id alongside the created ones", async () => {
+    renderSprintPage(sprint({ artifacts_bound: ["manuscript"],
+                              artifacts_create: [{ ...fig, exists: true, version: "v2" }] }));
+
+    expect((await screen.findByRole("link", { name: "manuscript" })).getAttribute("href"))
+      .toBe("/programs/p1/artifacts/manuscript");
+    expect(screen.getByRole("link", { name: "Kernel shape" })).toBeTruthy();
+  });
+});

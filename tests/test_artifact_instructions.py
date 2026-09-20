@@ -49,3 +49,14 @@ def test_instructions_forbid_hand_written_artifact_metadata(tmp_path):
     text = build_instructions(s, ctx, tmp_path / "scratchpad.md")
     assert "meta.md" in text
     assert "no version directory of your own" in text
+
+def test_instructions_warn_the_working_path_will_not_exist_for_the_reader(tmp_path):
+    """A finished sprint pointed its human at "the artifact work directory", which the
+    platform deletes the moment it snapshots it. Report the artifact, not the path."""
+    ctx = ExecutionContext(
+        artifacts=[{"aid": "figures", "kind": "figure",
+                    "work_path": "/repo/programs/p/artifacts/figures/work"}])
+    s = Sprint(id="s1", status=SprintStatus.EXECUTING, goals="g")
+    text = build_instructions(s, ctx, tmp_path / "scratchpad.md")
+    assert "The working directory is removed once it has been snapshotted" in text
+    assert "never the working path" in text
