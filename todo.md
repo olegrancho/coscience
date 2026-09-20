@@ -1,19 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 144
+version: 145
 last_updated: 2026-09-20
 ---
 
 # To QC
-
-### E3. Stop flagging a declined action as an unbacked claim
-
-The unbacked-claim check now reads the whole sentence and requires a past-tense verb,
-so a planner saying it had nothing to do is no longer stamped as claiming it did.
-
-**Check:** all seven live `programs/*/report.md` read clean where every one previously
-carried ⚠️. A genuine claim must still fire — a cycle whose report says "Manuscript-draft
-released into production." with an empty `release_ids` still shows the warning.
 
 ### E1. Replace the planner's reopen with a hold that keeps the approval
 
@@ -542,6 +533,10 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### E3. Stop flagging a declined action as an unbacked claim
+
+A planner explaining that it had nothing to do is no longer stamped as claiming it acted: the check reads the whole sentence and requires a past-tense verb, so it fires on a real claim and not on an honest one.
+
 ### P3. Highlight only the experiments the platform moved
 
 The program page highlights only what the platform did — a sprint the planner proposed, released or finished — and stays quiet for the viewer's own clicks and for a program's first visit.
@@ -581,8 +576,4 @@ After a probe, an agent surveys a server over SSH and proposes its capacity, car
 ### O10. Configure each server from its card
 
 Every server card has Config: a remote server is re-probed and updated in place, and this machine's dialog detects its own GPU cards.
-
-### O8. Let a worker agent pull the red button
-
-A worker agent or the platform can escalate a sprint; it is held with its lease and job while the planner or a human answers with resume, move or stop.
 
