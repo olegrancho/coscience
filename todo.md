@@ -1,19 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 137
+version: 138
 last_updated: 2026-09-20
 ---
 
 # To QC
-
-### E3. Stop flagging a declined action as an unbacked claim
-
-The unbacked-claim check now reads the whole sentence and requires a past-tense verb,
-so a planner saying it had nothing to do is no longer stamped as claiming it did.
-
-**Check:** all seven live `programs/*/report.md` read clean where every one previously
-carried ⚠️. A genuine claim must still fire — a cycle whose report says "Manuscript-draft
-released into production." with an empty `release_ids` still shows the warning.
 
 ### P3. Highlight only the experiments the platform moved
 
@@ -34,28 +25,28 @@ an approved one and restore it — back to **approved**, not proposed. Stop one 
 restore it — back to queued, and it must not be stopped again on the next beat. Demote one
 and try: it must refuse, saying the idea is where its life continued.
 
-# To Do (sprint)
+### E3. Stop flagging a declined action as an unbacked claim
+
+The unbacked-claim check now reads the whole sentence and requires a past-tense verb,
+so a planner saying it had nothing to do is no longer stamped as claiming it did.
+
+**Check:** all seven live `programs/*/report.md` read clean where every one previously
+carried ⚠️. A genuine claim must still fire — a cycle whose report says "Manuscript-draft
+released into production." with an empty `release_ids` still shows the warning.
 
 ### E1. Replace the planner's reopen with a hold that keeps the approval
 
-Take `reopen` off the planner and give it a hold instead: the sprint stays approved,
-carries the planner's reason, and simply is not released.
+The planner can no longer send an approved sprint back to proposed; it holds one instead,
+with a reason that shows on the sprint while the sprint stays approved.
 
-**Backend landed** (`52f7b17`): `holds` replaces `reopen_ids` end to end — model, prompt,
-parser, staging, apply, ledger, CLI and the lifecycle doc; a reasonless hold is refused;
-release and the human routes clear it. What is left is the dashboard: show the hold on
-an approved sprint with its reason and time, and a Clear hold button on the route that
-already exists (`POST /api/sprints/<id>/hold/clear`).
+**Check:** `holds` appears in the planner prompt where `reopen_ids` was, and `reopen_ids`
+appears nowhere in `src/`. On a held approved sprint the page reads "Held by the planner —
+approved, not released yet" with the reason and time, the program list badges the row
+"held", Clear hold lifts it leaving the status approved, and Run still overrides it in one
+click. A hold submitted with no reason must be refused and reported as "Hold FAILED" in the
+cycle's actions, not silently dropped.
 
-The planner can un-approve but cannot approve — only a human can — so reopen is a
-one-way door that destroys an authorization it cannot restore. All three reopens ever
-recorded undid a human approval, one of them eight minutes after the click and twice on
-the same sprint; the approval is itself what wakes the cycle that reverses it. Holding
-was always the right move (an approved sprint is the planner's queue and holding costs
-nothing), but holding is a non-action and leaves no trace, so "not yet" had no way to
-show itself and the planner reached for the lever that did. The hold is that expression:
-sprint page reads `approved · held by the planner` with the reason and when, Release
-clears it, and a human can clear it too.
+# To Do (sprint)
 
 ### E2. Keep a planner cycle's reasoning after the next cycle runs
 
