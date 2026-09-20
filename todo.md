@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 125
+version: 126
 last_updated: 2026-09-19
 ---
 
@@ -9,14 +9,17 @@ last_updated: 2026-09-19
 ### O12. Review the server cards against real servers
 
 The servers table is now name, CPU and GPU as filled slots, programs, and one status
-word; the row itself opens the server's configuration, which carries Remove and Keep.
+word; the row itself opens the server's configuration, which carries Remove, Keep and
+a display name. Leftover run directories are one line under the table.
 
 **Check:** the Compute page — every server should read at a glance, with the pips
 matching the numbers beside them and the status word matching what the server is
-doing. Hover a status for the whole truth (since when, why, waiting on what), and
-hover the GPU pips for each card's model and share. Clicking any row must open that
-server's dialog, Remove and Keep must work from inside it, and nothing may offer to
-remove this machine.
+doing. Hover anything with a dotted underline: the status gives the whole truth
+(since when, why, waiting on what), a program id gives its title, the GPU pips give
+each card, the leftover line gives the paths. Clicking any row must open that
+server's dialog; Remove and Keep must work from inside it and never appear for this
+machine. Give a server a display name and it should read that way everywhere on the
+page while the sprint records keep the filed-under name.
 
 # To Do (sprint)
 
