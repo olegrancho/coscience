@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 148
+version: 149
 last_updated: 2026-09-20
 ---
 
@@ -554,6 +554,29 @@ agent slots and not what is holding them. Each lease carries its `sprint_id` and
 half, and the same view resolves them for its own running-now list. Worth deciding
 whether the other gauges get the same treatment, since cpu and memory have the same
 question behind them.
+
+### P10. Give the lineage graph an auto-layout button
+
+Add a control that re-lays the lineage out from the graph's own structure, discarding
+the positions dragging has accumulated.
+
+The graph lays itself out with dagre on first render, but every drag is saved per
+program (`savePosition` in `components/graphPositions.ts`) and those saved positions win
+from then on — so a lineage that has been rearranged once, or that has grown since, stays
+crooked with no way back. `layout()` and `clearPositions()` both already exist; the item
+is a button that calls them and a decision on whether it asks first, since it throws away
+arrangement someone may have meant.
+
+### P11. Show only typed nodes on the wiki graph by default
+
+Flip the wiki graph's "typed only" filter on by default, so the first view is the
+structured part of the graph.
+
+`emptyFilters()` (`components/wikiGraphFilter.ts`) starts with `typedOnly: false`, so the
+graph opens showing everything and the typed structure is buried in it. The control is
+already built and already filters correctly; this is its default. Check what a graph with
+no typed nodes at all shows once the default flips — an empty canvas would read as a
+broken page rather than as a filter doing its job.
 
 ## Q. Code rot
 
