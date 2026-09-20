@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 142
+version: 143
 last_updated: 2026-09-20
 ---
 
@@ -493,6 +493,19 @@ Opening an experiment and going back costs a scroll every time, and on a program
 renders at the top; the experiments card already has the `sec-experiments` anchor the
 ToC scrolls to, so the target exists. Worth deciding whether it restores the exact
 scroll position or just the section, and whether the row you visited is marked.
+
+### P6. Filter the experiments list to just the new ones
+
+Add a single "show only new" check to a program's experiments list that hides everything
+but the highlighted rows.
+
+P3 makes a row light up when the platform moved or proposed it and the viewer has not
+looked since. On a program holding 33 proposed sprints the highlights are what you came
+for, and they are scattered down a long list. The card already carries a status `<select>`
+and a "Show all" toggle (`views/ProgramDetail.tsx`), so this is a third control beside
+them and has to compose with both. Note the "new" flag is per-browser localStorage, not
+substrate state, so the filter cannot be server-side and the count will differ between
+machines — and decide what the check shows when nothing is new.
 
 ## Q. Code rot
 
