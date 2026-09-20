@@ -1,10 +1,19 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 135
+version: 137
 last_updated: 2026-09-20
 ---
 
 # To QC
+
+### E3. Stop flagging a declined action as an unbacked claim
+
+The unbacked-claim check now reads the whole sentence and requires a past-tense verb,
+so a planner saying it had nothing to do is no longer stamped as claiming it did.
+
+**Check:** all seven live `programs/*/report.md` read clean where every one previously
+carried ⚠️. A genuine claim must still fire — a cycle whose report says "Manuscript-draft
+released into production." with an empty `release_ids` still shows the warning.
 
 ### P3. Highlight only the experiments the platform moved
 
@@ -32,6 +41,12 @@ and try: it must refuse, saying the idea is where its life continued.
 Take `reopen` off the planner and give it a hold instead: the sprint stays approved,
 carries the planner's reason, and simply is not released.
 
+**Backend landed** (`52f7b17`): `holds` replaces `reopen_ids` end to end — model, prompt,
+parser, staging, apply, ledger, CLI and the lifecycle doc; a reasonless hold is refused;
+release and the human routes clear it. What is left is the dashboard: show the hold on
+an approved sprint with its reason and time, and a Clear hold button on the route that
+already exists (`POST /api/sprints/<id>/hold/clear`).
+
 The planner can un-approve but cannot approve — only a human can — so reopen is a
 one-way door that destroys an authorization it cannot restore. All three reopens ever
 recorded undid a human approval, one of them eight minutes after the click and twice on
@@ -53,18 +68,6 @@ hours later, leaving a status change nobody could explain. The per-cycle actions
 kept in `pm.md` activations, but only as lists of ids: what was done, never why. A
 sprint touched by a cycle should carry the sentence that touched it, and the cycle's
 full report should be retrievable rather than replaced.
-
-### E3. Stop flagging a declined action as an unbacked claim
-
-Teach the unbacked-claim check that "nothing to release" is a denial, so declining to
-act stops being reported as a false claim of acting.
-
-`_NEGATION_RE` (`pm_agent.py`) knows `not`, `n't` and `never` — not `nothing`, `no` or
-`none`. So the sentence "No sprint is in the approved-and-waiting state this cycle, so
-there is nothing for me to release" is stamped "⚠️ the report above says it released an
-approved sprint, but no such action was submitted". It has fired on 18 of 29 recorded
-cycles, which is a safeguard against the planner taking credit it did not earn now
-spending most of its firings punishing the planner for honesty.
 
 ### B1. Warn on the pulse zone when a machine is low on disk
 
@@ -161,6 +164,60 @@ the artifact moved to v2 on 09-12 and v2 was ingested, but only an artifact's cu
 version counts as an object, so v1's page reads as pointing at nothing. Every future
 revision will do the same. The choices are to retire or merge the old page on
 ingest, or to have lint accept an origin that is a superseded version.
+
+## F. Agents' messageboard
+
+An agent can leave something for whoever comes next, and reach one named
+counterpart directly, without a human carrying the message.
+
+### F1. Build the messageboard and its read/write API
+
+A shared space where any agent can post a note and read what others have posted,
+with API calls for both.
+
+Agents today are sealed from each other: a worker learns nothing from the worker that
+ran before it except through a result a human or the planner relayed, and nothing at
+all from a worker in another program. The board is the low-ceremony channel — post,
+and read what is there. Decide first what a message carries (author, program, subject,
+body, when) and what scoping a reader gets, because that shapes every item below.
+
+### F2. Give the worker agent the board in its instructions
+
+Tell the worker agent the board exists, how to read it and when posting is worth it.
+
+A channel no agent is told about is a channel nobody uses. This is the same treatment
+the per-program server notes got: the instructions name it, say what belongs there and
+what does not, and the agent decides. Blocked on F1.
+
+### F3. Let the planner post to the board
+
+The planner can leave a message as itself, alongside the agents.
+
+It is the one participant with a view across a program's whole arc, so it is the one
+most able to leave something worth finding. One more field in the cycle JSON, applied
+the way `holds` and `host_notes` are. Blocked on F1.
+
+### F4. Have the planner prune the board
+
+Every few messages, the planner reviews the board and deletes what is no longer worth
+keeping.
+
+A shared space with no gardener fills with stale notes until reading it costs more than
+it returns. The planner already maintains the per-program server notes on exactly this
+pattern — it reads what accumulated and rewrites what survives — and the trigger is a
+message count, not a clock, so a quiet board is never disturbed. Whether a prune is a
+delete or an archive is open. Blocked on F1 and F3.
+
+### F5. Direct messages between an agent and a planner
+
+A planner inbox and an agent inbox, so one named counterpart can be addressed
+directly rather than broadcast.
+
+The board is for whoever finds it; some things are for one recipient. A worker that
+needs its planner mid-sprint has only the escalation, which stops the sprint — far too
+heavy for a question. The inbox is the light path: leave it, keep working, read the
+reply next beat. Needs a delivery rule (does an unread message wake a cycle?) and a
+decision on whether worker-to-worker is in scope. Blocked on F1.
 
 ## J. Wiki run cost
 
