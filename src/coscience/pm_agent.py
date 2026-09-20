@@ -42,11 +42,25 @@ MAX_EDGE_OPS = 100   # bound the edges the PM may add per cycle (headroom for li
 # channel showed it. `report` is free prose the machinery never parses, so these two
 # helpers close the gap: the ledger states what was ACTUALLY applied, and the claim check
 # flags prose that describes an action the cycle did not submit.
+#
+# A claim is the planner saying it DID something, so the verb has to be in the PAST
+# tense. The stem match ("releas(e|ed|es|ing)") swallowed every report explaining why
+# it had NOT acted — "nothing to release", "I will release them once approved", "no
+# approved sprints exist to release" — and the plural nouns too ("no prunes this
+# cycle"). None of those is "released". Past tense alone, with the negation check
+# below, cleared all seven live reports; before it, 18 of 29 recorded cycles carried a
+# warning and every one that could still be read was wrong.
+#
+# Deliberately NOT tied to a first-person subject: the hallucination this exists to
+# catch was subjectless ("Manuscript-draft released into production.").
 _CLAIM_CHECKS = (
     # (what the prose claims, pattern, the summary key that would back it up)
-    ("released an approved sprint", r"\breleas(?:e|ed|es|ing)\b", "released"),
-    ("pruned the idea pool", r"\bprun(?:e|ed|es|ing)\b", "ideas_removed"),
-    ("adopted an artifact", r"\badopt(?:ed|s|ing)\b", "adopted"),
+    ("released an approved sprint", r"\breleased\b", "released"),
+    ("pruned the idea pool", r"\bpruned\b", "ideas_removed"),
+    # "adopted by" is a passive agent naming who does the adopting in general —
+    # "a PNG adopted by the PM arrives byte-identical" describes the dedup rule,
+    # not something this cycle did.
+    ("adopted an artifact", r"\badopted\b(?!\s+by\b)", "adopted"),
     # A report may narrate answering an escalation (resume/reallocate/to_human)
     # without the cycle ever having submitted one in escalation_answers. Tied to
     # escalation context (not bare "resume"/"reallocate", which show up in plenty
@@ -61,18 +75,25 @@ _CLAIM_CHECKS = (
      "escalations_answered"),
 )
 
-# Negation words that, immediately before a claim match in the same sentence,
-# mean the report is DENYING the action, not claiming it ("I did not resume
-# p1-s3" must never be flagged as an unbacked claim of resuming it).
-_NEGATION_RE = re.compile(r"\b(?:not|n't|never)\b", re.I)
+# Negation words that, ANYWHERE in the claim's own sentence, mean the report is
+# DENYING the action rather than claiming it. "I did not resume p1-s3" negates
+# ahead of the verb; "I proposed and released nothing" and "I added two ideas and
+# pruned none" negate behind it, which the earlier look-back could not see.
+_NEGATION_RE = re.compile(r"\b(?:not|n't|never|no|none|nothing|neither|nor|without)\b", re.I)
+
+
+def _sentence_around(text: str, start: int, end: int) -> str:
+    """The whole sentence the match sits in — both sides of it. A denial can land
+    either way round, so looking only backwards misses half of them."""
+    left = max((text.rfind(c, 0, start) for c in ".!?\n"), default=-1)
+    right = min((r for r in (text.find(c, end) for c in ".!?\n") if r != -1),
+                default=len(text))
+    return text[left + 1:right]
 
 
 def _unnegated_match(pattern: str, text: str) -> bool:
-    for m in re.finditer(pattern, text, re.I):
-        # Look back only to the start of the current sentence, so a negation in
-        # an EARLIER sentence never suppresses a real claim in this one.
-        clause = re.split(r"[.!?]", text[:m.start()])[-1]
-        if not _NEGATION_RE.search(clause):
+    for m in re.finditer(pattern, text, re.I | re.M):
+        if not _NEGATION_RE.search(_sentence_around(text, m.start(), m.end())):
             return True
     return False
 
