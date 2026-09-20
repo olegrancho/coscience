@@ -1,24 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 128
-last_updated: 2026-09-19
+version: 131
+last_updated: 2026-09-20
 ---
 
 # To QC
-
-### O9. Keep per-program host notes the PM maintains
-
-Each program keeps one note per server at `programs/<id>/hosts/<server>.md`: a worker
-placed there reads it, what a worker learns comes back as a report, and the PM folds
-the reports in. A human reads and edits the notes on the program page.
-
-**Check:** the new "server notes" card on a program page — each server it runs on, the
-note, and any reports waiting. Write a note by hand and confirm the next sprint placed
-on that server has it in its instructions. Then let a sprint finish with `host_notes` in
-its `finished.json` and watch the report appear on the card and, after the next planner
-cycle, be folded into the note (the cycle's actions say "Host notes updated"). The
-planner must write a note only for a server the program may use; a server it may not
-shows as a skip line instead.
 
 # To Do (sprint)
 
@@ -404,6 +390,32 @@ dot. The same locale formatting is used for the exact times in tooltips and the 
 (`HostsCard.tsx`). One shared formatter used everywhere fixes all of them, and does not
 depend on which locale a viewer's browser reports.
 
+### P3. Highlight only the experiments the platform moved
+
+Highlight an experiment whose status the PM or its worker changed, and not one the human
+operator just moved themselves.
+
+The highlight fires on any status change: `isUnseen` (`sprintSeen.ts`) compares the
+sprint's last status time against a per-browser "seen" time, so approving or parking an
+experiment makes the row announce itself back at the person who did it. The transition's
+actor is already recorded in each `status_history` entry, but the sprint summary the
+program page reads carries only `last_status_at` — so the list payload needs the actor
+beside the time, and the highlight then keys on it.
+
+### P4. Let a human restore a canceled experiment
+
+Give a canceled experiment a way back — to proposed, or to wherever it was canceled
+from — instead of leaving cancel as the one irreversible human action.
+
+Cancel is a dead end today. `resume_sprint` re-opens `done` and `failed` only;
+`edit_sprint` treats canceled as read-only; nothing else moves a sprint out of it. So
+a misclick, or a change of mind, costs the whole record — its goals, plan, threads and
+votes — and the only recovery is to propose it again by hand. Cancel is reached from
+four places (reject a proposed/approved/queued one, cancel a parked one, demote, and a
+human stop mid-run), and they do not all deserve the same way back: a stopped
+mid-execution sprint is not the same as one rejected before it ever ran. Deciding which
+restore each earns is most of this item; the button is the small part.
+
 ## Q. Code rot
 
 The platform does what someone decided it should, and never acts on a signal because it
@@ -425,6 +437,10 @@ fallbacks that hide a failure. Each finding is removed or made an explicit choic
 short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
+
+### O9. Keep per-program host notes the PM maintains
+
+Each program keeps its own note per server, read by every worker placed there and kept current by the planner from what finished and escalated sprints report; a human reads and edits them low on the program page, beside the planner's activity.
 
 ### O12. Review the server cards against real servers
 
@@ -465,7 +481,3 @@ The dispatch loop checks each remote server every minute; a silent or drained se
 ### O6. Place and run work on a remote host
 
 A sprint reserved for a remote server runs there: its agent launches a job over SSH, the platform watches it, copies its outputs back, wakes the agent, and stops the job when a human stops the sprint.
-
-### O18. Stop a running sprint from the dashboard
-
-Stop ends a running sprint's agent and any job on its host, keeps what it produced, and cancels it with a note; verified live against a remote job.
