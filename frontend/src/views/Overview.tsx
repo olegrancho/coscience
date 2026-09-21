@@ -3,7 +3,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type SprintRow } from "../api";
-import { AbsTime, Bars, computeCost, EmptyState, Gauge, Heartbeat, LiveActivity, RelTime, Running, StateBar, StatusBadge, UsagePanel } from "../components/ui";
+import { AbsTime, Bars, computeCost, EmptyState, Gauge, Heartbeat, LiveActivity, RelTime, Running, StateBar, StatusBadge, UsagePanel, describeDisk } from "../components/ui";
 
 function programOf(s: SprintRow) {
   if (s.program) return s.program;
@@ -237,6 +237,15 @@ export default function Overview() {
               ))}
             </Stack>
           ) : <Text size="xs" c="dimmed">No compute pool configured yet.</Text>}
+          {/* Free space, per machine. The disk filling is what took the platform down
+              on 2026-09-19 and nothing said so; a severe line means that machine is
+              already refusing new work. */}
+          {(ledger.data?.hosts ?? []).filter((h) => h.disk).map((h) => (
+            <Text key={h.name} size="xs" mt={8} fw={600}
+                  style={{ color: h.disk === "critical" ? "var(--st-failed)" : "var(--st-queued)" }}>
+              {h.disk === "critical" ? "⛔" : "⚠"} {h.label || h.name}: {describeDisk(h.free_gb, h.disk)}
+            </Text>
+          ))}
         </Card>
       </SimpleGrid>
 

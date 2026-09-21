@@ -142,6 +142,14 @@ def _write(tmp_path, text):
 def test_ledger_status_lists_every_host(tmp_path):
     _write(tmp_path, HOSTS_YAML)
     status = Service(tmp_path).ledger_status()
+    # This machine's free space is a live measurement, so it cannot be asserted
+    # exactly — check it separately and compare the rest (B1).
+    assert isinstance(status["hosts"][0].pop("free_gb"), float)
+    assert status["hosts"][0].pop("disk") == ""          # a test box is not full
+    # A remote host that has never been checked has reported nothing, and a reading
+    # the platform does not have must never warn or gate.
+    assert status["hosts"][1].pop("free_gb") is None
+    assert status["hosts"][1].pop("disk") == ""
     local_health = {"state": "local", "checked_at": 0.0, "last_ok": 0.0, "fail_since": 0.0, "reason": ""}
     unchecked_health = {"state": "unchecked", "checked_at": 0.0, "last_ok": 0.0,
                         "fail_since": 0.0, "reason": ""}

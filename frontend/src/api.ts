@@ -149,6 +149,9 @@ export interface LedgerHost {
   drain?: boolean; drained_at?: number;
   removing: boolean; waiting_on: HostBlocker[];
   health?: HostHealth; used?: Record<string, number>; leases?: number; leftover?: HostLeftover[];
+  // Free space on the machine, and what it means: "" fine, "low" warn, "critical" the
+  // machine takes no new work. null/undefined free_gb = it has not reported one.
+  free_gb?: number | null; disk?: "" | "low" | "critical";
 }
 export interface HostCheck { name: string; ok: boolean; detail: string }
 export interface HostDeclaration {

@@ -81,6 +81,25 @@ _LIST_RUN_DIRS = ('for d in {root}/*/; do [ -d "$d" ] || continue; d=${{d%/}}; '
                   'echo "${{d##*/}}"; done; true')
 MAX_RUN_DIRS = 200
 
+# Free space on the machine, asked on the same round trip as the liveness check so a
+# warning costs no extra ssh. POSIX `df -Pk` (not `df -h`, whose units vary and whose
+# long device names wrap onto a second line); column 4 of the data row is available
+# KB for an ordinary user. Printed with a marker so it cannot be mistaken for a run
+# directory, and tolerant of a host where df is missing or refuses.
+_FREE_KB = 'df -Pk "$HOME" 2>/dev/null | awk \'NR==2 {print "FREE_KB " $4}\'; true'
+
+
+def _free_gb(out: str) -> float | None:
+    """The FREE_KB line from a probe's output, in GB, or None if the host did not
+    report one (an older agent, a host without df)."""
+    for line in str(out).splitlines():
+        if line.startswith("FREE_KB "):
+            try:
+                return float(line.split()[1]) * 1024.0 / (1024.0 ** 3)
+            except (IndexError, ValueError):
+                return None
+    return None
+
 
 def _list_command(run_root: str) -> str:
     """The remote command for a host: a plain liveness check, or that plus a listing
@@ -88,15 +107,16 @@ def _list_command(run_root: str) -> str:
     try:
         root = check_remote_path(run_root)
     except ValueError:
-        return "true"          # no run root, or one this platform will not name
-    return _LIST_RUN_DIRS.format(root=root)
+        return _FREE_KB        # no run root, or one this platform will not name
+    return _FREE_KB + "\n" + _LIST_RUN_DIRS.format(root=root)
 
 
 def _run_dirs(out: str) -> list[str]:
     """Folder names from the listing: one per line, no path separators, capped so a
     run root nobody ever cleans cannot grow the health file without bound."""
     names = [line.strip() for line in str(out).splitlines()]
-    return [n for n in names if n and "/" not in n][:MAX_RUN_DIRS]
+    return [n for n in names
+            if n and "/" not in n and not n.startswith("FREE_KB ")][:MAX_RUN_DIRS]
 
 
 def _ask(host, runner: Runner) -> tuple[int, str, str]:
@@ -132,7 +152,10 @@ def check(repo_root, pool, now: float, runner: Runner | None = None) -> dict[str
             prev = entries.get(host.name, {})
             if code == 0:
                 entries[host.name] = {"checked_at": now, "last_ok": now, "fail_since": 0.0, "reason": ""}
-                if _list_command(host.run_root) != "true":
+                free = _free_gb(out)
+                if free is not None:
+                    entries[host.name]["free_gb"] = free
+                if _list_command(host.run_root) != _FREE_KB:
                     # Present and empty ("nothing is there") is not the same fact as
                     # absent ("nobody has looked"), so the key is written only when
                     # the host was actually asked, and readers must tell them apart.
@@ -147,6 +170,11 @@ def check(repo_root, pool, now: float, runner: Runner | None = None) -> dict[str
                     # A host that stopped answering still held these when it last did;
                     # dropping them would make the list flicker with the connection.
                     entries[host.name]["run_dirs"] = list(prev["run_dirs"])
+                if isinstance(prev.get("free_gb"), (int, float)):
+                    # Same for the last free-space reading: stale, but it is what the
+                    # machine last told us, and dropping it reads as "unknown" when
+                    # what we actually know is "low as of ten minutes ago".
+                    entries[host.name]["free_gb"] = float(prev["free_gb"])
     if entries != old:
         _save(repo_root, entries)
     return entries

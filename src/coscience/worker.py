@@ -13,7 +13,8 @@ import re
 import time
 from pathlib import Path
 
-from coscience import artifacts, escalation, feedback_harvest, host_health, remote_exec, usage_meter
+from coscience import (artifacts, disk, escalation, feedback_harvest, host_health,
+                       remote_exec, usage_meter)
 from coscience.executor import ExecutionContext
 from coscience.executor import is_running as _job_is_running
 from coscience.executor import process_token, terminate_detached as _terminate
@@ -404,6 +405,16 @@ class Worker:
                                          fail_open=False,
                                          repo_root=self.substrate.repo_root)))()
 
+    def _disk_ok(self) -> bool:
+        """False when THIS machine is too low on disk to start an agent (B2).
+
+        A worker agent writes constantly — scratchpad, log, artifact work/ — so
+        launching one into a nearly full disk produces corrupted output rather than
+        an honest failure. The PM loops are deliberately not gated on this: they are
+        cheap, they are how the platform reports and re-plans, and silencing them
+        would hide the very outage that caused it."""
+        return disk.level(disk.free_gb(self.substrate.repo_root)) != "critical"
+
     def _read_job_json(self, sprint_dir):
         """Read + normalize a declared detached job's job.json. Returns a clean dict
         {pid:int, out_file, note, expected_seconds, wake_after_seconds, max_seconds}
@@ -689,6 +700,15 @@ class Worker:
                 # Don't launch into an exhausted budget — the agent would die on
                 # arrival and print a limit message. Leave the sprint claimed; a
                 # later beat retries once usage frees up.
+                return BeatOutcome.IDLE
+            if not self._disk_ok():
+                # Same shape for disk: leave it claimed and retry once space frees.
+                # Recorded on the sprint, because an agent that never launches and
+                # never says why is the failure mode this whole block exists to end.
+                progress.last_error = (
+                    "not launched: " + (disk.describe(disk.free_gb(self.substrate.repo_root))
+                                        or "this machine is out of disk space"))
+                self.substrate.save_progress(progress)
                 return BeatOutcome.IDLE
             # Same shape, for compute rather than budget: a sprint that slept
             # through a detached job gave its worker slot back, and launching is

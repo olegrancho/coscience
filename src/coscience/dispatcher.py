@@ -10,6 +10,7 @@ from coscience.host_probe import ssh_argv
 from coscience.ledger import Ledger
 from coscience.models import BeatOutcome, ProgramStatus, SprintStatus, set_status
 from coscience.pause import is_paused
+from coscience import disk
 from coscience.resources import (LOCAL, WORKER_KEY, ResourcePool, effective_requirement,
                                  gpu_request, load_pool, over_capacity)
 from coscience.scheduler import SchedulerPolicy
@@ -121,6 +122,25 @@ def _probe_facts_line(repo_root, host_name: str) -> str:
     return " · ".join(parts)
 
 
+def low_disk_hosts(pool, entries: dict, repo_root) -> dict[str, str]:
+    """{host name: "low on disk"} for every machine under the critical threshold.
+
+    This machine is measured directly — it is not health-checked, so nothing else
+    would ever read it. A remote machine reports its free space on the same round
+    trip as its liveness check, so the figure is at most one check old. A machine
+    that has reported nothing is absent from the result: the platform does not stop
+    work over a measurement it does not have."""
+    out: dict[str, str] = {}
+    for host in pool.hosts:
+        free = (disk.free_gb(repo_root) if host.is_local
+                else entries.get(host.name, {}).get("free_gb"))
+        if not isinstance(free, (int, float)):
+            continue
+        if disk.level(float(free)) == "critical":
+            out[host.name] = "low on disk"
+    return out
+
+
 class Dispatcher:
     def __init__(self, substrate: Substrate, agent,
                  pool: ResourcePool, policy: SchedulerPolicy | None = None,
@@ -175,6 +195,13 @@ class Dispatcher:
         entries = host_health.check(self.substrate.repo_root, self.ledger.pool, now,
                                     runner=self._host_runner)
         closed = {name: "quiet" for name in host_health.quiet(entries, now)}
+        # B2: a machine with almost no disk takes no new work either, for the same
+        # reason a quiet one does not — the platform cannot trust what happens there.
+        # A full disk does not fail a sprint honestly; it corrupts whatever was
+        # mid-write, which is how this substrate's git repo lost 28 objects. The
+        # reading is this machine's own statvfs, or what a remote reported on its last
+        # liveness check; a machine that has never reported one is never gated.
+        closed.update(low_disk_hosts(self.ledger.pool, entries, self.substrate.repo_root))
         self.ledger.pool.closed = closed
 
         # M1 (fix round 1): a human can mark (or drain) a server at any point up to

@@ -32,6 +32,16 @@ export function sendOnCtrlEnter(send: () => void) {
   };
 }
 
+/** One line about a machine's free space, or "" when there is nothing to say.
+ *  Mirrors `disk.describe` on the backend so both say the same thing. */
+export function describeDisk(freeGb?: number | null, level?: string): string {
+  if (!level || freeGb === null || freeGb === undefined) return "";
+  const amount = freeGb < 1 ? `${Math.round(freeGb * 1024)} MB` : `${freeGb.toFixed(1)} GB`;
+  return level === "critical"
+    ? `${amount} free — too little to work safely; taking no new work`
+    : `${amount} free — running low`;
+}
+
 export function voterId(): string {
   const KEY = "coscience.voter";
   let v = localStorage.getItem(KEY);

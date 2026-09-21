@@ -1,5 +1,6 @@
 """O7: remote hosts are checked; a quiet host takes no new grants and keeps its work."""
 import json
+import shlex
 import time
 
 from coscience import host_health
@@ -43,7 +44,10 @@ def test_check_asks_each_remote_placeable_host_and_records_the_answer(tmp_path, 
     assert entries["big"] == {"checked_at": 1000.0, "last_ok": 1000.0, "fail_since": 0.0, "reason": ""}
     assert entries["gone"] == {"checked_at": 1000.0, "last_ok": 0.0, "fail_since": 1000.0,
                                "reason": "ssh: connect to host gone: No route"}
-    assert len(runner.calls) == 2 and all(c[-1] == "bash -c true" for c in runner.calls)
+    # A host with no run root is still asked how much space it has — the free-space
+    # reading rides the same round trip as the liveness check (B1).
+    assert len(runner.calls) == 2
+    assert all(c[-1] == f"bash -c {shlex.quote(host_health._FREE_KB)}" for c in runner.calls)
     assert json.loads((tmp_path / ".coscience" / "host-health.json").read_text()) == entries
     assert "local" not in entries
 
@@ -313,7 +317,7 @@ def test_a_host_with_no_run_root_is_only_asked_whether_it_answers(tmp_path, ever
     pool = ResourcePool.from_dict({"cpu": 4, "hosts": {"big": {"ssh": "big", "capacity": {"cpu": 1}}}})
     runner = ScriptRunner({"big": (0, "unexpected\n", "")})
     entries = host_health.check(tmp_path, pool, now=1000.0, runner=runner)
-    assert runner.calls[0][-1] == "bash -c true"
+    assert runner.calls[0][-1] == f"bash -c {shlex.quote(host_health._FREE_KB)}"
     assert "run_dirs" not in entries["big"]
 
 
@@ -324,7 +328,7 @@ def test_a_run_root_the_platform_will_not_name_is_never_pasted_into_a_command(
         "big": {"ssh": "big", "run_root": "~/runs; rm -rf ~", "capacity": {"cpu": 1}}}})
     runner = ScriptRunner({"big": (0, "", "")})
     entries = host_health.check(tmp_path, pool, now=1000.0, runner=runner)
-    assert runner.calls[0][-1] == "bash -c true"
+    assert runner.calls[0][-1] == f"bash -c {shlex.quote(host_health._FREE_KB)}"
     assert "run_dirs" not in entries["big"]
 
 

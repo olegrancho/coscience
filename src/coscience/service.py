@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import yaml
 
-from coscience import graph, host_health, host_removal, threads
+from coscience import disk, graph, host_health, host_removal, threads
 from coscience.artifacts import DESCRIPTION_FILE, FIGURE_DESCRIPTION_NOTE
 from coscience.ledger import Ledger
 from coscience.models import (DEFAULT_MODEL, Sprint, SprintStatus, Program, ProgramStatus,
@@ -466,6 +466,15 @@ class Service:
     def _activity(self, sprint_id: str) -> dict | None:
         from coscience.claude_executor import read_activity
         return read_activity(self.substrate.sprint_dir(sprint_id))
+
+    def _disk(self, host, health: dict) -> dict:
+        """`free_gb` and `disk` ("", "low" or "critical") for one host. A machine that
+        has not reported a reading carries free_gb None and disk "" — unknown never
+        warns and never gates."""
+        free = (disk.free_gb(self.repo_root) if host.is_local
+                else health.get(host.name, {}).get("free_gb"))
+        free = float(free) if isinstance(free, (int, float)) else None
+        return {"free_gb": free, "disk": disk.level(free)}
 
     def _create_specs(self, sprint: Sprint) -> list[dict]:
         """The sprint's create-targets, each said whether it exists yet and at which
@@ -1991,6 +2000,10 @@ class Service:
                                  ("fail_since", 0.0), ("reason", ""))}}),
                  "used": {k: v for k, v in ledger.used(h.name).items()
                           if k not in PLATFORM_KEYS and v},
+                 # Free space per machine (B1). This one is measured live — it is not
+                 # health-checked, so nothing else would ever read it; a remote host
+                 # reports it on the same round trip as its liveness check.
+                 **self._disk(h, health),
                  "leases": sum(1 for l in ledger.all_leases() if l.host == h.name),
                  "leftover": leftover.get(h.name, [])}
                 for h in ledger.pool.hosts
