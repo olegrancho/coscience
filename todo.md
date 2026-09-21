@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 150
+version: 151
 last_updated: 2026-09-20
 ---
 
@@ -38,6 +38,21 @@ hours later, leaving a status change nobody could explain. The per-cycle actions
 kept in `pm.md` activations, but only as lists of ids: what was done, never why. A
 sprint touched by a cycle should carry the sentence that touched it, and the cycle's
 full report should be retrievable rather than replaced.
+
+### B4. Say when the substrate cannot commit
+
+Make a failed commit distinguishable from an empty one, and show it where the disk
+warning shows, instead of losing it to a log.
+
+On 2026-09-20 the substrate's git repo refused every commit for twelve hours and nothing
+said so: 28 objects written during the previous day's full-disk outage had never landed,
+so `git add -A` failed on the index entries that referenced them. `Substrate.commit`
+hides exactly this — it runs `add` with `check=True` (a raise, which a beat reports as a
+generic failure with a wall of git stderr) but the `commit` after it with `check=False`,
+so a commit that fails returns "" and every caller reads that as "nothing to commit".
+Twelve hours of silence came from that one asymmetry. The platform kept working and the
+files were all on disk; what was lost was the history, and the ability to notice. Needs
+the two outcomes separated first, then a line in the pulse zone beside B1's.
 
 ### B3. Retire a Claude call whose end was never written
 
