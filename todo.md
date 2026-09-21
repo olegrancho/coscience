@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 151
+version: 152
 last_updated: 2026-09-20
 ---
 
@@ -8,12 +8,14 @@ last_updated: 2026-09-20
 
 ### B1. Warn on the pulse zone when a machine is low on disk
 
-The pulse zone names any machine under 2 GB free, and marks one under 500 MB severely;
-this machine is measured directly, a remote one reports on its liveness check.
+The servers table carries a Disk column with each machine's free space, and the pulse
+zone names any machine under 2 GB free and marks one under 500 MB severely; this machine
+is measured directly, a remote one reports on its liveness check.
 
-**Check:** `curl /api/ledger` carries `free_gb` and `disk` per host — this machine with a
-real number, a remote one once it has been checked since the deploy. A machine that has
-reported nothing must show `free_gb: null`, `disk: ""` and no warning at all.
+**Check:** Compute → servers shows a figure per machine, matching `df -Pk "$HOME"` run on
+that machine, and hovering a remote one dates the reading to its last health check.
+`curl /api/ledger` carries the same `free_gb` and `disk` per host. A machine that has
+reported nothing shows "—", never a warning.
 
 ### B2. Stop giving work to a machine with under 500 MB free
 

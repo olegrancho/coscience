@@ -2,6 +2,7 @@ import { Button, Card, Group, Table, Text, Tooltip } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type LedgerHost, type ProgramRow, type StrandedLease } from "../api";
+import { describeDisk } from "./ui";
 import AddHostModal from "./AddHostModal";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -126,6 +127,43 @@ export function cardSlots(host: LedgerHost): CardSlot[] {
   });
 }
 
+export interface DiskCell { text: string; title: string; color?: string }
+
+/** Free space for the table (B1). The figure is shown whenever the machine has
+ *  reported one, not only once it is nearly gone: "how much room is left on the
+ *  servers" is a question someone asks before there is a problem, and a warning
+ *  that only appears at 2 GB cannot answer it. Colour is reserved for the two
+ *  levels worth acting on, so a healthy pool stays quiet.
+ *
+ *  The reading rides along with the health check, so on a server that stopped
+ *  answering it is as old as the last successful check — the hover says when,
+ *  rather than presenting a stale number as current. */
+export function diskCell(host: LedgerHost): DiskCell {
+  const free = host.free_gb;
+  if (free === null || free === undefined) {
+    return {
+      text: "—",
+      title: host.ssh ? "this server has not reported its free space yet"
+                      : "free space could not be read on this machine",
+    };
+  }
+  const amount = free < 1 ? `${Math.round(free * 1024)} MB`
+                          : `${free.toFixed(free < 10 ? 1 : 0)} GB`;
+  const warning = describeDisk(free, host.disk);
+  if (warning) {
+    return {
+      text: amount,
+      color: host.disk === "critical" ? "var(--st-failed)" : "var(--st-queued)",
+      title: warning,
+    };
+  }
+  const at = host.ssh && host.health?.last_ok
+    ? `, as of the last health check at ${new Date(host.health.last_ok * 1000)
+        .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+    : "";
+  return { text: amount, title: `${amount} free where this server's sprints run${at}` };
+}
+
 export interface ProgramsCell { text: string; title: string }
 
 /** A server's program access for the table: the ids it runs, with paused and closed
@@ -228,6 +266,7 @@ export default function HostsCard(
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Server</Table.Th><Table.Th>CPU</Table.Th><Table.Th>GPU</Table.Th>
+            <Table.Th>Disk</Table.Th>
             <Table.Th>Programs</Table.Th><Table.Th>Status</Table.Th>
           </Table.Tr>
         </Table.Thead>
@@ -238,6 +277,7 @@ export default function HostsCard(
             const mem = "memory_gb" in h.capacity
               ? slots(h.capacity.memory_gb, h.used?.memory_gb ?? 0) : null;
             const cards = cardSlots(h);
+            const free = diskCell(h);
             const access = programsCell(h, programs.data);
             return (
               <Table.Tr key={h.name} role="button" tabIndex={0} aria-label={`Configure ${h.name}`}
@@ -272,6 +312,14 @@ export default function HostsCard(
                 <Table.Td>
                   <Pips states={cards.map((c) => c.state)}
                         label={cards.map((c) => c.title).join("\n")} />
+                </Table.Td>
+                <Table.Td>
+                  <Hover label={free.title}>
+                    <span style={{ ...hoverable, whiteSpace: "nowrap",
+                                   color: free.color, fontWeight: free.color ? 600 : undefined }}>
+                      {free.text}
+                    </span>
+                  </Hover>
                 </Table.Td>
                 <Table.Td>
                   <Hover label={access.title}><span style={hoverable}>{access.text}</span></Hover>

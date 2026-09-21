@@ -16,7 +16,7 @@ vi.mock("../api", () => ({
 
 import { api } from "../api";
 import type { LedgerHost, StrandedLease } from "../api";
-import HostsCard, { cardSlots, hostLabel, hostStatus, programsCell, slots } from "./HostsCard";
+import HostsCard, { cardSlots, diskCell, hostLabel, hostStatus, programsCell, slots } from "./HostsCard";
 
 beforeAll(() => {
   window.matchMedia = window.matchMedia || (((query: string) => ({
@@ -265,6 +265,51 @@ describe("HostsCard", () => {
     renderCard([], [LOCAL, REMOTE], [{ sprint_id: "s4", host: "gpu1", listed: true }]);
     expect(screen.getByText(/s4 still holds a lease on gpu1, which takes no work while remote placement is off/))
       .toBeTruthy();
+  });
+});
+
+describe("diskCell (B1)", () => {
+  it("shows the figure on a healthy machine, not only when it runs out", () => {
+    // The point of the column: "how much room is left" is asked before anything is
+    // wrong, and the warning line on Overview only appears below 2 GB.
+    const cell = diskCell({ ...LOCAL, free_gb: 263.138, disk: "" });
+    expect(cell.text).toBe("263 GB");
+    expect(cell.color).toBeUndefined();
+  });
+
+  it("keeps a decimal while the number is small enough for it to matter", () => {
+    expect(diskCell({ ...LOCAL, free_gb: 5.27, disk: "" }).text).toBe("5.3 GB");
+    expect(diskCell({ ...LOCAL, free_gb: 0.42, disk: "critical" }).text).toBe("430 MB");
+  });
+
+  it("colours the two levels worth acting on, and says why on hover", () => {
+    const low = diskCell({ ...LOCAL, free_gb: 1.4, disk: "low" });
+    expect(low.color).toBe("var(--st-queued)");
+    expect(low.title).toMatch(/running low/);
+    const crit = diskCell({ ...LOCAL, free_gb: 0.3, disk: "critical" });
+    expect(crit.color).toBe("var(--st-failed)");
+    expect(crit.title).toMatch(/taking no new work/);
+  });
+
+  it("dates a remote reading, which is only as fresh as the last health check", () => {
+    // A server that stopped answering keeps its last figure; presenting it bare would
+    // read as current.
+    const cell = diskCell({ ...REMOTE, free_gb: 144.4, disk: "" });
+    expect(cell.title).toMatch(/as of the last health check at /);
+  });
+
+  it("says nothing it does not know", () => {
+    expect(diskCell({ ...REMOTE, free_gb: null, disk: "" }).text).toBe("—");
+    expect(diskCell({ ...REMOTE, free_gb: null, disk: "" }).title)
+      .toMatch(/has not reported/);
+    expect(diskCell(LOCAL).title).toMatch(/could not be read/);
+  });
+
+  it("puts the free space on the servers table", async () => {
+    renderCard([], [{ ...LOCAL, free_gb: 263.1, disk: "" },
+                    { ...REMOTE, free_gb: 0.3, disk: "critical" }]);
+    expect(screen.getByText("263 GB")).toBeTruthy();
+    expect(screen.getByText("307 MB")).toBeTruthy();   // 0.3 GB, in the unit that reads
   });
 });
 
