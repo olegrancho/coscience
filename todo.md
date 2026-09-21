@@ -1,10 +1,29 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 149
+version: 150
 last_updated: 2026-09-20
 ---
 
 # To QC
+
+### B1. Warn on the pulse zone when a machine is low on disk
+
+The pulse zone names any machine under 2 GB free, and marks one under 500 MB severely;
+this machine is measured directly, a remote one reports on its liveness check.
+
+**Check:** `curl /api/ledger` carries `free_gb` and `disk` per host — this machine with a
+real number, a remote one once it has been checked since the deploy. A machine that has
+reported nothing must show `free_gb: null`, `disk: ""` and no warning at all.
+
+### B2. Stop giving work to a machine with under 500 MB free
+
+Under 500 MB a machine joins the reasons a server takes no new grants, and locally no
+worker agent launches while the PMs keep running.
+
+**Check:** the Compute page explains a gated machine the way it explains quiet/draining
+(`low on disk`), and it lifts by itself once space frees. Confirm the PM loops still beat
+while a worker is refused — that separation is the point — and that a sprint refused for
+disk says so in its error rather than silently never starting.
 
 # To Do (sprint)
 
@@ -19,31 +38,6 @@ hours later, leaving a status change nobody could explain. The per-cycle actions
 kept in `pm.md` activations, but only as lists of ids: what was done, never why. A
 sprint touched by a cycle should carry the sentence that touched it, and the cycle's
 full report should be retrievable rather than replaced.
-
-### B1. Warn on the pulse zone when a machine is low on disk
-
-Show a warning in the pulse zone when a machine has under 2 GB free, and a severe
-warning under 500 MB. Per machine, this one included.
-
-Nothing on the platform watches free space. On 2026-09-19 this machine's root
-filesystem filled at 05:55: every PM cycle and every dispatcher cycle failed with
-`[Errno 28] No space left on device` for about 40 minutes (163 dispatcher cycles, 5
-programs' PM cycles), the usage rail went blank because its reading is written to the
-same disk, and nothing anywhere said "the disk is full" — the only evidence was in a
-log file nobody was reading. Free space is already asked for on every remote server by
-the health check, and locally it is one `statvfs` call.
-
-### B2. Stop giving work to a machine with under 500 MB free
-
-Under 500 MB, a server takes no new sprints, and on this machine no worker runs at
-all — only the PMs, which need almost nothing and are what recovers the situation.
-
-A full disk does not fail a sprint honestly: it corrupts whatever was mid-write. The
-gate belongs with the other reasons a server takes no work (quiet, draining,
-removing), so the Compute page explains it in the same place and it lifts by itself
-once space is freed. Keeping the PMs alive is deliberate — they are cheap, they are
-how the platform reports and re-plans, and silencing them would hide the outage that
-caused this. Depends on B1 for the reading.
 
 ### B3. Retire a Claude call whose end was never written
 
