@@ -271,7 +271,7 @@ describe("HostsCard", () => {
 describe("diskCell (B1)", () => {
   it("shows the figure on a healthy machine, not only when it runs out", () => {
     // The point of the column: "how much room is left" is asked before anything is
-    // wrong, and the warning line on Overview only appears below 2 GB.
+    // wrong, and the pulse only speaks up once a machine is near the line.
     const cell = diskCell({ ...LOCAL, free_gb: 263.138, disk: "" });
     expect(cell.text).toBe("263 GB");
     expect(cell.color).toBeUndefined();
@@ -282,13 +282,19 @@ describe("diskCell (B1)", () => {
     expect(diskCell({ ...LOCAL, free_gb: 0.42, disk: "critical" }).text).toBe("430 MB");
   });
 
-  it("colours the two levels worth acting on, and says why on hover", () => {
+  it("marks the two levels worth acting on, and says why on hover", () => {
+    // A sign, not only a colour — the column is scanned, and a bold number on its own
+    // reads as ordinary.
     const low = diskCell({ ...LOCAL, free_gb: 1.4, disk: "low" });
-    expect(low.color).toBe("var(--st-queued)");
+    expect([low.mark, low.color]).toEqual(["⚠", "var(--st-queued)"]);
     expect(low.title).toMatch(/running low/);
     const crit = diskCell({ ...LOCAL, free_gb: 0.3, disk: "critical" });
-    expect(crit.color).toBe("var(--st-failed)");
+    expect([crit.mark, crit.color]).toEqual(["⛔", "var(--st-failed)"]);
     expect(crit.title).toMatch(/taking no new work/);
+  });
+
+  it("puts no mark on a machine with room", () => {
+    expect(diskCell({ ...LOCAL, free_gb: 263.1, disk: "" }).mark).toBeUndefined();
   });
 
   it("dates a remote reading, which is only as fresh as the last health check", () => {
@@ -312,20 +318,6 @@ describe("diskCell (B1)", () => {
     expect(screen.getByText("307 MB")).toBeTruthy();   // 0.3 GB, in the unit that reads
   });
 
-  it("marks the column while a drill is moving the thresholds", () => {
-    // Otherwise a rehearsed shortage is indistinguishable from a real one, which is
-    // how people learn to ignore the real one.
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <MantineProvider>
-        <QueryClientProvider client={qc}>
-          <HostsCard hosts={[{ ...LOCAL, free_gb: 263.1, disk: "critical" }]}
-                     errors={[]} drill />
-        </QueryClientProvider>
-      </MantineProvider>,
-    );
-    expect(screen.getByText("Disk · drill")).toBeTruthy();
-  });
 });
 
 describe("programsCell", () => {

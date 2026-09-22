@@ -1,12 +1,12 @@
 import { lazy, Suspense, type ReactNode } from "react";
-import { AppShell, Group, Text } from "@mantine/core";
+import { AppShell, Group, Text, Tooltip } from "@mantine/core";
 import { Link, Route, Routes, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 import { useMe, UserChip } from "./auth";
 import LiveAgents from "./components/LiveAgents";
 import AttentionBadge from "./components/AttentionBadge";
-import { pulseCounts } from "./components/pulseCounts";
+import { diskPulse, pulseCounts } from "./components/pulseCounts";
 import { Heartbeat, WindowTick, windowElapsed } from "./components/ui";
 import Overview from "./views/Overview";
 import Programs from "./views/ProgramsOverview";
@@ -59,8 +59,10 @@ function railLinkStyle({ isActive }: { isActive: boolean }) {
 function Pulse() {
   const programs = useQuery({ queryKey: ["programs"], queryFn: api.listPrograms });
   const sprints = useQuery({ queryKey: ["sprints"], queryFn: api.listSprints });
+  const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.getLedger });
   const { active, running, awaitingYou, waiting, cantStart } =
     pulseCounts(programs.data ?? [], sprints.data ?? []);
+  const disk = diskPulse(ledger.data?.hosts ?? []);
 
   const Row = ({ children }: { children: ReactNode }) => (
     <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-muted)" }}>
@@ -97,6 +99,21 @@ function Pulse() {
           <b className="mono">{awaitingYou}</b> awaiting you
         </span>
       </Row>
+      {/* Disk, beside the budget: the two resources that stop the platform without
+          failing anything. Silent while every machine has room — the pulse is for what
+          needs attention, and the figures themselves live on Compute. */}
+      {disk && (
+        <Row>
+          <Tooltip withArrow multiline w={260} openDelay={120}
+                   transitionProps={{ duration: 0 }}
+                   label={<span style={{ whiteSpace: "pre-line" }}>{disk.title}</span>}>
+            <span style={{ display: "flex", alignItems: "center", gap: 8, cursor: "help" }}>
+              <span style={{ width: 9, textAlign: "center", color: disk.color }}>{disk.mark}</span>
+              <span style={{ color: disk.color, fontWeight: 600 }}>{disk.text}</span>
+            </span>
+          </Tooltip>
+        </Row>
+      )}
       <LiveAgents />
       <UsageBars />
     </div>

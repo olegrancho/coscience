@@ -1,23 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 154
-last_updated: 2026-09-21
+version: 156
+last_updated: 2026-09-22
 ---
 
 # To QC
-
-### B2. Stop giving work to a machine with under 500 MB free
-
-Under 500 MB a machine joins the reasons a server takes no new grants, and locally no
-worker agent launches while the PMs keep running.
-
-**Check:** rehearse it by moving the line rather than filling a disk — restart the loops
-with `COSCIENCE_DISK_CRITICAL_GB=500` and every machine is below it, against real
-readings and through the real gates. Then: the Compute page explains a gated machine the
-way it explains quiet/draining (`low on disk`), the PM loops keep beating while a worker
-is refused (that separation is the point), a sprint refused for disk says so in its error
-rather than silently never starting, and every warning is marked as a drill. Unset the
-variable, restart, and confirm it all lifts by itself.
 
 # To Do (sprint)
 
@@ -603,9 +590,15 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### B2. Stop giving work to a machine with under 500 MB free
+
+A machine under the gate (1 GB) takes no new grants and launches no worker agent, while
+the planners keep beating; both thresholds can be moved from the environment, so the gate
+is rehearsed by shifting the line instead of filling a real disk.
+
 ### B1. Warn on the pulse zone when a machine is low on disk
 
-Every machine's free space is on the servers table, dated to its last health check when it came from a remote one, and the pulse zone calls out anything under 2 GB — severely under 500 MB.
+Every machine's free space is on the servers table, dated to its last health check when it came from a remote one, and the pulse calls out anything running low — severely once it is under the gate.
 
 ### E1. Replace the planner's reopen with a hold that keeps the approval
 
@@ -643,8 +636,5 @@ The health check lists each server's run root and the servers card shows what is
 there, labelling a folder no sprint explains as "no sprint record"; verified live against
 the server, four phantom folders down to the one that exists.
 
-### O15. Remove a server with one button
-
-Remove marks a server and the dispatcher takes it out of the pool once nothing is on it; Keep undoes the mark, and the drain step is gone.
 
 

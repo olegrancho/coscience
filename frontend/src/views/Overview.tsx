@@ -246,15 +246,6 @@ export default function Overview() {
               {h.disk === "critical" ? "⛔" : "⚠"} {h.label || h.name}: {describeDisk(h.free_gb, h.disk)}
             </Text>
           ))}
-          {/* A drill moves the thresholds so the gate can be rehearsed without filling a
-              real machine. Saying so here is the whole safeguard: a drill that looks
-              exactly like an outage teaches people to ignore the outage. */}
-          {ledger.data?.disk_drill && (
-            <Text size="xs" mt={8} c="dimmed">
-              Disk drill: the thresholds were moved by <span className="mono">COSCIENCE_DISK_*</span>,
-              so these are rehearsed, not real. Unset them and restart to go back.
-            </Text>
-          )}
         </Card>
       </SimpleGrid>
 

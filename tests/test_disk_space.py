@@ -20,9 +20,9 @@ def test_free_gb_on_a_path_that_is_not_there_is_unknown(tmp_path):
 # --- what a reading means -----------------------------------------------------------
 
 @pytest.mark.parametrize("free,expected", [
-    (100.0, ""), (2.1, ""), (2.0, ""),          # at the threshold is still fine
-    (1.99, "low"), (0.6, "low"), (0.5, "low"),  # at the gate is still only a warning
-    (0.49, "critical"), (0.0, "critical"),
+    (100.0, ""), (5.1, ""), (5.0, ""),          # at the threshold is still fine
+    (4.99, "low"), (1.5, "low"), (1.0, "low"),  # at the gate is still only a warning
+    (0.99, "critical"), (0.0, "critical"),
 ])
 def test_level_thresholds(free, expected):
     assert disk.level(free) == expected

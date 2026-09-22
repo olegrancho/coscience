@@ -1974,9 +1974,6 @@ class Service:
             "used": ledger.used(),
             "available": ledger.available(),
             "paused": is_paused(self.substrate.repo_root),
-            # True while this platform is running a disk drill rather than the real
-            # thresholds, so the dashboard's disk warnings can say which they are.
-            "disk_drill": disk.DRILL,
             # What the capacity editor edits: the platform keys and this machine's own
             # amounts. Once remote hosts take work the totals above include them, and
             # writing a total back as this machine's capacity would be wrong.

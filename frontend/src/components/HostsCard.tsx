@@ -127,12 +127,12 @@ export function cardSlots(host: LedgerHost): CardSlot[] {
   });
 }
 
-export interface DiskCell { text: string; title: string; color?: string }
+export interface DiskCell { text: string; title: string; color?: string; mark?: string }
 
 /** Free space for the table (B1). The figure is shown whenever the machine has
  *  reported one, not only once it is nearly gone: "how much room is left on the
  *  servers" is a question someone asks before there is a problem, and a warning
- *  that only appears at 2 GB cannot answer it. Colour is reserved for the two
+ *  that only appears near the line cannot answer it. Colour is reserved for the two
  *  levels worth acting on, so a healthy pool stays quiet.
  *
  *  The reading rides along with the health check, so on a server that stopped
@@ -151,8 +151,11 @@ export function diskCell(host: LedgerHost): DiskCell {
                           : `${free.toFixed(free < 10 ? 1 : 0)} GB`;
   const warning = describeDisk(free, host.disk);
   if (warning) {
+    // A sign, not just a colour: the number alone reads as ordinary at a glance, and
+    // this column is scanned, not studied. Same two marks the pulse zone uses.
     return {
       text: amount,
+      mark: host.disk === "critical" ? "⛔" : "⚠",
       color: host.disk === "critical" ? "var(--st-failed)" : "var(--st-queued)",
       title: warning,
     };
@@ -235,9 +238,9 @@ function Pips({ states, label }: { states: string[]; label: string }) {
 }
 
 export default function HostsCard(
-  { hosts, errors, stranded = [], localCapacity, drill = false }: {
+  { hosts, errors, stranded = [], localCapacity }: {
     hosts: LedgerHost[]; errors: string[]; stranded?: StrandedLease[];
-    localCapacity?: Record<string, number>; drill?: boolean;
+    localCapacity?: Record<string, number>;
   },
 ) {
   const [adding, setAdding] = useState(false);
@@ -266,13 +269,7 @@ export default function HostsCard(
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Server</Table.Th><Table.Th>CPU</Table.Th><Table.Th>GPU</Table.Th>
-            <Table.Th>
-              {drill ? (
-                <Hover label="A disk drill is running: the thresholds were moved by COSCIENCE_DISK_*, so a machine shown as out of space is being rehearsed, not failing. Unset them and restart to go back.">
-                  <span style={hoverable}>Disk · drill</span>
-                </Hover>
-              ) : "Disk"}
-            </Table.Th>
+            <Table.Th>Disk</Table.Th>
             <Table.Th>Programs</Table.Th><Table.Th>Status</Table.Th>
           </Table.Tr>
         </Table.Thead>
@@ -323,6 +320,7 @@ export default function HostsCard(
                   <Hover label={free.title}>
                     <span style={{ ...hoverable, whiteSpace: "nowrap",
                                    color: free.color, fontWeight: free.color ? 600 : undefined }}>
+                      {free.mark && <span style={{ marginRight: 4 }}>{free.mark}</span>}
                       {free.text}
                     </span>
                   </Hover>
