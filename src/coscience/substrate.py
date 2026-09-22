@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from uuid import uuid4
 
+from coscience import commit_health
 from coscience.frontmatter_io import parse, serialize
 from coscience.models import (Sprint, SprintStatus, ProgressState, Result, Program,
                               ProgramStatus, PMState, Idea, ChatThread, Artifact,
@@ -101,6 +102,7 @@ class Substrate:
             artifacts_bound=[str(a) for a in fm.get("artifacts_bound", [])],
             artifacts_create=[dict(c) for c in fm.get("artifacts_create", [])],
             hold=dict(fm.get("hold") or {}),
+            pm_notes=[dict(n) for n in fm.get("pm_notes", []) if isinstance(n, dict)],
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
@@ -166,6 +168,8 @@ class Substrate:
             fm["artifacts_create"] = [dict(c) for c in sprint.artifacts_create]
         if sprint.hold:
             fm["hold"] = dict(sprint.hold)
+        if sprint.pm_notes:
+            fm["pm_notes"] = [dict(n) for n in sprint.pm_notes]
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))
 
@@ -423,14 +427,38 @@ class Substrate:
                 max_n = max(max_n, int(m.group(1)))
         return f"p{max_n + 1}"
 
-    def save_report(self, program_id: str, report: str) -> None:
+    def save_report(self, program_id: str, report: str, cycle: int | None = None) -> None:
+        """The planner's report for this cycle. `report.md` is the current one; when a
+        cycle number is given the same text is also kept under `reports/` (E2).
+
+        Without the copy, the reasoning behind any decision is gone the moment the next
+        cycle runs — a status change nobody could explain, hours later, with the prose
+        that explained it already overwritten."""
         d = self.program_dir(program_id)
         d.mkdir(parents=True, exist_ok=True)
-        (d / "report.md").write_text(report.rstrip() + "\n")
+        text = report.rstrip() + "\n"
+        (d / "report.md").write_text(text)
+        if cycle is not None:
+            archive = d / "reports"
+            archive.mkdir(parents=True, exist_ok=True)
+            (archive / f"{int(cycle):04d}.md").write_text(text)
 
-    def load_report(self, program_id: str) -> str:
-        path = self.program_dir(program_id) / "report.md"
+    def load_report(self, program_id: str, cycle: int | None = None) -> str:
+        """The current report, or the one a given cycle wrote."""
+        if cycle is not None:
+            path = self.program_dir(program_id) / "reports" / f"{int(cycle):04d}.md"
+        else:
+            path = self.program_dir(program_id) / "report.md"
         return path.read_text() if path.is_file() else ""
+
+    def report_cycles(self, program_id: str) -> list[int]:
+        """Cycle numbers with a kept report, newest first."""
+        d = self.program_dir(program_id) / "reports"
+        out = []
+        for f in (d.iterdir() if d.is_dir() else []):
+            if f.suffix == ".md" and f.stem.isdigit():
+                out.append(int(f.stem))
+        return sorted(out, reverse=True)
 
     def save_instructions(self, program_id: str, text: str) -> None:
         """Standing house rules for this program's PM — style, policy, what never to
@@ -764,20 +792,37 @@ class Substrate:
         Returns "" when no new commit exists — either because this is not a
         git repo, or because there was nothing to commit. Callers that name a
         commit as the undo for something (e.g. a wiki merge, spec 9.1) must
-        never be handed a stale, unrelated HEAD."""
+        never be handed a stale, unrelated HEAD.
+
+        "" is deliberately ambiguous to the caller and must not be ambiguous to
+        the platform (B4): nothing-to-commit and cannot-commit look identical
+        from here, and for twelve hours on 2026-09-20 they were. Whichever it
+        was is recorded in `commit_health`, which the dashboard reads."""
         if not (self.repo_root / ".git").is_dir():
             return ""
+        git = ["git", "-C", str(self.repo_root)]
         before = subprocess.run(
-            ["git", "-C", str(self.repo_root), "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=False,
+            [*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=False,
         ).stdout.strip()
-        subprocess.run(["git", "-C", str(self.repo_root), "add", "-A"], check=True)
-        subprocess.run(
-            ["git", "-C", str(self.repo_root), "commit", "-q", "-m", message],
-            check=False,  # tolerate "nothing to commit"
-        )
+        add = subprocess.run([*git, "add", "-A"], capture_output=True, text=True, check=False)
+        if add.returncode:
+            # This is the shape the outage took: `add` fails on index entries whose
+            # objects never landed, so nothing is ever staged and no commit is tried.
+            commit_health.record_failure(self.repo_root, f"git add: {add.stderr.strip()}")
+            raise RuntimeError(f"git add failed in {self.repo_root}: {add.stderr.strip()}")
+        staged = subprocess.run([*git, "diff", "--cached", "--quiet"], check=False)
+        if staged.returncode == 0:
+            commit_health.record_success(self.repo_root)   # genuinely nothing to commit
+            return ""
+        done = subprocess.run(
+            [*git, "commit", "-q", "-m", message], capture_output=True, text=True, check=False)
         after = subprocess.run(
-            ["git", "-C", str(self.repo_root), "rev-parse", "HEAD"],
-            capture_output=True, text=True, check=False,
+            [*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=False,
         ).stdout.strip()
-        return after if after and after != before else ""
+        if not after or after == before:
+            # Something was staged and HEAD did not move: the commit was refused.
+            commit_health.record_failure(
+                self.repo_root, f"git commit: {(done.stderr or done.stdout).strip()}")
+            return ""
+        commit_health.record_success(self.repo_root)
+        return after
