@@ -48,7 +48,7 @@ def cache_root() -> Path:
                                os.path.expanduser("~/.cache/coscience")))
 
 
-def _substrate_key(repo_root) -> str:
+def substrate_key(repo_root) -> str:
     """A stable per-substrate filename. The basename alone will not do: both real
     substrates are directories named `coscience`, so keying on it would merge one
     program's spend into another's. The hash disambiguates, the name keeps the
@@ -66,7 +66,7 @@ def runs_path(repo_root) -> Path:
     rise as more call sites started recording. Safe to keep out of git because the
     run directories stay in the substrate — the log is an index over them, not the
     system of record, and can be rebuilt from the agent envelopes on disk."""
-    return cache_root() / "runs" / f"{_substrate_key(repo_root)}.jsonl"
+    return cache_root() / "runs" / f"{substrate_key(repo_root)}.jsonl"
 
 
 def legacy_runs_path(repo_root) -> Path:
@@ -193,11 +193,57 @@ def start_call(repo_root, kind: str, *, program: str = "", sprint: str = "",
     return rid
 
 
+def retire_open_calls(repo_root, *, kind: str, token: str, program: str = "",
+                      now: float | None = None) -> list[str]:
+    """Close this process's own unfinished calls of one kind, and say which (B3).
+
+    A call is inferred `running` while the process named by its token is alive. For a
+    call a long-lived loop makes in-process, that token is the loop's own pid, and the
+    loop outlives every cycle — so once an end event is lost (a full disk, a `kill -9`,
+    an OOM kill that takes the writer before the record) the row can never retire. Three
+    PM calls read as in flight eight hours after the fact for exactly this reason, which
+    is what "several PMs are running" on the dashboard meant.
+
+    Inference cannot fix that: from the outside, "this loop is calling Claude now" and
+    "this loop called Claude and never wrote the end" look identical. The loop itself can,
+    because it knows something no reader does — it is about to start a new call, so any
+    earlier one of its own has certainly finished. That is the rule this applies, and it
+    is why `lost` is written here rather than derived.
+
+    Matching is deliberately narrow — same kind, same program, same process token — so a
+    loop only ever retires its own leftovers, never a sibling's live call.
+    """
+    retired: list[str] = []
+    if not token:
+        return retired
+    # Read the events rather than `calls()`: the token is what identifies this
+    # process's own work, and a folded row does not carry it.
+    open_rids: dict[str, dict] = {}
+    for rec in load_runs(repo_root):
+        rid = str(rec.get("rid") or "")
+        if not rid:
+            continue
+        if rec.get("ev") == "start":
+            open_rids[rid] = rec
+        elif rec.get("ev") == "end":
+            open_rids.pop(rid, None)
+    for rid, rec in open_rids.items():
+        if rec.get("kind") != kind or str(rec.get("token") or "") != token:
+            continue
+        if program and rec.get("program") != program:
+            continue
+        finish_call(repo_root, rid, status="lost", now=now)
+        retired.append(rid)
+    return retired
+
+
 def finish_call(repo_root, rid: str, *, status: str = "ok", cost=None, tokens=None,
                 usage=None, turns=None, prompt_bytes=None, model: str = "",
                 limits=None, limits_before=None, now: float | None = None) -> None:
     """Close the call `rid` opened. `status` is one of ok / failed / rate-limited /
-    escaped — `lost` and `running` are never written, only inferred on read.
+    escaped. `running` is never written, only inferred on read; `lost` is written
+    only by `retire_open_calls`, where the loop that made the call is the one saying
+    so (B3).
 
     `limits` is where the budget ended up; `limits_before` is where it stood when
     the run began, read from the run's own stream. The launch stamp cannot be

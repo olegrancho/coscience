@@ -126,6 +126,89 @@ def _unnegated_match(pattern: str, text: str) -> bool:
     return False
 
 
+# How much of a cycle's report one sprint keeps, and how many cycles it keeps.
+SPRINT_NOTE_CHARS = 600
+SPRINT_NOTES_KEPT = 10
+
+
+def sprint_share(report: str, sprint_id: str) -> str:
+    """The part of a cycle's report that is about this sprint (E2).
+
+    The planner writes one report for the whole program, and `report.md` is overwritten
+    by the next cycle — so a sprint that was released, held or dropped ends up carrying a
+    status change with no surviving explanation. Every sentence that names the sprint is
+    its share: crude, but it is the planner's own words rather than a summary of them,
+    and a sprint the report never mentions keeps nothing rather than an invented reason.
+    """
+    text = " ".join((report or "").split())
+    if not text or not sprint_id:
+        return ""
+    found: list[str] = []
+    for m in re.finditer(re.escape(sprint_id), text):
+        # A longer id that merely starts with this one is a different sprint.
+        after = text[m.end():m.end() + 1]
+        if after and (after.isalnum() or after in "-_"):
+            continue
+        sentence = _sentence_around(text, m.start(), m.end()).strip()
+        if sentence and sentence not in found:
+            found.append(sentence)
+    out = " ".join(found)
+    return out[:SPRINT_NOTE_CHARS].rstrip()
+
+
+def touched_sprints(actions: dict) -> list[str]:
+    """Every sprint this cycle acted on, in a stable order. A skipped action counts:
+    the sprint the planner tried and failed to move is exactly the one whose record
+    needs to say why something was attempted."""
+    ids: list[str] = []
+    for key in ("released", "held", "submitted", "dropped", "adopted",
+                "escalations_answered",
+                "release_skipped", "hold_skipped", "adopt_skipped", "escalation_skipped"):
+        for item in actions.get(key) or ():
+            ids.append(_action_id(item))
+    return [sid for i, sid in enumerate(ids) if sid and sid not in ids[:i]]
+
+
+def _action_id(item) -> str:
+    """The sprint id out of one entry of an actions list. The lists do not agree on
+    shape — applied ones hold bare ids, skipped ones {id, why}, and an answered
+    escalation a (id, action) pair — and a new shape must not take down the cycle that
+    is only trying to annotate it."""
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        return str(item.get("id") or "")
+    if isinstance(item, (tuple, list)) and item:
+        return str(item[0])
+    return ""
+
+
+def record_sprint_notes(substrate, report: str, actions: dict, cycle: int,
+                        at: float) -> list[str]:
+    """Put each touched sprint's share of the cycle's reasoning on that sprint (E2).
+
+    Only sprints the cycle actually acted on, and only when the report says something
+    about them: a note that repeats what the status already shows is worse than none.
+    Returns the ids that gained a note."""
+    written: list[str] = []
+    for sid in touched_sprints(actions):
+        text = sprint_share(report, sid)
+        if not text:
+            continue
+        try:
+            sp = substrate.load_sprint(sid)
+        except Exception:
+            continue                      # dropped, renamed, or never written
+        notes = list(sp.pm_notes or [])
+        if notes and notes[-1].get("cycle") == cycle:
+            continue                      # one note per sprint per cycle
+        notes.append({"cycle": cycle, "at": at, "text": text})
+        sp.pm_notes = notes[-SPRINT_NOTES_KEPT:]
+        substrate.save_sprint(sp)
+        written.append(sid)
+    return written
+
+
 def unbacked_claims(report: str, actions: dict) -> list[str]:
     """Actions the report text describes but the cycle never submitted.
 
@@ -789,10 +872,15 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         # in-process, so a loop killed mid-cycle leaves only the start — which is
         # exactly the trace that says a window was spent with nothing to show.
         from coscience.executor import process_token
+        token = process_token(os.getpid())      # this loop IS the process doing the call
+        # ...which is why a cycle whose end was never written can never retire on its
+        # own: the token stays alive as long as the loop does (B3). Starting a new cycle
+        # is proof the last one is over, and this loop is the only thing that knows it.
+        usage_meter.retire_open_calls(substrate.repo_root, kind="pm",
+                                      token=token, program=program_id)
         call_id = usage_meter.start_call(
             substrate.repo_root, "pm", program=program_id, model=context.model,
-            limits=usage_meter.current_window(),
-            token=process_token(os.getpid()))   # this loop IS the process doing the call
+            limits=usage_meter.current_window(), token=token)
 
         def _record(ok: bool) -> None:
             housekeeping.release(substrate.repo_root, holder)
@@ -1256,7 +1344,9 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                "host_note_skipped": host_note_skipped}
     actions["unbacked_claims"] = unbacked_claims(staged.output.report, actions)
     # The reasoner's prose, then the platform's own record of what it applied.
-    substrate.save_report(program_id, staged.output.report + actions_ledger(actions))
+    substrate.save_report(program_id, staged.output.report + actions_ledger(actions),
+                          cycle=cycle)
+    record_sprint_notes(substrate, staged.output.report, actions, cycle, now_ts)
 
     pm.cycle = cycle + 1
     pm.last_run = now_ts
