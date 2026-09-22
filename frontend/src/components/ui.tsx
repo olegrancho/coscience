@@ -484,6 +484,7 @@ export const liveChatId = (lock: ArtifactLock | undefined): string =>
 export const MODEL_OPTIONS = [
   { value: "claude-sonnet-5", label: "Sonnet 5" },
   { value: "claude-fable-5-1", label: "Fable 5.1" },
+  { value: "claude-opus-5-5", label: "Opus 5.5" },
   { value: "claude-opus-5", label: "Opus 5" },
   { value: "claude-opus-4-8", label: "Opus 4.8" },
   { value: "claude-opus-4-6", label: "Opus 4.6" },

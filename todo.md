@@ -1,21 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 157
+version: 158
 last_updated: 2026-09-22
 ---
 
 # To QC
-
-### E2. Keep a planner cycle's reasoning after the next cycle runs
-
-Every cycle's report is kept under the program's `reports/`, readable from a cycle
-selector on the program page, and each sprint a cycle acted on carries its own share of
-that cycle's prose.
-
-**Check:** on a program that has run a cycle since the deploy, switch the report card to
-an earlier cycle and confirm it is that cycle's text, not the latest. On a sprint the
-planner released or held, "what the AI said about this" shows the sentence naming it, and
-a sprint the report never mentioned shows no such card at all.
 
 ### B4. Say when the substrate cannot commit
 
@@ -582,6 +571,10 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### E2. Keep a planner cycle's reasoning after the next cycle runs
+
+Every cycle's report is kept under the program's `reports/` and readable from a cycle selector on the program page, and each sprint a cycle acted on carries that cycle's own sentences about it.
+
 ### B2. Stop giving work to a machine with under 500 MB free
 
 A machine under the gate (1 GB) takes no new grants and launches no worker agent, while
@@ -621,12 +614,3 @@ A server is one row — name, cores and cards as filled slots, programs, one sta
 Stopping a sprint copies the job's declared paths into the sprint's `collected/` and says
 in the sprint's note what was copied, or that the job declared nothing; verified live by
 stopping a ticking remote job at 165 of 600 ticks and finding all three of its files back.
-
-### O20. Build the leftover list from what the server actually has
-
-The health check lists each server's run root and the servers card shows what is really
-there, labelling a folder no sprint explains as "no sprint record"; verified live against
-the server, four phantom folders down to the one that exists.
-
-
-

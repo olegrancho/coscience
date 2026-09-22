@@ -109,6 +109,12 @@ describe("MODEL_OPTIONS", () => {
     expect(MODEL_OPTIONS).toContainEqual({ value: "claude-opus-4-8", label: "Opus 4.8" });
   });
 
+  it("offers Opus 5.5", () => {
+    // Verified against the CLI before it was listed: an id the installed Claude Code
+    // cannot run would kill every agent launched with it, on arrival and unattended.
+    expect(MODEL_OPTIONS).toContainEqual({ value: "claude-opus-5-5", label: "Opus 5.5" });
+  });
+
   it("has no duplicate values", () => {
     const values = MODEL_OPTIONS.map((o) => o.value);
     expect(new Set(values).size).toBe(values.length);
