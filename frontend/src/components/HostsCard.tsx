@@ -235,9 +235,9 @@ function Pips({ states, label }: { states: string[]; label: string }) {
 }
 
 export default function HostsCard(
-  { hosts, errors, stranded = [], localCapacity }: {
+  { hosts, errors, stranded = [], localCapacity, drill = false }: {
     hosts: LedgerHost[]; errors: string[]; stranded?: StrandedLease[];
-    localCapacity?: Record<string, number>;
+    localCapacity?: Record<string, number>; drill?: boolean;
   },
 ) {
   const [adding, setAdding] = useState(false);
@@ -266,7 +266,13 @@ export default function HostsCard(
         <Table.Thead>
           <Table.Tr>
             <Table.Th>Server</Table.Th><Table.Th>CPU</Table.Th><Table.Th>GPU</Table.Th>
-            <Table.Th>Disk</Table.Th>
+            <Table.Th>
+              {drill ? (
+                <Hover label="A disk drill is running: the thresholds were moved by COSCIENCE_DISK_*, so a machine shown as out of space is being rehearsed, not failing. Unset them and restart to go back.">
+                  <span style={hoverable}>Disk · drill</span>
+                </Hover>
+              ) : "Disk"}
+            </Table.Th>
             <Table.Th>Programs</Table.Th><Table.Th>Status</Table.Th>
           </Table.Tr>
         </Table.Thead>

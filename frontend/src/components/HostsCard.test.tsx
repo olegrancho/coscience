@@ -311,6 +311,21 @@ describe("diskCell (B1)", () => {
     expect(screen.getByText("263 GB")).toBeTruthy();
     expect(screen.getByText("307 MB")).toBeTruthy();   // 0.3 GB, in the unit that reads
   });
+
+  it("marks the column while a drill is moving the thresholds", () => {
+    // Otherwise a rehearsed shortage is indistinguishable from a real one, which is
+    // how people learn to ignore the real one.
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <MantineProvider>
+        <QueryClientProvider client={qc}>
+          <HostsCard hosts={[{ ...LOCAL, free_gb: 263.1, disk: "critical" }]}
+                     errors={[]} drill />
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+    expect(screen.getByText("Disk · drill")).toBeTruthy();
+  });
 });
 
 describe("programsCell", () => {

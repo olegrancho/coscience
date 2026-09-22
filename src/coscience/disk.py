@@ -9,13 +9,46 @@ reads.
 
 Two thresholds, and they mean different things. `LOW_GB` is a warning — someone should
 look. `CRITICAL_GB` is a gate: below it a machine takes no new work, because a full disk
-does not fail a sprint honestly, it corrupts whatever was mid-write."""
+does not fail a sprint honestly, it corrupts whatever was mid-write.
+
+Both are overridable from the environment, which is how the gate gets rehearsed: the
+alternative is filling a real machine's disk, and a server with 90 GB free needs 90 GB of
+ballast to test a warning about running out of space. Raising the line instead puts every
+machine below it — against real readings, through the real gates, including the remote
+ones no local trick can reach — and lowering it again lifts them. A run with the line
+moved says so in every message it produces, so a drill can never be mistaken for a real
+shortage, and it is read once at import: a loop that is running does not quietly change
+its mind about whether to work.
+
+    COSCIENCE_DISK_CRITICAL_GB=500 coscience dispatch --loop
+"""
 from __future__ import annotations
 
 import os
 
-LOW_GB = 2.0         # warn: the dashboard says so, nothing changes
-CRITICAL_GB = 0.5    # gate: this machine takes no new work
+DEFAULT_LOW_GB = 2.0       # warn: the dashboard says so, nothing changes
+DEFAULT_CRITICAL_GB = 0.5  # gate: this machine takes no new work
+LOW_ENV = "COSCIENCE_DISK_LOW_GB"
+CRITICAL_ENV = "COSCIENCE_DISK_CRITICAL_GB"
+
+
+def _threshold(name: str, default: float) -> float:
+    """A threshold, from the environment when it is set there. An unreadable value
+    falls back to the default rather than raising: a typo in a drill must not take
+    down the loop that reads it at import."""
+    try:
+        return float(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+
+LOW_GB = _threshold(LOW_ENV, DEFAULT_LOW_GB)
+CRITICAL_GB = _threshold(CRITICAL_ENV, DEFAULT_CRITICAL_GB)
+# True when this process is not using the real lines. Every message says so, and the
+# dashboard passes it on, because a drill that looks exactly like an outage teaches
+# people to ignore the outage.
+DRILL = (LOW_GB, CRITICAL_GB) != (DEFAULT_LOW_GB, DEFAULT_CRITICAL_GB)
+_DRILL_NOTE = " [drill: the line was moved by COSCIENCE_DISK_*, this is not a real shortage]"
 
 _GB = 1024.0 ** 3
 
@@ -50,6 +83,7 @@ def describe(free: float | None) -> str:
     if not lv or free is None:
         return ""
     amount = f"{free * 1024:.0f} MB" if free < 1 else f"{free:.1f} GB"
+    note = _DRILL_NOTE if DRILL else ""
     if lv == "critical":
-        return f"{amount} free — too little to work safely; taking no new work"
-    return f"{amount} free — running low"
+        return f"{amount} free — too little to work safely; taking no new work{note}"
+    return f"{amount} free — running low{note}"

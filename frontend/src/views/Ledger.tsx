@@ -147,7 +147,7 @@ export default function Ledger() {
       </Card>
 
       <HostsCard hosts={l.hosts ?? []} errors={l.host_errors ?? []} stranded={l.stranded ?? []}
-                 localCapacity={editable} />
+                 localCapacity={editable} drill={l.disk_drill} />
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 12 }}>running now · {l.leases.length}</div>

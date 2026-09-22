@@ -201,6 +201,9 @@ export interface Ledger {
   capacity: Record<string, number>; used: Record<string, number>;
   available: Record<string, number>; leases: unknown[];
   paused: boolean;
+  // The platform is running a disk drill: the thresholds were moved by the environment,
+  // so a machine shown as out of space is being rehearsed, not failing.
+  disk_drill?: boolean;
   // This machine's own amounts, once compute spans hosts — what `PUT /api/capacity`
   // writes. Falls back to `capacity` against an older backend that doesn't send it.
   local_capacity?: Record<string, number>;

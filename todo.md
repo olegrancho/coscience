@@ -1,31 +1,23 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 152
-last_updated: 2026-09-20
+version: 154
+last_updated: 2026-09-21
 ---
 
 # To QC
-
-### B1. Warn on the pulse zone when a machine is low on disk
-
-The servers table carries a Disk column with each machine's free space, and the pulse
-zone names any machine under 2 GB free and marks one under 500 MB severely; this machine
-is measured directly, a remote one reports on its liveness check.
-
-**Check:** Compute → servers shows a figure per machine, matching `df -Pk "$HOME"` run on
-that machine, and hovering a remote one dates the reading to its last health check.
-`curl /api/ledger` carries the same `free_gb` and `disk` per host. A machine that has
-reported nothing shows "—", never a warning.
 
 ### B2. Stop giving work to a machine with under 500 MB free
 
 Under 500 MB a machine joins the reasons a server takes no new grants, and locally no
 worker agent launches while the PMs keep running.
 
-**Check:** the Compute page explains a gated machine the way it explains quiet/draining
-(`low on disk`), and it lifts by itself once space frees. Confirm the PM loops still beat
-while a worker is refused — that separation is the point — and that a sprint refused for
-disk says so in its error rather than silently never starting.
+**Check:** rehearse it by moving the line rather than filling a disk — restart the loops
+with `COSCIENCE_DISK_CRITICAL_GB=500` and every machine is below it, against real
+readings and through the real gates. Then: the Compute page explains a gated machine the
+way it explains quiet/draining (`low on disk`), the PM loops keep beating while a worker
+is refused (that separation is the point), a sprint refused for disk says so in its error
+rather than silently never starting, and every warning is marked as a drill. Unset the
+variable, restart, and confirm it all lifts by itself.
 
 # To Do (sprint)
 
@@ -611,6 +603,10 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### B1. Warn on the pulse zone when a machine is low on disk
+
+Every machine's free space is on the servers table, dated to its last health check when it came from a remote one, and the pulse zone calls out anything under 2 GB — severely under 500 MB.
+
 ### E1. Replace the planner's reopen with a hold that keeps the approval
 
 The planner can no longer un-approve anything: it holds an approved sprint instead, with a one-sentence rationale shown on the sprint, which release or a human clears.
@@ -651,7 +647,4 @@ the server, four phantom folders down to the one that exists.
 
 Remove marks a server and the dispatcher takes it out of the pool once nothing is on it; Keep undoes the mark, and the drain step is gone.
 
-### O11. Let an agent own server discovery
-
-After a probe, an agent surveys a server over SSH and proposes its capacity, cards and notes; a failed check is accepted only with the agent's written reason and an explicit human accept.
 

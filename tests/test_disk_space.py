@@ -44,6 +44,59 @@ def test_the_critical_line_says_work_stops():
     assert "no new work" in disk.describe(0.2)
 
 
+# --- moving the line, so the gate can be rehearsed (B2) ------------------------------
+
+def _reload(monkeypatch, **env):
+    """Re-import the module with this environment: the thresholds are read once at
+    import, which is what makes a running loop unable to change its mind about
+    whether to work."""
+    import importlib
+    for k in (disk.LOW_ENV, disk.CRITICAL_ENV):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    return importlib.reload(disk)
+
+
+def test_the_thresholds_come_from_the_environment_when_it_sets_them(monkeypatch):
+    d = _reload(monkeypatch, COSCIENCE_DISK_CRITICAL_GB="500", COSCIENCE_DISK_LOW_GB="900")
+    try:
+        assert (d.CRITICAL_GB, d.LOW_GB) == (500.0, 900.0)
+        # The point of the drill: a machine with real room is below a moved line.
+        assert d.level(263.0) == "critical"
+    finally:
+        _reload(monkeypatch)
+
+
+def test_a_moved_line_says_so_in_every_message(monkeypatch):
+    """A drill that reads exactly like an outage teaches people to ignore outages."""
+    d = _reload(monkeypatch, COSCIENCE_DISK_CRITICAL_GB="500")
+    try:
+        assert d.DRILL is True
+        assert "drill" in d.describe(263.0)
+        assert "263.0 GB" in d.describe(263.0)   # still the true reading
+    finally:
+        _reload(monkeypatch)
+
+
+def test_a_typo_falls_back_instead_of_taking_the_loop_down(monkeypatch):
+    """The thresholds are read at import, inside a loop's own startup: raising there
+    would stop the platform over a mistyped drill."""
+    d = _reload(monkeypatch, COSCIENCE_DISK_CRITICAL_GB="lots")
+    try:
+        assert d.CRITICAL_GB == d.DEFAULT_CRITICAL_GB
+        assert d.DRILL is False
+    finally:
+        _reload(monkeypatch)
+
+
+def test_the_real_thresholds_are_not_a_drill(monkeypatch):
+    d = _reload(monkeypatch)
+    assert (d.LOW_GB, d.CRITICAL_GB) == (d.DEFAULT_LOW_GB, d.DEFAULT_CRITICAL_GB)
+    assert d.DRILL is False
+    assert "drill" not in d.describe(0.2)
+
+
 # --- the remote reading, on the same round trip as the liveness check ----------------
 
 def test_the_probe_asks_for_free_space_even_with_no_run_root():
