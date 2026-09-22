@@ -228,6 +228,7 @@ export default function SprintDetail() {
       ...(d.status === "escalated" && d.escalation ? [{ id: "sec-escalation", label: "Escalation" }] : []),
       ...(d.title && d.goals && d.goals !== d.title ? [{ id: "sec-goals", label: "Goals" }] : []),
       ...(d.rationale ? [{ id: "sec-rationale", label: "Rationale" }] : []),
+      ...(d.pm_notes?.length ? [{ id: "sec-pm-notes", label: "PM's reasoning" }] : []),
       ...(d.status === "failed" ? [{ id: "sec-failed", label: "Failed" }] : []),
       { id: "sec-feedback", label: "Feedback" },
       ...(d.results.length > 0 ? [{ id: "sec-results", label: "Results" }] : []),
@@ -551,6 +552,28 @@ export default function SprintDetail() {
         <Card id="sec-rationale" padding="lg" radius="md" style={cardStyle}>
           <div className="eyebrow" style={{ marginBottom: 8 }}>why the AI proposed this</div>
           <div className="report-leaf"><Md>{s.rationale}</Md></div>
+        </Card>
+      )}
+
+      {(s.pm_notes?.length ?? 0) > 0 && (
+        // What the planner said about THIS sprint, cycle by cycle (E2). The program's
+        // report is overwritten every cycle, so without this the status change outlives
+        // its explanation by minutes — newest first, because the last word is the one
+        // that explains where the sprint stands now.
+        <Card id="sec-pm-notes" padding="lg" radius="md" style={cardStyle}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>what the AI said about this</div>
+          <Stack gap={10}>
+            {[...(s.pm_notes ?? [])].reverse().map((n) => (
+              <div key={`${n.cycle}-${n.at}`}>
+                <Text size="xs" c="dimmed">
+                  cycle {n.cycle} · <AbsTime at={n.at} />
+                </Text>
+                <Text size="sm" mt={2} style={{ color: "var(--ink-muted)", lineHeight: 1.5 }}>
+                  {n.text}
+                </Text>
+              </div>
+            ))}
+          </Stack>
         </Card>
       )}
 

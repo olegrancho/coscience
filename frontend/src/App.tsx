@@ -63,11 +63,26 @@ function Pulse() {
   const { active, running, awaitingYou, waiting, cantStart } =
     pulseCounts(programs.data ?? [], sprints.data ?? []);
   const disk = diskPulse(ledger.data?.hosts ?? []);
+  const commitError = ledger.data?.commit_error ?? "";
 
   const Row = ({ children }: { children: ReactNode }) => (
     <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-muted)" }}>
       {children}
     </div>
+  );
+
+  /** A pulse row that only exists when something is wrong: a mark, a short phrase, and
+   *  the whole story on hover. The rail has no room for the story itself. */
+  const Alarm = ({ mark, color, text, title }:
+                 { mark: string; color: string; text: string; title: string }) => (
+    <Tooltip withArrow multiline w={260} openDelay={120}
+             transitionProps={{ duration: 0 }}
+             label={<span style={{ whiteSpace: "pre-line" }}>{title}</span>}>
+      <span style={{ display: "flex", alignItems: "center", gap: 8, cursor: "help" }}>
+        <span style={{ width: 9, textAlign: "center", color }}>{mark}</span>
+        <span style={{ color, fontWeight: 600 }}>{text}</span>
+      </span>
+    </Tooltip>
   );
 
   return (
@@ -99,19 +114,18 @@ function Pulse() {
           <b className="mono">{awaitingYou}</b> awaiting you
         </span>
       </Row>
-      {/* Disk, beside the budget: the two resources that stop the platform without
-          failing anything. Silent while every machine has room — the pulse is for what
-          needs attention, and the figures themselves live on Compute. */}
+      {/* Disk and the substrate's history: two ways the platform stops being useful
+          without anything failing. Both silent until there is something to say — the
+          pulse is for what needs attention, and disk figures live on Compute. */}
       {disk && (
         <Row>
-          <Tooltip withArrow multiline w={260} openDelay={120}
-                   transitionProps={{ duration: 0 }}
-                   label={<span style={{ whiteSpace: "pre-line" }}>{disk.title}</span>}>
-            <span style={{ display: "flex", alignItems: "center", gap: 8, cursor: "help" }}>
-              <span style={{ width: 9, textAlign: "center", color: disk.color }}>{disk.mark}</span>
-              <span style={{ color: disk.color, fontWeight: 600 }}>{disk.text}</span>
-            </span>
-          </Tooltip>
+          <Alarm mark={disk.mark} color={disk.color} text={disk.text} title={disk.title} />
+        </Row>
+      )}
+      {commitError && (
+        <Row>
+          <Alarm mark="⛔" color="var(--st-failed)" text="substrate not committing"
+                 title={commitError} />
         </Row>
       )}
       <LiveAgents />

@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import yaml
 
-from coscience import disk, graph, host_health, host_removal, threads
+from coscience import commit_health, disk, graph, host_health, host_removal, threads
 from coscience.artifacts import DESCRIPTION_FILE, FIGURE_DESCRIPTION_NOTE
 from coscience.ledger import Ledger
 from coscience.models import (DEFAULT_MODEL, Sprint, SprintStatus, Program, ProgramStatus,
@@ -585,6 +585,7 @@ class Service:
             "artifacts_bound": list(sprint.artifacts_bound),
             "artifacts_create": self._create_specs(sprint),
             "hold": dict(sprint.hold),
+            "pm_notes": [dict(n) for n in sprint.pm_notes],
             "threads": [threads.public(t) for t in sprint.threads],
             "decisions": list(sprint.decisions),
             "status_history": list(sprint.status_history),
@@ -889,6 +890,9 @@ class Service:
             "max_proposed": p.max_proposed,
             "instructions": self.substrate.load_instructions(program_id),
             "report": self.substrate.load_report(program_id),
+            # Which earlier cycles' reports are still readable (E2). The current one is
+            # above; these are the ones the next cycle would otherwise have erased.
+            "report_cycles": self.substrate.report_cycles(program_id),
             "cycle": pm.cycle,
             "activations": list(reversed(pm.activations)),   # newest first, for the timeline
             "last_run": pm.last_run,
@@ -1974,6 +1978,11 @@ class Service:
             "used": ledger.used(),
             "available": ledger.available(),
             "paused": is_paused(self.substrate.repo_root),
+            # "" while the substrate is committing normally (B4). A repo that has
+            # stopped accepting commits keeps working and loses its history silently,
+            # so the one place it can be seen is here.
+            "commit_error": commit_health.describe(
+                commit_health.read(self.substrate.repo_root)),
             # What the capacity editor edits: the platform keys and this machine's own
             # amounts. Once remote hosts take work the totals above include them, and
             # writing a total back as this machine's capacity would be wrong.

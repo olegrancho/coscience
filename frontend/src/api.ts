@@ -7,11 +7,14 @@ export type StatusActor = "human" | "pm" | "platform";
 /** The planner's "not yet" on an approved sprint: it stays approved and unreleased,
  *  carrying the reason. Absent/undefined means no hold. */
 export interface SprintHold { why: string; at: number; by: string }
+// What the planner said about this sprint on one cycle (E2). The program's report is
+// overwritten every cycle; this is the sprint's own copy of its share of it.
+export interface PMNote { cycle: number; at: number; text: string }
 export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string; last_status_at: number | null; last_status_by?: StatusActor;
   hold?: SprintHold; votes: VoteTally; escalation_level: "" | "pm" | "human" }
 export interface PMActivation { at: number; cycle: number; triggers: string[]; submitted: string[]; forced: boolean }
 export interface Program extends ProgramRow {
-  report: string; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
+  report: string; report_cycles?: number[]; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
   wiki_model: string;     // model for this program's wiki runs; separate from pm_model
   chat_model: string;     // model chat turns run on; defaults to pm_model until set
   worker_model: string;   // model new sprints inherit when proposed
@@ -123,6 +126,7 @@ export interface Sprint {
   artifacts_create: { aid: string; title: string; kind: string;
                       exists?: boolean; version?: string }[];
   hold?: SprintHold;
+  pm_notes?: PMNote[];
 }
 export interface SprintFile {
   name: string; label: string; kind: string; size: number;
@@ -201,6 +205,9 @@ export interface Ledger {
   capacity: Record<string, number>; used: Record<string, number>;
   available: Record<string, number>; leases: unknown[];
   paused: boolean;
+  // Set while the substrate's git repo is refusing commits (B4): the platform keeps
+  // working and loses its history, so this is the only place it shows.
+  commit_error?: string;
   // This machine's own amounts, once compute spans hosts — what `PUT /api/capacity`
   // writes. Falls back to `capacity` against an older backend that doesn't send it.
   local_capacity?: Record<string, number>;
@@ -340,6 +347,9 @@ export const api = {
     }).then(j<Program>),
   getProgram: (id: string) => fetch(`/api/programs/${id}`).then(j<Program>),
   getGraph: (id: string) => fetch(`/api/programs/${id}/graph`).then(j<Graph>),
+  // One earlier cycle's report, kept because report.md is overwritten each cycle (E2).
+  getProgramReport: (id: string, cycle: number) =>
+    fetch(`/api/programs/${id}/reports/${cycle}`).then(j<{ cycle: number; text: string }>),
   setProgramStatus: (id: string, status: string) =>
     fetch(`/api/programs/${id}/status`, {
       method: "POST", headers: { "Content-Type": "application/json" },

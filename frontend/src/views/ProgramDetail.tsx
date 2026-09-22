@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Button, Card, Group, Loader, Stack, Text, Textarea, TextInput, Tooltip } from "@mantine/core";
+import { ActionIcon, Badge, Button, Card, Group, Loader, Select, Stack, Text, Textarea, TextInput, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -52,8 +52,15 @@ export default function ProgramDetail() {
   const [pmExpanded, setPmExpanded] = useState(false);
   const [browsing, setBrowsing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // null = the current report; a number = an earlier cycle's, kept since E2.
+  const [pastCycle, setPastCycle] = useState<number | null>(null);
 
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
+  const past = useQuery({
+    queryKey: ["program-report", id, pastCycle],
+    queryFn: () => api.getProgramReport(id, pastCycle as number),
+    enabled: pastCycle !== null,
+  });
   const guidance = useQuery({ queryKey: ["guidance", id], queryFn: () => api.listGuidance(id) });
   const ideas = useQuery({ queryKey: ["ideas", id], queryFn: () => api.listIdeas(id) });
   const artifacts = useQuery({ queryKey: ["artifacts", id], queryFn: () => api.listArtifacts(id) });
@@ -109,6 +116,7 @@ export default function ProgramDetail() {
 
   // The PM report mentions experiments by id (as `code` chips). Turn any that
   // belong to this program into links to the experiment page.
+  const shownReport = pastCycle === null ? p.report : (past.data?.text ?? "");
   const sprintIds = new Set(p.sprints.map((s) => s.id));
   const reportComponents: Components = {
     code({ className, children, node: _node, ...rest }) {
@@ -262,9 +270,27 @@ export default function ProgramDetail() {
       {p.goals && <Text c="dimmed" style={{ maxWidth: 680 }}>{p.goals}</Text>}
 
       <Card id="sec-report" padding="lg" radius="md" style={cardStyle}>
-        <div className="eyebrow" style={{ marginBottom: 12 }}>the AI's status report</div>
-        {p.report ? <div className="report-leaf"><Md components={reportComponents}>{p.report}</Md></div>
-          : <Text size="sm" c="dimmed">No report yet — the AI writes one each planning cycle.</Text>}
+        <Group justify="space-between" align="baseline" mb={12} wrap="nowrap">
+          <div className="eyebrow">
+            {pastCycle === null ? "the AI's status report" : `the AI's report — cycle ${pastCycle}`}
+          </div>
+          {/* Every cycle's report is kept now (E2); this card used to show only the
+              latest, which the next cycle overwrites. */}
+          {(p.report_cycles?.length ?? 0) > 0 && (
+            <Select size="xs" w={150} allowDeselect={false}
+                    aria-label="Which cycle's report to show"
+                    value={pastCycle === null ? "latest" : String(pastCycle)}
+                    onChange={(v) => setPastCycle(v && v !== "latest" ? Number(v) : null)}
+                    data={[{ value: "latest", label: "latest" },
+                           ...(p.report_cycles ?? []).map((c) => ({ value: String(c), label: `cycle ${c}` }))]} />
+          )}
+        </Group>
+        {pastCycle !== null && past.isLoading && <Loader size="sm" color="machine" />}
+        {shownReport
+          ? <div className="report-leaf"><Md components={reportComponents}>{shownReport}</Md></div>
+          : pastCycle === null
+            ? <Text size="sm" c="dimmed">No report yet — the AI writes one each planning cycle.</Text>
+            : !past.isLoading && <Text size="sm" c="dimmed">That cycle's report is no longer kept.</Text>}
       </Card>
 
       <Card id="sec-instructions" padding="lg" radius="md" style={cardStyle}>

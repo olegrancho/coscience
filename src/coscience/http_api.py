@@ -818,6 +818,14 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def search_wiki(program_id: str, q: str = "", limit: int = 50) -> list[dict]:
         return service.search_wiki(program_id, q, limit=limit)
 
+    @api.get("/programs/{program_id}/reports/{cycle}")
+    def program_report(program_id: str, cycle: int) -> dict:
+        """One earlier cycle's report, kept because `report.md` is overwritten (E2)."""
+        text = service.substrate.load_report(program_id, cycle=cycle)
+        if not text:
+            raise HTTPException(status_code=404, detail="not found")
+        return {"cycle": cycle, "text": text}
+
     @api.get("/programs/{program_id}/wiki/log")
     def wiki_log(program_id: str) -> dict:
         return {"text": service.wiki_log(program_id)}

@@ -80,6 +80,10 @@ class Sprint:
     # sprint is the planner's queue, and holding one is the queue working, not a
     # decision being reversed. Cleared when the sprint is released, or by a human.
     hold: dict = field(default_factory=dict)
+    # What the planner said about this sprint, cycle by cycle: [{cycle, at, text}],
+    # oldest first (E2). The program's report.md is overwritten every cycle, so without
+    # this a status change outlives the reasoning that produced it by minutes.
+    pm_notes: list[dict] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.model:

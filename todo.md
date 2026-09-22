@@ -1,52 +1,44 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 156
+version: 157
 last_updated: 2026-09-22
 ---
 
 # To QC
 
-# To Do (sprint)
-
 ### E2. Keep a planner cycle's reasoning after the next cycle runs
 
-Write each cycle's reasoning somewhere it survives, and put a sprint's share of it on
-that sprint.
+Every cycle's report is kept under the program's `reports/`, readable from a cycle
+selector on the program page, and each sprint a cycle acted on carries its own share of
+that cycle's prose.
 
-`report.md` is overwritten every cycle, so the why behind any planner decision is gone
-as soon as the next cycle runs — the reasoning for a reversal was already unrecoverable
-hours later, leaving a status change nobody could explain. The per-cycle actions are
-kept in `pm.md` activations, but only as lists of ids: what was done, never why. A
-sprint touched by a cycle should carry the sentence that touched it, and the cycle's
-full report should be retrievable rather than replaced.
+**Check:** on a program that has run a cycle since the deploy, switch the report card to
+an earlier cycle and confirm it is that cycle's text, not the latest. On a sprint the
+planner released or held, "what the AI said about this" shows the sentence naming it, and
+a sprint the report never mentioned shows no such card at all.
 
 ### B4. Say when the substrate cannot commit
 
-Make a failed commit distinguishable from an empty one, and show it where the disk
-warning shows, instead of losing it to a log.
+A refused commit is now distinguishable from an empty one and is recorded outside the
+substrate; the pulse says so once the failures repeat.
 
-On 2026-09-20 the substrate's git repo refused every commit for twelve hours and nothing
-said so: 28 objects written during the previous day's full-disk outage had never landed,
-so `git add -A` failed on the index entries that referenced them. `Substrate.commit`
-hides exactly this — it runs `add` with `check=True` (a raise, which a beat reports as a
-generic failure with a wall of git stderr) but the `commit` after it with `check=False`,
-so a commit that fails returns "" and every caller reads that as "nothing to commit".
-Twelve hours of silence came from that one asymmetry. The platform kept working and the
-files were all on disk; what was lost was the history, and the ability to notice. Needs
-the two outcomes separated first, then a line in the pulse zone beside B1's.
+**Check:** with the platform running, make the substrate refuse commits (a `pre-commit`
+hook that exits 1 is enough) and confirm the pulse grows a red "substrate not committing"
+row after the third beat, with the git error on hover. Remove the hook and it clears on
+the next successful commit. Confirm nothing appears for a repo that simply has nothing to
+commit — the case that hid the real one.
 
 ### B3. Retire a Claude call whose end was never written
 
-A call that never recorded its end must stop reading as `running` once the work it
-belonged to is over.
+A planner cycle closes its own unfinished calls before opening the next one, so a lost
+end event no longer leaves a row reading `running` for as long as the loop lives.
 
-The same outage left three PM calls shown as in flight eight hours later, which is
-what "several PMs are running" on the dashboard meant. A call is inferred `running`
-while the process named by its token is alive, but the PM's token is the loop's own
-pid (`pm_agent.py`, "this loop IS the process doing the call"), and the loop outlives
-every cycle — so once an end event is lost, to a full disk or a `kill -9`, the row can
-never retire. The fix is a token, or a rule, that belongs to the call rather than to
-the process that hosts it.
+**Check:** the Compute call log shows no `pm` call in flight while the PM loop is idle.
+To force the case, kill a PM loop mid-cycle (`kill -9`) and confirm the row reads `lost`
+once the loop restarts and runs its next cycle for that program — rather than `running`
+for as long as the new loop lives.
+
+# To Do (sprint)
 
 # To Do (backlog)
 
