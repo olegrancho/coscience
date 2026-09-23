@@ -143,9 +143,10 @@ describe("AddHostModal", () => {
       const onClose = vi.fn();
       renderModal({ host: REMOTE, onClose });
       expect(screen.getByText("Configure gpu1")).toBeTruthy();
-      const nameInput = screen.getByLabelText(/^Name/) as HTMLInputElement;
-      expect(nameInput.value).toBe("gpu1");
-      expect(nameInput.disabled).toBe(true);
+      // The fixed name is shown where it matters — as what an empty display name goes by —
+      // rather than as a greyed-out field of its own.
+      expect((screen.getByLabelText(/^Display name/) as HTMLInputElement).placeholder).toBe("gpu1");
+      expect(screen.getByText(/Leave empty to go by "gpu1"/)).toBeTruthy();
       expect((screen.getByLabelText(/^SSH target/) as HTMLInputElement).value).toBe("gpu1");
       expect((screen.getByLabelText(/^Run root/) as HTMLInputElement).value).toBe("~/coscience-runs");
       await awaitProgramsSeeded(["p2"]);
@@ -218,7 +219,7 @@ describe("AddHostModal", () => {
     it("blocks Update on a half-filled card row and unblocks once it's whole", async () => {
       const noCard = { ...REMOTE, gpus: [] };
       renderModal({ host: noCard, onClose: vi.fn() });
-      fireEvent.click(screen.getByRole("button", { name: "+ add card" }));
+      fireEvent.click(screen.getByRole("button", { name: "+ add graphics card" }));
       fireEvent.change(screen.getByLabelText("GPU 1 model"), { target: { value: "A100" } });
       expect((screen.getByRole("button", { name: "Update configuration" }) as HTMLButtonElement).disabled).toBe(true);
       expect(screen.getByText("Every GPU card needs a model and its VRAM (GB)")).toBeTruthy();
@@ -381,9 +382,7 @@ describe("AddHostModal", () => {
       // Before Detect: CPU seeded from localCapacity, memory empty (not declared).
       expect((screen.getByLabelText("CPU cores available to Co-Science") as HTMLInputElement).value).toBe("24");
       expect((screen.getByLabelText("Memory available to Co-Science (GB)") as HTMLInputElement).value).toBe("");
-      expect(screen.getByText(
-        "Declaring memory lets sprints request memory on this machine.",
-      )).toBeTruthy();
+      expect(screen.getByText(/Declaring memory lets sprints request memory on this machine\./)).toBeTruthy();
 
       fireEvent.click(screen.getByRole("button", { name: "Detect" }));
       await waitFor(() => expect(api.detectLocal).toHaveBeenCalled());

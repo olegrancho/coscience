@@ -1,7 +1,7 @@
-import { Alert, Badge, Button, Group, Modal, NumberInput, Stack, Switch, Text, TextInput } from "@mantine/core";
+import { ActionIcon, Alert, Badge, Button, Group, Modal, NumberInput, Stack, Switch, Text, Textarea, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, type CardSpec, type HostProbe, type LedgerHost, type LocalDetect, type MachineTotals,
          type SurveyProposal } from "../api";
 import { cutOffMessage, programsForEdit } from "./programAccess";
@@ -47,6 +47,23 @@ export function machinePayload(cpu: Amount, memory: Amount): MachineTotals {
   return out;
 }
 const DEFAULT_RUN_ROOT = "~/coscience-runs";
+
+const SECTION_HEAD = { fontSize: 11, fontWeight: 600, textTransform: "uppercase" as const,
+                       letterSpacing: "0.04em", color: "var(--ink-muted)" };
+
+/** One headed group of the dialog, with an optional small action beside its title. */
+function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+  return (
+    <Stack gap="sm">
+      <Group justify="space-between" align="center"
+             style={{ borderBottom: "1px solid var(--hairline)", paddingBottom: 4 }}>
+        <span style={SECTION_HEAD}>{title}</span>
+        {action}
+      </Group>
+      {children}
+    </Stack>
+  );
+}
 const IN_USE_SUFFIX = "in use — lowering below that lets running work finish and blocks new grants.";
 
 const samePrograms = (a: string[], b: string[]) => {
@@ -438,44 +455,92 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
   const title = mode === "local" ? "Configure this machine"
     : mode === "edit" ? `Configure ${host!.name}` : "Add a server";
 
-  // G2: what Co-Science may use beside what the machine has, for CPU and memory.
-  const amountPair = (what: string, unit: string, avail: Amount, setAvail: (v: Amount) => void,
-                      total: Amount, setTotal: (v: Amount) => void, description?: string) => (
-    <Group grow align="flex-start" gap="sm">
-      <NumberInput label={`${what} available to Co-Science${unit}`} min={0} value={avail}
-                   description={description}
-                   max={total !== "" && Number(total) > 0 ? Number(total) : undefined}
-                   clampBehavior="none"
-                   onChange={(v) => setAvail(v === "" ? "" : Number(v))} />
-      <NumberInput label={`${what} on the machine${unit}`} min={0} value={total}
-                   description="As found by Detect or a probe; type it in otherwise"
-                   onChange={(v) => setTotal(v === "" ? "" : Number(v))} />
-    </Group>
+  // G2: one aligned table — a row per resource, a column for what Co-Science may use
+  // and one for what the machine has. The inputs carry no labels of their own (the
+  // column headings say it once, and each has an aria-label), so every box on a row
+  // lines up; help text lives in one line under the table, never under a single field.
+  const num = (value: Amount, onChange: (v: Amount) => void, aria: string,
+               opts: { unit?: string; disabled?: boolean; placeholder?: string } = {}) => (
+    <NumberInput aria-label={aria} value={value} min={0} hideControls size="sm"
+                 disabled={opts.disabled} placeholder={opts.placeholder ?? "—"}
+                 rightSection={opts.unit ? <Text size="xs" c="dimmed">{opts.unit}</Text> : undefined}
+                 rightSectionPointerEvents="none"
+                 onChange={(v) => onChange(v === "" ? "" : Number(v))} />
+  );
+  const cell = { display: "flex", alignItems: "center", minWidth: 0, gap: 8 } as const;
+  // The header row reads like every other section heading: same type, same rule under it.
+  const head = { ...SECTION_HEAD, display: "flex", alignItems: "center", minHeight: 26 };
+
+  const resourceGrid = (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 128px 128px 28px",
+                    columnGap: 12, rowGap: 8, alignItems: "center" }}>
+        <div style={{ ...head, justifyContent: "space-between" }}>
+          <span>Resources</span>
+          {mode === "local" && (
+            <Button size="compact-xs" variant="light" onClick={runDetect} loading={busy && !detect}>
+              Detect
+            </Button>
+          )}
+        </div>
+        <span style={head}>Co-Science may use</span>
+        <span style={head}>Machine has</span>
+        <span />
+        {/* One unbroken rule under the headings, across the column gaps. */}
+        <div style={{ gridColumn: "1 / -1", borderBottom: "1px solid var(--hairline)", marginTop: -4 }} />
+
+        <Text size="sm">CPU cores</Text>
+        {num(cpu, setCpu, "CPU cores available to Co-Science")}
+        {num(totalCpu, setTotalCpu, "CPU cores on the machine")}
+        <span />
+
+        <Text size="sm">Memory</Text>
+        {num(memory, setMemory, "Memory available to Co-Science (GB)", { unit: "GB" })}
+        {num(totalMemory, setTotalMemory, "Memory on the machine (GB)", { unit: "GB" })}
+        <span />
+
+        {cards.map((c, i) => (
+          <Fragment key={i}>
+            <div style={cell}>
+              <Switch size="sm" aria-label={`Use GPU ${i + 1}`} checked={c.on}
+                      onChange={(e) => updateCard(i, { on: e.currentTarget.checked })} />
+              <TextInput size="sm" aria-label={`GPU ${i + 1} model`} placeholder="Card model"
+                         style={{ flex: 1, minWidth: 0 }} value={c.model}
+                         onChange={(e) => updateCard(i, { model: e.currentTarget.value })} />
+            </div>
+            {num(c.vram_gb, (v) => updateCard(i, { vram_gb: v }), `GPU ${i + 1} VRAM available (GB)`,
+                 { unit: "GB", disabled: !c.on, placeholder: c.on ? "—" : "off" })}
+            {num(c.total_vram_gb, (v) => updateCard(i, { total_vram_gb: v }), `GPU ${i + 1} VRAM on the card (GB)`,
+                 { unit: "GB" })}
+            <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`Remove GPU ${i + 1}`}
+                        onClick={() => removeCard(i)}>✕</ActionIcon>
+          </Fragment>
+        ))}
+      </div>
+      <button type="button" className="linklike" style={{ marginTop: 6 }} onClick={addCard}>
+        + add graphics card
+      </button>
+      <Text size="xs" c="dimmed" mt={6}>
+        {mode === "local"
+          ? "Detect fills in what the machine has; what Co-Science may use stays your choice. "
+          : "A probe fills in what the machine has; what Co-Science may use stays your choice. "}
+        A card switched off stays listed but takes no work.
+        {mode === "local" ? " Declaring memory lets sprints request memory on this machine." : ""}
+      </Text>
+    </div>
   );
 
-  const cardRows = (
-    <Stack gap={4}>
-      {cards.map((c, i) => (
-        <Group key={i} gap="xs" wrap="nowrap" align="flex-end">
-          <Switch aria-label={`Use GPU ${i + 1}`} checked={c.on} mb={8}
-                  onChange={(e) => updateCard(i, { on: e.currentTarget.checked })} />
-          <TextInput label={`GPU ${i + 1} model`} placeholder="Model" style={{ flex: 1 }}
-                     value={c.model} onChange={(e) => updateCard(i, { model: e.currentTarget.value })} />
-          <NumberInput label="VRAM available (GB)" placeholder="GB" min={0} style={{ width: 130 }}
-                       aria-label={`GPU ${i + 1} VRAM available (GB)`} disabled={!c.on}
-                       value={c.vram_gb} onChange={(v) => updateCard(i, { vram_gb: v === "" ? "" : Number(v) })} />
-          <NumberInput label="on the card (GB)" placeholder="GB" min={0} style={{ width: 110 }}
-                       aria-label={`GPU ${i + 1} VRAM on the card (GB)`}
-                       value={c.total_vram_gb}
-                       onChange={(v) => updateCard(i, { total_vram_gb: v === "" ? "" : Number(v) })} />
-          <Button variant="subtle" color="gray" aria-label={`Remove GPU ${i + 1}`}
-                  onClick={() => removeCard(i)}>✕</Button>
-        </Group>
-      ))}
-      <button type="button" className="linklike" style={{ textAlign: "left" }} onClick={addCard}>
-        + add card
-      </button>
-    </Stack>
+  // Who the server is for, and who to ask about it — a remote server's only.
+  const whoFor = (
+    <Section title="Who it is for">
+      <ProgramAccessInput value={programs} onChange={declare(setPrograms)} programs={programsQuery.data ?? []} />
+      <Switch label="Shared with other people" checked={shared}
+              onChange={(e) => declare(setShared)(e.currentTarget.checked)} />
+      <TextInput label="Owner or contact" value={owner} onChange={(e) => declare(setOwner)(e.currentTarget.value)} />
+      <Textarea label="Notes" description="Usage rules, e.g. hours or longest job" value={notes}
+                autosize minRows={2} maxRows={6}
+                onChange={(e) => declare(setNotes)(e.currentTarget.value)} />
+    </Section>
   );
 
   const probeResultBlock = (
@@ -499,41 +564,36 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
 
   return (
     <Modal opened={opened} onClose={onClose} title={title} size="lg">
-      <Stack>
+      <Stack gap="lg">
+        {/* Name. The display name is a human's choice; the name itself is what every
+            lease, sprint record and probe is filed under, so it never changes. */}
         {mode !== "add" && (
           <TextInput label="Display name"
-                     description={`What the dashboard calls it. Leave it empty to go by "${name}", `
-                                  + "which is the name every lease, sprint record and probe is filed "
-                                  + "under and never changes."}
+                     description={`Leave empty to go by "${name}", the name it is filed under.`}
                      placeholder={name}
                      value={label} onChange={(e) => setLabel(e.currentTarget.value)} />
         )}
-        {mode === "edit" && <TextInput label="Name" value={name} disabled />}
         {mode === "add" && (
-          <TextInput label="Name" description="How the platform refers to it" value={name}
+          <TextInput label="Name" description="How the platform refers to it; it never changes" value={name}
                      onChange={(e) => declare(setName)(e.currentTarget.value)} />
         )}
 
         {mode !== "local" && (
-          <>
+          <Section title="Connection" action={
+            <Button size="compact-xs" variant="light" onClick={runProbe} loading={busy && !probe}
+                    disabled={busy || !name.trim() || !ssh.trim()}>
+              {mode === "edit" ? "Re-probe" : "Probe"}
+            </Button>
+          }>
             <TextInput label="SSH target" description="An alias from ~/.ssh/config, user@host or user@host:port — key login only"
                        value={ssh} onChange={(e) => declare(setSsh, "ssh")(e.currentTarget.value)} />
             <TextInput label="Run root" description="Where sprint work goes on the server; not inside a synced folder"
                        value={runRoot} onChange={(e) => declare(setRunRoot, "run_root")(e.currentTarget.value)} />
-            <Switch label="Shared with other people" checked={shared}
-                    onChange={(e) => declare(setShared)(e.currentTarget.checked)} />
-            <ProgramAccessInput value={programs} onChange={declare(setPrograms)} programs={programsQuery.data ?? []} />
-            <TextInput label="Owner or contact" value={owner} onChange={(e) => declare(setOwner)(e.currentTarget.value)} />
-            <TextInput label="Notes" description="Usage rules, e.g. hours or longest job" value={notes}
-                       onChange={(e) => declare(setNotes)(e.currentTarget.value)} />
-            <Button onClick={runProbe} loading={busy && !probe}
-                    disabled={busy || !name.trim() || !ssh.trim()}>
-              {mode === "edit" ? "Re-probe" : "Probe"}
-            </Button>
-          </>
+          </Section>
         )}
+        {/* Before the resources: on Add, all of it goes out with the probe. */}
+        {mode !== "local" && whoFor}
 
-        {mode === "local" && <Button onClick={runDetect} loading={busy && !detect}>Detect</Button>}
 
         {probe && !probe.ok && <Alert color="red" title="Probe failed">{probe.error}</Alert>}
         {detect && !detect.ok && <Alert color="red" title="Detect failed">{detect.error}</Alert>}
@@ -542,9 +602,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
           probe?.ok && (
             <>
               {probeResultBlock}
-              {amountPair("CPU cores", "", cpu, setCpu, totalCpu, setTotalCpu)}
-              {amountPair("Memory", " (GB)", memory, setMemory, totalMemory, setTotalMemory)}
-              {cards.length ? cardRows : <Text size="sm" c="dimmed">No GPUs found.</Text>}
+              {resourceGrid}
               {overTotals.map((w) => <Text key={w} size="sm" c="red">{w}</Text>)}
               <Text size="sm" c="dimmed">
                 A server added now waits for remote launch before it takes work.
@@ -570,14 +628,12 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
           <>
             {(probe?.ok || detect?.ok) && probeResultBlock}
             {mode === "edit" && probe?.ok && <SurveyPanel name={name.trim()} onUseProposal={use} />}
-            {amountPair("CPU cores", "", cpu, setCpu, totalCpu, setTotalCpu)}
-            {amountPair("Memory", " (GB)", memory, setMemory, totalMemory, setTotalMemory,
-                        mode === "local" ? "Declaring memory lets sprints request memory on this machine."
-                                         : "Optional")}
-            {cardRows}
+            {resourceGrid}
             {overTotals.map((w) => <Text key={w} size="sm" c="red">{w}</Text>)}
             {mode === "local" && (
-              <ProgramAccessInput value={programs} onChange={setPrograms} programs={programsQuery.data ?? []} />
+              <Section title="Who it is for">
+                <ProgramAccessInput value={programs} onChange={setPrograms} programs={programsQuery.data ?? []} />
+              </Section>
             )}
             {inUseWarnings.map((w) => <Text key={w} size="sm" c="dimmed">{w}</Text>)}
             {mode === "edit" && needsProbe && (
