@@ -1,31 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 158
+version: 159
 last_updated: 2026-09-22
 ---
 
 # To QC
-
-### B4. Say when the substrate cannot commit
-
-A refused commit is now distinguishable from an empty one and is recorded outside the
-substrate; the pulse says so once the failures repeat.
-
-**Check:** with the platform running, make the substrate refuse commits (a `pre-commit`
-hook that exits 1 is enough) and confirm the pulse grows a red "substrate not committing"
-row after the third beat, with the git error on hover. Remove the hook and it clears on
-the next successful commit. Confirm nothing appears for a repo that simply has nothing to
-commit — the case that hid the real one.
-
-### B3. Retire a Claude call whose end was never written
-
-A planner cycle closes its own unfinished calls before opening the next one, so a lost
-end event no longer leaves a row reading `running` for as long as the loop lives.
-
-**Check:** the Compute call log shows no `pm` call in flight while the PM loop is idle.
-To force the case, kill a PM loop mid-cycle (`kill -9`) and confirm the row reads `lost`
-once the loop restarts and runs its next cycle for that program — rather than `running`
-for as long as the new loop lives.
 
 # To Do (sprint)
 
@@ -571,6 +550,14 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### B4. Say when the substrate cannot commit
+
+A refused commit is told apart from an empty one and recorded outside the substrate, and the pulse grows a red row after three in a row — checked on a scratch substrate with a refusing hook, and silent again on the next good commit.
+
+### B3. Retire a Claude call whose end was never written
+
+A planner cycle closes its own unfinished calls before opening the next one, so a loop that lost an end event no longer shows a call in flight for as long as it lives.
+
 ### E2. Keep a planner cycle's reasoning after the next cycle runs
 
 Every cycle's report is kept under the program's `reports/` and readable from a cycle selector on the program page, and each sprint a cycle acted on carries that cycle's own sentences about it.
@@ -604,13 +591,3 @@ A canceled experiment can be put back where it was canceled from, keeping its go
 ### O9. Keep per-program host notes the PM maintains
 
 Each program keeps its own note per server, read by every worker placed there and kept current by the planner from what finished and escalated sprints report; a human reads and edits them low on the program page, beside the planner's activity.
-
-### O12. Review the server cards against real servers
-
-A server is one row — name, cores and cards as filled slots, programs, one status word — with everything else on hover, the row itself opening its configuration, and an optional display name so "local" can read as whatever the machine is called.
-
-### O19. Collect a stopped job's outputs, or say they were left behind
-
-Stopping a sprint copies the job's declared paths into the sprint's `collected/` and says
-in the sprint's note what was copied, or that the job declared nothing; verified live by
-stopping a ticking remote job at 165 of 600 ticks and finding all three of its files back.

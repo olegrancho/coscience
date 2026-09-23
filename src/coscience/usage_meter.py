@@ -199,8 +199,10 @@ def retire_open_calls(repo_root, *, kind: str, token: str, program: str = "",
 
     A call is inferred `running` while the process named by its token is alive. For a
     call a long-lived loop makes in-process, that token is the loop's own pid, and the
-    loop outlives every cycle — so once an end event is lost (a full disk, a `kill -9`,
-    an OOM kill that takes the writer before the record) the row can never retire. Three
+    loop outlives every cycle — so once an end event is lost while the loop lives on (a
+    full disk refusing the write, an error path that skips it) the row can never retire.
+    A loop that dies with its call is not this case: its token's process is gone, so the
+    row already reads `lost` by inference. Three
     PM calls read as in flight eight hours after the fact for exactly this reason, which
     is what "several PMs are running" on the dashboard meant.
 
