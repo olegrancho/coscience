@@ -1,10 +1,94 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 159
-last_updated: 2026-09-22
+version: 167
+last_updated: 2026-09-23
 ---
 
 # To QC
+
+### P11. Show only typed nodes on the wiki graph by default
+
+The wiki graph opens with "typed only" on whenever the graph has a typed relation, and off when it has none.
+
+**Check:** open a program's wiki graph — the box is ticked and only typed links show; untick it and every body link comes back. The filter hides links, never nodes, so on a graph with no typed relation it opens unticked: "typed only" there would leave every node standing with no links at all.
+
+### P2. Show times the same way whatever the browser's locale
+
+Every time on the dashboard is 24-hour `HH:MM` and every date `22 Sep` / `22 Sep 2026`, from one formatter (`components/timefmt.ts`) that never consults the locale.
+
+**Check:** a server's "not answering since", the call log's timestamps, the Compute disk hover and any date on a sprint or program page, all in a browser set to a dot-time locale. Numbers (`1,234`) still follow the locale; the item was about times, so they were left.
+
+### P8. Show how long each running experiment has been going, on Compute
+
+Compute's running-now table names each experiment by title and has a "Running for" column, with the exact grant time on hover.
+
+**Check:** Compute → running now while something runs. The clock starts when the experiment was granted compute (`granted_at`), which is what the lease carries — not when its agent last started, which is what the pulse's "running 12m" measures, so the two can differ for a job that woke up.
+
+### P9. Name the experiments behind the workers gauge
+
+Hovering any gauge — on the Overview's compute card and on Compute — lists the experiments holding it, by title, with the amount each holds.
+
+**Check:** hover `workers` while an agent runs, and `cpu`. Every gauge got it, not only workers. A worker slot is held only while a sprint's agent runs, so a sprint waiting on its detached job shows under `cpu` and not under `workers` — that is the ledger telling the truth, not a gap.
+
+### P10. Give the lineage graph an auto-layout button
+
+The lineage card has a labelled "Auto-layout" button, inline and in the expanded view, that forgets dragged positions and lays the graph out again.
+
+**Check:** drag a few lineage nodes, press Auto-layout, and the graph returns to its computed layout. The control already existed as a bare "↺" icon since July; the fix was naming it. It does not ask first — what it discards is this browser's remembered drag positions.
+
+### P5. Come back to the experiments list, not the top of the program
+
+Going back from an experiment — by its back link or the browser's Back — lands on that experiment's row in the program's list, with a brief flash so the eye finds it.
+
+**Check:** open a program, scroll to an experiment well down the list, open it, then go back both ways. Reaching the program any other way (the nav, a link) still starts at the top. It brings the row into view rather than restoring the exact scroll position, and the row stays visible even if the done/canceled cap would otherwise fold it.
+
+### P6. Filter the experiments list to just the new ones
+
+The experiments card has an "only new (N)" check beside the status filter that shows just the highlighted rows.
+
+**Check:** on a program with highlights, tick it — only the highlighted rows remain, and it combines with the status filter (the count follows the filter). With nothing new it says "Nothing new since you last looked." instead of an empty list. The count is this browser's, so it can differ between machines.
+
+### P7. Never hide an experiment that is new
+
+The done/canceled cap still counts new rows toward its three, but never folds one away.
+
+**Check:** with four sprints finished since your last look, all four stay in view without "Show all" and the older seen ones fold behind them. The rules are in `views/experimentsList.ts` with their tests.
+
+### P12. Collapse the server notes on the program page
+
+Each server's row in the notes card starts collapsed to one line — name, the note's first line, and an "N reports unread" badge — and opens on click.
+
+**Check:** a program page with several servers: the card is a short list, a row with pending reports says so without opening, and Edit opens the row it edits.
+
+### O23. Stop every program page polling the whole ledger
+
+The notes payload now carries every server with its display name and whether the program may use it, and the program page no longer requests the ledger at all.
+
+**Check:** with a program page open, the browser's network tab shows `/api/programs/<id>/host-notes` polling and no `/api/ledger`. Compute and the Overview still poll the ledger, as they should.
+
+### O22. Tidy the edges of the server notes
+
+Four fixes: the planner is no longer shown notes or reports for servers it may not use; a human can only start a note on a server the program may use; saves carry the note as opened and a conflict is refused, not overwritten; a planner cycle skips a note a human saved while it ran.
+
+**Check:** (1) withdraw a program's access to a server that has pending reports — the next cycle's report has no "Host note FAILED" line, and the row offers "Mark read"; (2) `PUT …/host-notes/typo` answers 422; (3) edit one note in two tabs and save both — the second shows the first's text and asks before replacing it. The section-nav entry the item also named had already landed on 09-19.
+
+### G1. Make the global capacity editor the platform's own limits, and nothing else
+
+Compute's "Edit capacity" is now "Platform limits": two named fields — worker agents and housekeeping agents at once, empty meaning no limit — saved through their own endpoint (`PUT /api/platform-limits`), which refuses any other name.
+
+**Check:** Compute → Platform limits shows those two fields and nothing else; change one and only that key moves in `resources.yaml`. The gauges' +/- steppers now exist only on `workers` and `housekeepers`.
+
+### G2. Edit every machine's real capacity only on its own card, this one included
+
+CPUs, memory and cards are edited only in each server's own dialog; this machine's save sends its own amounts and the server keeps the platform limits from the file.
+
+**Check:** open this machine's row under servers, change its CPU count, save — `workers` and `housekeepers` in `resources.yaml` are unchanged, and no gauge on Compute offers a cpu or memory stepper. The live pool file had no invented top-level resource, so nothing needed migrating; one would still ride along untouched through this machine's save, but no screen edits it any more. `PUT /api/capacity` still accepts a platform key if sent, for any script that predates the split.
+
+### P1. Redesign the sprint edit dialog
+
+The edit dialog is a wide two-column form — the work (title, summary, goals, plan, rationale) on the left, how it runs (priority, worker model, preemptible, compute) on the right — and the title, summary and rationale are now editable through the API too.
+
+**Check:** open Edit on a proposed sprint and on an approved one. Proposed: everything is live. Approved: title, summary, model and the scheduler fields are live; goals, plan and rationale are greyed with a line saying why. The rationale rule is new — it argued for the approval, so it closes with goals and plan; the title and summary stay open until done or canceled. Changing the model on a sprint whose agent is running says it will restart it.
 
 # To Do (sprint)
 
@@ -125,31 +209,6 @@ decision on whether worker-to-worker is in scope. Blocked on F1.
 Capacity is declared and edited in the place it actually belongs: how many agent
 processes the platform may run, set once for the platform; real CPUs, memory and
 cards, set on the machine that has them.
-
-### G1. Make the global capacity editor the platform's own limits, and nothing else
-
-Reduce "Edit capacity" to the pool-wide process limits — workers and housekeepers —
-instead of a free-form key/value list over the whole pool.
-
-`workers` and `housekeepers` bound how many agent processes run at once on the
-dispatcher's machine wherever their work lands, so they are pool-wide by definition —
-`resources.yaml` even refuses them inside a host (`"{key} is platform-wide, not per
-host"`). But the editor (`components/CapacityModal.tsx`) is a generic
-name/value table over one flat map, so those two sit undifferentiated beside this
-machine's `cpu` and `memory_gb`, and any name at all can be typed in. Two named fields
-with real labels would say what each one governs and make an invented key impossible.
-
-### G2. Edit every machine's real capacity only on its own card, this one included
-
-Take CPUs, memory and cards out of the global editor; each server's own dialog is
-where they are set.
-
-Each machine's card already opens a dialog that edits its cpu, memory and GPU cards —
-this machine included — so the same numbers currently have two editors that can
-disagree, and the flat map is why `set_capacity` needs a fragile branch to avoid
-dropping this machine's cards when an unrelated field is saved. Depends on G1, which
-decides what is left in the global editor. Worth checking what happens to a resource
-someone invented through the old free-form editor before the two are separated.
 
 ## J. Wiki run cost
 
@@ -306,31 +365,6 @@ Any server someone onboards becomes schedulable compute — its CPUs, memory and
 GPU with its VRAM join one pool — and every sprint lands on a machine its request
 actually fits.
 
-### O22. Tidy the edges of the server notes
-
-Three small ways the notes misbehave at the margins, all found in review and none of
-them data loss.
-
-A server a program may no longer use keeps its pending reports forever: the planner is
-told to fold them in, the apply refuses because the program has no access, and the
-cycle report carries a skip line every cycle from then on. A human can clear it from
-the program page, and nothing says so. The human save has no pool check at all, so a
-mistyped host in a URL can create a note the planner may then never touch. And two
-people (or a person and the planner) editing one note overwrite each other silently —
-the save carries no version. The card also has no entry in the page's section nav,
-because that list is built before the card knows whether it will draw anything.
-
-### O23. Stop every program page polling the whole ledger
-
-The server-notes card reads the ledger to know which servers a program may use, so every
-open program page now asks for it every ten seconds.
-
-`ledger_status` parses every sprint on the box on each call — `blockers_by_host` starts by
-loading them all — so this is a real cost that grows with the substrate, paid per open
-tab. The card needs three fields per server (name, display name, program access). Either
-a smaller endpoint, or a slower poll for this query, or the program payload carrying the
-servers it may use.
-
 ### O21. Show the agent a launch command that lets go of the ssh channel
 
 Put a launch line in the worker's instructions that returns at once, instead of leaving
@@ -418,115 +452,6 @@ to pilot is a decision.
 
 The dashboard shows a human everything they need to see and change, and uses the
 screen space it takes.
-
-### P1. Redesign the sprint edit dialog
-
-Rebuild the sprint edit dialog so every editable field is shown and the screen space is
-used well.
-
-The dialog is a narrow single column (Mantine's default modal size). It shows goals,
-priority, preemptible and the five compute fields. It leaves out the plan and the worker
-model, which the edit API already accepts. Title, summary and rationale cannot be edited
-at all. A wider layout could group the fields into what the work is (goals, plan) and how
-it runs (priority, preemptible, model, compute), and keep the existing rule for which
-fields each status may change.
-
-### P2. Show times the same way whatever the browser's locale
-
-Format every time on the dashboard as 24-hour `HH:MM`, and every date in one fixed style,
-instead of taking the browser's locale.
-
-A server's "not answering since" read `23.03` on a browser whose locale writes times with a
-dot. The same locale formatting is used for the exact times in tooltips and the short dates
-(`components/ui.tsx`), the call log's timestamps (`CallLog.tsx`) and the servers card
-(`HostsCard.tsx`). One shared formatter used everywhere fixes all of them, and does not
-depend on which locale a viewer's browser reports.
-
-### P5. Come back to the experiments list, not the top of the program
-
-Returning from an experiment to its program should land on the experiments section,
-with the row you came from in view.
-
-Opening an experiment and going back costs a scroll every time, and on a program with
-33 proposed sprints the row you were reading is well down the page. The back link
-(`BackLink` in `components/ui.tsx`) navigates to a bare `/programs/<id>`, which always
-renders at the top; the experiments card already has the `sec-experiments` anchor the
-ToC scrolls to, so the target exists. Worth deciding whether it restores the exact
-scroll position or just the section, and whether the row you visited is marked.
-
-### P6. Filter the experiments list to just the new ones
-
-Add a single "show only new" check to a program's experiments list that hides everything
-but the highlighted rows.
-
-P3 makes a row light up when the platform moved or proposed it and the viewer has not
-looked since. On a program holding 33 proposed sprints the highlights are what you came
-for, and they are scattered down a long list. The card already carries a status `<select>`
-and a "Show all" toggle (`views/ProgramDetail.tsx`), so this is a third control beside
-them and has to compose with both. Note the "new" flag is per-browser localStorage, not
-substrate state, so the filter cannot be server-side and the count will differ between
-machines — and decide what the check shows when nothing is new.
-
-### P7. Never hide an experiment that is new
-
-The list's automatic cap must exempt highlighted rows, so nothing the platform did
-since you last looked is folded away behind "Show all".
-
-Unless "show all" is on, the experiments list caps the noisy terminal statuses — done
-and canceled — at their three most recent (`views/ProgramDetail.tsx`). The rows are
-sorted newest-first, so one sprint finishing stays visible; a burst does not. Four
-sprints finishing overnight puts the fourth behind the fold while it is still unseen,
-and a hidden highlight is worse than no highlight: the count says something happened and
-the list does not show it. The cap is the platform's choice, not the viewer's, so it is
-the one that must yield — a status filter the human set is theirs to live with.
-
-### P8. Show how long each running experiment has been going, on Compute
-
-Give the "running now" table on Compute a column with each experiment's elapsed run
-time, the way the pulse zone already shows it.
-
-The table lists the experiment and what it is using and nothing about time, so the one
-question you ask of a running job — how long has this been going — is the one it does
-not answer. The pulse zone answers it with `<Running since={…}/>` (`components/ui.tsx`),
-and the ledger payload already carries each lease's `granted_at`; the Compute view
-simply drops it, casting the lease to `{id, sprint_id, amounts, host}`. While there:
-the row shows the bare sprint id where every other list shows a title.
-
-### P9. Name the experiments behind the workers gauge
-
-Hovering the workers gauge in the pulse zone should say which experiments are using
-them, by title.
-
-The compute card renders one `Gauge` per capacity key and a gauge has no tooltip at
-all, so "workers 3 / 4" names nothing — you can see the platform is nearly out of
-agent slots and not what is holding them. Each lease carries its `sprint_id` and its
-`amounts`, so the three using a worker are already known; the titles are the missing
-half, and the same view resolves them for its own running-now list. Worth deciding
-whether the other gauges get the same treatment, since cpu and memory have the same
-question behind them.
-
-### P10. Give the lineage graph an auto-layout button
-
-Add a control that re-lays the lineage out from the graph's own structure, discarding
-the positions dragging has accumulated.
-
-The graph lays itself out with dagre on first render, but every drag is saved per
-program (`savePosition` in `components/graphPositions.ts`) and those saved positions win
-from then on — so a lineage that has been rearranged once, or that has grown since, stays
-crooked with no way back. `layout()` and `clearPositions()` both already exist; the item
-is a button that calls them and a decision on whether it asks first, since it throws away
-arrangement someone may have meant.
-
-### P11. Show only typed nodes on the wiki graph by default
-
-Flip the wiki graph's "typed only" filter on by default, so the first view is the
-structured part of the graph.
-
-`emptyFilters()` (`components/wikiGraphFilter.ts`) starts with `typedOnly: false`, so the
-graph opens showing everything and the typed structure is buried in it. The control is
-already built and already filters correctly; this is its default. Check what a graph with
-no typed nodes at all shows once the default flips — an empty canvas would read as a
-broken page rather than as a filter doing its job.
 
 ## Q. Code rot
 
