@@ -133,7 +133,15 @@ export interface SprintFile {
   content: string; truncated: boolean; binary: boolean;
 }
 export interface ResultRow { id: string; sprint: string; summary: string; program?: string | null; completed_at?: number | null }
-export interface LedgerCard { index: number; model: string; vram_gb: number | null; whole: boolean; shared_gb: number }
+export interface LedgerCard {
+  index: number; model: string; vram_gb: number | null; whole: boolean; shared_gb: number;
+  total_vram_gb?: number | null;       // what the card has; vram_gb is what Co-Science may use (G2)
+}
+// One card as the server dialog writes it. `vram_gb` is what Co-Science may use;
+// `total_vram_gb` what the card has; `disabled` keeps it on file but lends it to no one.
+export interface CardSpec { model: string; vram_gb: number; total_vram_gb?: number; disabled?: boolean }
+// A machine's own totals, as probed or typed in (G2). Capacity is what is offered of them.
+export type MachineTotals = { cpu?: number; memory_gb?: number };
 export interface HostHealth {
   state: "local" | "unchecked" | "ok" | "failing" | "quiet";
   checked_at: number; last_ok: number; fail_since: number; reason: string;
@@ -156,6 +164,8 @@ export interface LedgerHost {
   // Free space on the machine, and what it means: "" fine, "low" warn, "critical" the
   // machine takes no new work. null/undefined free_gb = it has not reported one.
   free_gb?: number | null; disk?: "" | "low" | "critical";
+  machine?: MachineTotals;
+  cards_off?: { index: number; model: string; vram_gb: number | null; total_vram_gb?: number | null }[];
 }
 export interface HostCheck { name: string; ok: boolean; detail: string }
 export interface HostDeclaration {
@@ -164,19 +174,19 @@ export interface HostDeclaration {
 export interface HostProbe {
   name: string; declared: HostDeclaration; probed_at: number; ok: boolean; error: string;
   facts: Record<string, unknown>; checks: HostCheck[]; warnings: string[];
-  proposal: { capacity?: Record<string, number>; gpus?: { model: string; vram_gb: number }[] };
+  proposal: { capacity?: Record<string, number>; gpus?: CardSpec[]; machine?: MachineTotals };
 }
 // POST /api/hosts/local/detect — same shape family as HostProbe, but for this
 // machine there is nothing to SSH-check, so `checks` is absent altogether
 // rather than sent empty.
 export interface LocalDetect {
   ok: boolean; error: string; facts: Record<string, unknown>; warnings: string[];
-  proposal: { capacity?: Record<string, number>; gpus?: { model: string; vram_gb: number }[] };
+  proposal: { capacity?: Record<string, number>; gpus?: CardSpec[]; machine?: MachineTotals };
 }
 export interface HostUpdate {
   label?: string; ssh?: string; run_root?: string; shared?: boolean; programs?: string[];
   owner?: string; notes?: string; capacity?: Record<string, number>;
-  gpus?: { model: string; vram_gb: number }[]; probed_at?: number;
+  gpus?: CardSpec[]; machine?: MachineTotals; probed_at?: number;
   // Set only when the write is authorized by an agent survey's written overrides
   // rather than by every check passing — see SurveyProposal.overrides.
   accept_overrides?: boolean;
@@ -620,7 +630,7 @@ export const api = {
     }).then(j<HostProbe>),
   listHostProbes: () => fetch("/api/hosts/probes").then(j<HostProbe[]>),
   confirmHost: (body: {
-    name: string; capacity: Record<string, number>; gpus?: { model: string; vram_gb: number }[];
+    name: string; capacity: Record<string, number>; gpus?: CardSpec[]; machine?: MachineTotals;
     notes?: string; probed_at?: number; accept_overrides?: boolean; programs?: string[];
   }) =>
     fetch("/api/hosts", {
@@ -654,12 +664,13 @@ export const api = {
   // This machine's own capacity, from its server dialog. The platform limits are kept
   // from the file when left out, so this never needs to send them (G2). `gpus` is sent
   // only when this machine's own cards are being written.
-  setCapacity: (capacity: Record<string, number>, gpus?: { model: string; vram_gb: number }[],
-                label?: string) =>
+  setCapacity: (capacity: Record<string, number>, gpus?: CardSpec[],
+                label?: string, machine?: MachineTotals) =>
     fetch("/api/capacity", {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         capacity, ...(gpus ? { gpus } : {}), ...(label === undefined ? {} : { label }),
+        ...(machine === undefined ? {} : { machine }),
       }),
     }).then(j<Ledger>),
   setPause: (paused: boolean) =>

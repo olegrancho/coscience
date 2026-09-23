@@ -24,7 +24,7 @@ vi.mock("@mantine/notifications", () => ({
 import { api } from "../api";
 import { notifications } from "@mantine/notifications";
 import type { HostSurvey, LedgerHost, SurveyProposal } from "../api";
-import AddHostModal from "./AddHostModal";
+import AddHostModal, { machinePayload, mergeDetected } from "./AddHostModal";
 
 beforeAll(() => {
   window.matchMedia = window.matchMedia || (((query: string) => ({
@@ -105,7 +105,8 @@ const OK_DETECT = {
   ok: true, error: "",
   facts: { os: "Example Linux 9", cpu_model: "Example CPU", threads: 32, mem_total_kb: 58720256 },
   warnings: ["glibc 2.17 is old: many current Python wheels and binaries will not run"],
-  proposal: { capacity: { cpu: 24, memory_gb: 56 }, gpus: [{ model: "NVIDIA GeForce RTX 4090", vram_gb: 24 }] },
+  proposal: { capacity: { cpu: 24, memory_gb: 56 }, gpus: [{ model: "NVIDIA GeForce RTX 4090", vram_gb: 24 }],
+              machine: { cpu: 32, memory_gb: 56 } },
 };
 
 interface ModalProps {
@@ -150,12 +151,12 @@ describe("AddHostModal", () => {
       await awaitProgramsSeeded(["p2"]);
       expect((screen.getByLabelText(/^Owner/) as HTMLInputElement).value).toBe("alice");
       expect((screen.getByLabelText(/^Notes/) as HTMLInputElement).value).toBe("business hours only");
-      expect((screen.getByLabelText("CPU cores") as HTMLInputElement).value).toBe("10");
-      expect((screen.getByLabelText("Memory (GB)") as HTMLInputElement).value).toBe("50");
-      expect((screen.getByLabelText("GPU 1 VRAM (GB)") as HTMLInputElement).value).toBe("10.8");
+      expect((screen.getByLabelText("CPU cores available to Co-Science") as HTMLInputElement).value).toBe("10");
+      expect((screen.getByLabelText("Memory available to Co-Science (GB)") as HTMLInputElement).value).toBe("50");
+      expect((screen.getByLabelText("GPU 1 VRAM available (GB)") as HTMLInputElement).value).toBe("10.8");
 
       fireEvent.change(screen.getByLabelText(/^Notes/), { target: { value: "24/7 now" } });
-      fireEvent.change(screen.getByLabelText("CPU cores"), { target: { value: "12" } });
+      fireEvent.change(screen.getByLabelText("CPU cores available to Co-Science"), { target: { value: "12" } });
       fireEvent.click(screen.getByRole("button", { name: "Update configuration" }));
       await waitFor(() => expect(api.updateHost).toHaveBeenCalled());
       expect(api.updateHost).toHaveBeenCalledWith("gpu1", expect.objectContaining({
@@ -199,7 +200,7 @@ describe("AddHostModal", () => {
     it("says when lowering below what's in use", async () => {
       const busy = { ...REMOTE, used: { cpu: 8 } };
       renderModal({ host: busy });
-      fireEvent.change(screen.getByLabelText("CPU cores"), { target: { value: "4" } });
+      fireEvent.change(screen.getByLabelText("CPU cores available to Co-Science"), { target: { value: "4" } });
       expect(screen.getByText(
         "8 CPU cores in use — lowering below that lets running work finish and blocks new grants.",
       )).toBeTruthy();
@@ -222,7 +223,7 @@ describe("AddHostModal", () => {
       expect((screen.getByRole("button", { name: "Update configuration" }) as HTMLButtonElement).disabled).toBe(true);
       expect(screen.getByText("Every GPU card needs a model and its VRAM (GB)")).toBeTruthy();
 
-      fireEvent.change(screen.getByLabelText("GPU 1 VRAM (GB)"), { target: { value: "80" } });
+      fireEvent.change(screen.getByLabelText("GPU 1 VRAM available (GB)"), { target: { value: "80" } });
       expect((screen.getByRole("button", { name: "Update configuration" }) as HTMLButtonElement).disabled).toBe(false);
       expect(screen.queryByText("Every GPU card needs a model and its VRAM (GB)")).toBeNull();
 
@@ -378,8 +379,8 @@ describe("AddHostModal", () => {
       expect(screen.queryByRole("button", { name: "Probe" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Re-probe" })).toBeNull();
       // Before Detect: CPU seeded from localCapacity, memory empty (not declared).
-      expect((screen.getByLabelText("CPU cores") as HTMLInputElement).value).toBe("24");
-      expect((screen.getByLabelText("Memory (GB)") as HTMLInputElement).value).toBe("");
+      expect((screen.getByLabelText("CPU cores available to Co-Science") as HTMLInputElement).value).toBe("24");
+      expect((screen.getByLabelText("Memory available to Co-Science (GB)") as HTMLInputElement).value).toBe("");
       expect(screen.getByText(
         "Declaring memory lets sprints request memory on this machine.",
       )).toBeTruthy();
@@ -387,18 +388,16 @@ describe("AddHostModal", () => {
       fireEvent.click(screen.getByRole("button", { name: "Detect" }));
       await waitFor(() => expect(api.detectLocal).toHaveBeenCalled());
       expect((await screen.findByLabelText("GPU 1 model") as HTMLInputElement).value).toBe("NVIDIA GeForce RTX 4090");
-      expect((screen.getByLabelText("GPU 1 VRAM (GB)") as HTMLInputElement).value).toBe("24");
+      expect((screen.getByLabelText("GPU 1 VRAM available (GB)") as HTMLInputElement).value).toBe("24");
       // Detect fills the cards but does not touch CPU/memory.
-      expect((screen.getByLabelText("CPU cores") as HTMLInputElement).value).toBe("24");
-      expect((screen.getByLabelText("Memory (GB)") as HTMLInputElement).value).toBe("");
-      expect(screen.getByText("Detected: 32 threads")).toBeTruthy();
-      expect(screen.getByText("Detected: 56 GB")).toBeTruthy();
+      expect((screen.getByLabelText("CPU cores available to Co-Science") as HTMLInputElement).value).toBe("24");
+      expect((screen.getByLabelText("Memory available to Co-Science (GB)") as HTMLInputElement).value).toBe("");
+      // What it found is the machine's total (G2), beside what Co-Science may use.
+      expect((screen.getByLabelText("CPU cores on the machine") as HTMLInputElement).value).toBe("32");
+      expect((screen.getByLabelText("Memory on the machine (GB)") as HTMLInputElement).value).toBe("56");
 
-      fireEvent.click(screen.getByRole("button", { name: "Use detected CPU cores" }));
-      expect((screen.getByLabelText("CPU cores") as HTMLInputElement).value).toBe("32");
-      // Memory's "use detected" is there too but wasn't clicked — Update
-      // below must send no memory_gb at all.
-      expect(screen.getByRole("button", { name: "Use detected memory" })).toBeTruthy();
+      // Offering all of it is a choice a human makes, typed in.
+      fireEvent.change(screen.getByLabelText("CPU cores available to Co-Science"), { target: { value: "32" } });
 
       fireEvent.click(screen.getByRole("button", { name: "Update configuration" }));
       await waitFor(() => expect(api.setCapacity).toHaveBeenCalled());
@@ -406,8 +405,9 @@ describe("AddHostModal", () => {
       // the server keeps them from the file.
       expect(api.setCapacity).toHaveBeenCalledWith(
         { cpu: 32 },
-        [{ model: "NVIDIA GeForce RTX 4090", vram_gb: 24 }],
+        [{ model: "NVIDIA GeForce RTX 4090", vram_gb: 24, total_vram_gb: 24 }],
         "",                       // display name: none set, so it goes by "local"
+        { cpu: 32, memory_gb: 56 },
       );
     });
 
@@ -471,19 +471,17 @@ describe("AddHostModal", () => {
       expect(await screen.findByText(/rsync both ways/)).toBeTruthy();
       expect(screen.getByText(/glibc 2.17 is old/)).toBeTruthy();
       expect(screen.getByText("Example Linux 9 · Example CPU · 12 threads · 62 GB memory")).toBeTruthy();
-      expect((screen.getByLabelText("CPU cores offered") as HTMLInputElement).value).toBe("12");
-      // Cards are read-only text in add mode — there's nothing to edit and no
-      // "+ add card" to click — but the probe's cards are still sent on Add.
-      expect(screen.getByText(/10\.8 GB X\./)).toBeTruthy();
-      expect(screen.queryByLabelText("GPU 1 model")).toBeNull();
-      expect(screen.queryByLabelText("GPU 1 VRAM (GB)")).toBeNull();
-      expect(screen.queryByText("+ add card")).toBeNull();
-      fireEvent.change(screen.getByLabelText("CPU cores offered"), { target: { value: "10" } });
+      expect((screen.getByLabelText("CPU cores available to Co-Science") as HTMLInputElement).value).toBe("12");
+      // The probe's cards can be switched off or trimmed before adding (G2).
+      expect((screen.getByLabelText("GPU 1 model") as HTMLInputElement).value).toBe("X");
+      expect((screen.getByLabelText("GPU 1 VRAM available (GB)") as HTMLInputElement).value).toBe("10.8");
+      fireEvent.change(screen.getByLabelText("CPU cores available to Co-Science"), { target: { value: "10" } });
       fireEvent.click(screen.getByRole("button", { name: "Add to the pool" }));
       await waitFor(() => expect(api.confirmHost).toHaveBeenCalled());
       expect(api.confirmHost).toHaveBeenCalledWith({
         name: "gpu1", capacity: { cpu: 10, memory_gb: 55 },
-        gpus: [{ model: "X", vram_gb: 10.8 }], notes: "", probed_at: 1, programs: ALL_PROGRAM_IDS,
+        gpus: [{ model: "X", vram_gb: 10.8, total_vram_gb: 10.8 }], notes: "", probed_at: 1,
+        programs: ALL_PROGRAM_IDS, machine: {},
       });
     });
 
@@ -543,12 +541,11 @@ describe("AddHostModal", () => {
       await screen.findByRole("button", { name: "Add to the pool" });
 
       fireEvent.click(await screen.findByRole("button", { name: "Use proposal" }));
-      expect((screen.getByLabelText("CPU cores offered") as HTMLInputElement).value).toBe("6");
-      expect((screen.getByLabelText("Memory offered (GB)") as HTMLInputElement).value).toBe("40");
+      expect((screen.getByLabelText("CPU cores available to Co-Science") as HTMLInputElement).value).toBe("6");
+      expect((screen.getByLabelText("Memory available to Co-Science (GB)") as HTMLInputElement).value).toBe("40");
       expect((screen.getByLabelText(/^Notes/) as HTMLInputElement).value).toBe("agent-verified");
-      // Shown both by the modal's own card summary and by SurveyPanel's
-      // proposal block; match the modal's specific wording.
-      expect(screen.getByText(/80 GB A100\. A server added now waits/)).toBeTruthy();
+      expect((screen.getByLabelText("GPU 1 model") as HTMLInputElement).value).toBe("A100");
+      expect((screen.getByLabelText("GPU 1 VRAM available (GB)") as HTMLInputElement).value).toBe("80");
     });
 
     it("sends the proposal's gpus and notes, not just capacity, when adding after Use proposal", async () => {
@@ -564,7 +561,7 @@ describe("AddHostModal", () => {
       await waitFor(() => expect(api.confirmHost).toHaveBeenCalled());
       expect(api.confirmHost).toHaveBeenCalledWith(expect.objectContaining({
         capacity: { cpu: 6, memory_gb: 40 },
-        gpus: [{ model: "A100", vram_gb: 80 }],
+        gpus: [{ model: "A100", vram_gb: 80, total_vram_gb: 80 }],
         notes: "agent-verified",
       }));
     });
@@ -721,5 +718,68 @@ describe("AddHostModal", () => {
       expect(screen.queryByRole("button", { name: /^Remove local/ })).toBeNull();
       expect(screen.queryByText(/Taking it out of the pool/)).toBeNull();
     });
+  });
+});
+
+describe("available vs the machine's totals (G2)", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const WITH_TOTALS = {
+    ...REMOTE, capacity: { cpu: 10, memory_gb: 50 }, machine: { cpu: 12, memory_gb: 62 },
+    gpus: [{ index: 1, model: "B", vram_gb: 10, total_vram_gb: 11, whole: false, shared_gb: 0 }],
+    cards_off: [{ index: 0, model: "A", vram_gb: 11, total_vram_gb: 11 }],
+  };
+
+  it("shows what Co-Science may use beside what the machine has, cards in device order", () => {
+    renderModal({ host: WITH_TOTALS as never });
+    expect((screen.getByLabelText("CPU cores available to Co-Science") as HTMLInputElement).value).toBe("10");
+    expect((screen.getByLabelText("CPU cores on the machine") as HTMLInputElement).value).toBe("12");
+    expect((screen.getByLabelText("Memory on the machine (GB)") as HTMLInputElement).value).toBe("62");
+    expect((screen.getByLabelText("GPU 1 model") as HTMLInputElement).value).toBe("A");
+    expect((screen.getByLabelText("Use GPU 1") as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByLabelText("Use GPU 2") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("GPU 2 VRAM on the card (GB)") as HTMLInputElement).value).toBe("11");
+  });
+
+  it("saves a switched-off card as disabled, and the totals with it", async () => {
+    vi.mocked(api.updateHost).mockResolvedValue({} as never);
+    renderModal({ host: WITH_TOTALS as never });
+    fireEvent.click(screen.getByLabelText("Use GPU 2"));
+    fireEvent.click(screen.getByRole("button", { name: "Update configuration" }));
+    await waitFor(() => expect(api.updateHost).toHaveBeenCalled());
+    expect(api.updateHost).toHaveBeenCalledWith("gpu1", expect.objectContaining({
+      gpus: [{ model: "A", vram_gb: 11, total_vram_gb: 11, disabled: true },
+             { model: "B", vram_gb: 10, total_vram_gb: 11, disabled: true }],
+      machine: { cpu: 12, memory_gb: 62 },
+    }));
+  });
+
+  it("will not save more than the machine has, and says which", async () => {
+    renderModal({ host: WITH_TOTALS as never });
+    fireEvent.change(screen.getByLabelText("CPU cores available to Co-Science"), { target: { value: "16" } });
+    fireEvent.change(screen.getByLabelText("GPU 2 VRAM available (GB)"), { target: { value: "20" } });
+    expect(screen.getByText("16 CPU cores available is more than the machine's 12")).toBeTruthy();
+    expect(screen.getByText("GPU 2: 20 GB available is more than its 11 GB")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Update configuration" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("card helpers (G2)", () => {
+  it("merges found cards, keeping a human's choices for the same card only", () => {
+    const current = [
+      { model: "A", vram_gb: 8 as const, total_vram_gb: 11 as const, on: false },
+      { model: "B", vram_gb: 10 as const, total_vram_gb: 11 as const, on: true },
+    ];
+    const merged = mergeDetected(
+      [{ model: "A", vram_gb: 11, total_vram_gb: 11 }, { model: "C", vram_gb: 24, total_vram_gb: 24 }],
+      current as never);
+    expect(merged).toEqual([
+      { model: "A", vram_gb: 8, total_vram_gb: 11, on: false },     // same card: kept
+      { model: "C", vram_gb: 24, total_vram_gb: 24, on: true },     // a different card: fresh
+    ]);
+  });
+
+  it("sends only the totals that are known", () => {
+    expect(machinePayload(32, "")).toEqual({ cpu: 32 });
+    expect(machinePayload("", "")).toEqual({});
   });
 });

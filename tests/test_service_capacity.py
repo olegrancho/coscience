@@ -159,12 +159,12 @@ def test_ledger_status_lists_every_host(tmp_path):
          "capacity": {"cpu": 24.0}, "available": {"cpu": 24.0, "workers": 3.0}, "gpus": [],
          "shared": False, "owner": "", "notes": "", "drain": False, "drained_at": 0.0,
          "removing": False, "waiting_on": [], "health": local_health,
-         "used": {}, "leases": 0, "leftover": []},
+         "used": {}, "leases": 0, "leftover": [], "machine": {}, "cards_off": []},
         {"name": "remote1", "label": "", "ssh": "remote1", "placeable": False, "programs": ["p2"],
          "run_root": "~/coscience-runs", "capacity": {"cpu": 28.0}, "available": {}, "gpus": [],
          "shared": False, "owner": "", "notes": "", "drain": False, "drained_at": 0.0,
          "removing": False, "waiting_on": [], "health": unchecked_health,
-         "used": {}, "leases": 0, "leftover": []},
+         "used": {}, "leases": 0, "leftover": [], "machine": {}, "cards_off": []},
     ]
 
 
@@ -226,7 +226,8 @@ def test_ledger_status_describes_each_card(tmp_path):
     status = Service(tmp_path).ledger_status()
 
     assert status["hosts"][0]["gpus"] == [
-        {"index": 0, "model": "A", "vram_gb": 24.0, "whole": False, "shared_gb": 8.0}]
+        {"index": 0, "model": "A", "vram_gb": 24.0, "total_vram_gb": None,
+         "whole": False, "shared_gb": 8.0}]
     assert status["leases"][0]["gpu_devices"] == [0]
     assert status["capacity"]["gpu"] == 1.0
     assert status["used"]["gpu"] == 1.0
@@ -296,3 +297,70 @@ def test_platform_limits_over_http(tmp_path):
     r = c.put("/api/platform-limits", json={"limits": {"workers": 2}})
     assert r.status_code == 200 and r.json()["capacity"]["workers"] == 2.0
     assert c.put("/api/platform-limits", json={"limits": {"cpu": 2}}).status_code == 422
+
+
+# --- G2 rework: the machine's totals, and what Co-Science may use of them ------------
+
+def test_a_switched_off_card_takes_no_work_and_keeps_every_card_numbered():
+    """Card numbers are CUDA device ids: dropping card 0 must not renumber card 1."""
+    from coscience.resources import ResourcePool
+    pool = ResourcePool.from_dict({"cpu": 8, "gpus": [
+        {"model": "A", "vram_gb": 20, "total_vram_gb": 24, "disabled": True},
+        {"model": "B", "vram_gb": 10, "total_vram_gb": 24}]})
+    local = pool.host("local")
+    assert [(g.index, g.model) for g in local.gpus] == [(1, "B")]
+    assert [(g.index, g.model) for g in local.cards_off] == [(0, "A")]
+    assert local.capacity["gpu"] == 1.0
+    assert pool.host_errors == []
+
+
+def test_a_card_cannot_offer_more_vram_than_it_has():
+    from coscience.resources import ResourcePool
+    pool = ResourcePool.from_dict({"gpus": [{"model": "A", "vram_gb": 30, "total_vram_gb": 24}]})
+    assert "30 GB available is more than the card's 24 GB" in pool.host_errors[0]
+
+
+def test_this_machines_totals_are_saved_beside_what_is_offered(tmp_path):
+    _write(tmp_path, "cpu: 24\nworkers: 4\n")
+    status = Service(tmp_path).set_capacity({"cpu": 20, "memory_gb": 40},
+                                            machine={"cpu": 32, "memory_gb": 62})
+    written = yaml.safe_load((tmp_path / ".coscience" / "resources.yaml").read_text())
+    assert written["machine"] == {"cpu": 32.0, "memory_gb": 62.0}
+    assert (written["cpu"], written["memory_gb"], written["workers"]) == (20.0, 40.0, 4)
+    assert status["hosts"][0]["machine"] == {"cpu": 32.0, "memory_gb": 62.0}
+
+
+def test_offering_more_than_the_machine_has_is_refused(tmp_path):
+    _write(tmp_path, "cpu: 24\n")
+    with pytest.raises(ValueError, match="40 available is more than the machine's 32"):
+        Service(tmp_path).set_capacity({"cpu": 40}, machine={"cpu": 32})
+    written = yaml.safe_load((tmp_path / ".coscience" / "resources.yaml").read_text())
+    assert written == {"cpu": 24}                              # nothing written
+
+
+def test_a_save_without_totals_keeps_the_ones_on_file(tmp_path):
+    _write(tmp_path, "cpu: 24\nmachine: {cpu: 32, memory_gb: 62}\n")
+    Service(tmp_path).set_capacity({"cpu": 16})
+    written = yaml.safe_load((tmp_path / ".coscience" / "resources.yaml").read_text())
+    assert written["machine"] == {"cpu": 32, "memory_gb": 62}
+
+
+def test_the_ledger_shows_a_servers_totals_and_its_switched_off_cards(tmp_path):
+    _write(tmp_path, "cpu: 4\nhosts:\n  g1:\n    ssh: g1\n    capacity: {cpu: 10}\n"
+                     "    machine: {cpu: 12, memory_gb: 62}\n"
+                     "    gpus:\n      - {model: A, vram_gb: 10, total_vram_gb: 11, disabled: true}\n"
+                     "      - {model: B, vram_gb: 11, total_vram_gb: 11}\n")
+    g1 = next(h for h in Service(tmp_path).ledger_status()["hosts"] if h["name"] == "g1")
+    assert g1["machine"] == {"cpu": 12.0, "memory_gb": 62.0}
+    assert [(c["index"], c["model"]) for c in g1["gpus"]] == [(1, "B")]
+    assert g1["cards_off"] == [{"index": 0, "model": "A", "vram_gb": 10.0, "total_vram_gb": 11.0}]
+
+
+def test_a_servers_totals_are_edited_with_it(tmp_path):
+    _write(tmp_path, "cpu: 4\nhosts:\n  g1:\n    ssh: g1\n    run_root: ~/r\n    capacity: {cpu: 10}\n")
+    svc = Service(tmp_path)
+    svc.update_host("g1", capacity={"cpu": 10}, machine={"cpu": 12})
+    written = yaml.safe_load((tmp_path / ".coscience" / "resources.yaml").read_text())
+    assert written["hosts"]["g1"]["machine"] == {"cpu": 12.0}
+    with pytest.raises(ValueError, match="more than the machine's 12"):
+        svc.update_host("g1", capacity={"cpu": 14})

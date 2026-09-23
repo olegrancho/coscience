@@ -1,46 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 170
+version: 175
 last_updated: 2026-09-23
 ---
 
 # To QC
-
-### P9. Name the experiments behind the workers gauge
-
-Hovering any gauge — on the Overview's compute card and on Compute — lists the experiments holding it, by title; and in the pulse, hovering "N agents calling Claude" lists every live agent with what it is working on, as does hovering each agent's row.
-
-**Check:** while agents run, hover "agents calling Claude" in the rail's pulse — each line names a worker's experiment by title, or the program a planner or wiki agent works for, then the model — and hover one agent row for its own line. Then `workers` and `cpu` on Compute. The pulse was the first QC's finding; the rows' hover used to be a native tooltip naming only the program and model.
-
-### P10. Give the lineage graph an auto-layout button
-
-The lineage card has a labelled "Auto-layout" button, inline and in the expanded view, that forgets dragged positions and lays the graph out again.
-
-**Check:** drag a few lineage nodes, press Auto-layout, and the graph returns to its computed layout. The control already existed as a bare "↺" icon since July; the fix was naming it. It does not ask first — what it discards is this browser's remembered drag positions.
-
-### P5. Come back to the experiments list, not the top of the program
-
-Going back from an experiment — by its back link or the browser's Back — lands on that experiment's row in the program's list, with a brief flash so the eye finds it.
-
-**Check:** open a program, scroll to an experiment well down the list, open it, then go back both ways. Reaching the program any other way (the nav, a link) still starts at the top. It brings the row into view rather than restoring the exact scroll position, and the row stays visible even if the done/canceled cap would otherwise fold it.
-
-### P6. Filter the experiments list to just the new ones
-
-The experiments card has an "only new (N)" check beside the status filter that shows just the highlighted rows.
-
-**Check:** on a program with highlights, tick it — only the highlighted rows remain, and it combines with the status filter (the count follows the filter). With nothing new it says "Nothing new since you last looked." instead of an empty list. The count is this browser's, so it can differ between machines.
-
-### P7. Never hide an experiment that is new
-
-The done/canceled cap still counts new rows toward its three, but never folds one away.
-
-**Check:** with four sprints finished since your last look, all four stay in view without "Show all" and the older seen ones fold behind them. The rules are in `views/experimentsList.ts` with their tests.
-
-### P12. Collapse the server notes on the program page
-
-Each server's row in the notes card starts collapsed to one line — name, the note's first line, and an "N reports unread" badge — and opens on click.
-
-**Check:** a program page with several servers: the card is a short list, a row with pending reports says so without opening, and Edit opens the row it edits.
 
 ### O23. Stop every program page polling the whole ledger
 
@@ -62,9 +26,9 @@ Compute's "Edit capacity" is now "Platform limits": two named fields — worker 
 
 ### G2. Edit every machine's real capacity only on its own card, this one included
 
-CPUs, memory and cards are edited only in each server's own dialog; this machine's save sends its own amounts and the server keeps the platform limits from the file.
+Each server's dialog — this machine's included — now shows, for CPU and memory, what Co-Science may use beside what the machine has; and one row per graphics card with an on/off switch, the VRAM Co-Science may use and the VRAM the card has.
 
-**Check:** open this machine's row under servers, change its CPU count, save — `workers` and `housekeepers` in `resources.yaml` are unchanged, and no gauge on Compute offers a cpu or memory stepper. The live pool file had no invented top-level resource, so nothing needed migrating; one would still ride along untouched through this machine's save, but no screen edits it any more. `PUT /api/capacity` still accepts a platform key if sent, for any script that predates the split.
+**Check:** open this machine's dialog, press Detect — the "on the machine" fields fill with what it found while the available ones stay as they were; switch a card off and save — it is written `disabled: true`, stays in the dialog, and no gauge counts it; try offering more CPU, memory or VRAM than the total — the dialog says which and Save waits. The first QC's finding was that the dialog showed the machine's total where it should show what Co-Science gets. Totals are stored as `machine: {cpu, memory_gb}` and per card `total_vram_gb`; every existing server starts without them until probed, detected or typed in. A switched-off card keeps its device number, so the cards after it keep theirs.
 
 ### P1. Redesign the sprint edit dialog
 
@@ -110,11 +74,6 @@ actually runs a server out of memory. Written up as O17 before this block existe
 
 No machine is given work it has no room for, and a machine that is running out says
 so on the dashboard before it stops working.
-
-## E. The planner's record
-
-What the planner decided about a sprint is readable on that sprint, truthful about what
-it actually did, and never a human authorization it has no power to give back.
 
 ## D. Wiki content health
 
@@ -457,6 +416,30 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### P12. Collapse the server notes on the program page
+
+Each server's note starts collapsed to one line — name, the note's first line and an unread-reports badge — and opens on click.
+
+### P7. Never hide an experiment that is new
+
+The done/canceled cap never folds away a row the viewer has not seen yet.
+
+### P6. Filter the experiments list to just the new ones
+
+The experiments card has an "only new (N)" check that shows just the highlighted rows, combined with the status filter.
+
+### P5. Come back to the experiments list, not the top of the program
+
+Going back from an experiment lands on its row in the program's list, with a brief flash so the eye finds it.
+
+### P10. Give the lineage graph an auto-layout button
+
+The lineage card has a labelled Auto-layout button that forgets dragged positions and lays the graph out again.
+
+### P9. Name the experiments behind the workers gauge
+
+Every compute gauge, and the pulse's live agents, name on hover the experiments and programs behind them, by title.
+
 ### P8. Show how long each running experiment has been going, on Compute
 
 Compute's running-now table names each experiment by title and says how long it has held compute, with the grant time on hover.
@@ -472,29 +455,3 @@ The wiki graph opens with "typed only" on whenever it has a typed relation, and 
 ### B4. Say when the substrate cannot commit
 
 A refused commit is told apart from an empty one and recorded outside the substrate, and the pulse grows a red row after three in a row — checked on a scratch substrate with a refusing hook, and silent again on the next good commit.
-
-### B3. Retire a Claude call whose end was never written
-
-A planner cycle closes its own unfinished calls before opening the next one, so a loop that lost an end event no longer shows a call in flight for as long as it lives.
-
-### E2. Keep a planner cycle's reasoning after the next cycle runs
-
-Every cycle's report is kept under the program's `reports/` and readable from a cycle selector on the program page, and each sprint a cycle acted on carries that cycle's own sentences about it.
-
-### B2. Stop giving work to a machine with under 500 MB free
-
-A machine under the gate (1 GB) takes no new grants and launches no worker agent, while
-the planners keep beating; both thresholds can be moved from the environment, so the gate
-is rehearsed by shifting the line instead of filling a real disk.
-
-### B1. Warn on the pulse zone when a machine is low on disk
-
-Every machine's free space is on the servers table, dated to its last health check when it came from a remote one, and the pulse calls out anything running low — severely once it is under the gate.
-
-### E1. Replace the planner's reopen with a hold that keeps the approval
-
-The planner can no longer un-approve anything: it holds an approved sprint instead, with a one-sentence rationale shown on the sprint, which release or a human clears.
-
-### E3. Stop flagging a declined action as an unbacked claim
-
-A planner explaining that it had nothing to do is no longer stamped as claiming it acted: the check reads the whole sentence and requires a past-tense verb, so it fires on a real claim and not on an honest one.

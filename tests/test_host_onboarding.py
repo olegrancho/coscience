@@ -52,7 +52,8 @@ def test_confirming_writes_the_host_and_keeps_the_rest_of_the_file(tmp_path):
     assert written["hosts"]["gpu1"] == {
         "ssh": "gpu1", "run_root": "~/coscience-runs", "programs": ["p2"],
         "capacity": {"cpu": 10.0, "memory_gb": 50.0},
-        "gpus": [{"model": "Example GPU 11GB", "vram_gb": 10.8}]}
+        "gpus": [{"model": "Example GPU 11GB", "vram_gb": 10.8, "total_vram_gb": 10.8}],
+        "machine": {"cpu": 12.0, "memory_gb": 62.0}}          # the probe's totals (G2)
     assert [h["name"] for h in status["hosts"]] == ["local", "gpu1"]
     assert status["host_errors"] == []
     assert next(h for h in status["hosts"] if h["name"] == "gpu1")["placeable"] is False

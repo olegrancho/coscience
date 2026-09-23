@@ -46,7 +46,9 @@ def test_propose_offers_all_threads_or_half_on_a_shared_server():
     facts = parse_facts(SAMPLE_OUTPUT, now=1000.0)
     assert propose(facts, shared=False) == {
         "capacity": {"cpu": 12.0, "memory_gb": 55.0},
-        "gpus": [{"model": "Example GPU 11GB", "vram_gb": 10.8}]}
+        "gpus": [{"model": "Example GPU 11GB", "vram_gb": 10.8, "total_vram_gb": 10.8}],
+        # What the machine has (G2): the ceiling the capacity above is offered from.
+        "machine": {"cpu": 12.0, "memory_gb": 62.0}}
     assert propose(facts, shared=True)["capacity"]["cpu"] == 6.0
 
 

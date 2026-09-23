@@ -2,7 +2,8 @@ import { Alert, Badge, Button, Group, Modal, NumberInput, Stack, Switch, Text, T
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { api, type HostProbe, type LedgerHost, type LocalDetect, type SurveyProposal } from "../api";
+import { api, type CardSpec, type HostProbe, type LedgerHost, type LocalDetect, type MachineTotals,
+         type SurveyProposal } from "../api";
 import { cutOffMessage, programsForEdit } from "./programAccess";
 import ProgramAccessInput from "./ProgramAccessInput";
 import SurveyPanel from "./SurveyPanel";
@@ -12,7 +13,39 @@ interface Props {
   host?: LedgerHost; local?: boolean; localCapacity?: Record<string, number>;
 }
 type Amount = number | "";
-interface CardRow { model: string; vram_gb: Amount }
+// `vram_gb` is what Co-Science may use of the card, `total_vram_gb` what it has (G2).
+// `on` false keeps the card on file but lends it to no one.
+interface CardRow { model: string; vram_gb: Amount; total_vram_gb: Amount; on: boolean }
+
+/** A server's cards for the dialog: the ones in use and the switched-off ones, in
+ *  their physical order — the index is the device number, so the order must hold. */
+export function cardRowsOf(host?: Pick<LedgerHost, "gpus" | "cards_off">): CardRow[] {
+  const on = (host?.gpus ?? []).map((g) => ({ ...g, on: true }));
+  const off = (host?.cards_off ?? []).map((g) => ({ ...g, on: false }));
+  return [...on, ...off].sort((a, b) => a.index - b.index).map((g) => ({
+    model: g.model, vram_gb: g.vram_gb ?? "", total_vram_gb: g.total_vram_gb ?? "", on: g.on,
+  }));
+}
+
+/** Cards as found by a probe or Detect, keeping what a human already set for a card
+ *  in the same position: its available VRAM (while it still fits) and its switch. */
+export function mergeDetected(found: CardSpec[], current: CardRow[]): CardRow[] {
+  return found.map((g, i) => {
+    const total = g.total_vram_gb ?? g.vram_gb;
+    const was = current[i]?.model === g.model ? current[i] : undefined;
+    const keep = was && was.vram_gb !== "" && Number(was.vram_gb) <= total;
+    return { model: g.model, total_vram_gb: total, vram_gb: keep ? was.vram_gb : total,
+             on: was ? was.on : true };
+  });
+}
+
+/** Totals as sent: only what is known; {} clears them. */
+export function machinePayload(cpu: Amount, memory: Amount): MachineTotals {
+  const out: MachineTotals = {};
+  if (cpu !== "" && cpu > 0) out.cpu = cpu;
+  if (memory !== "" && memory > 0) out.memory_gb = memory;
+  return out;
+}
 const DEFAULT_RUN_ROOT = "~/coscience-runs";
 const IN_USE_SUFFIX = "in use — lowering below that lets running work finish and blocks new grants.";
 
@@ -46,6 +79,9 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
   const [cpu, setCpu] = useState<Amount>("");
   const [memory, setMemory] = useState<Amount>("");
   const [cards, setCards] = useState<CardRow[]>([]);
+  // The machine's own totals (G2): what the probe found or a human typed in.
+  const [totalCpu, setTotalCpu] = useState<Amount>("");
+  const [totalMemory, setTotalMemory] = useState<Amount>("");
   // The last proposal a survey agent's "Use proposal" filled in, kept so its
   // written overrides can still authorize Add/Update after a failed check —
   // see `overridesCoverFailedChecks` below.
@@ -72,17 +108,19 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
         setName(host.name); setSsh(host.ssh); setRunRoot(host.run_root); setShared(!!host.shared);
         setOwner(host.owner ?? ""); setNotes(host.notes ?? ""); setLabel(host.label ?? "");
         setCpu(host.capacity.cpu ?? ""); setMemory(host.capacity.memory_gb ?? "");
-        setCards(host.gpus.map((g) => ({ model: g.model, vram_gb: g.vram_gb ?? "" })));
+        setCards(cardRowsOf(host));
+        setTotalCpu(host.machine?.cpu ?? ""); setTotalMemory(host.machine?.memory_gb ?? "");
       } else if (mode === "local") {
         setName(host?.name ?? "local"); setSsh(""); setRunRoot(""); setShared(false);
         setOwner(""); setNotes(""); setLabel(host?.label ?? "");
         setCpu((localCapacity?.cpu as Amount) ?? "");
         setMemory((localCapacity?.memory_gb as Amount) ?? "");
-        setCards((host?.gpus ?? []).map((g) => ({ model: g.model, vram_gb: g.vram_gb ?? "" })));
+        setCards(cardRowsOf(host));
+        setTotalCpu(host?.machine?.cpu ?? ""); setTotalMemory(host?.machine?.memory_gb ?? "");
       } else {
         setName(""); setSsh(""); setRunRoot(DEFAULT_RUN_ROOT); setShared(false);
         setOwner(""); setNotes(""); setLabel("");
-        setCpu(""); setMemory(""); setCards([]);
+        setCpu(""); setMemory(""); setCards([]); setTotalCpu(""); setTotalMemory("");
       }
     }
     wasOpened.current = opened;
@@ -118,7 +156,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
     const invalidates = mode === "add" || key === "ssh" || key === "run_root";
     if (invalidates) { generation.current += 1; setProbe(null); setUsedProposal(null); }
     set(v);
-    if (mode === "add") { setCpu(""); setMemory(""); setCards([]); }
+    if (mode === "add") { setCpu(""); setMemory(""); setCards([]); setTotalCpu(""); setTotalMemory(""); }
   };
 
   // Omits `programs` entirely (rather than sending the not-yet-seeded `[]`)
@@ -143,7 +181,10 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
       if (result.ok) {
         setCpu(result.proposal?.capacity?.cpu ?? "");
         setMemory(result.proposal?.capacity?.memory_gb ?? "");
-        setCards((result.proposal?.gpus ?? []).map((g) => ({ model: g.model, vram_gb: g.vram_gb })));
+        setCards((prev) => mergeDetected(result.proposal?.gpus ?? [], prev));
+        // What the probe found is the machine's total; what is offered stays a choice.
+        setTotalCpu(result.proposal?.machine?.cpu ?? "");
+        setTotalMemory(result.proposal?.machine?.memory_gb ?? "");
       }
     } catch (e) {
       if (generation.current !== gen) return;
@@ -164,8 +205,12 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
       // Silently raising CPU or declaring memory off a hardware reading
       // would over-commit this machine without anyone deciding to; "use
       // detected" (below) makes that an explicit choice per field instead.
+      // Detect fills in what the machine HAS (G2) — never what is offered, which
+      // stays whatever is declared until a human changes it.
       if (result.ok) {
-        setCards((result.proposal?.gpus ?? []).map((g) => ({ model: g.model, vram_gb: g.vram_gb })));
+        setCards((prev) => mergeDetected(result.proposal?.gpus ?? [], prev));
+        if (result.proposal?.machine?.cpu) setTotalCpu(result.proposal.machine.cpu);
+        if (result.proposal?.machine?.memory_gb) setTotalMemory(result.proposal.machine.memory_gb);
       }
     } catch (e) {
       if (generation.current !== gen) return;
@@ -184,6 +229,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
     try {
       await api.confirmHost({
         name: name.trim(), capacity, gpus: cardsPayload(), notes: notes.trim(),
+        machine: machinePayload(totalCpu, totalMemory),
         probed_at: probe?.probed_at,
         ...programsField(),
         ...(acceptOverrides ? { accept_overrides: true } : {}),
@@ -232,7 +278,13 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
     setUsedProposal(p);
     setCpu(p.capacity.cpu ?? cpu);
     setMemory(p.capacity.memory_gb ?? memory);
-    setCards(p.gpus.map((g) => ({ model: g.model, vram_gb: g.vram_gb })));
+    // A card's total belongs to that card: it carries over only when the proposal
+    // names the same model in the same position, else the proposed VRAM stands for it.
+    setCards((prev) => p.gpus.map((g, i) => {
+      const same = prev[i] && prev[i].model === g.model && prev[i].total_vram_gb !== "";
+      return { model: g.model, vram_gb: g.vram_gb, on: prev[i]?.on ?? true,
+               total_vram_gb: same ? prev[i].total_vram_gb : g.vram_gb };
+    }));
     // Keeps any `Override …` lines already recorded (from an earlier accepted
     // proposal) below the agent's fresh notes, instead of silently dropping
     // reasons a previous Update wrote down.
@@ -250,10 +302,25 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
   const cardIssue = (c: CardRow) => cardHasModel(c) !== cardHasVram(c);
   const cardsInvalid = cards.some(cardIssue);
 
-  const cardsPayload = () =>
+  const cardsPayload = (): CardSpec[] =>
     cards
       .filter((c) => cardHasModel(c) && cardHasVram(c))
-      .map((c) => ({ model: c.model.trim(), vram_gb: Number(c.vram_gb) }));
+      .map((c) => ({
+        model: c.model.trim(), vram_gb: Number(c.vram_gb),
+        ...(c.total_vram_gb !== "" && Number(c.total_vram_gb) > 0 ? { total_vram_gb: Number(c.total_vram_gb) } : {}),
+        ...(c.on ? {} : { disabled: true }),
+      }));
+
+  // G2: what is offered never exceeds what the machine has. Said here rather than
+  // left to a 422, and Save waits until it is right.
+  const over = (avail: Amount, total: Amount) =>
+    avail !== "" && total !== "" && Number(total) > 0 && Number(avail) > Number(total);
+  const overTotals = [
+    ...(over(cpu, totalCpu) ? [`${cpu} CPU cores available is more than the machine's ${totalCpu}`] : []),
+    ...(over(memory, totalMemory) ? [`${memory} GB memory available is more than the machine's ${totalMemory} GB`] : []),
+    ...cards.flatMap((c, i) => over(c.vram_gb, c.total_vram_gb)
+      ? [`GPU ${i + 1}: ${c.vram_gb} GB available is more than its ${c.total_vram_gb} GB`] : []),
+  ];
 
   const submitEdit = async (acceptOverrides = false) => {
     if (!host) return;
@@ -276,7 +343,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
         ssh: ssh.trim(), run_root: runRoot.trim(), shared,
         ...programsField(),
         owner: owner.trim(), notes: notes.trim(),
-        capacity, gpus: cardsPayload(),
+        capacity, gpus: cardsPayload(), machine: machinePayload(totalCpu, totalMemory),
         ...(probe?.probed_at ? { probed_at: probe.probed_at } : {}),
         ...(acceptOverrides ? { accept_overrides: true } : {}),
       });
@@ -302,7 +369,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
     if (cpu !== "") capacity.cpu = cpu;
     if (memory !== "" && memory > 0) capacity.memory_gb = memory;
     try {
-      await api.setCapacity(capacity, cardsPayload(), label.trim());
+      await api.setCapacity(capacity, cardsPayload(), label.trim(), machinePayload(totalCpu, totalMemory));
       if (!samePrograms(programs, initialPrograms.current)) {
         const result = await api.setHostPrograms("local", programs);
         if (result.cut_off?.length) {
@@ -320,7 +387,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
   const updateCard = (i: number, patch: Partial<CardRow>) =>
     setCards(cards.map((c, j) => (j === i ? { ...c, ...patch } : c)));
   const removeCard = (i: number) => setCards(cards.filter((_, j) => j !== i));
-  const addCard = () => setCards([...cards, { model: "", vram_gb: "" }]);
+  const addCard = () => setCards([...cards, { model: "", vram_gb: "", total_vram_gb: "", on: true }]);
 
   const checksFailed = !!probe?.checks?.some((c) => !c.ok);
   // True only once the last-used proposal's overrides cover every failed
@@ -340,13 +407,6 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
       ].filter((p): p is string => typeof p === "string" && p.length > 0).join(" · ")
     : "";
 
-  // What Detect actually read off the hardware, for the "Detected: …" hints
-  // beside CPU/memory in local mode — distinct from `cpu`/`memory` state,
-  // which Detect no longer overwrites on its own.
-  const detectedThreads = detect?.ok && typeof detect.facts.threads === "number" ? detect.facts.threads : undefined;
-  const detectedMemGb = detect?.ok && typeof detect.facts.mem_total_kb === "number"
-    ? Math.round(detect.facts.mem_total_kb / 1024 / 1024) : undefined;
-
   const sshChanged = mode === "edit" && !!host && ssh.trim() !== host.ssh;
   const runRootChanged = mode === "edit" && !!host && runRoot.trim() !== host.run_root;
   // A passing probe is either clean or, failing checks, backed by an agent's
@@ -357,7 +417,7 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
   // record for. A human who re-probes an unchanged target just to look, then
   // edits notes or capacity, is not blocked by what it found.
   const needsProbe = mode === "edit" && (sshChanged || runRootChanged) && !hasPassingProbe;
-  const updateBlocked = needsProbe || (mode !== "add" && cardsInvalid);
+  const updateBlocked = needsProbe || (mode !== "add" && cardsInvalid) || overTotals.length > 0;
   // The override path is only "in play" when it's the reason a changed
   // SSH/run-root target isn't blocking Update — an unchanged target's failed
   // checks never block anything, so there's nothing for overrides to unblock.
@@ -378,14 +438,36 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
   const title = mode === "local" ? "Configure this machine"
     : mode === "edit" ? `Configure ${host!.name}` : "Add a server";
 
+  // G2: what Co-Science may use beside what the machine has, for CPU and memory.
+  const amountPair = (what: string, unit: string, avail: Amount, setAvail: (v: Amount) => void,
+                      total: Amount, setTotal: (v: Amount) => void, description?: string) => (
+    <Group grow align="flex-start" gap="sm">
+      <NumberInput label={`${what} available to Co-Science${unit}`} min={0} value={avail}
+                   description={description}
+                   max={total !== "" && Number(total) > 0 ? Number(total) : undefined}
+                   clampBehavior="none"
+                   onChange={(v) => setAvail(v === "" ? "" : Number(v))} />
+      <NumberInput label={`${what} on the machine${unit}`} min={0} value={total}
+                   description="As found by Detect or a probe; type it in otherwise"
+                   onChange={(v) => setTotal(v === "" ? "" : Number(v))} />
+    </Group>
+  );
+
   const cardRows = (
     <Stack gap={4}>
       {cards.map((c, i) => (
         <Group key={i} gap="xs" wrap="nowrap" align="flex-end">
+          <Switch aria-label={`Use GPU ${i + 1}`} checked={c.on} mb={8}
+                  onChange={(e) => updateCard(i, { on: e.currentTarget.checked })} />
           <TextInput label={`GPU ${i + 1} model`} placeholder="Model" style={{ flex: 1 }}
                      value={c.model} onChange={(e) => updateCard(i, { model: e.currentTarget.value })} />
-          <NumberInput label={`GPU ${i + 1} VRAM (GB)`} placeholder="VRAM (GB)" min={0} style={{ width: 140 }}
+          <NumberInput label="VRAM available (GB)" placeholder="GB" min={0} style={{ width: 130 }}
+                       aria-label={`GPU ${i + 1} VRAM available (GB)`} disabled={!c.on}
                        value={c.vram_gb} onChange={(v) => updateCard(i, { vram_gb: v === "" ? "" : Number(v) })} />
+          <NumberInput label="on the card (GB)" placeholder="GB" min={0} style={{ width: 110 }}
+                       aria-label={`GPU ${i + 1} VRAM on the card (GB)`}
+                       value={c.total_vram_gb}
+                       onChange={(v) => updateCard(i, { total_vram_gb: v === "" ? "" : Number(v) })} />
           <Button variant="subtle" color="gray" aria-label={`Remove GPU ${i + 1}`}
                   onClick={() => removeCard(i)}>✕</Button>
         </Group>
@@ -460,12 +542,11 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
           probe?.ok && (
             <>
               {probeResultBlock}
-              <NumberInput label="CPU cores offered" min={0} value={cpu}
-                           onChange={(v) => setCpu(v === "" ? "" : Number(v))} />
-              <NumberInput label="Memory offered (GB)" min={0} value={memory}
-                           onChange={(v) => setMemory(v === "" ? "" : Number(v))} />
+              {amountPair("CPU cores", "", cpu, setCpu, totalCpu, setTotalCpu)}
+              {amountPair("Memory", " (GB)", memory, setMemory, totalMemory, setTotalMemory)}
+              {cards.length ? cardRows : <Text size="sm" c="dimmed">No GPUs found.</Text>}
+              {overTotals.map((w) => <Text key={w} size="sm" c="red">{w}</Text>)}
               <Text size="sm" c="dimmed">
-                {cards.length ? `${cards.map((c) => `${c.vram_gb} GB ${c.model}`).join(", ")}. ` : "No GPUs found. "}
                 A server added now waits for remote launch before it takes work.
               </Text>
               <SurveyPanel name={name.trim()} onUseProposal={use} />
@@ -478,7 +559,8 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
                 </Text>
               )}
               {(!checksFailed || overridesCoverFailedChecks) && (
-                <Button onClick={() => confirmAdd(overridesCoverFailedChecks)} loading={busy}>
+                <Button onClick={() => confirmAdd(overridesCoverFailedChecks)} loading={busy}
+                        disabled={overTotals.length > 0}>
                   {overridesCoverFailedChecks ? "Add with the agent's overrides" : "Add to the pool"}
                 </Button>
               )}
@@ -488,29 +570,12 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
           <>
             {(probe?.ok || detect?.ok) && probeResultBlock}
             {mode === "edit" && probe?.ok && <SurveyPanel name={name.trim()} onUseProposal={use} />}
-            <NumberInput label="CPU cores" min={0} value={cpu}
-                         onChange={(v) => setCpu(v === "" ? "" : Number(v))} />
-            {mode === "local" && detectedThreads !== undefined && (
-              <Group gap={6} wrap="nowrap">
-                <Text size="xs" c="dimmed">Detected: {detectedThreads} threads</Text>
-                <button type="button" className="linklike" aria-label="Use detected CPU cores"
-                        onClick={() => setCpu(detectedThreads)}>use detected</button>
-              </Group>
-            )}
-            <NumberInput label="Memory (GB)"
-                         description={mode === "local"
-                           ? "Declaring memory lets sprints request memory on this machine."
-                           : "Optional"}
-                         min={0} value={memory}
-                         onChange={(v) => setMemory(v === "" ? "" : Number(v))} />
-            {mode === "local" && detectedMemGb !== undefined && (
-              <Group gap={6} wrap="nowrap">
-                <Text size="xs" c="dimmed">Detected: {detectedMemGb} GB</Text>
-                <button type="button" className="linklike" aria-label="Use detected memory"
-                        onClick={() => setMemory(detectedMemGb)}>use detected</button>
-              </Group>
-            )}
+            {amountPair("CPU cores", "", cpu, setCpu, totalCpu, setTotalCpu)}
+            {amountPair("Memory", " (GB)", memory, setMemory, totalMemory, setTotalMemory,
+                        mode === "local" ? "Declaring memory lets sprints request memory on this machine."
+                                         : "Optional")}
             {cardRows}
+            {overTotals.map((w) => <Text key={w} size="sm" c="red">{w}</Text>)}
             {mode === "local" && (
               <ProgramAccessInput value={programs} onChange={setPrograms} programs={programsQuery.data ?? []} />
             )}

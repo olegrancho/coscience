@@ -279,8 +279,15 @@ def propose(facts: dict, shared: bool) -> dict:
         gpus: list[dict] = []
         capacity["gpu"] = float(len(cards))
     else:
-        gpus = [{"model": g["model"], "vram_gb": g["vram_gb"]} for g in cards]
-    return {"capacity": capacity, "gpus": gpus}
+        gpus = [{"model": g["model"], "vram_gb": g["vram_gb"], "total_vram_gb": g["vram_gb"]}
+                for g in cards]
+    # What the machine has, as found (G2) — the ceiling for what is offered above.
+    machine: dict[str, float] = {}
+    if threads:
+        machine["cpu"] = float(threads)
+    if mem_kb:
+        machine["memory_gb"] = round(mem_kb / 1024 / 1024, 1)
+    return {"capacity": capacity, "gpus": gpus, "machine": machine}
 
 
 def detect_local(runner: Runner = subprocess_runner, now: float | None = None) -> dict:

@@ -41,6 +41,13 @@ class Gpu:
     index: int
     vram_gb: float | None = None     # None: never declared; such a card is only lent whole
     model: str = ""
+    # What the card has, as probed or typed in (G2); `vram_gb` is what Co-Science may use
+    # of it. None when nobody recorded it.
+    total_vram_gb: float | None = None
+    # Switched off (G2): kept on file so it can be switched back on, but lent to no one.
+    # Its index stays its physical position, so the cards after it keep their numbers.
+    # Written `disabled: true` — never `off:`, which YAML 1.1 reads as the boolean false.
+    disabled: bool = False
 
 
 @dataclass
@@ -58,6 +65,10 @@ class Host:
     drain: bool = False                                  # takes no new grants; running work finishes
     drained_at: float = 0.0                              # time.time() when drain was set; 0.0 = unknown/long ago
     removing: bool = False                               # marked for removal; the dispatcher deletes it once empty
+    # The machine's own totals (G2): what the probe found or a human typed in. The
+    # capacity above is what Co-Science may use of it, never more.
+    machine: dict[str, float] = field(default_factory=dict)
+    cards_off: list[Gpu] = field(default_factory=list)   # switched-off cards, for display
 
     def __post_init__(self):
         if not self.gpus and self.capacity.get(GPU_KEY, 0.0) >= 1:
@@ -128,6 +139,9 @@ class ResourcePool:
         local_label = raw.pop("label", None)
         if local_label is None and raw is not d:
             local_label = d.get("label")
+        machine_spec = raw.pop("machine", None)
+        if machine_spec is None and raw is not d:
+            machine_spec = d.get("machine")
         access_specs: dict[str, object] = {}
         for key in _ACCESS_KEYS:
             val = raw.pop(key, None)
@@ -148,12 +162,15 @@ class ResourcePool:
             host_errors.append(
                 "gpu_vram_gb: is a request key, not capacity; declare cards under gpus:")
         local_gpus: list[Gpu] = []
+        local_off: list[Gpu] = []
         if gpu_specs is not None:
             try:
-                local_gpus = _parse_gpus("", gpu_specs)
+                all_cards = _parse_gpus("", gpu_specs)
             except ValueError as exc:
                 host_errors.append(str(exc))
             else:
+                local_gpus = [g for g in all_cards if not g.disabled]
+                local_off = [g for g in all_cards if g.disabled]
                 if GPU_KEY in local_capacity and int(local_capacity[GPU_KEY]) != len(local_gpus):
                     host_errors.append(f"gpus: {len(local_gpus)} card(s) listed but gpu is "
                                        f"{local_capacity[GPU_KEY]:g}; using the list")
@@ -172,8 +189,15 @@ class ResourcePool:
                 local_programs = _parse_programs("", access_specs)
             except ValueError as exc:
                 host_errors.append(str(exc))       # reported on Compute; local stays open
+        local_machine: dict[str, float] = {}
+        if machine_spec is not None:
+            try:
+                local_machine = _parse_machine("", machine_spec, local_capacity)
+            except ValueError as exc:
+                host_errors.append(str(exc))       # reported on Compute; the capacity stands
         hosts = [Host(LOCAL, local_capacity, gpus=local_gpus, programs=local_programs,
-                      label=str(local_label or "").strip())]
+                      label=str(local_label or "").strip(), machine=local_machine,
+                      cards_off=local_off)]
         for name, spec in host_specs.items():
             try:
                 hosts.append(_parse_host(str(name), spec))
@@ -225,8 +249,11 @@ def _parse_host(name: str, spec) -> Host:
         raise ValueError(f"hosts.{name}.remove: must be true or false")
     programs = _parse_programs(f"hosts.{name}.", spec)
     gpus: list[Gpu] = []
+    cards_off: list[Gpu] = []
     if spec.get("gpus") is not None:
-        gpus = _parse_gpus(f"hosts.{name}.", spec["gpus"])
+        all_cards = _parse_gpus(f"hosts.{name}.", spec["gpus"])
+        gpus = [g for g in all_cards if not g.disabled]
+        cards_off = [g for g in all_cards if g.disabled]
         if GPU_KEY in capacity and int(capacity[GPU_KEY]) != len(gpus):
             raise ValueError(f"hosts.{name}: gpus lists {len(gpus)} card(s) but "
                              f"capacity.gpu is {capacity[GPU_KEY]:g}")
@@ -243,7 +270,35 @@ def _parse_host(name: str, spec) -> Host:
                 shared=bool(spec.get("shared", False)), owner=str(spec.get("owner") or ""),
                 notes=str(spec.get("notes") or ""), label=str(spec.get("label") or "").strip(),
                 drain=bool(spec.get("drain", False)),
-                drained_at=drained_at, removing=bool(spec.get("remove", False)))
+                drained_at=drained_at, removing=bool(spec.get("remove", False)),
+                machine=_parse_machine(f"hosts.{name}.", spec.get("machine"), capacity),
+                cards_off=cards_off)
+
+
+MACHINE_KEYS = ("cpu", "memory_gb")
+
+
+def _parse_machine(where: str, spec, capacity: dict[str, float]) -> dict[str, float]:
+    """A machine's own totals (G2): `machine: {cpu: 32, memory_gb: 62}`. What Co-Science
+    may use (`capacity`) can be less, never more — a declaration above the machine is a
+    typo, and planning around it would over-commit the machine."""
+    if spec is None:
+        return {}
+    if not isinstance(spec, dict):
+        raise ValueError(f"{where}machine: must be a mapping like {{cpu: 32, memory_gb: 62}}")
+    out: dict[str, float] = {}
+    for key, val in spec.items():
+        key = str(key)
+        if key not in MACHINE_KEYS:
+            raise ValueError(f"{where}machine.{key}: only {', '.join(MACHINE_KEYS)} are recorded")
+        if (isinstance(val, bool) or not isinstance(val, (int, float))
+                or not math.isfinite(val) or val <= 0):
+            raise ValueError(f"{where}machine.{key}: must be a positive number")
+        out[key] = float(val)
+        if capacity.get(key, 0.0) > out[key]:
+            raise ValueError(f"{where}{key}: {capacity[key]:g} available is more than the "
+                             f"machine's {out[key]:g}")
+    return out
 
 
 def _parse_programs(where: str, spec: dict) -> list[str] | None:
@@ -275,7 +330,20 @@ def _parse_gpus(where: str, spec) -> list[Gpu]:
         if (isinstance(vram, bool) or not isinstance(vram, (int, float))
                 or not math.isfinite(vram) or vram <= 0):
             raise ValueError(f"{where}gpus[{i}].vram_gb: must be a positive number")
-        cards.append(Gpu(index=i, vram_gb=float(vram), model=str(card.get("model") or "")))
+        total = card.get("total_vram_gb")
+        if total is not None:
+            if (isinstance(total, bool) or not isinstance(total, (int, float))
+                    or not math.isfinite(total) or total <= 0):
+                raise ValueError(f"{where}gpus[{i}].total_vram_gb: must be a positive number")
+            if vram > total:
+                raise ValueError(f"{where}gpus[{i}]: {vram:g} GB available is more than the "
+                                 f"card's {total:g} GB")
+        disabled = card.get("disabled", False)
+        if not isinstance(disabled, bool):
+            raise ValueError(f"{where}gpus[{i}].disabled: must be true or false")
+        cards.append(Gpu(index=i, vram_gb=float(vram), model=str(card.get("model") or ""),
+                         total_vram_gb=float(total) if total is not None else None,
+                         disabled=disabled))
     return cards
 
 

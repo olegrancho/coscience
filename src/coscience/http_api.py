@@ -134,6 +134,7 @@ class CapacityUpdate(BaseModel):
     capacity: dict[str, float] = Field(default_factory=dict)
     gpus: list[dict] | None = None
     label: str | None = None       # this machine's display name; "" goes back to "local"
+    machine: dict[str, float] | None = None   # the machine's own totals (G2); {} clears
 
 
 ONBOARDING_ENV = "COSCIENCE_ALLOW_ONBOARDING"
@@ -166,6 +167,7 @@ class HostConfirmIn(BaseModel):
     accept_overrides: bool = False
     notes: str | None = None
     programs: list[str] | None = None
+    machine: dict[str, float] | None = None   # the machine's own totals (G2); {} clears
 
 
 class HostUpdateIn(BaseModel):
@@ -180,6 +182,7 @@ class HostUpdateIn(BaseModel):
     gpus: list[dict] | None = None
     probed_at: float | None = None
     accept_overrides: bool = False
+    machine: dict[str, float] | None = None   # the machine's own totals (G2); {} clears
 
 
 class SurveyIn(BaseModel):
@@ -1009,7 +1012,7 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     @api.put("/capacity")
     def set_capacity(body: CapacityUpdate) -> dict:
         try:
-            return service.set_capacity(body.capacity, body.gpus, body.label)
+            return service.set_capacity(body.capacity, body.gpus, body.label, body.machine)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 

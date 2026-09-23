@@ -33,6 +33,18 @@ def service_from_env() -> "Service":
     return Service(repo_root)
 
 
+def _clean_card(card: dict) -> dict:
+    """One card as written to the pool file: numbers as floats, `disabled` only when set."""
+    out = {**card, "vram_gb": float(card["vram_gb"])}
+    if out.get("total_vram_gb") is not None:
+        out["total_vram_gb"] = float(out["total_vram_gb"])
+    else:
+        out.pop("total_vram_gb", None)
+    if not out.get("disabled"):
+        out.pop("disabled", None)
+    return out
+
+
 class NoteChanged(ValueError):
     """A server note was saved over a version its editor never saw (O22). Carries the
     note as it now stands, so the page can show it instead of losing either side."""
@@ -2012,6 +2024,7 @@ class Service:
         def cards(host) -> list[dict]:
             use = ledger.device_use(host.name)
             return [{"index": g.index, "model": g.model, "vram_gb": g.vram_gb,
+                     "total_vram_gb": g.total_vram_gb,
                      "whole": use.get(g.index, (False, 0.0))[0],
                      "shared_gb": use.get(g.index, (False, 0.0))[1]}
                     for g in host.gpus]
@@ -2040,6 +2053,11 @@ class Service:
                  # A host that cannot take work has nothing available to grant.
                  "available": ledger.available(h.name) if h.placeable else {},
                  "gpus": cards(h),
+                 # The machine's totals and its switched-off cards (G2): what the server
+                 # dialog shows beside what Co-Science may use.
+                 "machine": dict(h.machine),
+                 "cards_off": [{"index": g.index, "model": g.model, "vram_gb": g.vram_gb,
+                                "total_vram_gb": g.total_vram_gb} for g in h.cards_off],
                  "shared": h.shared, "owner": h.owner, "notes": h.notes,
                  "drain": h.drain, "drained_at": h.drained_at, "removing": h.removing,
                  "waiting_on": waiting_on.get(h.name, []),
@@ -2092,7 +2110,7 @@ class Service:
         return self.ledger_status()
 
     def set_capacity(self, capacity: dict, gpus: list | None = None,
-                     label: str | None = None) -> dict:
+                     label: str | None = None, machine: dict | None = None) -> dict:
         """Replace the declared resource pool. Validates, writes
         .coscience/resources.yaml atomically, commits, and returns fresh ledger
         status. Lowering a limit below what is currently leased is allowed and
@@ -2113,7 +2131,7 @@ class Service:
             errors = ResourcePool.from_dict({"gpus": gpus}).host_errors
             if errors:
                 raise ValueError(errors[0])
-            clean_gpus = [{**g, "vram_gb": float(g["vram_gb"])} for g in gpus]
+            clean_gpus = [_clean_card(g) for g in gpus]
 
         clean: dict[str, float] = {}
         for raw_key, raw_val in (capacity or {}).items():
@@ -2163,6 +2181,9 @@ class Service:
                     for key in PLATFORM_KEYS:
                         if key in local and key not in out:
                             out[key] = local[key]
+                    # The machine's totals are not capacity either; kept unless replaced below.
+                    if local.get("machine"):
+                        out["machine"] = local["machine"]
                     # This machine's display name is not a capacity amount, so the
                     # rebuilt document would drop it unless it is carried over.
                     on_file = (wrapped.get("label") if isinstance(wrapped, dict) else None)
@@ -2185,6 +2206,20 @@ class Service:
                     out["label"] = _clean_label(label)
                 else:
                     out.pop("label", None)
+            # This machine's totals (G2): replaced when given ({} clears them), else kept
+            # from the file above.
+            if machine is not None:
+                if machine:
+                    out["machine"] = {str(k): float(v) for k, v in machine.items()}
+                else:
+                    out.pop("machine", None)
+            # The parser is the judge of what loads: a total below what is offered, or a
+            # card offering more VRAM than it has, is refused before anything is written.
+            parsed = ResourcePool.from_dict(out)
+            bad = [e for e in parsed.host_errors if e.startswith(("machine", "cpu:", "memory_gb:"))
+                   or "available is more than" in e]
+            if bad:
+                raise ValueError(bad[0])
             if gpus is not None:
                 if clean_gpus:
                     out["gpus"] = clean_gpus
@@ -2610,7 +2645,8 @@ class Service:
 
     def confirm_host(self, *, name: str, capacity: dict, gpus: list | None = None,
                      probed_at: float | None = None, accept_overrides: bool = False,
-                     notes: str | None = None, programs: list | None = None) -> dict:
+                     notes: str | None = None, programs: list | None = None,
+                     machine: dict | None = None) -> dict:
         """Write a probed server into `resources.yaml` `hosts:`, keeping the rest of the
         file. The entry is checked by the same parser the pool uses, so what is written
         is what loads."""
@@ -2632,7 +2668,12 @@ class Service:
         declared = record["declared"]
         entry: dict = {"ssh": declared["ssh"], "run_root": declared["run_root"],
                        "capacity": {str(k): float(v) for k, v in (capacity or {}).items()},
-                       "gpus": gpus if gpus is not None else record["proposal"].get("gpus", [])}
+                       "gpus": ([_clean_card(g) for g in gpus] if gpus is not None
+                                else record["proposal"].get("gpus", []))}
+        # The machine's totals: what the caller says, else what the probe found (G2).
+        totals = machine if machine is not None else record.get("proposal", {}).get("machine")
+        if totals:
+            entry["machine"] = {str(k): float(v) for k, v in totals.items()}
         if not entry["gpus"]:
             del entry["gpus"]
             proposed_capacity = record.get("proposal", {}).get("capacity", {})
@@ -2679,7 +2720,7 @@ class Service:
                     shared: bool | None = None, programs: list | None = None,
                     owner: str | None = None, notes: str | None = None,
                     capacity: dict | None = None, gpus: list | None = None,
-                    label: str | None = None,
+                    label: str | None = None, machine: dict | None = None,
                     probed_at: float | None = None, accept_overrides: bool = False) -> dict:
         """Edit a remote host's entry in place, keeping `drain` and anything not
         given here. A new SSH target or run root is refused unless a probe of it is
@@ -2748,7 +2789,7 @@ class Service:
                 new_entry["capacity"] = {str(k): float(v) for k, v in capacity.items()}
             if gpus is not None:
                 if gpus:
-                    new_entry["gpus"] = [{**g, "vram_gb": float(g["vram_gb"])} for g in gpus]
+                    new_entry["gpus"] = [_clean_card(g) for g in gpus]
                 else:
                     new_entry.pop("gpus", None)
                 # The dialog echoes the host's current capacity, which carries a derived
@@ -2756,6 +2797,12 @@ class Service:
                 # (or its absence) in _parse_host, so the count is derived fresh from `gpus`.
                 new_entry["capacity"] = {k: v for k, v in new_entry.get("capacity", {}).items()
                                          if k != GPU_KEY}
+
+            if machine is not None:
+                if machine:
+                    new_entry["machine"] = {str(k): float(v) for k, v in machine.items()}
+                else:
+                    new_entry.pop("machine", None)
 
             if override_lines:
                 new_entry["notes"] = self._append_notes(new_entry.get("notes", ""), override_lines)
