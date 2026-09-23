@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import CallLog from "../components/CallLog";
-import PlatformLimitsModal from "../components/PlatformLimitsModal";
 import HostsCard from "../components/HostsCard";
 import { EmptyState, Gauge, UsagePanel, formatDuration, gaugeUsers } from "../components/ui";
 import { fullTime } from "../components/timefmt";
@@ -21,7 +20,6 @@ export default function Ledger() {
   const qc = useQueryClient();
   const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.getLedger });
   const usage = useQuery({ queryKey: ["usage"], queryFn: api.getUsage });
-  const [editing, setEditing] = useState(false);
   // Locally adjusted capacities, layered over the server's. The 10s ledger poll
   // would otherwise snap a half-finished adjustment back mid-click.
   const [pending, setPending] = useState<Record<string, number>>({});
@@ -58,6 +56,35 @@ export default function Ledger() {
     });
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => { void save(); }, SAVE_DEBOUNCE_MS);
+  };
+
+  // A cap that does not exist has no gauge, so no stepper: this starts one at what is
+  // running now (at least 1), and the gauge's steppers take it from there.
+  const addLimit = async (key: string) => {
+    setSaveError("");
+    try {
+      await api.setPlatformLimits({ [key]: Math.max(1, ledger.data?.used[key] ?? 0) });
+      qc.invalidateQueries({ queryKey: ["ledger"] });
+    } catch (e) {
+      setSaveError(String(e));
+    }
+  };
+
+  // ∞ on a limit's gauge: no cap at all. Any stepper adjustment still waiting to be
+  // saved for it is dropped first, so the debounce cannot put the cap straight back.
+  const removeLimit = async (key: string) => {
+    setSaveError("");
+    setPending((prev) => {
+      const { [key]: _dropped, ...rest } = prev;
+      pendingRef.current = rest;
+      return rest;
+    });
+    try {
+      await api.setPlatformLimits({ [key]: null });
+      qc.invalidateQueries({ queryKey: ["ledger"] });
+    } catch (e) {
+      setSaveError(String(e));
+    }
   };
 
   const togglePause = async () => {
@@ -109,23 +136,24 @@ export default function Ledger() {
       </Card>
 
       <Card padding="lg" radius="md" style={cardStyle}>
-        <Group justify="space-between" style={{ marginBottom: 16 }}>
-          <div className="eyebrow">capacity in use</div>
-          <Button size="xs" variant="default" onClick={() => setEditing(true)}>Platform limits</Button>
-        </Group>
+        <div className="eyebrow" style={{ marginBottom: 16 }}>capacity in use</div>
 
         {!(WORKER_KEY in l.capacity) && (
           <Text size="sm" c="dimmed" style={{ marginBottom: 16 }}>
-            No worker cap — any number of agents can run at once. Set one under
-            Platform limits to bound it.
+            No worker cap — any number of agents can run at once.{" "}
+            <button type="button" className="linklike" onClick={() => { void addLimit(WORKER_KEY); }}>
+              Set a limit
+            </button>
           </Text>
         )}
 
         {!(HOUSEKEEPER_KEY in l.capacity) && (
           <Text size="sm" c="dimmed" style={{ marginBottom: 16 }}>
             No housekeeping cap — PM and wiki agents start whenever they are due,
-            however many are already running. Set a limit under Platform limits to
-            bound how many spend Claude budget at once.
+            however many are already running.{" "}
+            <button type="button" className="linklike" onClick={() => { void addLimit(HOUSEKEEPER_KEY); }}>
+              Set a limit
+            </button>
           </Text>
         )}
 
@@ -141,6 +169,7 @@ export default function Ledger() {
                      capacity={pending[k] ?? l.capacity[k]}
                      pending={k in pending}
                      onAdjust={PLATFORM_KEYS.has(k) ? (delta) => adjust(k, delta) : undefined}
+                     onUnlimited={PLATFORM_KEYS.has(k) ? () => { void removeLimit(k); } : undefined}
                      users={gaugeUsers(l.leases, k)} />
             ))}
           </Stack>
@@ -193,8 +222,6 @@ export default function Ledger() {
         <CallLog />
       </Card>
 
-      <PlatformLimitsModal opened={editing} onClose={() => setEditing(false)}
-                           capacity={l.capacity} used={l.used} />
     </Stack>
   );
 }

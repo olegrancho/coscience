@@ -98,14 +98,25 @@ describe("Compute page", () => {
     await waitFor(() => expect(screen.getByText(/no claude calls recorded yet/i)).toBeTruthy());
   });
 
-  it("opens the platform limits (G1)", async () => {
+  it("starts a missing cap at what is running, since there is no gauge to step yet (G1)", async () => {
+    vi.mocked(api.setPlatformLimits).mockClear();
     ledger.mockResolvedValue({
-      capacity: { cpu: 16, workers: 1 }, used: {}, available: {}, leases: [], paused: false,
+      capacity: { cpu: 16, housekeepers: 2 }, used: { workers: 3 }, available: {}, leases: [], paused: false,
     });
     renderPage();
-    fireEvent.click(await screen.findByRole("button", { name: "Platform limits" }));
-    expect(await screen.findByLabelText(/Worker agents at once/)).toBeTruthy();
-    expect(screen.queryByLabelText(/cpu/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Platform limits" })).toBeNull();   // no dialog any more
+    fireEvent.click(await screen.findByRole("button", { name: "Set a limit" }));
+    await waitFor(() => expect(api.setPlatformLimits).toHaveBeenCalledWith({ workers: 3 }));
+  });
+
+  it("starts a cap at one when nothing of that kind is running", async () => {
+    vi.mocked(api.setPlatformLimits).mockClear();
+    ledger.mockResolvedValue({
+      capacity: { cpu: 16, workers: 4 }, used: {}, available: {}, leases: [], paused: false,
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Set a limit" }));
+    await waitFor(() => expect(api.setPlatformLimits).toHaveBeenCalledWith({ housekeepers: 1 }));
   });
 
   it("offers Pause while the platform is running", async () => {
@@ -188,6 +199,24 @@ describe("Compute page steppers", () => {
       capacity: { cpu: 16, workers: 4 }, used: { cpu: 2, workers: 2 },
       available: { cpu: 14, workers: 2 }, leases: [], paused: false,
     });
+  });
+
+  it("removes a limit with the ∞ after its steppers, and only limits have one (G1)", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByLabelText("remove the workers limit"));
+    await waitFor(() => expect(api.setPlatformLimits).toHaveBeenCalledWith({ workers: null }));
+    expect(screen.queryByLabelText("remove the cpu limit")).toBeNull();
+  });
+
+  it("drops a stepper change still waiting to save when ∞ is pressed", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("increase workers")).toBeTruthy());
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByLabelText("increase workers"));
+    fireEvent.click(screen.getByLabelText("remove the workers limit"));
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    // Only the removal went out; the debounced +1 never put the cap back.
+    expect(vi.mocked(api.setPlatformLimits).mock.calls).toEqual([[{ workers: null }]]);
   });
 
   it("steps only the platform limits; a machine's cpu is set on its card (G2)", async () => {

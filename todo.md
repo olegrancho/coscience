@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 175
+version: 176
 last_updated: 2026-09-23
 ---
 
@@ -20,9 +20,9 @@ Four fixes: the planner is no longer shown notes or reports for servers it may n
 
 ### G1. Make the global capacity editor the platform's own limits, and nothing else
 
-Compute's "Edit capacity" is now "Platform limits": two named fields — worker agents and housekeeping agents at once, empty meaning no limit — saved through their own endpoint (`PUT /api/platform-limits`), which refuses any other name.
+The global editor is gone: the platform's two limits — worker and housekeeping agents at once — are set only by the steppers on their own gauges on Compute, saved through `PUT /api/platform-limits`, which refuses any other name.
 
-**Check:** Compute → Platform limits shows those two fields and nothing else; change one and only that key moves in `resources.yaml`. The gauges' +/- steppers now exist only on `workers` and `housekeepers`.
+**Check:** Compute has no capacity or limits dialog; the `workers` and `housekeepers` gauges step their limits, and no other gauge has steppers. With a cap missing, its note offers "Set a limit", which starts it at what is running now (at least 1). The ∞ after a limit's steppers removes the cap altogether, dropping any stepper change still waiting to save.
 
 ### G2. Edit every machine's real capacity only on its own card, this one included
 

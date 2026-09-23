@@ -199,8 +199,10 @@ export function gaugeUsers(leases: LeaseT[] | undefined, key: string): string[] 
     });
 }
 
-export function Gauge({ label, used, capacity, onAdjust, pending, users }: {
+export function Gauge({ label, used, capacity, onAdjust, onUnlimited, pending, users }: {
   label: string; used: number; capacity: number;
+  /** When given, an ∞ after the steppers removes the limit altogether (G1). */
+  onUnlimited?: () => void;
   /** When given, hovering the gauge names what is using it (`gaugeUsers`). */
   users?: string[];
   onAdjust?: (delta: number) => void;
@@ -228,6 +230,12 @@ export function Gauge({ label, used, capacity, onAdjust, pending, users }: {
                       disabled={capacity <= 0} onClick={() => onAdjust(-1)}>−</button>
               <button type="button" aria-label={`increase ${label}`} style={stepStyle}
                       onClick={() => onAdjust(1)}>+</button>
+              {onUnlimited && (
+                <Tooltip label="No limit" withArrow openDelay={300}>
+                  <button type="button" aria-label={`remove the ${label} limit`} style={stepStyle}
+                          onClick={onUnlimited}>∞</button>
+                </Tooltip>
+              )}
             </>
           )}
         </span>
