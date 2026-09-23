@@ -83,3 +83,53 @@ describe("SprintEditModal compute fields", () => {
     expect(api.editSprint).toHaveBeenCalledWith("s1", { priority: 3 });
   });
 });
+
+describe("SprintEditModal: every editable field (P1)", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const box = (label: string) => screen.getByLabelText(new RegExp(`^${label}`)) as HTMLInputElement;
+
+  it("shows the title, summary, plan, rationale and worker model, filled in", () => {
+    renderModal(sprint({ title: "Dock", summary: "Short.", rationale: "Because.",
+                         plan: ["prepare", "dock"], model: "claude-sonnet-5" }));
+    expect(box("Title").value).toBe("Dock");
+    expect(box("Summary").value).toBe("Short.");
+    expect(box("Plan").value).toBe("prepare\ndock");
+    expect(box("Rationale").value).toBe("Because.");
+    expect((screen.getByLabelText("Worker model") as HTMLSelectElement).value).toBe("claude-sonnet-5");
+  });
+
+  it("sends only what changed, the plan as one step per line", async () => {
+    renderModal(sprint({ title: "Dock", plan: ["a"], model: "claude-sonnet-5" }));
+    fireEvent.change(box("Title"), { target: { value: "  Dock the new ligands " } });
+    fireEvent.change(box("Plan"), { target: { value: "prepare\n\n  dock \n" } });
+    fireEvent.change(screen.getByLabelText("Worker model"), { target: { value: "claude-opus-5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.editSprint).toHaveBeenCalledWith("s1", {
+      title: "Dock the new ligands", plan: ["prepare", "dock"], model: "claude-opus-5",
+    }));
+  });
+
+  it("refuses an emptied plan before asking the server", async () => {
+    renderModal(sprint());
+    fireEvent.change(box("Plan"), { target: { value: "  \n " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("The plan needs at least one step.")).toBeTruthy();
+    expect(api.editSprint).not.toHaveBeenCalled();
+  });
+
+  it("after approval keeps the title and model open and the proposal itself closed", () => {
+    renderModal(sprint({ status: "approved" }));
+    expect(box("Title").disabled).toBe(false);
+    expect(box("Summary").disabled).toBe(false);
+    expect((screen.getByLabelText("Worker model") as HTMLSelectElement).disabled).toBe(false);
+    for (const l of ["Goals", "Plan", "Rationale"]) expect(box(l).disabled).toBe(true);
+    expect(screen.getByText(/what was approved/)).toBeTruthy();
+  });
+
+  it("warns that a new model restarts a running agent", () => {
+    renderModal(sprint({ status: "executing", agent_running: true, model: "claude-sonnet-5" }));
+    expect(screen.queryByText(/restarts it on the new model/)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Worker model"), { target: { value: "claude-opus-5" } });
+    expect(screen.getByText(/restarts it on the new model/)).toBeTruthy();
+  });
+});

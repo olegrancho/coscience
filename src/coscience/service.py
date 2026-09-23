@@ -377,13 +377,25 @@ class Service:
 
     def edit_sprint(self, sprint_id: str, *, goals=None, plan=None, priority=None,
                     resources_required=None, preemptible=None, distributed=None,
-                    model=None) -> None:
+                    model=None, title=None, summary=None, rationale=None) -> None:
+        """A human's edit (P1). Goals, plan and the rationale are the proposal itself,
+        so they change only while it is proposed — after approval they are what was
+        approved. The title and summary only name and describe the work, so they stay
+        editable until it is done or canceled, like the scheduler knobs and the model."""
         sprint = self._load_sprint(sprint_id)
         st = sprint.status
         if st in (SprintStatus.DONE, SprintStatus.CANCELED):
             raise ValueError(f"{sprint_id} is {st.value} and is read-only")
         if (goals is not None or plan is not None) and st != SprintStatus.PROPOSED:
             raise ValueError("goals/plan are editable only while proposed")
+        if rationale is not None and st != SprintStatus.PROPOSED:
+            raise ValueError("the rationale is editable only while proposed")
+        if title is not None:
+            sprint.title = str(title).strip()
+        if summary is not None:
+            sprint.summary = str(summary).strip()
+        if rationale is not None:
+            sprint.rationale = str(rationale).strip()
         if plan is not None and len(plan) == 0:
             raise ValueError("plan must have at least one suggested step")
         if goals is not None:

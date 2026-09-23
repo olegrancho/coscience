@@ -33,14 +33,17 @@ describe("availableActions", () => {
 describe("editableFields", () => {
   it("allows all fields when proposed", () => {
     expect(editableFields("proposed")).toEqual(
-      { goals: true, plan: true, priority: true, resources: true, preemptible: true });
+      { goals: true, plan: true, priority: true, resources: true, preemptible: true,
+        title: true, summary: true, rationale: true, model: true });
   });
   it("allows only scheduler fields when approved/executing", () => {
     expect(editableFields("executing")).toEqual(
-      { goals: false, plan: false, priority: true, resources: true, preemptible: true });
+      { goals: false, plan: false, priority: true, resources: true, preemptible: true,
+        title: true, summary: true, rationale: false, model: true });
   });
   it("allows nothing when done", () => {
     expect(editableFields("done")).toEqual(
-      { goals: false, plan: false, priority: false, resources: false, preemptible: false });
+      { goals: false, plan: false, priority: false, resources: false, preemptible: false,
+        title: false, summary: false, rationale: false, model: false });
   });
 });

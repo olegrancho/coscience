@@ -295,6 +295,28 @@ def test_edit_priority_allowed_when_executing(tmp_path):
     assert svc.get_sprint("sp1")["priority"] == 7
 
 
+def test_a_proposal_can_be_renamed_described_and_argued(tmp_path):
+    """P1: title, summary and rationale had no edit path at all."""
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["a"], title="Old", summary="s", rationale="r")
+    svc.edit_sprint("sp1", title="  Dock the new ligands ", summary="What it does.",
+                    rationale="Why it is worth doing.")
+    d = svc.get_sprint("sp1")
+    assert (d["title"], d["summary"], d["rationale"]) == \
+        ("Dock the new ligands", "What it does.", "Why it is worth doing.")
+
+
+def test_after_approval_the_title_still_changes_but_the_rationale_does_not(tmp_path):
+    """The rationale argued for the approval; once given, it is what was approved."""
+    svc = Service(tmp_path)
+    svc.submit_sprint(id="sp1", goals="g", plan=["a"], title="Old", rationale="r")
+    svc.approve_sprint("sp1")
+    svc.edit_sprint("sp1", title="Clearer name", summary="Clearer summary")
+    assert svc.get_sprint("sp1")["title"] == "Clearer name"
+    with pytest.raises(ValueError, match="rationale is editable only while proposed"):
+        svc.edit_sprint("sp1", rationale="rewritten after the fact")
+
+
 def test_edit_blocked_when_done(tmp_path):
     svc = Service(tmp_path)
     svc.submit_sprint(id="sp1", goals="g", plan=["a"])

@@ -120,6 +120,9 @@ class SprintPatch(BaseModel):
     preemptible: bool | None = None
     distributed: bool | None = None
     model: str | None = None
+    title: str | None = None
+    summary: str | None = None
+    rationale: str | None = None
 
 
 class PlatformLimitsIn(BaseModel):

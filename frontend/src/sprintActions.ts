@@ -30,12 +30,18 @@ export const PRIMARY_ACTIONS: Action[] = ["approve", "run", "sendBack"];
 export interface EditableFields {
   goals: boolean; plan: boolean; priority: boolean;
   resources: boolean; preemptible: boolean;
+  title: boolean; summary: boolean; rationale: boolean; model: boolean;
 }
 
 export function editableFields(status: SprintStatus): EditableFields {
   const proposed = status === "proposed";
   // scheduler knobs stay editable through queued (still pre-lease) and executing
   const scheduler = proposed || status === "approved" || status === "queued" || status === "executing";
+  // Naming and the model are open until the sprint is finished with (P1); the backend
+  // refuses every edit on a done or canceled sprint.
+  const open = status !== "done" && status !== "canceled";
   return { goals: proposed, plan: proposed, priority: scheduler,
-           resources: scheduler, preemptible: scheduler };
+           resources: scheduler, preemptible: scheduler,
+           // The rationale argued for the approval, so it is part of the proposal.
+           title: open, summary: open, rationale: proposed, model: open };
 }

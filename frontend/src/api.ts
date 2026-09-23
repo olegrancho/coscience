@@ -344,6 +344,7 @@ async function j<T>(r: Response): Promise<T> {
 export interface SprintPatch {
   goals?: string; plan?: string[]; priority?: number;
   resources_required?: Record<string, number>; distributed?: boolean; preemptible?: boolean; model?: string;
+  title?: string; summary?: string; rationale?: string;
 }
 
 export const api = {
