@@ -1,10 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MantineProvider } from "@mantine/core";
 
 const callLog = vi.fn();
 const programs = vi.fn();
-vi.mock("../api", () => ({ api: { getCallLog: () => callLog(), listPrograms: () => programs() } }));
+const sprints = vi.fn();
+vi.mock("../api", () => ({ api: {
+  getCallLog: () => callLog(), listPrograms: () => programs(), listSprints: () => sprints(),
+} }));
+
+beforeAll(() => {
+  window.matchMedia = window.matchMedia || (((query: string) => ({
+    matches: false, media: query, onchange: null,
+    addListener() {}, removeListener() {},
+    addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
+  })) as unknown as typeof window.matchMedia);
+});
 
 import LiveAgents from "./LiveAgents";
 
@@ -18,10 +30,9 @@ const row = (over: Record<string, unknown> = {}) => ({
 
 function renderIt() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  // No MantineProvider: LiveAgents is plain markup, so the rail can render it
-  // without pulling in a theme context (and its matchMedia requirement).
+  // The hovers are Mantine tooltips (P9), so the rail's theme context is needed here too.
   return render(
-    <QueryClientProvider client={qc}><LiveAgents /></QueryClientProvider>,
+    <MantineProvider><QueryClientProvider client={qc}><LiveAgents /></QueryClientProvider></MantineProvider>,
   );
 }
 
@@ -29,6 +40,8 @@ beforeEach(() => {
   callLog.mockReset();
   programs.mockReset();
   programs.mockResolvedValue([]);
+  sprints.mockReset();
+  sprints.mockResolvedValue([]);
 });
 
 describe("LiveAgents in the rail", () => {
@@ -81,17 +94,33 @@ describe("LiveAgents in the rail", () => {
     await waitFor(() => expect(screen.getByText("p5")).toBeTruthy());
   });
 
-  it("names the program and model on hover", async () => {
+  it("names a worker's experiment, its program and model on hover of its row (P9)", async () => {
     programs.mockResolvedValue([{ id: "p2", title: "Lead Finder optimization", status: "active", goals: "" }]);
-    callLog.mockResolvedValue({ calls: [row({ program: "p2", model: "claude-sonnet-5" })] });
+    sprints.mockResolvedValue([{ id: "p2-c37", status: "executing", title: "Dock the new ligands" }]);
+    callLog.mockResolvedValue({ calls: [row({ program: "p2", sprint: "p2-c37", model: "claude-sonnet-5" })] });
     renderIt();
-    await waitFor(() => expect(screen.getByTitle("Lead Finder optimization · Sonnet 5")).toBeTruthy());
+    fireEvent.mouseEnter((await screen.findByText("worker")).parentElement!);
+    expect(await screen.findByText("Dock the new ligands · Lead Finder optimization · Sonnet 5")).toBeTruthy();
+  });
+
+  it("lists what every live agent is doing on hover of the count (P9)", async () => {
+    programs.mockResolvedValue([{ id: "p3", title: "Abiogenesis", status: "active", goals: "" }]);
+    sprints.mockResolvedValue([{ id: "p2-c37", status: "executing", title: "Dock the new ligands" }]);
+    callLog.mockResolvedValue({ calls: [
+      row({ kind: "worker", program: "p2", sprint: "p2-c37", model: "claude-sonnet-5" }),
+      row({ kind: "pm", program: "p3", sprint: "", model: "claude-opus-5" }),
+    ] });
+    renderIt();
+    fireEvent.mouseEnter(await screen.findByText(/agents calling Claude/));
+    expect(await screen.findByText("worker: Dock the new ligands · p2 · Sonnet 5")).toBeTruthy();
+    expect(screen.getByText("pm: Abiogenesis · Opus 5")).toBeTruthy();
   });
 
   it("falls back to the slug and raw model id when it cannot name them", async () => {
-    callLog.mockResolvedValue({ calls: [row({ program: "p9", model: "claude-new-9" })] });
+    callLog.mockResolvedValue({ calls: [row({ program: "p9", sprint: "", model: "claude-new-9" })] });
     renderIt();
-    await waitFor(() => expect(screen.getByTitle("p9 · claude-new-9")).toBeTruthy());
+    fireEvent.mouseEnter((await screen.findByText("worker")).parentElement!);
+    expect(await screen.findByText("p9 · claude-new-9")).toBeTruthy();
   });
 
   it("renders nothing until the log has loaded, so the rail never flickers", async () => {
@@ -100,8 +129,9 @@ describe("LiveAgents in the rail", () => {
     // rejection in this harness rather than reaching the component.
     let settle: (v: unknown) => void = () => {};
     callLog.mockReturnValue(new Promise((res) => { settle = res; }));
-    const { container } = renderIt();
-    expect(container.textContent).toBe("");
+    renderIt();
+    // Not container.textContent: the Mantine provider puts a <style> in the container.
+    expect(screen.queryByText(/agent/)).toBeNull();
     settle({ calls: [] });          // never leave a promise pending at teardown
   });
 });

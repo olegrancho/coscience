@@ -1,34 +1,16 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 167
+version: 170
 last_updated: 2026-09-23
 ---
 
 # To QC
 
-### P11. Show only typed nodes on the wiki graph by default
-
-The wiki graph opens with "typed only" on whenever the graph has a typed relation, and off when it has none.
-
-**Check:** open a program's wiki graph — the box is ticked and only typed links show; untick it and every body link comes back. The filter hides links, never nodes, so on a graph with no typed relation it opens unticked: "typed only" there would leave every node standing with no links at all.
-
-### P2. Show times the same way whatever the browser's locale
-
-Every time on the dashboard is 24-hour `HH:MM` and every date `22 Sep` / `22 Sep 2026`, from one formatter (`components/timefmt.ts`) that never consults the locale.
-
-**Check:** a server's "not answering since", the call log's timestamps, the Compute disk hover and any date on a sprint or program page, all in a browser set to a dot-time locale. Numbers (`1,234`) still follow the locale; the item was about times, so they were left.
-
-### P8. Show how long each running experiment has been going, on Compute
-
-Compute's running-now table names each experiment by title and has a "Running for" column, with the exact grant time on hover.
-
-**Check:** Compute → running now while something runs. The clock starts when the experiment was granted compute (`granted_at`), which is what the lease carries — not when its agent last started, which is what the pulse's "running 12m" measures, so the two can differ for a job that woke up.
-
 ### P9. Name the experiments behind the workers gauge
 
-Hovering any gauge — on the Overview's compute card and on Compute — lists the experiments holding it, by title, with the amount each holds.
+Hovering any gauge — on the Overview's compute card and on Compute — lists the experiments holding it, by title; and in the pulse, hovering "N agents calling Claude" lists every live agent with what it is working on, as does hovering each agent's row.
 
-**Check:** hover `workers` while an agent runs, and `cpu`. Every gauge got it, not only workers. A worker slot is held only while a sprint's agent runs, so a sprint waiting on its detached job shows under `cpu` and not under `workers` — that is the ledger telling the truth, not a gap.
+**Check:** while agents run, hover "agents calling Claude" in the rail's pulse — each line names a worker's experiment by title, or the program a planner or wiki agent works for, then the model — and hover one agent row for its own line. Then `workers` and `cpu` on Compute. The pulse was the first QC's finding; the rows' hover used to be a native tooltip naming only the program and model.
 
 ### P10. Give the lineage graph an auto-layout button
 
@@ -475,6 +457,18 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### P8. Show how long each running experiment has been going, on Compute
+
+Compute's running-now table names each experiment by title and says how long it has held compute, with the grant time on hover.
+
+### P2. Show times the same way whatever the browser's locale
+
+Every time on the dashboard is 24-hour `HH:MM` and every date `22 Sep` / `22 Sep 2026`, from one formatter that never consults the locale.
+
+### P11. Show only typed nodes on the wiki graph by default
+
+The wiki graph opens with "typed only" on whenever it has a typed relation, and off when it has none.
+
 ### B4. Say when the substrate cannot commit
 
 A refused commit is told apart from an empty one and recorded outside the substrate, and the pulse grows a red row after three in a row — checked on a scratch substrate with a refusing hook, and silent again on the next good commit.
@@ -504,15 +498,3 @@ The planner can no longer un-approve anything: it holds an approved sprint inste
 ### E3. Stop flagging a declined action as an unbacked claim
 
 A planner explaining that it had nothing to do is no longer stamped as claiming it acted: the check reads the whole sentence and requires a past-tense verb, so it fires on a real claim and not on an honest one.
-
-### P3. Highlight only the experiments the platform moved
-
-The program page highlights only what the platform did — a sprint the planner proposed, released or finished — and stays quiet for the viewer's own clicks and for a program's first visit.
-
-### P4. Let a human restore a canceled experiment
-
-A canceled experiment can be put back where it was canceled from, keeping its goals, plan, comments and votes — except a demoted one, whose life continued as an idea.
-
-### O9. Keep per-program host notes the PM maintains
-
-Each program keeps its own note per server, read by every worker placed there and kept current by the planner from what finished and escalated sprints report; a human reads and edits them low on the program page, beside the planner's activity.
