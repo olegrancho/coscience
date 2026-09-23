@@ -487,6 +487,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
             rel = "; ".join(f"{e['type']} {e['dst']}" for e in i.edges)
             graph_lines.append(f"{i.id}: {rel}")
     capacity, leased, hosts = _compute(substrate, program_id)
+    host_notes, host_reports = _usable_host_notes(substrate, program_id)
     return PMContext(
         program_id=program_id, goals=program.goals, cycle=pm.cycle,
         instructions=substrate.load_instructions(program_id),
@@ -503,9 +504,29 @@ def gather_context(substrate, program_id: str) -> PMContext:
         artifacts=artifact_dicts, artifact_feedback=artifact_feedback,
         compute_capacity=capacity, compute_leased=leased, compute_hosts=hosts,
         escalations=escalations,
-        host_notes=substrate.list_host_notes(program_id),
-        host_reports=substrate.load_host_reports(program_id),
+        host_notes=host_notes,
+        host_reports=host_reports,
     )
+
+
+def _usable_host_notes(substrate, program_id: str) -> tuple[dict[str, str], list[dict]]:
+    """The notes and pending reports on servers this program may still use (O22).
+
+    The apply refuses a note on any other server, so showing the planner one only asked
+    it to fold in something it can never write: it tried every cycle, was refused every
+    cycle, and the report carried the same skip line for good. Those stay on the program
+    page, where a human can still read and clear them."""
+    from coscience.resources import load_pool
+    pool = load_pool(substrate.repo_root)
+
+    def usable(host: str) -> bool:
+        h = pool.host(host)
+        return h is not None and h.allows(program_id)
+
+    notes = {h: t for h, t in substrate.list_host_notes(program_id).items() if usable(h)}
+    reports = [r for r in substrate.load_host_reports(program_id)
+               if usable(str(r.get("host") or ""))]
+    return notes, reports
 
 
 def _compute(substrate, program_id: str) -> tuple[dict, dict, list[dict]]:
@@ -574,6 +595,11 @@ class StagedCycle:
     # instead of the pre-apply one when the fold-in happens as staged, so the planner
     # wakes once for a report rather than twice (the second time for its own work).
     fingerprint_after: str = ""
+    # {server: note text} as the cycle was shown it (O22). A note that has changed by
+    # the time the cycle applies was saved by a human while the reasoner ran, and the
+    # planner's rewrite would silently discard it. None for a cycle staged before this
+    # was recorded, which applies as it always did.
+    host_notes_seen: dict | None = None
 
 
 def proposal_id(program_id: str, cycle: int, suffix: str) -> str:
@@ -614,7 +640,8 @@ def _staging_path(substrate, program_id: str):
 
 def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
                   fingerprint: str = "", directive: str = "",
-                  host_report_ids: dict | None = None, fingerprint_after: str = "") -> None:
+                  host_report_ids: dict | None = None, fingerprint_after: str = "",
+                  host_notes_seen: dict | None = None) -> None:
     path = _staging_path(substrate, program_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {
@@ -622,6 +649,7 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
         "fingerprint": fingerprint,
         "fingerprint_after": fingerprint_after,
         "host_report_ids": dict(host_report_ids or {}),
+        "host_notes_seen": host_notes_seen,
         "directive": directive,
         "report": output.report,
         "ideas_summary": output.ideas_summary,
@@ -679,7 +707,8 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
                        fingerprint=data.get("fingerprint", ""),
                        directive=data.get("directive", ""),
                        host_report_ids=dict(data.get("host_report_ids") or {}),
-                       fingerprint_after=data.get("fingerprint_after", ""))
+                       fingerprint_after=data.get("fingerprint_after", ""),
+                       host_notes_seen=data.get("host_notes_seen"))
 
 
 def clear_staging(substrate, program_id: str) -> None:
@@ -923,11 +952,13 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         if context.host_reports and folded:
             left = [r for r in context.host_reports if str(r.get("host") or "") not in folded]
             after = context_fingerprint(replace(context, host_reports=left))
+        notes_seen = dict(context.host_notes)
         write_staging(substrate, program_id, cycle, output, fingerprint, directive,
-                      host_report_ids=seen_reports, fingerprint_after=after)  # COMMIT POINT
+                      host_report_ids=seen_reports, fingerprint_after=after,
+                      host_notes_seen=notes_seen)  # COMMIT POINT
         staged = StagedCycle(cycle=cycle, output=output, fingerprint=fingerprint,
                              directive=directive, host_report_ids=seen_reports,
-                             fingerprint_after=after)
+                             fingerprint_after=after, host_notes_seen=notes_seen)
 
     cycle = staged.cycle
     now_ts = time.time() if now is None else now
@@ -1253,6 +1284,13 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         h = pool.host(host)
         if h is None or not h.allows(program_id):
             host_note_skipped.append({"id": host, "why": f"this program may not use {host}"})
+            continue
+        if (staged.host_notes_seen is not None
+                and substrate.list_host_notes(program_id).get(host, "")
+                != staged.host_notes_seen.get(host, "")):
+            # Someone saved this note while the reasoner ran. Theirs stands; the reports
+            # they read went with their save, and the planner sees the new note next cycle.
+            host_note_skipped.append({"id": host, "why": "a human edited it while this cycle ran"})
             continue
         try:
             if isinstance(entry.get("text"), str):

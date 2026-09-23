@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from coscience import artifacts, auth, fs_browse
-from coscience.service import NotFoundError, Service, service_from_env
+from coscience.service import NoteChanged, NotFoundError, Service, service_from_env
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -229,6 +229,7 @@ class ProgramInstructionsIn(BaseModel):
 class HostNoteIn(BaseModel):
     text: str = ""                 # "" deletes the note
     reports: list[str] | None = None   # the report ids the page showed; None clears the server
+    base: str | None = None        # the note as the editor opened it; None skips the check
 
 
 class ProgramGoalsIn(BaseModel):
@@ -1246,9 +1247,11 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     @api.put("/programs/{program_id}/host-notes/{host}")
     def set_host_note(program_id: str, host: str, body: HostNoteIn) -> dict:
         try:
-            return service.set_host_note(program_id, host, body.text, body.reports)
+            return service.set_host_note(program_id, host, body.text, body.reports, body.base)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except NoteChanged as exc:
+            raise HTTPException(status_code=409, detail={"message": str(exc), "current": exc.current})
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 

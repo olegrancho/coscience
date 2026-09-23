@@ -283,6 +283,63 @@ def test_a_bad_server_name_is_422_and_an_unknown_program_is_404(client):
     assert client.get("/api/programs/nope/host-notes").status_code == 404
 
 
+def _pool(client, text="hosts:\n  a:\n    ssh: a\n    capacity: {cpu: 8}\n"
+                       "  b:\n    ssh: b\n    programs: [p2]\n    capacity: {cpu: 8}\n"):
+    cos = client.svc.substrate.repo_root / ".coscience"
+    cos.mkdir(parents=True, exist_ok=True)
+    (cos / "resources.yaml").write_text(text)
+
+
+def test_get_names_every_server_and_whether_the_program_may_use_it(client):
+    """O23: all the notes card needs to know about compute, so it can stop polling the
+    whole ledger — which parses every sprint on the box — every ten seconds."""
+    _pool(client)
+    hosts = client.get("/api/programs/p1/host-notes").json()["hosts"]
+    assert {h["name"]: h["allowed"] for h in hosts} == {"local": True, "a": True, "b": False}
+    assert set(hosts[0]) == {"name", "label", "allowed"}
+
+
+def test_a_note_cannot_be_started_on_a_server_the_program_may_not_use(client):
+    """O22: a mistyped server in a URL used to create a note the planner could then
+    never touch."""
+    _pool(client)
+    r = client.put("/api/programs/p1/host-notes/typo", json={"text": "x"})
+    assert r.status_code == 422 and "may not use typo" in r.json()["detail"]
+    assert client.put("/api/programs/p1/host-notes/b", json={"text": "x"}).status_code == 422
+    assert client.svc.substrate.list_host_notes("p1") == {}
+
+
+def test_a_note_left_on_a_withdrawn_server_can_still_be_edited_and_cleared(client):
+    _pool(client)
+    sub = client.svc.substrate
+    sub.save_host_note("p1", "b", "from when p1 could run here")
+    sub.add_host_report("p1", sprint_id="s1", host="b", text="old", source="finished", now=1.0)
+    r = client.put("/api/programs/p1/host-notes/b", json={"text": ""})
+    assert r.status_code == 200
+    assert r.json()["notes"] == {} and r.json()["reports"] == []
+
+
+def test_saving_over_a_note_that_changed_since_it_was_opened_is_refused(client):
+    """O22: two editors (or an editor and the planner) used to overwrite each other."""
+    _pool(client)
+    client.svc.substrate.save_host_note("p1", "a", "what the other person wrote")
+    r = client.put("/api/programs/p1/host-notes/a",
+                   json={"text": "mine", "base": "what I opened"})
+    assert r.status_code == 409
+    assert r.json()["detail"]["current"] == "what the other person wrote"
+    assert client.svc.substrate.load_host_note("p1", "a") == "what the other person wrote"
+
+
+def test_saving_over_the_note_as_opened_goes_through(client):
+    _pool(client)
+    client.svc.substrate.save_host_note("p1", "a", "as opened")
+    r = client.put("/api/programs/p1/host-notes/a", json={"text": "mine", "base": "as opened"})
+    assert r.status_code == 200 and r.json()["notes"]["a"] == "mine"
+    # A server with no note yet has an empty base.
+    r = client.put("/api/programs/p1/host-notes/local", json={"text": "first", "base": ""})
+    assert r.status_code == 200 and r.json()["notes"]["local"] == "first"
+
+
 # --- a note is an extra: it never breaks the work it hangs off (review round 1) ------
 
 def test_an_escalation_is_still_raised_when_its_report_cannot_be_filed(substrate):

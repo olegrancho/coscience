@@ -72,13 +72,12 @@ export default function ProgramDetail() {
   const ideas = useQuery({ queryKey: ["ideas", id], queryFn: () => api.listIdeas(id) });
   const artifacts = useQuery({ queryKey: ["artifacts", id], queryFn: () => api.listArtifacts(id) });
   const wiki = useQuery({ queryKey: ["wiki", id], queryFn: () => api.getWikiSummary(id) });
-  // The same two queries the server-notes card uses, by the same keys — React Query
-  // hands back the one cached result, so this costs no extra request. The nav needs
-  // to know whether that card will draw anything, and `noteRows` is what decides.
+  // The same query the server-notes card uses, by the same key — React Query hands
+  // back the one cached result, so this costs no extra request. The nav needs to know
+  // whether that card will draw anything, and `noteRows` is what decides. The servers
+  // come with the notes (O23); this page no longer polls the ledger at all.
   const hostNotes = useQuery({ queryKey: ["host-notes", id], queryFn: () => api.getHostNotes(id) });
-  const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.getLedger });
-  const hasServerNotes = !!hostNotes.data && !!ledger.data
-    && noteRows(ledger.data.hosts ?? [], id, hostNotes.data).length > 0;
+  const hasServerNotes = !!hostNotes.data && noteRows(hostNotes.data).length > 0;
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["program", id] });
     qc.invalidateQueries({ queryKey: ["guidance", id] });
@@ -126,7 +125,7 @@ export default function ProgramDetail() {
       { id: "sec-lineage", label: "Lineage" },
       // Housekeeping, last and in page order. Server notes is listed whenever this
       // program has a server to speak of — which is what the card itself decides, so
-      // the entry is gated on the same fact (`hosts` from the ledger) rather than on
+      // the entry is gated on the same fact (the servers sent with the notes) rather than on
       // the card having drawn, which the nav cannot see.
       ...(d.activations?.length > 0 ? [{ id: "sec-activity", label: "PM activity" }] : []),
       ...(hasServerNotes ? [{ id: "sec-host-notes", label: "Server notes" }] : []),

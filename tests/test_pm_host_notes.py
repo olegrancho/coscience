@@ -36,6 +36,7 @@ def _report(substrate, program_id="p1", *, sprint_id="p1-s1", host="a",
 def test_gather_context_carries_the_programs_notes_and_pending_reports(substrate):
     _program(substrate)
     _program(substrate, "p2")
+    _hosts_yaml(substrate)
     substrate.save_host_note("p1", "a", "torch 2.3 in env t23")
     substrate.save_host_note("p2", "a", "another program's business")
     rep = _report(substrate)
@@ -44,6 +45,24 @@ def test_gather_context_carries_the_programs_notes_and_pending_reports(substrate
 
     assert ctx.host_notes == {"a": "torch 2.3 in env t23"}
     assert ctx.host_reports == [rep]
+
+
+def test_the_pm_is_not_shown_what_it_could_never_write_back(substrate):
+    """O22. A server this program may no longer use: its note and reports stay on the
+    program page for a human, but the planner is not asked to fold in what the apply
+    would refuse — it used to try, be refused, and say so, every cycle."""
+    _program(substrate)
+    _hosts_yaml(substrate)                   # p1 may use a, not b
+    substrate.save_host_note("p1", "b", "from when p1 could run here")
+    _report(substrate, host="b")
+    _report(substrate, host="gone")          # a server no longer in the pool at all
+    kept = _report(substrate, host="a")
+
+    ctx = gather_context(substrate, "p1")
+
+    assert ctx.host_notes == {}
+    assert ctx.host_reports == [kept]
+    assert len(substrate.load_host_reports("p1")) == 3   # nothing was cleared, only withheld
 
 
 def test_a_program_with_no_notes_sees_none(substrate):
@@ -61,6 +80,7 @@ def test_a_program_with_no_reports_has_no_host_reports_fingerprint_key():
 
 def test_a_new_report_changes_the_fingerprint(substrate):
     _program(substrate)
+    _hosts_yaml(substrate)
     before = _context_payload(gather_context(substrate, "p1"))
     _report(substrate)
     after = _context_payload(gather_context(substrate, "p1"))
@@ -72,6 +92,7 @@ def test_a_new_report_changes_the_fingerprint(substrate):
 def test_rewriting_a_note_does_not_change_the_fingerprint(substrate):
     # Otherwise the PM's own fold-in would wake it again next beat, forever.
     _program(substrate)
+    _hosts_yaml(substrate)
     _report(substrate)
     before = _context_payload(gather_context(substrate, "p1"))
     substrate.save_host_note("p1", "a", "torch 2.3 in env t23")
@@ -315,3 +336,31 @@ def test_a_note_that_cannot_be_written_does_not_wedge_the_planner(substrate, mon
     assert summary["host_note_skipped"][0]["id"] == "a"
     assert "could not be written" in summary["host_note_skipped"][0]["why"]
     assert read_staging(substrate, "p1") is None          # the cycle finished and cleared
+
+
+def test_a_note_a_human_saved_while_the_cycle_ran_is_not_overwritten(substrate):
+    """O22: the planner read the note, a human saved a new one while it reasoned, and
+    the planner's rewrite used to land over it without a word."""
+    _program(substrate)
+    _hosts_yaml(substrate)
+    substrate.save_host_note("p1", "a", "as the planner read it")
+    write_staging(substrate, "p1", 3,
+                  PMCycleOutput(report="r", host_notes=[{"host": "a", "text": "planner's"}]),
+                  host_notes_seen={"a": "as the planner read it"})
+    substrate.save_host_note("p1", "a", "the human's, saved mid-cycle")
+
+    summary = pm_beat(substrate, "p1", FakeReasoner([]), force=True)
+
+    assert substrate.load_host_note("p1", "a") == "the human's, saved mid-cycle"
+    assert summary["host_note_skipped"] == [
+        {"id": "a", "why": "a human edited it while this cycle ran"}]
+
+
+def test_a_cycle_staged_before_notes_were_recorded_applies_as_before(substrate):
+    _program(substrate)
+    _hosts_yaml(substrate)
+    substrate.save_host_note("p1", "a", "whatever it was")
+    write_staging(substrate, "p1", 3,
+                  PMCycleOutput(report="r", host_notes=[{"host": "a", "text": "planner's"}]))
+    pm_beat(substrate, "p1", FakeReasoner([]), force=True)
+    assert substrate.load_host_note("p1", "a") == "planner's"

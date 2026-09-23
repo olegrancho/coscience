@@ -200,7 +200,17 @@ export interface HostReport {
 }
 // A program's own notes per server — `local` is this machine. Separate from the
 // server entry's machine-wide `notes` in the ledger.
-export interface HostNotes { notes: Record<string, string>; reports: HostReport[] }
+// Every server in the pool and whether this program may use it — what the notes card
+// needs to know about compute, sent with the notes so it never polls the ledger (O23).
+export interface NoteHost { name: string; label: string; allowed: boolean }
+export interface HostNotes { notes: Record<string, string>; reports: HostReport[]; hosts?: NoteHost[] }
+
+/** A server note changed between opening it for edit and saving (O22). */
+export class NoteChangedError extends Error {
+  constructor(public current: string) {
+    super("Someone changed this note since you opened it.");
+  }
+}
 // One grant of compute to one experiment. `title` is the sprint's, empty when its files
 // are gone; a worker slot shows up in `amounts` only while its agent runs.
 export interface LeaseT {
@@ -448,11 +458,18 @@ export const api = {
   // Saving a note also clears that server's pending reports — the human has read them.
   // `reports` names the report ids this page showed. One filed between the page
   // loading and Save landing has been read by nobody, so it stays pending.
-  setHostNote: (id: string, host: string, text: string, reports: string[]) =>
+  // `base` is the note as the editor opened it; a 409 means it has changed since.
+  setHostNote: (id: string, host: string, text: string, reports: string[], base?: string) =>
     fetch(`/api/programs/${id}/host-notes/${encodeURIComponent(host)}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, reports }),
-    }).then(j<HostNotes>),
+      body: JSON.stringify({ text, reports, base }),
+    }).then(async (r) => {
+      if (r.status === 409) {
+        const body = await r.json().catch(() => ({}));
+        throw new NoteChangedError(String(body?.detail?.current ?? ""));
+      }
+      return j<HostNotes>(r);
+    }),
   setProgramMaxProposed: (id: string, n: number) =>
     fetch(`/api/programs/${id}/max_proposed`, {
       method: "POST", headers: { "Content-Type": "application/json" },

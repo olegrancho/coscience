@@ -17,14 +17,13 @@ beforeEach(() => {
   } as any);
 });
 
-// The server-notes card sits on this page and reads both of these. Empty here:
-// with no server and no note it draws nothing, which is the state most of these
-// tests want to ignore.
-function mockHostNotes(notes: Record<string, string> = {}, hosts: any[] = []) {
-  vi.spyOn(api, "getHostNotes").mockResolvedValue({ notes, reports: [] });
-  vi.spyOn(api, "getLedger").mockResolvedValue({
-    capacity: {}, used: {}, available: {}, leases: [], paused: false, hosts,
-  } as any);
+// The server-notes card sits on this page and reads this, servers included (O23).
+// Empty here: with no server and no note it draws nothing, which is the state most
+// of these tests want to ignore.
+function mockHostNotes(notes: Record<string, string> = {},
+                       hosts: { name: string; label: string; allowed: boolean }[] = []) {
+  vi.spyOn(api, "getHostNotes").mockResolvedValue({ notes, reports: [], hosts });
+  vi.spyOn(api, "getLedger");
 }
 
 function mockProgram(instructions: string) {
@@ -77,13 +76,12 @@ describe("general instructions", () => {
 describe("server notes", () => {
   it("shows a note for each server the program runs on", async () => {
     mockProgram("");
-    mockHostNotes({ gpu1: "Use conda env torch2." }, [
-      { name: "gpu1", ssh: "gpu1", placeable: true, programs: ["p"], run_root: "",
-        capacity: {}, available: {}, gpus: [], removing: false, waiting_on: [] },
-    ]);
+    mockHostNotes({ gpu1: "Use conda env torch2." }, [{ name: "gpu1", label: "", allowed: true }]);
     renderAt();
     expect(await screen.findByText("Use conda env torch2.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit notes on gpu1" })).toBeTruthy();
+    expect(screen.queryByText(/no longer used/)).toBeNull();   // it reads the access right
+    expect(api.getLedger).not.toHaveBeenCalled();              // O23: no ledger poll here
   });
 
   it("leaves the page alone when no server has a note", async () => {
@@ -96,10 +94,7 @@ describe("server notes", () => {
 
   it("lists itself in the nav, after the science, once there is one", async () => {
     mockProgram("");
-    mockHostNotes({ gpu1: "Use conda env torch2." }, [
-      { name: "gpu1", ssh: "gpu1", placeable: true, programs: ["p"], run_root: "",
-        capacity: {}, available: {}, gpus: [], removing: false, waiting_on: [] },
-    ]);
+    mockHostNotes({ gpu1: "Use conda env torch2." }, [{ name: "gpu1", label: "", allowed: true }]);
     renderAt();
     const entry = await screen.findByText("Server notes");
     expect(entry).toBeTruthy();

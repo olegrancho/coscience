@@ -33,6 +33,16 @@ def service_from_env() -> "Service":
     return Service(repo_root)
 
 
+class NoteChanged(ValueError):
+    """A server note was saved over a version its editor never saw (O22). Carries the
+    note as it now stands, so the page can show it instead of losing either side."""
+
+    def __init__(self, host: str, current: str):
+        super().__init__(f"the note on {host} changed since you opened it")
+        self.host = host
+        self.current = current
+
+
 class NotFoundError(KeyError):
     """A requested sprint or result does not exist."""
 
@@ -1079,11 +1089,16 @@ class Service:
         """This program's own note per server, plus the reports workers filed that the
         PM has not folded in yet (O9)."""
         self._require_program(program_id)
+        # The servers, and which this program may use, are all the notes card needs to
+        # know about compute (O23). It used to poll the whole ledger for them, and the
+        # ledger parses every sprint on the box to answer.
         return {"notes": self.substrate.list_host_notes(program_id),
-                "reports": self.substrate.load_host_reports(program_id)}
+                "reports": self.substrate.load_host_reports(program_id),
+                "hosts": [{"name": h.name, "label": h.label, "allowed": h.allows(program_id)}
+                          for h in self.pool.hosts]}
 
     def set_host_note(self, program_id: str, host: str, text: str,
-                      report_ids: list[str] | None = None) -> dict:
+                      report_ids: list[str] | None = None, base: str | None = None) -> dict:
         """Replace one server's note by hand. Saving clears that server's pending
         reports: a human who read them and wrote the note has folded them in, and
         nothing else should show them to the PM again.
@@ -1091,9 +1106,25 @@ class Service:
         `report_ids` names the reports the page actually showed. A sprint can file one
         between the page loading and Save landing, and that one has been read by nobody
         — it stays pending. An older dashboard sends nothing and clears the server, as
-        it always did."""
+        it always did.
+
+        `base` is the note as the editor first saw it. When the note has changed since —
+        another person, or a planner cycle, saved in between — nothing is written and
+        `NoteChanged` says so: two editors used to overwrite each other silently (O22).
+        None skips the check, for a client that sends no base.
+
+        A note can only be started on a server this program may use. One that already
+        holds a note or reports stays editable after access is withdrawn — that is the
+        only way to clear it — but a mistyped server name cannot create one (O22)."""
         self._require_program(program_id)
         check_host_name(host)
+        notes = self.substrate.list_host_notes(program_id)
+        h = self.pool.host(host)
+        if (h is None or not h.allows(program_id)) and host not in notes and not any(
+                r.get("host") == host for r in self.substrate.load_host_reports(program_id)):
+            raise ValueError(f"program {program_id} may not use {host}, so it keeps no note there")
+        if base is not None and notes.get(host, "") != str(base).strip():
+            raise NoteChanged(host, notes.get(host, ""))
         self.substrate.save_host_note(program_id, host, str(text or ""))
         self.substrate.clear_host_reports(program_id, host, ids=report_ids)
         self.substrate.commit(f"program {program_id}: notes on {host} updated")
