@@ -143,9 +143,9 @@ export function LiveActivity(
   );
 }
 
-export function BackLink({ to, children }: { to: string; children: ReactNode }) {
+export function BackLink({ to, state, children }: { to: string; state?: unknown; children: ReactNode }) {
   return (
-    <Link to={to} className="backlink">
+    <Link to={to} state={state} className="backlink">
       <span aria-hidden>‹</span> <span className="backlink-label">{children}</span>
     </Link>
   );

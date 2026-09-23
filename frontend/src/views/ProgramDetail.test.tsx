@@ -278,6 +278,96 @@ describe("experiments list", () => {
     const pmRow = screen.getByText("Fine for now").closest("div");
     expect(pmRow?.parentElement?.textContent).not.toMatch(/needs you/);
   });
+
+  // A program this browser has opened before, so a sprint with no "seen" record is
+  // genuinely new rather than seeded away as part of a first visit.
+  function visitedBefore(seen: Record<string, number>) {
+    localStorage.setItem("coscience:program-seen", JSON.stringify({ p: 1 }));
+    localStorage.setItem("coscience:sprint-seen", JSON.stringify(seen));
+  }
+  const later = Date.now() / 1000 + 60;
+
+  it("filters to just the new rows, and counts them (P6)", async () => {
+    visitedBefore({ "p-old": later });
+    mockProgramWithSprints([
+      row({ id: "p-new", title: "Proposed overnight", status: "proposed", last_status_by: "pm" }),
+      row({ id: "p-old", title: "Seen already", status: "proposed", last_status_by: "pm" }),
+    ]);
+    renderAt();
+    const box = await screen.findByLabelText("only new (1)");
+    expect(screen.getByText("Seen already")).toBeTruthy();
+    fireEvent.click(box);
+    expect(screen.getByText("Proposed overnight")).toBeTruthy();
+    expect(screen.queryByText("Seen already")).toBeNull();
+  });
+
+  it("says nothing is new rather than showing an empty list (P6)", async () => {
+    visitedBefore({ "p-old": later });
+    mockProgramWithSprints([row({ id: "p-old", title: "Seen already", status: "proposed" })]);
+    renderAt();
+    fireEvent.click(await screen.findByLabelText("only new (0)"));
+    expect(screen.getByText("Nothing new since you last looked.")).toBeTruthy();
+  });
+});
+
+describe("coming back from an experiment (P5)", () => {
+  const scrolled: string[] = [];
+  beforeEach(() => {
+    scrolled.length = 0;
+    sessionStorage.clear();
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this.id); };
+    vi.spyOn(api, "getProgram").mockResolvedValue({
+      id: "p", title: "P", status: "active", goals: "g", report: "", cycle: 0,
+      sprints: [{ id: "p-s7", status: "done", goals: "g", title: "The one I opened", results: [],
+                  model: "m", last_status_at: 1, votes: { up: 0, down: 0, mine: 0 },
+                  escalation_level: "" }],
+      pm_model: "", workdir: "", activations: [], last_run: null, instructions: "",
+    } as any);
+    vi.spyOn(api, "listGuidance").mockResolvedValue([]);
+    vi.spyOn(api, "listIdeas").mockResolvedValue({ summary: "", ideas: [] } as any);
+    vi.spyOn(api, "listArtifacts").mockResolvedValue([]);
+    vi.spyOn(api, "getWikiSummary").mockResolvedValue({ pending: 0, pages: 0 } as any);
+    mockHostNotes();
+  });
+
+  function arrive(state?: unknown) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}><MantineProvider>
+        <MemoryRouter initialEntries={[{ pathname: "/programs/p", state }]}>
+          <Routes><Route path="/programs/:id" element={<ProgramDetail />} /></Routes>
+        </MemoryRouter>
+      </MantineProvider></QueryClientProvider>);
+  }
+
+  it("brings the row just left into view and marks it", async () => {
+    sessionStorage.setItem("coscience:return-row:p", "p-s7");
+    arrive({ back: true });
+    await waitFor(() => expect(scrolled).toEqual(["exp-p-s7"]));
+    expect(document.getElementById("exp-p-s7")?.className).toMatch(/sprint-returned/);
+  });
+
+  it("starts at the top on any other arrival, and forgets the row", async () => {
+    // A MemoryRouter's first entry counts as a POP, like a reload, so this arrival is
+    // told apart by the history entry: a plain push to the program.
+    sessionStorage.setItem("coscience:return-row:p", "p-s7");
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { Link } = await import("react-router-dom");
+    render(
+      <QueryClientProvider client={qc}><MantineProvider>
+        <MemoryRouter initialEntries={["/elsewhere"]}>
+          <Routes>
+            <Route path="/elsewhere" element={<Link to="/programs/p">go</Link>} />
+            <Route path="/programs/:id" element={<ProgramDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </MantineProvider></QueryClientProvider>);
+    fireEvent.click(screen.getByText("go"));
+    await screen.findByText("The one I opened");
+    await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+    expect(scrolled).toEqual([]);
+    expect(sessionStorage.getItem("coscience:return-row:p")).toBeNull();
+  });
 });
 
 describe("a held experiment on the list", () => {

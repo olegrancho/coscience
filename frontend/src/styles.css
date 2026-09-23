@@ -353,13 +353,19 @@ a { color: inherit; }
   margin-left: -3px;
   animation: unseen-pulse 2s ease-in-out 3;
 }
+/* The row you just came back from (P5): one brief flash so the eye finds it. */
+.sprint-returned { animation: returned-flash 1.6s ease-out 1; }
+@keyframes returned-flash {
+  0%   { background: color-mix(in srgb, var(--machine) 22%, var(--card)); }
+  100% { background: transparent; }
+}
 @keyframes unseen-pulse {
   50% { background: color-mix(in srgb, var(--machine) 20%, var(--card)); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .heartbeat::after { animation: none; }
-  .sprint-unseen { animation: none; }
+  .sprint-unseen, .sprint-returned { animation: none; }
   * { scroll-behavior: auto !important; }
 }
 

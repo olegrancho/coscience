@@ -11,6 +11,7 @@ import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
 import { AbsTime, BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, ZoomableImg, describeCompute, isImageName, voterId } from "../components/ui";
 import { markSeen } from "../sprintSeen";
+import { rememberOpened } from "../returnRow";
 import PageToc, { type TocEntry } from "../components/PageToc";
 import SprintEditModal from "../components/SprintEditModal";
 import { useMe, useIsMine, UserChip, OTHER_SHADE } from "../auth";
@@ -220,6 +221,8 @@ export default function SprintDetail() {
   const refresh = () => qc.invalidateQueries({ queryKey: ["sprint", id] });
 
   useEffect(() => { markSeen(id); }, [id]);
+  // So going back to the program lands on this row (P5).
+  useEffect(() => { if (prog) rememberOpened(prog, id); }, [prog, id]);
 
   const tocEntries = useMemo<TocEntry[]>(() => {
     const d = sprint.data;
@@ -384,7 +387,7 @@ export default function SprintDetail() {
     <Stack gap="lg">
       <PageToc entries={tocEntries} />
       <div>
-        <BackLink to={`/programs/${prog}`}>{progTitle}</BackLink>
+        <BackLink to={`/programs/${prog}`} state={{ back: true }}>{progTitle}</BackLink>
         <Group justify="space-between" align="flex-start" wrap="nowrap">
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 23, fontWeight: 600, margin: 0, maxWidth: 620, lineHeight: 1.25 }}>
             {s.title || s.goals || s.id}

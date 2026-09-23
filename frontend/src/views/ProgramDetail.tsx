@@ -2,7 +2,7 @@ import { ActionIcon, Badge, Button, Card, Group, Loader, Select, Stack, Text, Te
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigationType, useParams } from "react-router-dom";
 import { type Components } from "react-markdown";
 import Md from "../components/Md";
 import { FeedbackThread } from "../components/FeedbackThread";
@@ -16,6 +16,8 @@ import HostNotesCard, { noteRows } from "../components/HostNotesCard";
 import type { ArtifactRow, WikiSummary } from "../api";
 import { TYPE_HUE } from "../components/wikiGraphStyle";
 import { isUnseen, seedIfNew } from "../sprintSeen";
+import { takeReturnRow } from "../returnRow";
+import { experimentRows } from "./experimentsList";
 import PageToc, { type TocEntry } from "../components/PageToc";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
@@ -48,6 +50,11 @@ export default function ProgramDetail() {
   const [replanning, setReplanning] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all");
   const [showAll, setShowAll] = useState(false);
+  const [onlyNew, setOnlyNew] = useState(false);
+  // The experiment this page was left for, when it is reached by going back (P5).
+  const [returned, setReturned] = useState<string | null>(null);
+  const location = useLocation();
+  const navType = useNavigationType();
   const [ideasExpanded, setIdeasExpanded] = useState(false);
   const [pmExpanded, setPmExpanded] = useState(false);
   const [browsing, setBrowsing] = useState(false);
@@ -82,6 +89,28 @@ export default function ProgramDetail() {
   useEffect(() => {
     if (program.data) seedIfNew(program.data.sprints, program.data.id);
   }, [program.data]);
+
+  // P5. Once per arrival, as soon as the list exists: going back (the back link, or the
+  // browser's Back) lands on the experiment just left; any other arrival discards the
+  // record, so a later visit from the nav still starts at the top.
+  const loaded = !!program.data;
+  useEffect(() => {
+    if (!loaded) return;
+    const sid = takeReturnRow(id);
+    const back = navType === "POP" || !!(location.state as { back?: boolean } | null)?.back;
+    setReturned(back ? sid : null);
+    // Arrival is what matters, not every later change of navigation state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, id]);
+  useEffect(() => {
+    if (!returned) return;
+    const raf = requestAnimationFrame(() => {
+      // The row, or the section if a filter somehow still hides it.
+      (document.getElementById(`exp-${returned}`) ?? document.getElementById("sec-experiments"))
+        ?.scrollIntoView({ block: "center" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [returned]);
 
   const tocEntries = useMemo<TocEntry[]>(() => {
     const d = program.data;
@@ -348,24 +377,13 @@ export default function ProgramDetail() {
       </Card>
 
       {(() => {
-        // Filter by status, then (unless "show all") cap the noisy terminal
-        // statuses — done and canceled — at their 3 most recent (sprints arrive
-        // newest-first). Active statuses are always shown in full.
-        const CAPPED = new Set(["done", "canceled"]);
-        const CAP = 3;
-        const filtered = (statusFilter === "all"
-          ? p.sprints : p.sprints.filter((s) => s.status === statusFilter))
-          .slice().sort((a, b) => (b.last_status_at ?? 0) - (a.last_status_at ?? 0));
-        const seen: Record<string, number> = {};
-        const hidden = new Set<string>();
-        if (!showAll) {
-          for (const s of filtered) {
-            if (!CAPPED.has(s.status)) continue;
-            seen[s.status] = (seen[s.status] ?? 0) + 1;
-            if (seen[s.status] > CAP) hidden.add(s.id);
-          }
-        }
-        const shown = filtered.filter((s) => !hidden.has(s.id));
+        // The rules live in experimentsList.ts: status filter, "only new", and a cap on
+        // done/canceled that never folds away an unseen row or the one just returned to.
+        const { shown, hidden, newCount } = experimentRows(p.sprints, {
+          statusFilter, showAll, onlyNew,
+          isNew: (s) => isUnseen(s.id, s.last_status_at, s.last_status_by),
+          keep: returned ? new Set([returned]) : undefined,
+        });
         const counts = p.sprints.reduce<Record<string, number>>((a, s) => {
           a[s.status] = (a[s.status] ?? 0) + 1; return a;
         }, {});
@@ -375,6 +393,14 @@ export default function ProgramDetail() {
           <Card id="sec-experiments" padding="lg" radius="md" style={cardStyle}>
             <Group justify="space-between" align="center" mb={12} wrap="nowrap">
               <div className="eyebrow">experiments · {p.sprints.length}</div>
+              <Group gap={12} wrap="nowrap">
+              {/* P6. "New" is this browser's own record of what it has seen, so the
+                  count can differ between machines and the filter cannot be server-side. */}
+              <label className="mono" style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5,
+                                               color: newCount ? "var(--ink)" : "var(--ink-faint)", cursor: "pointer" }}>
+                <input type="checkbox" checked={onlyNew} onChange={(e) => setOnlyNew(e.target.checked)} />
+                only new ({newCount})
+              </label>
               <select className="mono" value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
                 style={{ fontSize: 12, padding: "3px 6px", background: "var(--surface)",
@@ -384,16 +410,22 @@ export default function ProgramDetail() {
                   <option key={st} value={st}>{st} ({counts[st]})</option>
                 ))}
               </select>
+              </Group>
             </Group>
             {p.sprints.length === 0 ? (
               <Text size="sm" c="dimmed">None yet. Propose one, or let the AI propose on its next cycle.</Text>
+            ) : shown.length === 0 && onlyNew ? (
+              <Text size="sm" c="dimmed">
+                Nothing new{statusFilter === "all" ? "" : ` among ${statusFilter} experiments`} since you last looked.
+              </Text>
             ) : shown.length === 0 ? (
               <Text size="sm" c="dimmed">No {statusFilter} experiments.</Text>
             ) : (
               <Stack gap={2}>
                 {shown.map((s) => (
-                  <div key={s.id}
-                    className={isUnseen(s.id, s.last_status_at, s.last_status_by) ? "sprint-unseen" : undefined}
+                  <div key={s.id} id={`exp-${s.id}`}
+                    className={[isUnseen(s.id, s.last_status_at, s.last_status_by) ? "sprint-unseen" : "",
+                                s.id === returned ? "sprint-returned" : ""].join(" ").trim() || undefined}
                     style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 6px", borderBottom: "1px solid var(--hairline)" }}>
                     <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 10 }}>
                       <Link to={`/sprints/${s.id}`} style={{ minWidth: 0, textDecoration: "none", color: "inherit" }}>
