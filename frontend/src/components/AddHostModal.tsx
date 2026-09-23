@@ -294,8 +294,10 @@ export default function AddHostModal({ opened, onClose, host, local, localCapaci
   const submitLocal = async () => {
     setBusy(true); setError("");
     const capacity: Record<string, number> = {};
+    // Anything else this machine declares rides along unchanged. The platform limits
+    // do not: they are not this machine's, and the server keeps them itself (G2).
     Object.entries(localCapacity ?? {}).forEach(([k, v]) => {
-      if (k !== "cpu" && k !== "memory_gb" && k !== "gpu") capacity[k] = v;
+      if (!["cpu", "memory_gb", "gpu", "workers", "housekeepers"].includes(k)) capacity[k] = v;
     });
     if (cpu !== "") capacity.cpu = cpu;
     if (memory !== "" && memory > 0) capacity.memory_gb = memory;

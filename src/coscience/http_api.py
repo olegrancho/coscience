@@ -122,6 +122,11 @@ class SprintPatch(BaseModel):
     model: str | None = None
 
 
+class PlatformLimitsIn(BaseModel):
+    # workers / housekeepers; null removes the limit (G1)
+    limits: dict[str, float | None] = Field(default_factory=dict)
+
+
 class CapacityUpdate(BaseModel):
     capacity: dict[str, float] = Field(default_factory=dict)
     gpus: list[dict] | None = None
@@ -1002,6 +1007,13 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def set_capacity(body: CapacityUpdate) -> dict:
         try:
             return service.set_capacity(body.capacity, body.gpus, body.label)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @api.put("/platform-limits")
+    def set_platform_limits(body: PlatformLimitsIn) -> dict:
+        try:
+            return service.set_platform_limits(body.limits)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 

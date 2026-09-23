@@ -644,8 +644,15 @@ export const api = {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hosts }),
     }).then(j<Ledger & { cut_off: CutOff[] }>),
   detectLocal: () => fetch("/api/hosts/local/detect", { method: "POST" }).then(j<LocalDetect>),
-  // `gpus` is sent only when this machine's own cards are being written — most
-  // capacity edits (workers, housekeepers, custom keys) have nothing to do with them.
+  // How many agent processes may run at once (G1). null removes a limit.
+  setPlatformLimits: (limits: Record<string, number | null>) =>
+    fetch("/api/platform-limits", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limits }),
+    }).then(j<Ledger>),
+  // This machine's own capacity, from its server dialog. The platform limits are kept
+  // from the file when left out, so this never needs to send them (G2). `gpus` is sent
+  // only when this machine's own cards are being written.
   setCapacity: (capacity: Record<string, number>, gpus?: { model: string; vram_gb: number }[],
                 label?: string) =>
     fetch("/api/capacity", {

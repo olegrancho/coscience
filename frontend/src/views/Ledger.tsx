@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import CallLog from "../components/CallLog";
-import CapacityModal from "../components/CapacityModal";
+import PlatformLimitsModal from "../components/PlatformLimitsModal";
 import HostsCard from "../components/HostsCard";
 import { EmptyState, Gauge, UsagePanel, formatDuration, gaugeUsers } from "../components/ui";
 import { fullTime } from "../components/timefmt";
@@ -12,6 +12,8 @@ import { fullTime } from "../components/timefmt";
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 const WORKER_KEY = "workers";
 const HOUSEKEEPER_KEY = "housekeepers";
+// The limits a gauge may step (G2): a machine's own amounts are set on its card.
+const PLATFORM_KEYS = new Set([WORKER_KEY, HOUSEKEEPER_KEY]);
 /** One save per adjustment, not one per click — each save is also a substrate commit. */
 const SAVE_DEBOUNCE_MS = 1000;
 
@@ -35,7 +37,8 @@ export default function Ledger() {
     const edits = pendingRef.current;
     if (!Object.keys(edits).length) return;
     try {
-      await api.setCapacity({ ...capacityRef.current, ...edits });
+      // Only the platform limits have steppers (G2), so this never writes a machine.
+      await api.setPlatformLimits(edits);
       setPending({});                    // server now agrees; drop the overlay
       qc.invalidateQueries({ queryKey: ["ledger"] });
     } catch (e) {
@@ -108,30 +111,28 @@ export default function Ledger() {
       <Card padding="lg" radius="md" style={cardStyle}>
         <Group justify="space-between" style={{ marginBottom: 16 }}>
           <div className="eyebrow">capacity in use</div>
-          <Button size="xs" variant="default" onClick={() => setEditing(true)}>Edit capacity</Button>
+          <Button size="xs" variant="default" onClick={() => setEditing(true)}>Platform limits</Button>
         </Group>
 
         {!(WORKER_KEY in l.capacity) && (
           <Text size="sm" c="dimmed" style={{ marginBottom: 16 }}>
-            No worker cap — any number of agents can run at once. Add a{" "}
-            <code>{WORKER_KEY}</code> limit to bound it.
+            No worker cap — any number of agents can run at once. Set one under
+            Platform limits to bound it.
           </Text>
         )}
 
         {!(HOUSEKEEPER_KEY in l.capacity) && (
           <Text size="sm" c="dimmed" style={{ marginBottom: 16 }}>
             No housekeeping cap — PM and wiki agents start whenever they are due,
-            however many are already running. Add a{" "}
-            <code>{HOUSEKEEPER_KEY}</code> limit to bound how many spend Claude
-            budget at once.
+            however many are already running. Set a limit under Platform limits to
+            bound how many spend Claude budget at once.
           </Text>
         )}
 
-        {remoteTakesWork && (
-          <Text size="sm" c="dimmed" style={{ marginBottom: 16 }}>
-            Totals include remote servers. Edit capacity changes this machine only.
-          </Text>
-        )}
+        <Text size="sm" c="dimmed" style={{ marginBottom: 16 }}>
+          {remoteTakesWork ? "Totals include remote servers. " : ""}
+          A machine's CPUs, memory and cards are set on its own row under servers.
+        </Text>
 
         {keys.length ? (
           <Stack gap={16}>
@@ -139,7 +140,7 @@ export default function Ledger() {
               <Gauge key={k} label={k} used={l.used[k] ?? 0}
                      capacity={pending[k] ?? l.capacity[k]}
                      pending={k in pending}
-                     onAdjust={remoteTakesWork ? undefined : (delta) => adjust(k, delta)}
+                     onAdjust={PLATFORM_KEYS.has(k) ? (delta) => adjust(k, delta) : undefined}
                      users={gaugeUsers(l.leases, k)} />
             ))}
           </Stack>
@@ -192,8 +193,8 @@ export default function Ledger() {
         <CallLog />
       </Card>
 
-      <CapacityModal opened={editing} onClose={() => setEditing(false)}
-                     capacity={editable} used={l.used} />
+      <PlatformLimitsModal opened={editing} onClose={() => setEditing(false)}
+                           capacity={l.capacity} used={l.used} />
     </Stack>
   );
 }

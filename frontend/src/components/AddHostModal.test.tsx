@@ -402,8 +402,10 @@ describe("AddHostModal", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Update configuration" }));
       await waitFor(() => expect(api.setCapacity).toHaveBeenCalled());
+      // The platform limits are not this machine's and stay out of its save (G2);
+      // the server keeps them from the file.
       expect(api.setCapacity).toHaveBeenCalledWith(
-        { cpu: 32, workers: 3, housekeepers: 2 },
+        { cpu: 32 },
         [{ model: "NVIDIA GeForce RTX 4090", vram_gb: 24 }],
         "",                       // display name: none set, so it goes by "local"
       );

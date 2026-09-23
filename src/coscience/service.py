@@ -2088,7 +2088,14 @@ class Service:
 
         `gpus`, when a list, replaces this machine's GPU cards (`[]` removes them,
         keeping whatever `gpu` count `capacity` itself carries); `None` keeps
-        whatever cards are already on file."""
+        whatever cards are already on file.
+
+        This is this machine's own capacity. The platform limits (`workers`,
+        `housekeepers`) bound agent processes wherever their work lands; the dashboard
+        sets them through `set_platform_limits`. One left out of `capacity` is carried
+        over from the file (G2) — the caller used to have to send them back, and an
+        edit that forgot them dropped the caps. One sent is still written, for callers
+        that predate the split."""
         clean_gpus: list[dict] | None = None
         if gpus is not None:
             errors = ResourcePool.from_dict({"gpus": gpus}).host_errors
@@ -2140,6 +2147,10 @@ class Service:
                         programs = loaded.get("programs")
                     if programs is not None:
                         out["programs"] = programs
+                    local = wrapped if isinstance(wrapped, dict) else loaded
+                    for key in PLATFORM_KEYS:
+                        if key in local and key not in out:
+                            out[key] = local[key]
                     # This machine's display name is not a capacity amount, so the
                     # rebuilt document would drop it unless it is carried over.
                     on_file = (wrapped.get("label") if isinstance(wrapped, dict) else None)
@@ -2170,6 +2181,44 @@ class Service:
                     out.pop("gpus", None)
             self._write_resources(out)
         self.substrate.commit("capacity updated")
+        return self.ledger_status()
+
+    def set_platform_limits(self, limits: dict) -> dict:
+        """Set how many agent processes the platform may run at once (G1): `workers`
+        (sprint agents) and `housekeepers` (planner and wiki agents). Nothing else can
+        be set here — a machine's CPUs, memory and cards are edited on its own card.
+
+        A value of None removes the limit, which leaves that kind of agent uncapped.
+        Only the named keys change; everything else in the pool file is untouched."""
+        clean: dict[str, float | None] = {}
+        for raw_key, raw_val in (limits or {}).items():
+            key = str(raw_key).strip()
+            if key not in PLATFORM_KEYS:
+                raise ValueError(f"{key!r} is not a platform limit (those are "
+                                 f"{', '.join(sorted(PLATFORM_KEYS))})")
+            if raw_val is None:
+                clean[key] = None
+                continue
+            if isinstance(raw_val, bool) or not isinstance(raw_val, (int, float)):
+                raise ValueError(f"{key}: the limit must be a number")
+            val = float(raw_val)
+            if not math.isfinite(val) or val < 0:
+                raise ValueError(f"{key}: the limit must be zero or more")
+            clean[key] = val
+        with pool_file_lock(self.repo_root):
+            loaded, _hosts = self._resources_hosts()
+            holder = self._local_holder(loaded)
+            before = {k: holder.get(k) for k in clean}
+            for key, val in clean.items():
+                if val is None:
+                    holder.pop(key, None)
+                else:
+                    holder[key] = val
+            changed = any(holder.get(k) != before[k] for k in clean)
+            if changed:
+                self._write_resources(loaded)
+        if changed:
+            self.substrate.commit("platform limits updated")
         return self.ledger_status()
 
     def _write_resources(self, data: dict) -> None:

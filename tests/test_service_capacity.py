@@ -250,3 +250,49 @@ def test_set_capacity_keeps_the_count_beside_a_malformed_card_list(tmp_path):
     Service(tmp_path).set_capacity({"cpu": 8, "gpu": 1})
     written = yaml.safe_load((tmp_path / ".coscience" / "resources.yaml").read_text())
     assert written == {"cpu": 8.0, "gpu": 1.0, "gpus": "24GB"}
+
+
+# --- G1/G2: platform limits and a machine's capacity are edited apart ---------------
+
+def test_platform_limits_set_only_workers_and_housekeepers(tmp_path):
+    _write(tmp_path, HOSTS_YAML)
+    status = Service(tmp_path).set_platform_limits({"workers": 3, "housekeepers": 1})
+    written = yaml.safe_load((tmp_path / ".coscience" / "resources.yaml").read_text())
+    assert (written["workers"], written["housekeepers"]) == (3.0, 1.0)
+    assert written["hosts"]["remote1"]["capacity"] == {"cpu": 28}     # untouched
+    assert status["capacity"]["workers"] == 3.0
+
+
+def test_platform_limits_refuse_anything_else(tmp_path):
+    """The old editor was a free-form name/value table; any name could be typed in."""
+    for bad in ({"cpu": 8}, {"memory_gb": 4}, {"licence": 1}):
+        with pytest.raises(ValueError, match="is not a platform limit"):
+            Service(tmp_path).set_platform_limits(bad)
+    with pytest.raises(ValueError, match="zero or more"):
+        Service(tmp_path).set_platform_limits({"workers": -1})
+
+
+def test_a_null_limit_removes_the_cap_and_leaves_the_rest(tmp_path):
+    _write(tmp_path, "cpu: 24\nworkers: 4\nhousekeepers: 2\n")
+    Service(tmp_path).set_platform_limits({"workers": None})
+    written = yaml.safe_load((tmp_path / ".coscience" / "resources.yaml").read_text())
+    assert "workers" not in written
+    assert (written["cpu"], written["housekeepers"]) == (24, 2)
+
+
+def test_saving_this_machine_keeps_the_platform_limits_it_did_not_send(tmp_path):
+    """G2: this machine's dialog sends its own amounts only. The caps used to vanish
+    unless every save sent them back."""
+    _write(tmp_path, "cpu: 24\nworkers: 4\nhousekeepers: 2\n")
+    Service(tmp_path).set_capacity({"cpu": 16, "memory_gb": 64})
+    written = yaml.safe_load((tmp_path / ".coscience" / "resources.yaml").read_text())
+    assert written == {"cpu": 16.0, "memory_gb": 64.0, "workers": 4, "housekeepers": 2}
+
+
+def test_platform_limits_over_http(tmp_path):
+    from fastapi.testclient import TestClient
+    from coscience.http_api import build_app
+    c = TestClient(build_app(Service(tmp_path)))
+    r = c.put("/api/platform-limits", json={"limits": {"workers": 2}})
+    assert r.status_code == 200 and r.json()["capacity"]["workers"] == 2.0
+    assert c.put("/api/platform-limits", json={"limits": {"cpu": 2}}).status_code == 422
