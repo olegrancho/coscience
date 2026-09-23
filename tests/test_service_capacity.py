@@ -177,6 +177,23 @@ def test_ledger_status_names_each_leases_host(tmp_path):
     assert Service(tmp_path).ledger_status()["leases"][0]["host"] == "local"
 
 
+def test_ledger_status_names_what_each_lease_is_running(tmp_path):
+    """Compute's running-now table and the workers gauge read the title here (P8, P9)."""
+    from coscience.ledger import Ledger
+    from coscience.models import Sprint, SprintStatus
+    from coscience.resources import ResourcePool
+    svc = Service(tmp_path)
+    svc.substrate.save_sprint(Sprint(id="sp1", status=SprintStatus.APPROVED, goals="g",
+                                     plan=["x"], title="Dock the new ligands"))
+    led = Ledger(ResourcePool({"cpu": 4.0}), tmp_path / ".coscience" / "leases.json")
+    led.load()
+    led.acquire("sp1", {"cpu": 1.0}, now=0.0, ttl=60.0)
+    led.acquire("gone", {"cpu": 1.0}, now=0.0, ttl=60.0)   # its sprint's files are gone
+
+    titles = {l["sprint_id"]: l["title"] for l in svc.ledger_status()["leases"]}
+    assert titles == {"sp1": "Dock the new ligands", "gone": ""}
+
+
 def test_set_capacity_keeps_the_hosts_section(tmp_path):
     _write(tmp_path, HOSTS_YAML)
     Service(tmp_path).set_capacity({"cpu": 16, "workers": 2})

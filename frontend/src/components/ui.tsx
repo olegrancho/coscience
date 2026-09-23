@@ -2,8 +2,9 @@ import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { useState } from "react";
 import { Modal, Stack, Text, Tooltip } from "@mantine/core";
 import { Link } from "react-router-dom";
-import type { ArtifactLock, RunAgg, SprintActivity, Usage, VoteTally } from "../api";
+import type { ArtifactLock, LeaseT, RunAgg, SprintActivity, Usage, VoteTally } from "../api";
 import { SPRINT_STATE_ORDER, statusVar } from "./status";
+import { dayMonth, dayMonthYear, fullTime } from "./timefmt";
 
 /** Break a view out of the app's centered 980px column to fill the canvas
  *  (navbar 232 + canvas padding 60 = 292px reserved), capped so text lines don't get
@@ -88,7 +89,7 @@ export function VoteControl(
   );
 }
 
-/** "2h ago" / "3d ago" / "Jun 27" — with the exact local time on hover. */
+/** "2h ago" / "3d ago" / "27 Jun" — with the exact local time on hover. */
 function relTime(at: number): string {
   const s = Math.max(0, Date.now() / 1000 - at);
   if (s < 45) return "just now";
@@ -98,25 +99,23 @@ function relTime(at: number): string {
   if (h < 24) return `${h}h ago`;
   const d = Math.round(h / 24);
   if (d < 7) return `${d}d ago`;
-  return new Date(at * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return dayMonth(at);
 }
 
 export function RelTime({ at, prefix }: { at?: number | null; prefix?: string }) {
   if (!at) return null;
-  const abs = new Date(at * 1000).toLocaleString();
+  const abs = fullTime(at);
   return <span title={abs}>{prefix}{relTime(at)}</span>;
 }
 
-/** Absolute local datetime ("Jul 14, 2026, 3:20 PM"), relative time on hover.
+/** Absolute local datetime ("14 Jul 2026, 15:20"), relative time on hover.
  * The inverse of RelTime — for when the exact date matters more than recency.
- * With `dateOnly`, shows just the day ("Jul 14, 2026") and puts the full
+ * With `dateOnly`, shows just the day ("14 Jul 2026") and puts the full
  * datetime + relative time on hover. */
 export function AbsTime({ at, prefix, dateOnly }: { at?: number | null; prefix?: string; dateOnly?: boolean }) {
   if (!at) return null;
-  const d = new Date(at * 1000);
-  const day = d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-  const full = d.toLocaleString(undefined,
-    { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const day = dayMonthYear(at);
+  const full = fullTime(at);
   if (dateOnly) return <span title={`${full} · ${relTime(at)}`}>{prefix}{day}</span>;
   return <span title={relTime(at)}>{prefix}{full}</span>;
 }
@@ -188,8 +187,22 @@ export function StateBar({ counts }: { counts: Record<string, number> }) {
 /** A labelled capacity gauge: used / capacity. Pass `onAdjust` to get -/+ steppers
  *  beside the readout; without it the gauge is read-only (the Overview renders it
  *  that way). */
-export function Gauge({ label, used, capacity, onAdjust, pending }: {
+/** Who is holding some of one resource, by title — what a gauge's hover names (P9).
+ *  Every gauge gets it, not only workers: "cpu 16 / 24" hides the same question. The
+ *  platform's own slots are always one apiece, so they carry no amount. */
+export function gaugeUsers(leases: LeaseT[] | undefined, key: string): string[] {
+  return (leases ?? [])
+    .filter((l) => (l.amounts[key] ?? 0) > 0)
+    .map((l) => {
+      const name = l.title || l.sprint_id;
+      return key === "workers" || key === "housekeepers" ? name : `${name} · ${l.amounts[key]}`;
+    });
+}
+
+export function Gauge({ label, used, capacity, onAdjust, pending, users }: {
   label: string; used: number; capacity: number;
+  /** When given, hovering the gauge names what is using it (`gaugeUsers`). */
+  users?: string[];
   onAdjust?: (delta: number) => void;
   pending?: boolean;        // capacity edited locally, not yet written to the server
 }) {
@@ -200,7 +213,7 @@ export function Gauge({ label, used, capacity, onAdjust, pending }: {
     color: "var(--ink-muted)", cursor: "pointer", fontSize: 12, lineHeight: "14px",
     padding: "0 6px",
   };
-  return (
+  const gauge = (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
         <span className="mono" style={{ fontSize: 12, color: "var(--ink-muted)" }}>{label}</span>
@@ -223,6 +236,15 @@ export function Gauge({ label, used, capacity, onAdjust, pending }: {
         <div style={{ height: "100%", width: `${pct}%`, background: hot ? "var(--signal)" : "var(--machine)" }} />
       </div>
     </div>
+  );
+  if (!users) return gauge;
+  return (
+    <Tooltip multiline maw={360} withArrow
+             label={users.length
+               ? <div>{users.map((u) => <div key={u}>{u}</div>)}</div>
+               : `Nothing is using ${label} right now.`}>
+      {gauge}
+    </Tooltip>
   );
 }
 
@@ -325,7 +347,7 @@ export function formatReset(resets: string): string {
   const days = (_WD.indexOf(wd[1]) - now.getDay() + 7) % 7;
   const d = new Date(now);
   d.setDate(now.getDate() + days);
-  const date = d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const date = dayMonth(d.getTime() / 1000);
   return `${wd[1]} ${date}${tm ? " · " + tm[1] : ""}`;
 }
 

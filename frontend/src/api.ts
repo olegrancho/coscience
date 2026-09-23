@@ -201,9 +201,16 @@ export interface HostReport {
 // A program's own notes per server — `local` is this machine. Separate from the
 // server entry's machine-wide `notes` in the ledger.
 export interface HostNotes { notes: Record<string, string>; reports: HostReport[] }
+// One grant of compute to one experiment. `title` is the sprint's, empty when its files
+// are gone; a worker slot shows up in `amounts` only while its agent runs.
+export interface LeaseT {
+  id: string; sprint_id: string; title?: string; amounts: Record<string, number>;
+  granted_at: number; expires_at: number; priority?: number; preemptible?: boolean;
+  host?: string; gpu_devices?: number[];
+}
 export interface Ledger {
   capacity: Record<string, number>; used: Record<string, number>;
-  available: Record<string, number>; leases: unknown[];
+  available: Record<string, number>; leases: LeaseT[];
   paused: boolean;
   // Set while the substrate's git repo is refusing commits (B4): the platform keeps
   // working and loses its history, so this is the only place it shows.

@@ -20,7 +20,9 @@ const g: WikiGraphT = {
 };
 
 const o = filterOptions(g);
-const all = () => resolveFilters(emptyFilters(), o);
+// Everything shown, untyped links included. Untouched filters no longer mean that
+// on a graph with typed relations (P11), so the helper says it outright.
+const all = () => ({ ...resolveFilters(emptyFilters(), o), typedOnly: false });
 
 describe("filterOptions", () => {
   it("reads the groups off the graph, sorted, without duplicates", () => {
@@ -32,6 +34,20 @@ describe("filterOptions", () => {
 });
 
 describe("resolveFilters", () => {
+  it("opens on the typed structure when the graph has any (P11)", () => {
+    expect(resolveFilters(emptyFilters(), o).typedOnly).toBe(true);
+  });
+
+  it("opens with every link shown when the graph has no typed relation", () => {
+    // "Typed only" here would leave every node standing and no edge at all.
+    const untyped = { ...g, edges: g.edges.filter((e) => !e.typed) };
+    expect(resolveFilters(emptyFilters(), filterOptions(untyped)).typedOnly).toBe(false);
+  });
+
+  it("keeps the reader's own choice once they have touched it", () => {
+    expect(resolveFilters({ ...emptyFilters(), typedOnly: false }, o).typedOnly).toBe(false);
+  });
+
   it("reads an untouched group as everything, so the ticks match the picture", () => {
     const r = all();
     expect([...r.types].sort()).toEqual(["Concept", "Entity"]);

@@ -159,6 +159,25 @@ describe("Compute page", () => {
     renderPage();
     expect(await screen.findByText(/on gpu1/)).toBeTruthy();
   });
+
+  it("names a running experiment by title and says how long it has run (P8)", async () => {
+    const now = Date.now() / 1000;
+    ledger.mockResolvedValue({
+      capacity: { cpu: 40 }, used: { cpu: 4 }, available: {}, paused: false, host_errors: [], hosts: [],
+      leases: [
+        { id: "l1", sprint_id: "p1-c4", title: "Dock the new ligands", amounts: { cpu: 4 },
+          granted_at: now - 2 * 3600 - 5 * 60, expires_at: now + 60 },
+        { id: "l2", sprint_id: "p1-c9", title: "", amounts: { cpu: 1 },
+          granted_at: now - 40, expires_at: now + 60 },
+      ],
+    });
+    renderPage();
+    expect(await screen.findByText("Dock the new ligands")).toBeTruthy();
+    expect(screen.getByText("Running for")).toBeTruthy();
+    expect(screen.getByText("2h 5m")).toBeTruthy();
+    expect(screen.getByText("p1-c9")).toBeTruthy();   // no title: the id stands in
+    expect(screen.getByText("40s")).toBeTruthy();
+  });
 });
 
 describe("Compute page steppers", () => {

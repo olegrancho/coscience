@@ -2019,6 +2019,7 @@ class Service:
             ],
             "leases": [
                 {"id": l.id, "sprint_id": l.sprint_id, "amounts": l.amounts,
+                 "title": self._lease_title(l.sprint_id),
                  "granted_at": l.granted_at, "expires_at": l.expires_at,
                  "priority": l.priority, "preemptible": l.preemptible,
                  "host": l.host, "gpu_devices": list(l.gpu_devices)}
@@ -2028,6 +2029,15 @@ class Service:
                          "listed": ledger.pool.host(l.host) is not None}
                         for l in ledger.stranded()],
         }
+
+    def _lease_title(self, sprint_id: str) -> str:
+        """What a lease is running, by name (P8, P9). One read per lease, and there are
+        only ever as many leases as slots. A lease can outlive its sprint's files, so
+        a missing one reads as no title rather than failing the whole status."""
+        try:
+            return self.substrate.load_sprint(sprint_id).title
+        except FileNotFoundError:
+            return ""
 
     def set_pause(self, paused: bool) -> dict:
         """Pause or resume the whole platform. Commits so the substrate history records

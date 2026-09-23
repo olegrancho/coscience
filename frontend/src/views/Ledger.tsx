@@ -1,4 +1,4 @@
-import { Button, Card, Group, Loader, Stack, Table, Text } from "@mantine/core";
+import { Button, Card, Group, Loader, Stack, Table, Text, Tooltip } from "@mantine/core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -6,7 +6,8 @@ import { api } from "../api";
 import CallLog from "../components/CallLog";
 import CapacityModal from "../components/CapacityModal";
 import HostsCard from "../components/HostsCard";
-import { EmptyState, Gauge, UsagePanel } from "../components/ui";
+import { EmptyState, Gauge, UsagePanel, formatDuration, gaugeUsers } from "../components/ui";
+import { fullTime } from "../components/timefmt";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 const WORKER_KEY = "workers";
@@ -138,7 +139,8 @@ export default function Ledger() {
               <Gauge key={k} label={k} used={l.used[k] ?? 0}
                      capacity={pending[k] ?? l.capacity[k]}
                      pending={k in pending}
-                     onAdjust={remoteTakesWork ? undefined : (delta) => adjust(k, delta)} />
+                     onAdjust={remoteTakesWork ? undefined : (delta) => adjust(k, delta)}
+                     users={gaugeUsers(l.leases, k)} />
             ))}
           </Stack>
         ) : <Text size="sm" c="dimmed">No compute pool is configured yet, so there's nothing to meter.</Text>}
@@ -157,15 +159,22 @@ export default function Ledger() {
           <Table>
             <Table.Thead>
               <Table.Tr>
-                <Table.Th>Experiment</Table.Th><Table.Th>Using</Table.Th>
+                <Table.Th>Experiment</Table.Th><Table.Th>Running for</Table.Th><Table.Th>Using</Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {l.leases.map((lease, i) => {
-                const x = lease as { id: string; sprint_id: string; amounts: Record<string, number>; host?: string };
+              {l.leases.map((x, i) => {
                 return (
                   <Table.Tr key={i}>
-                    <Table.Td><Link to={`/sprints/${x.sprint_id}`} className="mono" style={{ fontSize: 13, color: "var(--machine)", textDecoration: "none" }}>{x.sprint_id}</Link></Table.Td>
+                    {/* The title, like every other list; the id only when there is none. */}
+                    <Table.Td><Link to={`/sprints/${x.sprint_id}`} className={x.title ? undefined : "mono"} style={{ fontSize: 13, color: "var(--machine)", textDecoration: "none" }}>{x.title || x.sprint_id}</Link></Table.Td>
+                    <Table.Td className="mono" style={{ fontSize: 13 }}>
+                      {x.granted_at ? (
+                        <Tooltip label={`compute granted ${fullTime(x.granted_at)}`} withArrow>
+                          <span>{formatDuration(Date.now() / 1000 - x.granted_at)}</span>
+                        </Tooltip>
+                      ) : "—"}
+                    </Table.Td>
                     <Table.Td className="mono" style={{ fontSize: 13 }}>{`${Object.entries(x.amounts).map(([k, v]) => `${v} ${k}`).join(", ")}${x.host && x.host !== "local" ? ` on ${x.host}` : ""}`}</Table.Td>
                   </Table.Tr>
                 );

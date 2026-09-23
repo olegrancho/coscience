@@ -2,6 +2,7 @@ import { Table, Text, Tooltip } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { api, type CallRow } from "../api";
+import { dayTime } from "./timefmt";
 
 /** Colour by outcome. `running` is neutral rather than green: it has not
  *  succeeded yet, and on 09-04 most calls that were running went on to die. */
@@ -16,10 +17,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 function time(ts: number | null): string {
   if (!ts) return "—";
-  const d = new Date(ts * 1000);
-  return d.toLocaleString(undefined, {
-    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
-  });
+  return dayTime(ts);
 }
 
 function dur(seconds: number | null): string {

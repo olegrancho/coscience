@@ -3,7 +3,7 @@ import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type SprintRow } from "../api";
-import { AbsTime, Bars, computeCost, EmptyState, Gauge, Heartbeat, LiveActivity, RelTime, Running, StateBar, StatusBadge, UsagePanel, describeDisk } from "../components/ui";
+import { AbsTime, Bars, computeCost, EmptyState, Gauge, gaugeUsers, Heartbeat, LiveActivity, RelTime, Running, StateBar, StatusBadge, UsagePanel, describeDisk } from "../components/ui";
 
 function programOf(s: SprintRow) {
   if (s.program) return s.program;
@@ -233,7 +233,8 @@ export default function Overview() {
           {Object.keys(cap).length ? (
             <Stack gap={10} mt={2}>
               {Object.keys(cap).map((k) => (
-                <Gauge key={k} label={k} used={ledger.data?.used[k] ?? 0} capacity={cap[k]} />
+                <Gauge key={k} label={k} used={ledger.data?.used[k] ?? 0} capacity={cap[k]}
+                       users={gaugeUsers(ledger.data?.leases, k)} />
               ))}
             </Stack>
           ) : <Text size="xs" c="dimmed">No compute pool configured yet.</Text>}

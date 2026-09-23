@@ -373,7 +373,7 @@ export default function WikiGraphView() {
         shown={active}
         onToggle={setGroup}
         onAll={allGroup}
-        typedOnly={filters.typedOnly}
+        typedOnly={active.typedOnly}
         onTypedOnly={(v) => setFilters((f) => ({ ...f, typedOnly: v }))}
         tension={lens === "tension"}
         onTension={(v) => setLens(v ? "tension" : "structure")}

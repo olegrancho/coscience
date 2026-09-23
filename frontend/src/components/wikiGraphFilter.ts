@@ -16,7 +16,12 @@ export interface Filters {
   types: Set<string> | null;
   relations: Set<string> | null;
   trust: Set<string> | null;
-  typedOnly: boolean;
+  /** `null` until the reader touches it, like the groups above. It resolves to
+   *  on when the graph has any typed relation: the typed structure is what the
+   *  graph is for, so it is the first view. A graph with none opens with it off,
+   *  because "typed only" there leaves every node standing with no links at all,
+   *  which reads as a broken page rather than a filter doing its job. */
+  typedOnly: boolean | null;
 }
 
 /** The groups a graph offers, read off the data. */
@@ -34,7 +39,7 @@ export type ResolvedFilters = {
 };
 
 export function emptyFilters(): Filters {
-  return { types: null, relations: null, trust: null, typedOnly: false };
+  return { types: null, relations: null, trust: null, typedOnly: null };
 }
 
 export function filterOptions(g: WikiGraphT): FilterOptions {
@@ -54,7 +59,7 @@ export function resolveFilters(f: Filters, o: FilterOptions): ResolvedFilters {
     types: f.types ?? new Set(o.types),
     relations: f.relations ?? new Set(o.relations),
     trust: f.trust ?? new Set(o.trust),
-    typedOnly: f.typedOnly,
+    typedOnly: f.typedOnly ?? o.relations.length > 0,
   };
 }
 

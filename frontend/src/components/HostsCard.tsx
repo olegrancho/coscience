@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api, type LedgerHost, type ProgramRow, type StrandedLease } from "../api";
 import { describeDisk } from "./ui";
 import AddHostModal from "./AddHostModal";
+import { hhmm } from "./timefmt";
 
 const cardStyle = { border: "1px solid var(--hairline)", boxShadow: "var(--shadow-card)" };
 
@@ -24,8 +25,7 @@ function removingDetail(host: LedgerHost): string {
 function notAnsweringSince(host: LedgerHost): string {
   const h = host.health;
   if (!h) return "";
-  const hhmm = new Date(h.fail_since * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return `not answering since ${hhmm} — ${h.reason}`;
+  return `not answering since ${hhmm(h.fail_since)} — ${h.reason}`;
 }
 
 export type HostStatusKey = "working" | "ready" | "draining" | "removing" | "offline" | "unchecked";
@@ -161,8 +161,7 @@ export function diskCell(host: LedgerHost): DiskCell {
     };
   }
   const at = host.ssh && host.health?.last_ok
-    ? `, as of the last health check at ${new Date(host.health.last_ok * 1000)
-        .toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+    ? `, as of the last health check at ${hhmm(host.health.last_ok)}`
     : "";
   return { text: amount, title: `${amount} free where this server's sprints run${at}` };
 }

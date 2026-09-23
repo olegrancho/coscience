@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 
-import { Gauge, MODEL_OPTIONS, UsageBar, ZoomableImg, computeCost, describeCompute, tokenTitle, windowElapsed } from "./ui";
+import { Gauge, gaugeUsers, MODEL_OPTIONS, UsageBar, ZoomableImg, computeCost, describeCompute, tokenTitle, windowElapsed } from "./ui";
 
 // jsdom has no matchMedia; MantineProvider's color-scheme effect needs it.
 beforeAll(() => {
@@ -53,6 +53,39 @@ describe("ZoomableImg", () => {
     fireEvent.click(screen.getByAltText("plot.png"));
 
     expect(onNavigate).not.toHaveBeenCalled();
+  });
+});
+
+describe("gaugeUsers (P9)", () => {
+  const lease = (sprint_id: string, title: string, amounts: Record<string, number>) =>
+    ({ id: sprint_id, sprint_id, title, amounts, granted_at: 0, expires_at: 0 });
+  const leases = [
+    lease("p1-c4", "Dock the new ligands", { cpu: 4, workers: 1 }),
+    lease("p1-c9", "", { cpu: 8 }),
+    lease("p2-c1", "Rescore", { gpu: 1 }),
+  ];
+
+  it("names the experiments holding a worker slot, by title", () => {
+    expect(gaugeUsers(leases, "workers")).toEqual(["Dock the new ligands"]);
+  });
+
+  it("gives every other resource the amount each one holds, id standing in for a title", () => {
+    expect(gaugeUsers(leases, "cpu")).toEqual(["Dock the new ligands · 4", "p1-c9 · 8"]);
+  });
+
+  it("is empty when nothing holds any", () => {
+    expect(gaugeUsers(leases, "memory_gb")).toEqual([]);
+    expect(gaugeUsers(undefined, "cpu")).toEqual([]);
+  });
+
+  it("shows the names on hover, and says so when nothing is using it", async () => {
+    const { rerender } = render(
+      <MantineProvider><Gauge label="workers" used={1} capacity={4} users={["Dock the new ligands"]} /></MantineProvider>);
+    fireEvent.mouseEnter(screen.getByText("workers").parentElement!.parentElement!);   // the gauge itself
+    expect(await screen.findByText("Dock the new ligands")).toBeTruthy();
+    rerender(<MantineProvider><Gauge label="workers" used={0} capacity={4} users={[]} /></MantineProvider>);
+    fireEvent.mouseEnter(screen.getByText("workers").parentElement!.parentElement!);   // the gauge itself
+    expect(await screen.findByText("Nothing is using workers right now.")).toBeTruthy();
   });
 });
 

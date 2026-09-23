@@ -1,7 +1,7 @@
 import { Suspense, lazy, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { ActionIcon, Card, Group, Loader, Modal, SegmentedControl, Text, Tooltip } from "@mantine/core";
+import { ActionIcon, Button, Card, Group, Loader, Modal, SegmentedControl, Text, Tooltip } from "@mantine/core";
 import { api } from "../api";
 import { stageColor, stageFill } from "./graphFlow";
 import { clearPositions } from "./graphPositions";
@@ -58,8 +58,11 @@ export default function LineageCard({ programId }: { programId: string }) {
         onChange={(v) => setMode(v as LayoutMode)}
         data={[{ label: "box", value: "box" }, { label: "dot", value: "dot" }]}
       />
-      <Tooltip label="Reset layout">
-        <ActionIcon variant="subtle" onClick={resetLayout} aria-label="Reset layout">↺</ActionIcon>
+      {/* A word, not an icon: the same control sat here as a bare "↺" for two months
+          and was asked for as a missing feature (P10). No confirmation — what it
+          discards is where this browser remembers nodes being dragged, nothing more. */}
+      <Tooltip multiline maw={280} label="Lay the graph out again from its structure. Positions you dragged nodes to are forgotten.">
+        <Button size="compact-xs" variant="subtle" onClick={resetLayout}>Auto-layout</Button>
       </Tooltip>
     </Group>
   );
