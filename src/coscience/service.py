@@ -501,6 +501,18 @@ class Service:
         from coscience.claude_executor import read_activity
         return read_activity(self.substrate.sprint_dir(sprint_id))
 
+    def pulse_status(self) -> dict:
+        """What the rail's pulse shows about compute (O23): each machine's free space and
+        whether the substrate is committing. The rail is on every page, so every open tab
+        polls this — it reads the pool file and the health file, never a sprint, where
+        `ledger_status` parses every sprint on the box."""
+        health = host_health.load(self.repo_root)
+        return {
+            "hosts": [{"name": h.name, "label": h.label, **self._disk(h, health)}
+                      for h in self.pool.hosts],
+            "commit_error": commit_health.describe(commit_health.read(self.substrate.repo_root)),
+        }
+
     def _disk(self, host, health: dict) -> dict:
         """`free_gb` and `disk` ("", "low" or "critical") for one host. A machine that
         has not reported a reading carries free_gb None and disk "" — unknown never

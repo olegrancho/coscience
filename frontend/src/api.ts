@@ -228,6 +228,10 @@ export interface LeaseT {
   granted_at: number; expires_at: number; priority?: number; preemptible?: boolean;
   host?: string; gpu_devices?: number[];
 }
+export interface PulseStatus {
+  hosts: { name: string; label: string; free_gb: number | null; disk: "" | "low" | "critical" }[];
+  commit_error: string;
+}
 export interface Ledger {
   capacity: Record<string, number>; used: Record<string, number>;
   available: Record<string, number>; leases: LeaseT[];
@@ -619,6 +623,9 @@ export const api = {
   listResults: () => fetch("/api/results").then(j<ResultRow[]>),
   getResult: (id: string) => fetch(`/api/results/${id}`).then(j<ResultRow>),
   getLedger: () => fetch("/api/ledger").then(j<Ledger>),
+  // What the rail's pulse shows about compute (O23). Every page polls it, so it is
+  // kept to free space and commit health; the ledger parses every sprint.
+  getPulse: () => fetch("/api/pulse").then(j<PulseStatus>),
   // `programs` is optional here (unlike `HostDeclaration`, where a probe's own
   // `declared` echo always carries a concrete list): the dialog omits it
   // entirely — rather than sending a premature `[]` — while its program

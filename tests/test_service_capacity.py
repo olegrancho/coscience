@@ -364,3 +364,26 @@ def test_a_servers_totals_are_edited_with_it(tmp_path):
     assert written["hosts"]["g1"]["machine"] == {"cpu": 12.0}
     with pytest.raises(ValueError, match="more than the machine's 12"):
         svc.update_host("g1", capacity={"cpu": 14})
+
+
+# --- O23: the rail's pulse has its own small read -----------------------------------
+
+def test_the_pulse_reads_free_space_and_commit_health_without_touching_a_sprint(tmp_path, monkeypatch):
+    """Every open tab polls this, so it must not parse the sprints the ledger does."""
+    import json
+    _write(tmp_path, "cpu: 4\nlabel: avatar\nhosts:\n  g1:\n    ssh: g1\n    label: big one\n"
+                     "    capacity: {cpu: 8}\n")
+    (tmp_path / ".coscience" / "host-health.json").write_text(json.dumps(
+        {"g1": {"state": "ok", "free_gb": 0.5}}))
+    svc = Service(tmp_path)
+    monkeypatch.setattr(type(svc.substrate), "iter_sprints",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("read a sprint")))
+    monkeypatch.setattr(type(svc.substrate), "load_sprint",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("read a sprint")))
+
+    status = svc.pulse_status()
+
+    g1 = next(h for h in status["hosts"] if h["name"] == "g1")
+    assert (g1["label"], g1["free_gb"], g1["disk"]) == ("big one", 0.5, "critical")
+    assert next(h for h in status["hosts"] if h["name"] == "local")["label"] == "avatar"
+    assert status["commit_error"] == ""

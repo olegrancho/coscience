@@ -59,11 +59,12 @@ function railLinkStyle({ isActive }: { isActive: boolean }) {
 function Pulse() {
   const programs = useQuery({ queryKey: ["programs"], queryFn: api.listPrograms });
   const sprints = useQuery({ queryKey: ["sprints"], queryFn: api.listSprints });
-  const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.getLedger });
+  // Not the ledger: the rail is on every page, and the ledger parses every sprint (O23).
+  const pulse = useQuery({ queryKey: ["pulse"], queryFn: api.getPulse });
   const { active, running, awaitingYou, waiting, cantStart } =
     pulseCounts(programs.data ?? [], sprints.data ?? []);
-  const disk = diskPulse(ledger.data?.hosts ?? []);
-  const commitError = ledger.data?.commit_error ?? "";
+  const disk = diskPulse(pulse.data?.hosts ?? []);
+  const commitError = pulse.data?.commit_error ?? "";
 
   const Row = ({ children }: { children: ReactNode }) => (
     <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-muted)" }}>

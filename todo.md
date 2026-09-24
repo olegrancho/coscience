@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 176
+version: 178
 last_updated: 2026-09-23
 ---
 
@@ -8,27 +8,15 @@ last_updated: 2026-09-23
 
 ### O23. Stop every program page polling the whole ledger
 
-The notes payload now carries every server with its display name and whether the program may use it, and the program page no longer requests the ledger at all.
+No page polls the ledger except Compute and the Overview: the server-notes card gets its servers with the notes, and the rail's pulse — on every page — reads a small `/api/pulse` (each machine's free space, and commit health) instead.
 
-**Check:** with a program page open, the browser's network tab shows `/api/programs/<id>/host-notes` polling and no `/api/ledger`. Compute and the Overview still poll the ledger, as they should.
+**Check:** with a program page open, the browser's network tab (filter `api`) shows `/api/pulse` and `/api/programs/<id>/host-notes` every ten seconds and no `/api/ledger`. The first QC found the ledger still polled: the notes card had stopped, but the pulse's disk and commit warnings (B1, B4) read it from every page. `/api/pulse` reads the pool and health files and no sprint, about 1 ms against ~85 ms for the ledger.
 
 ### O22. Tidy the edges of the server notes
 
 Four fixes: the planner is no longer shown notes or reports for servers it may not use; a human can only start a note on a server the program may use; saves carry the note as opened and a conflict is refused, not overwritten; a planner cycle skips a note a human saved while it ran.
 
 **Check:** (1) withdraw a program's access to a server that has pending reports — the next cycle's report has no "Host note FAILED" line, and the row offers "Mark read"; (2) `PUT …/host-notes/typo` answers 422; (3) edit one note in two tabs and save both — the second shows the first's text and asks before replacing it. The section-nav entry the item also named had already landed on 09-19.
-
-### G1. Make the global capacity editor the platform's own limits, and nothing else
-
-The global editor is gone: the platform's two limits — worker and housekeeping agents at once — are set only by the steppers on their own gauges on Compute, saved through `PUT /api/platform-limits`, which refuses any other name.
-
-**Check:** Compute has no capacity or limits dialog; the `workers` and `housekeepers` gauges step their limits, and no other gauge has steppers. With a cap missing, its note offers "Set a limit", which starts it at what is running now (at least 1). The ∞ after a limit's steppers removes the cap altogether, dropping any stepper change still waiting to save.
-
-### G2. Edit every machine's real capacity only on its own card, this one included
-
-Each server's dialog — this machine's included — now shows, for CPU and memory, what Co-Science may use beside what the machine has; and one row per graphics card with an on/off switch, the VRAM Co-Science may use and the VRAM the card has.
-
-**Check:** open this machine's dialog, press Detect — the "on the machine" fields fill with what it found while the available ones stay as they were; switch a card off and save — it is written `disabled: true`, stays in the dialog, and no gauge counts it; try offering more CPU, memory or VRAM than the total — the dialog says which and Save waits. The first QC's finding was that the dialog showed the machine's total where it should show what Co-Science gets. Totals are stored as `machine: {cpu, memory_gb}` and per card `total_vram_gb`; every existing server starts without them until probed, detected or typed in. A switched-off card keeps its device number, so the cards after it keep theirs.
 
 ### P1. Redesign the sprint edit dialog
 
@@ -69,11 +57,6 @@ carry a GPU section naming the cards and VRAM share. Memory gets the same treatm
 trust, with no enforcement: nothing stops a job from using more. Enforcing it (a cgroup
 or `MemoryMax`) and checking free memory at grant time stay unplanned until a job
 actually runs a server out of memory. Written up as O17 before this block existed.
-
-## B. Disk space
-
-No machine is given work it has no room for, and a machine that is running out says
-so on the dashboard before it stops working.
 
 ## D. Wiki content health
 
@@ -416,6 +399,14 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### G2. Edit every machine's real capacity only on its own card, this one included
+
+Each server's dialog sets what Co-Science may use beside what the machine has, in one aligned table with a row per resource and an on/off switch per graphics card.
+
+### G1. Make the global capacity editor the platform's own limits, and nothing else
+
+The platform's two limits are set only on their own gauges on Compute — steppers, an ∞ that removes the cap, and a "Set a limit" when there is none — through an endpoint that refuses any other name.
+
 ### P12. Collapse the server notes on the program page
 
 Each server's note starts collapsed to one line — name, the note's first line and an unread-reports badge — and opens on click.
@@ -447,11 +438,3 @@ Compute's running-now table names each experiment by title and says how long it 
 ### P2. Show times the same way whatever the browser's locale
 
 Every time on the dashboard is 24-hour `HH:MM` and every date `22 Sep` / `22 Sep 2026`, from one formatter that never consults the locale.
-
-### P11. Show only typed nodes on the wiki graph by default
-
-The wiki graph opens with "typed only" on whenever it has a typed relation, and off when it has none.
-
-### B4. Say when the substrate cannot commit
-
-A refused commit is told apart from an empty one and recorded outside the substrate, and the pulse grows a red row after three in a row — checked on a scratch substrate with a refusing hook, and silent again on the next good commit.

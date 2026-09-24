@@ -1009,6 +1009,10 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def ledger_status() -> dict:
         return service.ledger_status()
 
+    @api.get("/pulse")
+    def pulse_status() -> dict:
+        return service.pulse_status()
+
     @api.put("/capacity")
     def set_capacity(body: CapacityUpdate) -> dict:
         try:
