@@ -1,22 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 184
+version: 185
 last_updated: 2026-09-23
 ---
 
 # To QC
-
-### P14. Stop the sprint page's Wake now and Clear hold buttons being cut off
-
-The sleeping-agent card's "Wake now" and the hold card's "Clear hold" keep their full width, and the text beside them wraps instead; the server notes' "Mark read" link got the same treatment.
-
-**Check:** open a held sprint and one whose agent is sleeping on a job — both labels read in full at any window width.
-
-### P13. Show the app's version in the top-right corner
-
-The header reads "live · v0.1.1"; the number comes from `VERSION` at the repo root, is baked into the bundle and reported by `/api/version`, and `scripts/bump-version` raises it once per deploy.
-
-**Check:** the header after a hard reload, and `curl /api/version` showing the same number beside the SHA. The next deploy should read v0.1.2 — the bump is a deploy rule in `CLAUDE.md` (rule 4), done on the machine where the deploy's commit is made; a host that deploys by `git pull` receives it already raised.
 
 # To Do (sprint)
 
@@ -393,6 +381,14 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### P13. Show the app's version in the top-right corner
+
+The header reads "live · v0.1.1", from a `VERSION` file that the build bakes in, `/api/version` reports, and each deploy raises by one.
+
+### P14. Stop the sprint page's Wake now and Clear hold buttons being cut off
+
+The sprint cards' buttons keep their full width and the text beside them wraps, so no label is clipped.
+
 ### P1. Redesign the sprint edit dialog
 
 The edit dialog is a wide two-column form — the work on the left, how it runs on the right — and the title, summary and rationale are editable too.
@@ -424,11 +420,3 @@ The done/canceled cap never folds away a row the viewer has not seen yet.
 ### P6. Filter the experiments list to just the new ones
 
 The experiments card has an "only new (N)" check that shows just the highlighted rows, combined with the status filter.
-
-### P5. Come back to the experiments list, not the top of the program
-
-Going back from an experiment lands on its row in the program's list, with a brief flash so the eye finds it.
-
-### P10. Give the lineage graph an auto-layout button
-
-The lineage card has a labelled Auto-layout button that forgets dragged positions and lays the graph out again.
