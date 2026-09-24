@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""Raise the app's version by one step (P13): 0.1.1 -> 0.1.2.
+
+Run once per deploy, before the deploy's commit, so the commit carries the new number
+and the build bakes it in. The version counts deploys, not commits: several commits
+deployed together raise it once.
+
+    scripts/bump-version            # bumps ./VERSION, prints the new version
+    scripts/bump-version path/to/VERSION
+"""
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1] / "VERSION"
+parts = path.read_text().strip().split(".")
+if len(parts) != 3 or not all(p.isdigit() for p in parts):
+    sys.exit(f"{path}: expected a version like 0.1.1, found {path.read_text().strip()!r}")
+parts[-1] = str(int(parts[-1]) + 1)
+new = ".".join(parts)
+path.write_text(new + "\n")
+print(new)

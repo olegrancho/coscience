@@ -1,28 +1,22 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 178
+version: 184
 last_updated: 2026-09-23
 ---
 
 # To QC
 
-### O23. Stop every program page polling the whole ledger
+### P14. Stop the sprint page's Wake now and Clear hold buttons being cut off
 
-No page polls the ledger except Compute and the Overview: the server-notes card gets its servers with the notes, and the rail's pulse — on every page — reads a small `/api/pulse` (each machine's free space, and commit health) instead.
+The sleeping-agent card's "Wake now" and the hold card's "Clear hold" keep their full width, and the text beside them wraps instead; the server notes' "Mark read" link got the same treatment.
 
-**Check:** with a program page open, the browser's network tab (filter `api`) shows `/api/pulse` and `/api/programs/<id>/host-notes` every ten seconds and no `/api/ledger`. The first QC found the ledger still polled: the notes card had stopped, but the pulse's disk and commit warnings (B1, B4) read it from every page. `/api/pulse` reads the pool and health files and no sprint, about 1 ms against ~85 ms for the ledger.
+**Check:** open a held sprint and one whose agent is sleeping on a job — both labels read in full at any window width.
 
-### O22. Tidy the edges of the server notes
+### P13. Show the app's version in the top-right corner
 
-Four fixes: the planner is no longer shown notes or reports for servers it may not use; a human can only start a note on a server the program may use; saves carry the note as opened and a conflict is refused, not overwritten; a planner cycle skips a note a human saved while it ran.
+The header reads "live · v0.1.1"; the number comes from `VERSION` at the repo root, is baked into the bundle and reported by `/api/version`, and `scripts/bump-version` raises it once per deploy.
 
-**Check:** (1) withdraw a program's access to a server that has pending reports — the next cycle's report has no "Host note FAILED" line, and the row offers "Mark read"; (2) `PUT …/host-notes/typo` answers 422; (3) edit one note in two tabs and save both — the second shows the first's text and asks before replacing it. The section-nav entry the item also named had already landed on 09-19.
-
-### P1. Redesign the sprint edit dialog
-
-The edit dialog is a wide two-column form — the work (title, summary, goals, plan, rationale) on the left, how it runs (priority, worker model, preemptible, compute) on the right — and the title, summary and rationale are now editable through the API too.
-
-**Check:** open Edit on a proposed sprint and on an approved one. Proposed: everything is live. Approved: title, summary, model and the scheduler fields are live; goals, plan and rationale are greyed with a line saying why. The rationale rule is new — it argued for the approval, so it closes with goals and plan; the title and summary stay open until done or canceled. Changing the model on a sprint whose agent is running says it will restart it.
+**Check:** the header after a hard reload, and `curl /api/version` showing the same number beside the SHA. The next deploy should read v0.1.2 — the bump is a deploy rule in `CLAUDE.md` (rule 4), done on the machine where the deploy's commit is made; a host that deploys by `git pull` receives it already raised.
 
 # To Do (sprint)
 
@@ -399,6 +393,18 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### P1. Redesign the sprint edit dialog
+
+The edit dialog is a wide two-column form — the work on the left, how it runs on the right — and the title, summary and rationale are editable too.
+
+### O22. Tidy the edges of the server notes
+
+The planner is no longer shown notes it could never write back, a note can only be started on a usable server, and a note saved over a changed one — by a person or the planner — is refused instead of silently overwriting it.
+
+### O23. Stop every program page polling the whole ledger
+
+Only Compute and the Overview poll the ledger; the notes card gets its servers with the notes, and the rail's pulse reads a small `/api/pulse`.
+
 ### G2. Edit every machine's real capacity only on its own card, this one included
 
 Each server's dialog sets what Co-Science may use beside what the machine has, in one aligned table with a row per resource and an on/off switch per graphics card.
@@ -426,15 +432,3 @@ Going back from an experiment lands on its row in the program's list, with a bri
 ### P10. Give the lineage graph an auto-layout button
 
 The lineage card has a labelled Auto-layout button that forgets dragged positions and lays the graph out again.
-
-### P9. Name the experiments behind the workers gauge
-
-Every compute gauge, and the pulse's live agents, name on hover the experiments and programs behind them, by title.
-
-### P8. Show how long each running experiment has been going, on Compute
-
-Compute's running-now table names each experiment by title and says how long it has held compute, with the grant time on hover.
-
-### P2. Show times the same way whatever the browser's locale
-
-Every time on the dashboard is 24-hour `HH:MM` and every date `22 Sep` / `22 Sep 2026`, from one formatter that never consults the locale.

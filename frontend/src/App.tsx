@@ -234,7 +234,7 @@ export default function App() {
           <UserMenu />
           <Group gap={7} wrap="nowrap">
             <span className="heartbeat" />
-            <Text className="mono" size="xs" c="dimmed">live · refreshes every 10s</Text>
+            <Text className="mono" size="xs" c="dimmed">live · v{__APP_RELEASE__}</Text>
           </Group>
         </Group>
       </AppShell.Header>

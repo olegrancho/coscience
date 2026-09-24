@@ -27,6 +27,12 @@ def test_version_returns_sha(client):
     assert isinstance(sha, str) and sha
 
 
+def test_version_names_the_apps_numbered_version(client):
+    """P13: the number the header shows, from the repo's VERSION file."""
+    import re
+    assert re.fullmatch(r"\d+\.\d+\.\d+", client.get("/api/version").json()["version"])
+
+
 def test_create_program_returns_201_and_detail(client):
     r = client.post("/api/programs", json={"title": "Cancer", "goals": "cure it"})
     assert r.status_code == 201

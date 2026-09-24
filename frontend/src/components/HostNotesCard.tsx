@@ -177,6 +177,7 @@ function Row({ row, programId }: { row: NoteRow; programId: string }) {
                 This program no longer runs here, so the planner will not fold these in.
               </Text>
               <button type="button" className="linklike" disabled={saving}
+                      style={{ flexShrink: 0, whiteSpace: "nowrap" }}
                       onClick={() => write(row.note, row.note)}>Mark read</button>
             </Group>
           )}

@@ -27,6 +27,17 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @lru_cache(maxsize=1)
+def app_release() -> str:
+    """The app's numbered version from the repo's VERSION file (P13), e.g. "0.1.1",
+    raised once per deploy by scripts/bump-version. Read once at startup, like the SHA:
+    a process started before a bump keeps saying what it is actually running."""
+    try:
+        return (_REPO_ROOT / "VERSION").read_text().strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
+@lru_cache(maxsize=1)
 def server_version() -> str:
     """Short git SHA of the code this server is running, resolved once at startup.
 
@@ -336,7 +347,7 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
 
     @pub.get("/version")
     def version() -> dict:
-        return {"sha": server_version()}
+        return {"sha": server_version(), "version": app_release()}
 
     @pub.get("/users")
     def list_users() -> list[dict]:

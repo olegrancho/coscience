@@ -56,6 +56,12 @@ usage-gated and idle beats make no Claude call.
    `deploy.sh` kills and relaunches it.
 3. **Frontend is served static from `frontend/dist`** — no restart needed for a
    rebuild, but a browser hard-reload (Ctrl-Shift-R) is, to drop the cached bundle.
+4. **Every deploy raises the version by one.** `VERSION` (repo root) is the number
+   the header shows ("live · v0.1.2") and `/api/version` reports. Run
+   `scripts/bump-version` on the machine where the deploy's commit is made, before
+   that commit, so the commit carries the new number — once per deploy, however many
+   commits it ships. A host that deploys by `git pull` (`deploy.sh`) receives the
+   number already raised and does not bump it again.
 
 ### Remote servers (off unless a deployment turns them on)
 

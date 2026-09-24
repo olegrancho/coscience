@@ -482,7 +482,8 @@ export default function SprintDetail() {
           // and the planner reached for un-approving it to make "not yet" visible.
           <Card withBorder padding="sm" mt={10} style={{ background: "var(--paper)" }}>
             <Group justify="space-between" wrap="nowrap" align="flex-start">
-              <div>
+              {/* P14: the text takes what is left and wraps; the button keeps its width. */}
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <Text size="sm" fw={600}>Held by the PM — approved, not released yet</Text>
                 <Text size="sm" mt={3} style={{ color: "var(--ink-muted)", lineHeight: 1.5 }}>
                   {s.hold.why}
@@ -492,7 +493,7 @@ export default function SprintDetail() {
                 ) : null}
               </div>
               <Tooltip label="Lift the hold. The sprint stays approved and can be released — by you with Run, or by the PM on its next cycle." withArrow openDelay={300}>
-                <Button size="xs" variant="default" onClick={clearHold}>Clear hold</Button>
+                <Button size="xs" variant="default" onClick={clearHold} style={{ flexShrink: 0 }}>Clear hold</Button>
               </Tooltip>
             </Group>
           </Card>
@@ -500,11 +501,11 @@ export default function SprintDetail() {
         {s.agent_state === "sleeping" && s.job && (
           <Card withBorder padding="sm" mt={10} style={{ background: "var(--paper)" }}>
             <Group justify="space-between" wrap="nowrap">
-              <div>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <Text size="sm" fw={600}>💤 Agent sleeping — waiting on a detached job</Text>
                 <Text size="xs" c="dimmed">{s.job.note || "(job)"} · expected ~{Math.round(s.job.expected_seconds / 60)}m · next check <RelTime at={s.job.next_wake} /></Text>
               </div>
-              <Button size="xs" onClick={wake}>Wake now</Button>
+              <Button size="xs" onClick={wake} style={{ flexShrink: 0 }}>Wake now</Button>
             </Group>
           </Card>
         )}
