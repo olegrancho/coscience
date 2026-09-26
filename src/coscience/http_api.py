@@ -902,6 +902,25 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
+    @api.post("/programs/{program_id}/wiki/migrate")
+    def migrate_wiki(program_id: str,
+                     user: "auth.User | None" = Depends(current_user)) -> dict:
+        # A migration spends several agent runs; record whose say-so it was.
+        actor = f"human:{user.username}" if user else "human:anonymous"
+        try:
+            return service.request_wiki_migration(program_id, by=actor)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @api.delete("/programs/{program_id}/wiki/migrate")
+    def cancel_wiki_migration(program_id: str) -> dict:
+        try:
+            return service.cancel_wiki_migration(program_id)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+
     @api.post("/programs/{program_id}/wiki/unquarantine")
     def unquarantine_wiki(program_id: str) -> dict:
         return service.unquarantine_wiki(program_id)

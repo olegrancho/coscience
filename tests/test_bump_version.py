@@ -6,8 +6,8 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "bump-version"
 
 
-def _bump(path):
-    return subprocess.run([sys.executable, str(SCRIPT), str(path)],
+def _bump(path, *flags):
+    return subprocess.run([sys.executable, str(SCRIPT), *flags, str(path)],
                           capture_output=True, text=True)
 
 
@@ -17,6 +17,14 @@ def test_it_raises_the_last_number_and_says_so(tmp_path):
     out = _bump(v)
     assert out.returncode == 0 and out.stdout.strip() == "0.1.10"
     assert v.read_text() == "0.1.10\n"
+
+
+def test_minor_raises_the_second_number_and_restarts_the_last(tmp_path):
+    v = tmp_path / "VERSION"
+    v.write_text("0.1.4\n")
+    out = _bump(v, "--minor")
+    assert out.returncode == 0 and out.stdout.strip() == "0.2.0"
+    assert v.read_text() == "0.2.0\n"
 
 
 def test_it_refuses_a_file_that_is_not_a_version(tmp_path):

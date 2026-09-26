@@ -170,6 +170,19 @@ def render_ingest(program, bundle: Path, objects: list[tuple[WikiObject, str]],
                   run_dir: Path) -> str:
     """The full ingest instruction document, written to the run directory."""
     scratchpad = run_dir / "scratchpad.md"
+    from coscience import wiki_layouts, wiki_topics
+    if wiki_layouts.of(bundle) == wiki_layouts.TOPICS_V1:
+        protocol = wiki_topics.PROTOCOL.format(scratchpad=scratchpad)
+        rules, voice = wiki_topics.RULES, wiki_topics.VOICE
+        task = ("For each one: write its grounding page under `sources/` at the slug "
+                "given, then place what it established in the topic and background pages "
+                "it belongs to, rewriting their current understanding where it changed.")
+    else:
+        protocol = _PROTOCOL.format(scratchpad=scratchpad)
+        rules, voice = _RULES, _VOICE
+        task = ("For each one: write its grounding page under `sources/` at the slug "
+                "given, then create or extend the\nconcept, entity and synthesis pages "
+                "it establishes.")
     return f"""# Wiki ingest run
 
 You are the wiki maintainer for the research program **{program.title}**
@@ -186,21 +199,25 @@ first.
 
 ## Your task
 
-Ingest the {len(objects)} object(s) below into the wiki. For each one: write its
-grounding page under `sources/` at the slug given, then create or extend the
-concept, entity and synthesis pages it establishes.
+Ingest the {len(objects)} object(s) below into the wiki. {task}
 
 A `sources/` page is a pointer plus a summary — it must carry
 `graph_excluded: true` and the sections `# Summary`, `# Section map`,
 `# Notable insights`, `# Concepts extracted`. It never carries the knowledge
 itself; the concept pages do.
 
+An artifact object (`artifact:<id>@<version>`) may be a new version of one
+already in the wiki. If an earlier version has a `sources/` page, keep that page
+but set its `status: deprecated` and open its `# Summary` with a line naming the
+version that replaced it and linking to its page. The earlier version still
+exists; it is only no longer current, so never describe it as removed.
+
 ## The batch
 
 {_object_block(objects)}
-{_PROTOCOL.format(scratchpad=scratchpad)}
-{_RULES}
-{_VOICE}
+{protocol}
+{rules}
+{voice}
 {_HOUSEKEEPING.format(run_dir=run_dir)}
 {_PROHIBITIONS.format(bundle=bundle, run_dir=run_dir)}
 """
@@ -253,6 +270,77 @@ platform files it under `.wiki/lint/`. Never delete a page, and never edit
 `# Human notes`.
 
 {_PROHIBITIONS.format(bundle=bundle, run_dir=run_dir)}
+"""
+
+
+def render_sweep(program, bundle: Path, run_dir: Path, results_dir: Path | None = None) -> str:
+    """The heavy lint (todo L9): an agent reads ACROSS pages for what the mechanical
+    lint cannot see. Chosen over tracking claims as structured data — nothing to
+    maintain between runs. What probing and a blind comparison of two ingests found,
+    and this is aimed at: a page's opening still stating what its own later section
+    overturned; one quantity given two values; an index line carrying a retired
+    verdict; and a name or number that does not match the source it cites (one wiki
+    named its benchmark by a better-known neighbour's name on 71 pages)."""
+    raw = (f"The raw results the source pages summarise are under `{results_dir}`; "
+           f"read one when a source page is too thin to settle a claim."
+           if results_dir else "")
+    return f"""# Wiki sweep run
+
+You are auditing the knowledge wiki of **{program.title}** (`{program.id}`),
+unattended, in `{bundle}`. Its `CLAUDE.md` is binding. This is not an ingest: no new
+material arrives. Your job is to find where the wiki is wrong about itself, fix what
+the evidence settles, and report the rest.
+
+Program goals:
+
+{_indent(program.goals)}
+
+## What to look for
+
+1. **Stale current claims.** A page's `description`, its opening section, or its
+   line in `index.md` states a conclusion that a later section of the same page, or
+   another page, says was overturned or revised.
+2. **One quantity, two values.** The same measurement (a count, a rate, a size, a
+   version, a threshold) given different values on one page or across pages,
+   with no scope explaining the difference.
+3. **Claims that do not match their source.** Check names, versions and numbers
+   against the `sources/` page each claim cites — and, where that page is thin, the
+   raw result. {raw} Pay special attention to names of datasets, benchmarks,
+   tools and versions: an agent can substitute a better-known name for the right one.
+4. **Explanations cited to a source that does not state them** — a mechanism or
+   reason written as if the result said it.
+5. **One word, two meanings** used without qualification.
+
+## How to work
+
+- Start from `index.md` and the frontmatter of every page, then read the pages
+  whose descriptions or index lines make strong or quantitative claims, and the
+  pages that cite the same sources. Prioritise breadth: a sweep that checks every
+  page's opening against its body finds more than one that reads five pages deeply.
+- Keep notes in `{run_dir}/scratchpad.md` as you go.
+
+## What to do with a finding
+
+- **Settled by the evidence** (the source says otherwise, or the page's own later
+  section supersedes its opening): fix it in place. Rewrite the stale line so it is
+  true now, correct the wrong name or number, and keep the old claim where the
+  schema keeps history. Every fix cites its source.
+- **Not settled** (two measurements genuinely disagree, or the source is silent):
+  do not guess. State both values with their scope on the page, and add the
+  question to `QUESTIONS.md` under `## Open`.
+- Never delete a page, never touch `# Human notes`, never compute a hash, never
+  write outside `{bundle}` and `{run_dir}`, never change git state.
+
+## Report
+
+Write `{run_dir}/sweep-report.md`: a table with one row per finding — page, kind
+(1-5 above), what was wrong, what the evidence says, and `fixed` or `open` — then
+two sentences on the wiki's overall reliability. Then write `{run_dir}/report.json`:
+
+```json
+{{"pages_updated": ["concepts/a.md"], "findings": 0, "fixed": 0, "open": 0,
+  "notes": "one or two sentences"}}
+```
 """
 
 

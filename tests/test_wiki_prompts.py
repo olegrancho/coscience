@@ -62,8 +62,10 @@ def test_ingest_prompt_defines_what_objects_means():
     assert "never put page paths in `objects`" in text
 
 
-def test_ingest_prompt_carries_the_four_pass_protocol():
-    text = wiki_prompts.render_ingest(PROGRAM, BUNDLE, OBJECTS, RUN)
+def test_ingest_prompt_carries_the_four_pass_protocol(tmp_path):
+    # The older layout's protocol; a wiki built in it keeps it until migrated.
+    (tmp_path / "CLAUDE.md").write_text(wiki_store.BUNDLE_CLAUDE_MD)
+    text = wiki_prompts.render_ingest(PROGRAM, tmp_path, OBJECTS, RUN)
     for pass_name in ("structure map", "claim", "relationship", "contradiction"):
         assert pass_name in text.lower()
 

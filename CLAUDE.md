@@ -61,7 +61,10 @@ usage-gated and idle beats make no Claude call.
    `scripts/bump-version` on the machine where the deploy's commit is made, before
    that commit, so the commit carries the new number — once per deploy, however many
    commits it ships. A host that deploys by `git pull` (`deploy.sh`) receives the
-   number already raised and does not bump it again.
+   number already raised and does not bump it again. A deploy that asks something
+   of whoever runs the platform — a new wiki layout their wikis need migrating to
+   (`docs/wiki-layouts.md`) — raises the second number instead:
+   `scripts/bump-version --minor` (0.1.4 → 0.2.0).
 
 ### Remote servers (off unless a deployment turns them on)
 

@@ -5,17 +5,27 @@ Run once per deploy, before the deploy's commit, so the commit carries the new n
 and the build bakes it in. The version counts deploys, not commits: several commits
 deployed together raise it once.
 
+A deploy that asks something of the people running the platform — a new wiki layout
+their wikis need migrating to (docs/wiki-layouts.md) — raises the second number
+instead and starts the last again: 0.1.4 -> 0.2.0.
+
     scripts/bump-version            # bumps ./VERSION, prints the new version
+    scripts/bump-version --minor    # 0.1.4 -> 0.2.0
     scripts/bump-version path/to/VERSION
 """
 import sys
 from pathlib import Path
 
-path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1] / "VERSION"
+args = [a for a in sys.argv[1:] if a != "--minor"]
+minor = "--minor" in sys.argv[1:]
+path = Path(args[0]) if args else Path(__file__).resolve().parents[1] / "VERSION"
 parts = path.read_text().strip().split(".")
 if len(parts) != 3 or not all(p.isdigit() for p in parts):
     sys.exit(f"{path}: expected a version like 0.1.1, found {path.read_text().strip()!r}")
-parts[-1] = str(int(parts[-1]) + 1)
+if minor:
+    parts[1], parts[2] = str(int(parts[1]) + 1), "0"
+else:
+    parts[-1] = str(int(parts[-1]) + 1)
 new = ".".join(parts)
 path.write_text(new + "\n")
 print(new)

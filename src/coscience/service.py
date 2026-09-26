@@ -2876,7 +2876,33 @@ class Service:
         # wiki's own settings — same reasoning as wiki_model/wiki_enabled above.
         out["wiki_merge"] = getattr(program, "wiki_merge", "auto")
         out["merge_proposals"] = len(state.get("merge_proposals") or [])
+        out.update(self._wiki_layout(program_id, state))
         return out
+
+    def _wiki_layout(self, program_id: str, state: dict) -> dict:
+        """Which layout the wiki is in, whether a newer one exists, and how far a
+        migration to it has got (docs/wiki-layouts.md)."""
+        from coscience import wiki_layouts, wiki_migrate, wiki_store
+        layout = wiki_layouts.of(wiki_store.bundle_dir(self.substrate, program_id))
+        target = wiki_migrate.available(self.substrate, program_id)
+        return {"layout": str(layout), "layout_current": str(wiki_layouts.CURRENT),
+                "layout_upgrade": str(target) if target else "",
+                "migration": state.get("migration") or None}
+
+    def request_wiki_migration(self, program_id: str, by: str) -> dict:
+        """Ask for this wiki to move to the next layout; the wiki beat runs it."""
+        from coscience import wiki_migrate
+        self.substrate.load_program(program_id)
+        mig = wiki_migrate.request(self.substrate, program_id, by=by, now=time.time())
+        self.substrate.commit(f"wiki {program_id}: migration to {mig['to']} requested")
+        return mig
+
+    def cancel_wiki_migration(self, program_id: str) -> dict:
+        from coscience import wiki_migrate
+        cancelled = wiki_migrate.cancel(self.substrate, program_id)
+        if cancelled:
+            self.substrate.commit(f"wiki {program_id}: migration cancelled")
+        return {"cancelled": cancelled}
 
     def list_wiki_pages(self, program_id: str) -> list[dict]:
         from coscience import wiki_read

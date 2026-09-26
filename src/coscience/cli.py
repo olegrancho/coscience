@@ -172,6 +172,13 @@ def main(argv: list[str] | None = None) -> int:
     wkmode.add_argument("--lint", action="store_true",
                         help="run the deterministic lint and print the report")
     wkmode.add_argument("--status", action="store_true")
+    wkmode.add_argument("--sweep", action="store_true",
+                        help="ask for a heavy-lint sweep on the next beat (needs --program)")
+    wkmode.add_argument("--migrate", action="store_true",
+                        help="move every wiki not in the current layout to it (or one, "
+                             "with --program); the wiki beat runs the steps")
+    wkmode.add_argument("--migrate-cancel", action="store_true",
+                        help="stop a migration and discard its staging bundle")
     wkmode.add_argument("--reconcile", action="store_true",
                         help="credit objects the bundle proves were already ingested")
     wk.add_argument("--fix", action="store_true",
@@ -311,6 +318,43 @@ def main(argv: list[str] | None = None) -> int:
                       f"since lint {state.get('ingests_since_lint', 0)} · "
                       f"quarantined {len(state.get('quarantined') or [])} · "
                       f"{'running ' + run.get('kind', '') if run else 'idle'}{behind}", flush=True)
+            return 0
+
+        if args.sweep:
+            # A request, not a launch: the next beat starts it under the same lock,
+            # admission slot and usage gate as every other wiki run.
+            if not args.program:
+                parser.error("--sweep needs --program")
+            for program in programs:
+                with wiki_store.state_guard(substrate, program.id) as state:
+                    state["sweep_requested"] = True
+                print(f"{program.id}: sweep requested — it starts on the next wiki beat "
+                      f"once no ingest is pending", flush=True)
+            return 0
+
+        if args.migrate or args.migrate_cancel:
+            from coscience import wiki_layouts, wiki_migrate
+            for program in programs:
+                layout = wiki_layouts.of(wiki_store.bundle_dir(substrate, program.id))
+                if args.migrate_cancel:
+                    try:
+                        done = wiki_migrate.cancel(substrate, program.id)
+                    except ValueError as e:
+                        print(f"{program.id}: {e}", flush=True)
+                        continue
+                    print(f"{program.id}: {'migration cancelled' if done else 'no migration'}",
+                          flush=True)
+                    continue
+                try:
+                    mig = wiki_migrate.request(substrate, program.id, by="cli", now=time.time())
+                except ValueError:
+                    print(f"{program.id}: {layout} — current, nothing to do", flush=True)
+                    continue
+                print(f"{program.id}: {mig['from']} → {mig['to']} — "
+                      f"{'resumed' if mig['phase'] != 'setup' else 'requested'}; "
+                      f"the wiki beat runs it", flush=True)
+            substrate.commit("wiki: migration " + ("cancelled" if args.migrate_cancel
+                                                   else "requested"))
             return 0
 
         if args.reconcile:

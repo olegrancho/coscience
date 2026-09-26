@@ -193,10 +193,14 @@ def ensure_bundle(substrate, program_id: str) -> Path:
         title = substrate.load_program(program_id).title or program_id
     except (OSError, ValueError):
         title = program_id
+    # A bundle that already has a schema keeps it — migrating is a deliberate run
+    # (wiki_migrate), never a side effect of making sure the skeleton exists.
+    from coscience import wiki_layouts
+    schema = wiki_layouts.schema(wiki_layouts.of(bundle))
     for name, text in (("index.md", _index_md(f"{title} — wiki")),
                        ("log.md", _LOG_MD),
                        ("QUESTIONS.md", _QUESTIONS_MD),
-                       ("CLAUDE.md", BUNDLE_CLAUDE_MD)):
+                       ("CLAUDE.md", schema)):
         f = bundle / name
         if not f.exists():
             f.write_text(text)
@@ -329,6 +333,25 @@ def program_objects(substrate, program_id: str) -> list[WikiObject]:
             resource=f"/programs/{program_id}/artifacts/{art.id}/{vid}",
             slug=f"sources/artifact-{art.id}-{vid}.md"))
     out.sort(key=lambda o: (o.at, o.oid))
+    return out
+
+
+def superseded_versions(substrate, program_id: str) -> dict[str, str]:
+    """Each artifact version that is no longer current, mapped to the version that
+    is: `artifact:x@v1` -> `artifact:x@v2`.
+
+    `program_objects` offers only the current version, so without this a source
+    page written for v1 reads as pointing at nothing once v2 lands (D3). Versions
+    are append-only — never deleted, only archived — so the old one still exists;
+    its page is history, not an orphan."""
+    out: dict[str, str] = {}
+    for art in substrate.iter_artifacts(program_id):
+        if not art.current:
+            continue
+        now = f"artifact:{art.id}@{art.current}"
+        for v in art.versions:
+            if v.id != art.current:
+                out[f"artifact:{art.id}@{v.id}"] = now
     return out
 
 

@@ -35,6 +35,25 @@ def test_missing_origin_object_is_an_error():
     assert "src/missing" in _rules(findings)
 
 
+def test_superseded_version_is_not_missing():
+    # D3: an artifact's earlier version still exists; only the current one is an object
+    page = _src(path="sources/artifact-fig-v1.md", status="deprecated",
+                extra={"origin": "artifact:fig@v1", "origin_hash": "sha256:x"})
+    findings = wiki_lint.lint([page], objects={"artifact:fig@v2": "sha256:y"},
+                              superseded={"artifact:fig@v1": "artifact:fig@v2"})
+    assert _rules(findings, "src/") == []
+
+
+def test_superseded_version_not_yet_deprecated_is_a_warning():
+    page = _src(path="sources/artifact-fig-v1.md",
+                extra={"origin": "artifact:fig@v1", "origin_hash": "sha256:x"})
+    findings = wiki_lint.lint([page], objects={"artifact:fig@v2": "sha256:y"},
+                              superseded={"artifact:fig@v1": "artifact:fig@v2"})
+    found = [f for f in findings if f.rule.startswith("src/")]
+    assert [(f.rule, f.severity) for f in found] == [("src/superseded", "warn")]
+    assert "artifact:fig@v2" in found[0].message
+
+
 def test_source_checks_are_skipped_when_objects_is_none():
     page = _src(extra={"origin": "result:r1", "origin_hash": "sha256:old"})
     assert _rules(wiki_lint.lint([page]), "src/") == []

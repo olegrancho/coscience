@@ -13,7 +13,8 @@ from pathlib import Path
 from coscience import executor, wiki_prompts
 from coscience.wiki_store import WikiObject
 
-_LEFTOVERS = ("agent.out", "agent.exit", "report.json", "lint-report.md", "progress.jsonl")
+_LEFTOVERS = ("agent.out", "agent.exit", "report.json", "lint-report.md",
+              "sweep-report.md", "progress.jsonl")
 
 
 #: The built-ins a wiki run actually uses — Read, Edit, Write and Bash, and nothing
@@ -23,6 +24,14 @@ _LEFTOVERS = ("agent.out", "agent.exit", "report.json", "lint-report.md", "progr
 #: four. `--tools` is what does that; `--allowedTools` only gates permissions and
 #: leaves the schemas in the prompt.
 _TOOLS = "Read,Edit,Write,Bash"
+
+#: No `--system-prompt` on purpose (J2). A one-paragraph replacement for Claude Code's
+#: built-in prompt was tried on a real ingest, re-run from the same starting bundle
+#: both ways: it trims ~6k tokens off a context that averages ~115k per call, so ~5%
+#: at best — and that run cost $3.92 to the stock run's $3.61, run-to-run noise
+#: swamping the saving. Judged blind page by page, the stock run carried more of the
+#: result into the wiki and overclaimed less; the lean one invented a detail. The
+#: built-in prompt's editing discipline is worth more here than its tokens.
 
 
 class WikiAgent:
@@ -37,8 +46,17 @@ class WikiAgent:
         run_dir.mkdir(parents=True, exist_ok=True)
         for name in _LEFTOVERS:
             (run_dir / name).unlink(missing_ok=True)
-        if kind == "lint":
+        if kind == "migrate":
+            # wiki_migrate renders each step's document itself (it needs the
+            # substrate to find the map and staging paths); it arrives as `report`,
+            # and `bundle` is the staging bundle the step writes into.
+            text = report
+        elif kind == "lint":
             text = wiki_prompts.render_lint(program, bundle, report, run_dir)
+        elif kind == "sweep":
+            # bundle is <repo>/programs/<id>/wiki; the raw results sit at <repo>/results.
+            text = wiki_prompts.render_sweep(program, bundle, run_dir,
+                                             results_dir=bundle.parents[2] / "results")
         else:
             text = wiki_prompts.render_ingest(program, bundle, objects or [], run_dir)
         (run_dir / "instructions.md").write_text(text)
@@ -86,9 +104,9 @@ def read_report(run_dir: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def read_lint_report(run_dir: Path) -> str:
+def read_lint_report(run_dir: Path, name: str = "lint-report.md") -> str:
     try:
-        return (run_dir / "lint-report.md").read_text()
+        return (run_dir / name).read_text()
     except OSError:
         return ""
 

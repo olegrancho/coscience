@@ -33,6 +33,7 @@ class Finding:
 
 def lint(pages: list[wiki_okf.Page], *, index_body: str = "",
          objects: dict[str, str] | None = None,
+         superseded: dict[str, str] | None = None,
          previous: dict[str, str] | None = None,
          now: float | None = None) -> list[Finding]:
     """Every finding for this bundle, worst first. Never raises — a lint that
@@ -43,7 +44,7 @@ def lint(pages: list[wiki_okf.Page], *, index_body: str = "",
     out += _page_rules(pages, index_body, now)
     out += _link_rules(pages)
     out += _relation_rules(pages)
-    out += _source_rules(pages, objects)
+    out += _source_rules(pages, objects, superseded or {})
     out += _trust_rules(pages, previous)
     out += _human_notes_rules(pages)
     out.sort(key=lambda f: (_RANK.get(f.severity, 9), f.path, f.rule))
@@ -393,8 +394,8 @@ HUMAN_NOTES = "Human notes"
 _FOOTNOTE_DEF = re.compile(r"^\[\^[^\]]+\]:")
 
 
-def _source_rules(pages: list[wiki_okf.Page],
-                  objects: dict[str, str] | None) -> list[Finding]:
+def _source_rules(pages: list[wiki_okf.Page], objects: dict[str, str] | None,
+                  superseded: dict[str, str]) -> list[Finding]:
     out = []
     source_titles = {_norm(p.title): p.path for p in pages if p.type == "Source"}
     for p in pages:
@@ -404,7 +405,17 @@ def _source_rules(pages: list[wiki_okf.Page],
             if not oid:
                 continue
             current = objects.get(oid)
-            if current is None:
+            if current is None and oid in superseded:
+                # An artifact's earlier version: it still exists, it is just not
+                # current. The page is history, so it stays; it only has to say so.
+                # Calling it missing had the agent write "removed from the
+                # platform" onto a page whose version is still on disk.
+                if p.status != "deprecated":
+                    out.append(Finding("src/superseded", "warn", p.path,
+                                       f"`{oid}` was replaced by `{superseded[oid]}`: "
+                                       f"mark this page `status: deprecated` and "
+                                       f"point readers to the current version's page"))
+            elif current is None:
                 out.append(Finding("src/missing", "error", p.path,
                                    f"origin object `{oid}` no longer exists"))
             elif declared and declared != current:
@@ -491,6 +502,7 @@ def run_lint(substrate, program_id: str, *, now: float | None = None,
     except OSError:
         index_body = ""
     findings = lint(pages, index_body=index_body, objects=objects,
+                    superseded=wiki_store.superseded_versions(substrate, program_id),
                     previous=wiki_store.previous_bodies(substrate, program_id),
                     now=now)
     return findings, fixed_count

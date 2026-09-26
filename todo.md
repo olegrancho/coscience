@@ -1,12 +1,130 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 185
-last_updated: 2026-09-23
+version: 194
+last_updated: 2026-09-25
 ---
 
 # To QC
 
+### J3. Choose the batch hold's max-wait, or leave it off
+
+The live dispatch loop holds a short wiki batch 15 minutes (`COSCIENCE_WIKI_MAX_WAIT=900`); the code default stays off.
+
+**Check:** the env file's comment and `batch_max_wait`'s docstring carry the
+measurement (77 runs, 59 single-object at ~$2.6, back-to-back runs 6-8 min apart on
+one program), and over the next days the wiki runs show fewer single-object ingests
+without any program's wiki lagging more than ~15 minutes behind its results.
+
+### D3. Retire the source page of a superseded artifact version
+
+Lint now reads a replaced artifact version as history: no error, and a `src/superseded` warning only while its page is not marked `status: deprecated`.
+
+**Check:** `coscience wiki lint` on the affected program no longer reports the scaling figure's v1/v2
+pages as `src/missing`, and the ingest prompt's new paragraph tells the agent to
+deprecate the old page, not call it removed. The live v1 page still says "removed
+from the platform", which the agent wrote because the old lint told it so; nothing
+rewrites it automatically.
+
+### L1. Write the question set, a few per program
+
+Two programs have question sets, kept outside both repos in the host's platform config directory and passed to the probe with `--questions`.
+
+**Check:** the files hold the questions as written, and nothing under the substrate's
+program directories mentions them — an agent that could read them could write the
+wiki to the test.
+
+### J2. Replace the wiki agent's default system prompt
+
+Decided against: the wiki agent keeps Claude Code's built-in prompt, and the reason is written above `_TOOLS` in `wiki_agent.py`.
+
+**Check:** the comment's numbers — one real ingest re-run from the same starting
+bundle both ways: ~6k of a ~115k per-call context saved, $3.92 lean vs $3.61 stock,
+and a blind page-by-page judgement that the stock run was modestly better. One pair
+is a small sample; the call is that a ≤5% saving is not worth a second one.
+
+### L2. Answer each question with a traced agent
+
+Both question sets were probed on 09-24: 16 questions, $13.23, one report per program under the host's probe cache.
+
+**Check:** each report has an answer, the pages read in order and the searches for
+every question, and flags the three answers that left the wiki for raw results.
+
+### L3. Debrief each agent after it answers
+
+Every answer in both reports carries its debrief: what the agent could not find, what misled it, where pages disagreed.
+
+**Check:** the debriefs name concrete pages and defects rather than generic advice —
+the recurring one is an answer scattered over many concept pages with no page that
+gathers it.
+
+### L5. Generate a question set with agents, and review it
+
+Sonnet wrote 20 questions with answer keys per program from the raw results, plans, goals and workdir docs; after review 37 remain, kept with the human set outside both repos.
+
+**Check:** the review notes in the lab's decision log — three dropped because their
+answers live in sprint plans, not results — and a sample of keys against the result
+files they cite.
+
+### L6. Probe in two modes: free search and click-through
+
+`coscience.wiki_probe --mode nav` answers through `coscience.wiki_nav`, an MCP tool that serves `index.md` and then only pages linked from pages already opened; `--bundle` points the probe at any copy of a wiki.
+
+**Check:** `tests/test_wiki_nav.py`, and a nav-mode report's per-question page list —
+every page after the index is linked from one opened before it.
+
+### L7. Grade answers on path and clarity, with the key as a reference
+
+`--grade <model>` scores each answer's path and clarity (1-5) and classes it against the key; the report opens with a grade table.
+
+**Check:** a baseline report's grade table, and whether the grades match a read of
+two or three answers. The key classes run lenient — an answer naming the wrong
+benchmark version came out "differs-defensibly" — so treat them as flags, not verdicts.
+
+### L8. Organise every wiki around topics, not sprint results
+
+Topics is the platform's current wiki layout (`wiki_topics.py`): topic and background pages that open with the current understanding, and an ingest that rewrites what a result overturns. New wikis start in it; existing ones move by L11's migration.
+
+**Check:** the lab's decision log (outside both repos) — two real wikis migrated to
+copies, probe scores against the old layout, and the ingest test where a result that
+overturned a verdict had the page opening, description, index line and status page
+rewritten. Still open before it is fully comfortable: docs as a source kind, alias
+ownership between background and topic pages.
+
+### L9. Add a heavy lint: an agent sweep for inconsistencies
+
+The sweep (`wiki_prompts.render_sweep`) is a wiki run kind that runs every 10 wiki runs by default (`COSCIENCE_WIKI_SWEEP_EVERY`, 0 = off), on `coscience wiki --sweep --program <id>`, and after every migration — only once no ingest is pending.
+
+**Check:** `tests/test_wiki_sweep_run.py`, and the two sweep reports in the lab — one
+fixed a benchmark name wrong on 69 pages, the other a dozen copy errors — against a
+sample of the pages they changed.
+
+### L10. Re-probe after the changes and compare
+
+Both wikis were probed on the same 53 questions as current, current + sweep and topics, in both modes; the table is at the top of the lab's decision log.
+
+**Check:** the table against the per-run reports, and the two correctness cases the
+grades cannot show (a wrong layer count, a wrong benchmark name) in the answers
+themselves.
+
+### L11. Version wiki layouts and migrate between them from the platform
+
+Each bundle names its layout on the first line of its CLAUDE.md; `wiki_layouts` holds the current one and the upgrade path, and `wiki_migrate` moves a wiki over as beat-driven runs (map, write batches, finish, swap) while the old one keeps serving. Wiki settings show the layout and offer the migration; `coscience wiki --migrate` does every program. Instructions: `docs/wiki-layouts.md`.
+
+**Check:** `tests/test_wiki_migrate.py`; Wiki settings on a wiki in the old layout
+(the offer, then progress); and one real migration on a copy of the substrate before
+any live wiki is migrated — the lab migrations were run by hand, this code has not yet
+driven a real one.
+
 # To Do (sprint)
+
+### L4. Read the traces against Oleg's own account
+
+Compare what the agents struggled with to where Oleg finds the wiki lacking.
+
+The point of the exercise is the delta: where the traces confirm the impression,
+where they contradict it, and where they surface problems nobody had noticed.
+Agreement between an independent trace and a held opinion is worth more than
+either alone, and disagreement is where the bias was.
 
 # To Do (backlog)
 
@@ -44,17 +162,6 @@ actually runs a server out of memory. Written up as O17 before this block existe
 
 Every program wiki is accurate about itself: it passes lint, and a run's report
 matches what that run actually changed.
-
-### D3. Retire the source page of a superseded artifact version
-
-Decide what happens to a source page when its artifact moves to a new version, so
-lint stops reporting it as `src/missing`.
-
-One program's only lint error is the source page of an artifact's v1:
-the artifact moved to v2 on 09-12 and v2 was ingested, but only an artifact's current
-version counts as an object, so v1's page reads as pointing at nothing. Every future
-revision will do the same. The choices are to retire or merge the old page on
-ingest, or to have lint accept an origin that is a superseded version.
 
 ## F. Agents' messageboard
 
@@ -121,95 +228,10 @@ cards, set on the machine that has them.
 A wiki run's token bill is proportional to the material it ingests, not to the
 harness wrapped around it.
 
-### J2. Replace the wiki agent's default system prompt
-
-Give the run a lean `--system-prompt` in place of Claude Code's built-in one.
-
-Measured on one program's bundle, the launch prefix is 21,615 tokens with the stock
-setup, 14,096 once `--tools` drops the unused schemas (J1), and 7,870 with a
-one-paragraph system prompt as well — another ~6.2k tokens, re-read on all 35
-turns of a run, worth roughly 12% of an ingest's cost. The catch is that the
-default prompt carries Claude Code's own behavioural scaffolding for editing
-files carefully, and this agent edits a knowledge base unattended, so the saving
-has to be weighed against a run that is measurably worse. Needs a real ingest on
-each setting compared page by page, not a token count alone.
-
-### J3. Choose the batch hold's max-wait, or leave it off
-
-Decide what `COSCIENCE_WIKI_MAX_WAIT` should be on the live substrate; the
-mechanism is built and defaults to off.
-
-The hold ships: a short batch waits for company until `COSCIENCE_WIKI_BATCH`
-objects are pending or the wait expires, and 0 (the default) means no hold, so
-nothing changed until someone sets it. What is left is the number, and the
-measurement argues for leaving it small or unset — results land a median of
-5.5-24.6h apart per program, so a wait long enough to actually fill a batch of
-four costs days of staleness. The $1.38-vs-$0.73 gap is backlog against steady
-state, not a lever, and the existing code already batches whatever is pending.
-Where a hold does pay is a burst of sprints finishing together. I1 closed without
-adding a sprint-completion trigger, so nothing produces bursts on purpose; set it
-only if the call log shows several one-object ingests landing minutes apart.
-
 ## L. Wiki quality improvement
 
 The wiki answers the questions actually brought to it, and we know that from
 evidence rather than impression.
-
-### L1. Write the question set, a few per program
-
-Collect the questions and requests Oleg wants a program's wiki to answer, and
-keep them next to the program.
-
-This is the half only Oleg can supply and it blocks the rest of the block. The
-motivating complaint is that the wiki reads "relatively okay, but in some ways
-not quite what I need" — an impression formed while working, and one he expects
-to be biased. Questions written down BEFORE any agent runs are what convert that
-into something falsifiable: a wiki either answers them or it does not. One-off
-for now, not a standing suite; making them re-runnable is a later decision.
-
-### L2. Answer each question with a traced agent
-
-Run one subagent per question against the program's bundle, and keep its stream.
-
-The runner exists and is piloted, so this waits only on L1:
-`python -m coscience.wiki_probe --program <id>` reads `programs/<id>/wiki-questions.md`
-(a markdown list, one question per item) and writes `report.md`, `summary.json` and
-both streams under `~/.cache/coscience/wiki-probe/<id>/<stamp>/`. Each agent is
-read-only in the bundle, starts from `index.md`, and may leave for raw results
-only by saying so; the report flags every read outside the wiki. The 09-13 pilot
-on one program took 50s and $0.14 for one question on Sonnet 5, and the answering model
-defaults to the program's planner model.
-
-### L3. Debrief each agent after it answers
-
-Ask the agent, in a second turn, what it could not find and what misled it.
-
-The trace shows what an agent read; only the agent can say what it went looking
-for and failed to find, which page it expected to exist, or where two pages
-disagreed and it had to guess. Absence is the defect class a wiki hides best and
-the one that matters most here. Built into the same runner as a `--resume` turn
-with five fixed questions; on the pilot it cost $0.03 and surfaced a real defect
-unprompted — a canonical numbers page, billed as the single source of truth,
-predates and omits the program's best result.
-
-### L4. Read the traces against Oleg's own account
-
-Compare what the agents struggled with to where Oleg finds the wiki lacking.
-
-The point of the exercise is the delta: where the traces confirm the impression,
-where they contradict it, and where they surface problems nobody had noticed.
-Agreement between an independent trace and a held opinion is worth more than
-either alone, and disagreement is where the bias was.
-
-### L5. Fix what L4 justifies
-
-Make the wiki changes the evidence supports, and nothing it does not.
-
-Deliberately unspecified: the whole point is that the work is chosen by findings
-rather than by intuition. The likely surfaces are the ingest and lint prompts in
-`wiki_prompts.py`, the page schema and relation vocabulary in the bundle's
-`CLAUDE.md`, and `index.md` as a retrieval entry point — but committing to any of
-those now would be the same guessing this block exists to replace.
 
 ## M. Delegated approval
 

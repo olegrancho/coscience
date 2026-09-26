@@ -1,7 +1,7 @@
 import { Button, Checkbox, Divider, Group, Modal, Stack, Text } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type WikiSummary } from "../api";
+import { api, type WikiMigration, type WikiSummary } from "../api";
 import { MergePolicySelect, ModelSelect } from "./ui";
 
 interface Props {
@@ -47,6 +47,21 @@ export default function WikiSettingsModal(
     }
     wasOpened.current = opened;
   }, [opened, summary]);
+
+  const [migrating, setMigrating] = useState(false);
+  const [migrateError, setMigrateError] = useState("");
+  const migrationAction = async (act: () => Promise<unknown>) => {
+    setMigrating(true);
+    setMigrateError("");
+    try {
+      await act();
+      onSaved();
+    } catch (e) {
+      setMigrateError(String(e));
+    } finally {
+      setMigrating(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -95,6 +110,49 @@ export default function WikiSettingsModal(
           onChange={(e) => setEnabled(e.currentTarget.checked)}
         />
 
+        <Divider />
+
+        <Stack gap={8}>
+          <Group justify="space-between" align="center" wrap="nowrap">
+            <Text size="sm">
+              Layout: <b>{summary.layout}</b>
+              {!summary.layout_upgrade && summary.layout === summary.layout_current &&
+                <Text span size="xs" c="dimmed"> — current</Text>}
+            </Text>
+            {summary.migration ? (
+              <Group gap={8} wrap="nowrap">
+                {summary.migration.error && (
+                  <Button size="xs" variant="light" color="machine" loading={migrating}
+                          onClick={() => migrationAction(() => api.migrateWiki(programId))}>
+                    Resume
+                  </Button>
+                )}
+                <Button size="xs" variant="subtle" color="gray" loading={migrating}
+                        disabled={summary.run?.kind === "migrate"}
+                        onClick={() => migrationAction(() => api.cancelWikiMigration(programId))}>
+                  Cancel migration
+                </Button>
+              </Group>
+            ) : summary.layout_upgrade ? (
+              <Button size="xs" variant="light" color="machine" loading={migrating}
+                      onClick={() => migrationAction(() => api.migrateWiki(programId))}>
+                Migrate to {summary.layout_upgrade}
+              </Button>
+            ) : null}
+          </Group>
+          {summary.migration
+            ? <MigrationProgress m={summary.migration} />
+            : summary.layout_upgrade && (
+              <Text size="xs" c="dimmed">
+                A newer layout is available. Migrating rebuilds the pages in it, one
+                agent run per step — a map, a run per few pages, then the index —
+                while this wiki keeps serving; the old wiki is archived, not deleted.
+                Ingests wait until it finishes. See docs/wiki-layouts.md.
+              </Text>
+            )}
+          {migrateError && <Text size="xs" c="red">{migrateError}</Text>}
+        </Stack>
+
         {locked && (
           <Text size="xs" c="dimmed">
             A run is in progress. Both dials are read when a run collects, so
@@ -118,5 +176,29 @@ export default function WikiSettingsModal(
         </Group>
       </Stack>
     </Modal>
+  );
+}
+
+
+/** Where a migration has got to, in words: the phases are wiki runs the beat
+ *  launches one at a time. */
+export function migrationText(m: WikiMigration): string {
+  const step = {
+    setup: "starts on the next wiki beat",
+    map: "drawing up the topic map from the old wiki",
+    write: `writing pages — batch ${Math.min(m.batch + 1, m.batches)} of ${m.batches}`,
+    finish: "writing the index and summary pages",
+  }[m.phase] ?? m.phase;
+  return `Migrating ${m.from} → ${m.to}: ${step}.`;
+}
+
+function MigrationProgress({ m }: { m: WikiMigration }) {
+  return (
+    <Stack gap={2}>
+      <Text size="xs">{migrationText(m)}</Text>
+      {m.error
+        ? <Text size="xs" c="red">Stopped: {m.error}. The old wiki is still live; Resume retries the step.</Text>
+        : <Text size="xs" c="dimmed">The old wiki keeps serving until the last step swaps the new one in.</Text>}
+    </Stack>
   );
 }

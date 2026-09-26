@@ -287,6 +287,18 @@ export interface WikiSummary {
   wiki_merge: "auto" | "propose";
   merge_proposals: number;
   index_md: string;
+  // docs/wiki-layouts.md: the layout this wiki is in, the platform's current one,
+  // the one a migration would produce ("" = nothing to migrate), and its progress.
+  layout: string;
+  layout_current: string;
+  layout_upgrade: string;
+  migration: WikiMigration | null;
+}
+export interface WikiMigration {
+  from: string; to: string;
+  phase: "setup" | "map" | "write" | "finish";
+  batch: number; batches: number; failures: number; error: string;
+  requested_by: string; at: number;
 }
 export interface WikiMergeProposal {
   id: string; winner: string; loser: string; why: string; run: string; at: number;
@@ -757,6 +769,11 @@ export const api = {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind }),
     }).then(j<{ line: string }>),
+  migrateWiki: (id: string) =>
+    fetch(`/api/programs/${id}/wiki/migrate`, { method: "POST" }).then(j<WikiMigration>),
+  cancelWikiMigration: (id: string) =>
+    fetch(`/api/programs/${id}/wiki/migrate`, { method: "DELETE" })
+      .then(j<{ cancelled: boolean }>),
   unquarantineWiki: (id: string) =>
     fetch(`/api/programs/${id}/wiki/unquarantine`, { method: "POST" })
       .then(j<{ cleared: string[] }>),

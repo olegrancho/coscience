@@ -55,6 +55,14 @@ def max_failures() -> int:
     return _env_int("COSCIENCE_WIKI_MAX_FAILURES", 3)
 
 
+def sweep_every() -> int:
+    """Run the heavy-lint sweep (L9) after this many wiki runs (ingests and lints
+    that finished ok); 0 turns the schedule off, leaving only `coscience wiki
+    --sweep`. A sweep reads across the whole bundle and costs several ingests, which
+    is why it is spaced out rather than folded into every lint."""
+    return _env_int("COSCIENCE_WIKI_SWEEP_EVERY", 10)
+
+
 def collect_grace() -> float:
     return _env_float("COSCIENCE_WIKI_COLLECT_GRACE", 60.0)
 
@@ -73,7 +81,13 @@ def batch_max_wait() -> float:
     problem, not the budget. Where it earns its keep is a burst: several sprints
     landing together, which is exactly what a sprint-completion trigger produces.
     Set it to the width of a burst you want collapsed, not to the gap between
-    results."""
+    results.
+
+    Measured again over 77 real runs (J3): 59 ingested a single object, at a median
+    $2.6 each, and one program's single-object runs landed back to back 6-8 minutes
+    apart — bursts after all. Replayed against the results' own completion times, a
+    15-minute hold merges about one run in seven, so the live deployment sets 900;
+    the default stays off because the right width is a property of the substrate."""
     return _env_float("COSCIENCE_WIKI_MAX_WAIT", 0.0)
 
 
@@ -147,6 +161,9 @@ def beat(substrate, program, now: float, agent, *,
         if not gate():
             return ""
 
+        if state.get("migration"):
+            return _migrate_beat(substrate, program, now, agent, state)
+
         quarantined = set(state.get("quarantined") or [])
         pending = wiki_store.pending_objects(
             substrate, program.id, state.get("ingested") or {}, quarantined)
@@ -156,14 +173,20 @@ def beat(substrate, program, now: float, agent, *,
         # quarantined — must disarm. Left set, the next object to arrive would
         # inherit an already-expired deadline and launch alone, which is the
         # batch-of-one the hold exists to prevent.
+        # A sweep waits for the ingest queue to empty: it audits the bundle as a
+        # whole, and a result arriving mid-sweep would be half-audited.
+        due_for_sweep = (not pending and not wiki_store.is_empty(substrate, program.id)
+                         and (bool(state.get("sweep_requested"))
+                              or (sweep_every() > 0
+                                  and state.get("runs_since_sweep", 0) >= sweep_every())))
         if not pending:
             state.pop("batch_armed_at", None)
-        if not due_for_lint and not pending:
+        if not due_for_lint and not pending and not due_for_sweep:
             return ""
 
         # Hold a short batch for company. Not for a lint, which has no batch to
         # fill, and never for a human who pressed the button and is watching.
-        if pending and not due_for_lint and forced_by is None:
+        if pending and not due_for_lint and not due_for_sweep and forced_by is None:
             held = _hold_batch(state, len(pending), now)
             if held is not None:
                 return held
@@ -181,7 +204,10 @@ def beat(substrate, program, now: float, agent, *,
         run_dir = wiki_store.run_dir(substrate, program.id, run_id)
         bundle = wiki_store.bundle_dir(substrate, program.id)
 
-        if due_for_lint:
+        if due_for_sweep and not due_for_lint:
+            kind, batch, objects, report = "sweep", [], None, ""
+            state.pop("sweep_requested", None)
+        elif due_for_lint:
             kind, batch, objects, report = "lint", [], None, _lint_report(substrate, program)
         else:
             kind, report = "ingest", ""
@@ -218,6 +244,38 @@ def beat(substrate, program, now: float, agent, *,
             state["run"]["forced_by"] = forced_by
         return f"wiki: launched {kind} {run_id}" + (
             f" ({len(batch)} object{'s' if len(batch) != 1 else ''})" if batch else "")
+
+
+def _migrate_beat(substrate, program, now: float, agent, state: dict) -> str:
+    """Launch the next step of a migration (wiki_migrate). While one is under way
+    nothing else runs on this wiki: a result ingested into the old bundle now would
+    be lost at the swap, and one ingested into the half-built new bundle would be
+    written against a map that does not know it."""
+    from coscience import wiki_migrate
+    mig = state["migration"]
+    if mig.get("error"):
+        return ""
+    holder = f"wiki:{program.id}"
+    if not housekeeping.acquire(substrate.repo_root, holder, now):
+        return ""
+    step = wiki_migrate.next_launch(substrate, program, state)
+    if step is None:
+        housekeeping.release(substrate.repo_root, holder)
+        return ""
+    text, cwd = step
+    run_id = _next_run_id(state)
+    run_dir = wiki_store.run_dir(substrate, program.id, run_id)
+    token = agent.launch(kind="migrate", program=program, bundle=cwd, run_dir=run_dir,
+                         objects=None, report=text, model=program.wiki_model)
+    call_id = usage_meter.start_call(
+        substrate.repo_root, "wiki-migrate", program=program.id,
+        model=program.wiki_model, limits=usage_meter.current_window(),
+        token=str(token or ""), now=now)
+    state["run"] = {"id": run_id, "kind": "migrate", "phase": mig["phase"],
+                    "batch": [], "token": token, "started_at": now,
+                    "model": program.wiki_model, "dirty_before": [], "call": call_id}
+    where = (f" {mig['batch'] + 1} of {mig['batches']}" if mig["phase"] == "write" else "")
+    return f"wiki: launched migrate {mig['phase']}{where} {run_id} ({mig['from']} → {mig['to']})"
 
 
 def _lint_report(substrate, program) -> str:
@@ -503,7 +561,7 @@ def _collect(substrate, program, now, agent, state, run) -> str:
     batch = list(run.get("batch") or [])
     escaped: list[str] = []
     merged: list[dict] = []
-    if status == "ok":
+    if status == "ok" and kind != "migrate":      # a migration writes to staging by design
         escaped = _escaped(substrate, program.id,
                            list(run.get("dirty_before") or []), _dirty_paths(substrate))
 
@@ -532,6 +590,19 @@ def _collect(substrate, program, now, agent, state, run) -> str:
             **outcome)
 
     state["run"] = None
+    if kind == "migrate":
+        from coscience import wiki_migrate
+        phase = run.get("phase", "")
+        line = (wiki_migrate.collected(substrate, program, state, status, now, max_failures())
+                if state.get("migration") else f"wiki: migrate {phase} {status}")
+        state["last_run"] = {"id": run_id, "kind": kind, "status": status, "at": now,
+                             "pages_created": 0, "pages_updated": 0,
+                             "notes": line.removeprefix("wiki: "), "escaped": []}
+        state["runs"] = ([{"id": run_id, "kind": kind, "status": status, "at": now,
+                           "pages_created": 0, "pages_updated": 0, "merged": []}]
+                         + list(state.get("runs") or []))[:RUNS_KEPT]
+        substrate.commit(f"wiki {program.id}: migrate {phase} {run_id} {status}")
+        return line
     created, updated = _page_counts(substrate, program.id, run_dir, report)
     if kind == "ingest":
         # After the counts, so the fix is not reported as the agent's work.
@@ -547,8 +618,15 @@ def _collect(substrate, program, now, agent, state, run) -> str:
     line = f"wiki: {kind} {status}"
     if status == "ok":
         _credit(substrate, program.id, state, _reconciled(batch, report), now, run_id)
+        if kind == "sweep":
+            state["runs_since_sweep"] = 0
+        else:
+            state["runs_since_sweep"] = state.get("runs_since_sweep", 0) + 1
         if kind == "ingest":
             state["ingests_since_lint"] = state.get("ingests_since_lint", 0) + 1
+        elif kind == "sweep":
+            _file_lint_report(substrate, program.id, run_dir, now, name="sweep-report.md",
+                              suffix="-sweep")
         else:
             state["ingests_since_lint"] = 0
             _file_lint_report(substrate, program.id, run_dir, now)
@@ -601,17 +679,18 @@ def wiki_agent_outcome(run_dir: Path) -> dict:
     return wiki_agent.read_outcome(run_dir)
 
 
-def _file_lint_report(substrate, program_id: str, run_dir: Path, now: float) -> None:
-    """Move the agent's lint summary into .wiki/lint/<date>.md."""
+def _file_lint_report(substrate, program_id: str, run_dir: Path, now: float, *,
+                      name: str = "lint-report.md", suffix: str = "") -> None:
+    """Move the agent's lint (or sweep) summary into .wiki/lint/<date><suffix>.md."""
     from datetime import datetime, timezone
     from coscience import wiki_agent
-    text = wiki_agent.read_lint_report(run_dir)
+    text = wiki_agent.read_lint_report(run_dir, name)
     if not text.strip():
         return
     day = datetime.fromtimestamp(now, timezone.utc).strftime("%Y-%m-%d")
     d = wiki_store.state_dir(substrate, program_id) / "lint"
     d.mkdir(parents=True, exist_ok=True)
-    (d / f"{day}.md").write_text(text)
+    (d / f"{day}{suffix}.md").write_text(text)
 
 
 def reconcile(substrate, program_id: str, *, apply: bool = False,

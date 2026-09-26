@@ -93,3 +93,17 @@ def test_pending_excludes_quarantined(substrate):
     _program(substrate, "p1")
     _result(substrate, "r1", "s1", "p1", 100.0)
     assert wiki_store.pending_objects(substrate, "p1", {}, {"result:r1"}) == []
+
+
+def test_superseded_versions_map_old_to_current(substrate, tmp_path):
+    _program(substrate, "p1")
+    src = tmp_path / "fig.md"
+    ids = []
+    for text, at in (("v1\n", 10.0), ("v2\n", 20.0), ("v3\n", 30.0)):
+        src.write_text(text)
+        ids.append(artifacts.adopt(substrate, "p1", "fig", title="Figure", kind="figure",
+                                   now=at, created_by="cli",
+                                   sources=artifacts.resolve_sources(tmp_path, [src], restrict=False)))
+    now = f"artifact:fig@{ids[2]}"
+    assert wiki_store.superseded_versions(substrate, "p1") == {
+        f"artifact:fig@{ids[0]}": now, f"artifact:fig@{ids[1]}": now}

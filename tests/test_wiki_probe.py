@@ -77,3 +77,41 @@ def test_a_probe_answers_then_debriefs_in_the_same_session_and_writes_a_report(t
     assert "I expected a page on waters." in report
     assert "total $0.45" in report
     assert (out / "q01.answer.jsonl").is_file() and (out / "q01.debrief.jsonl").is_file()
+
+
+def test_json_questions_carry_their_keys():
+    qs = wiki_probe.load_questions('[{"id": "p2-g01", "question": "Q?", "key": "K", "sources": ["results/r.md"]}]')
+    assert qs == [{"id": "p2-g01", "question": "Q?", "key": "K", "sources": ["results/r.md"]}]
+    assert wiki_probe.load_questions("- A?\n- B?")[1] == {"id": "q02", "question": "B?", "key": "", "sources": []}
+
+
+def test_nav_mode_offers_only_the_page_tool_and_grades_against_the_key(tmp_path):
+    bundle, out = tmp_path / "wiki", tmp_path / "out"
+    bundle.mkdir()
+    calls = []
+
+    def fake(args, prompt, cwd):
+        calls.append((args, prompt))
+        if "--mcp-config" in args:
+            log = json.loads(args[args.index("--mcp-config") + 1])["mcpServers"]["wiki"]["args"][-1]
+            with open(log, "w") as fh:
+                fh.write(json.dumps({"path": "index.md", "ok": True, "bytes": 10}) + "\n")
+                fh.write(json.dumps({"path": "concepts/x.md", "ok": False, "broken": False}) + "\n")
+            return _stream(bundle)
+        if "grading one answer" in prompt:
+            g = '{"path": 4, "path_note": "index routed", "clarity": 5, "clarity_note": "clear", "key": "agrees", "key_note": "", "admits_gaps": true}'
+            return _stream(bundle, answer=g, cost=0.01)
+        return _stream(bundle)
+
+    q = {"id": "g1", "question": "Why?", "key": "Because K.", "sources": []}
+    summary = wiki_probe.probe("p2", [q], bundle, out, mode="nav", debrief=False,
+                               grade_model="claude-sonnet-5", invoke=fake)
+    answer_args = calls[0][0]
+    assert answer_args[answer_args.index("--tools") + 1] == ""
+    assert wiki_probe.NAV_TOOL in answer_args
+    row = summary["questions"][0]
+    assert [r["path"] for r in row["answer"]["reads"]] == ["index.md"]   # refusals are not reads
+    assert row["nav"]["refused"] == 1 and row["grade"]["path"] == 4
+    assert "Because K." in calls[1][1]
+    report = (out / "report.md").read_text()
+    assert "nav mode" in report and "path 4.0/5" in report and "1 refused clicks" in report
