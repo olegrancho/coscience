@@ -1,11 +1,11 @@
 import { ActionIcon, Badge, Button, Card, Group, Loader, Menu, SegmentedControl, Stack, Text, Textarea, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
-import { api, type ChatScope } from "../api";
+import { api, type ChatMessage, type ChatScope } from "../api";
 import { BackLink, DESCRIPTION_FILE, RelTime, ZoomableImg, canvasBreakout, isImageName, sendOnCtrlEnter } from "../components/ui";
 import { UserChip, useIsMine, OTHER_SHADE } from "../auth";
 
@@ -18,7 +18,6 @@ export default function ChatView() {
   const qc = useQueryClient();
   const isMine = useIsMine();
   const [active, setActive] = useState<string>("");
-  const [draft, setDraft] = useState("");
   const [expanded, setExpanded] = useState(false);
 
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
@@ -137,7 +136,7 @@ export default function ChatView() {
   });
   const send = useMutation({
     mutationFn: (message: string) => api.sendChatMessage(id, active, message),
-    onSuccess: (t) => { qc.setQueryData(["chat", id, active], t); setDraft(""); refreshChats(); },
+    onSuccess: (t) => { qc.setQueryData(["chat", id, active], t); refreshChats(); },
     onError: (e) => notifications.show({ color: "red", title: "Couldn't send", message: String(e) }),
   });
   const setScope = useMutation({
@@ -155,7 +154,7 @@ export default function ChatView() {
   });
 
   const t = thread.data;
-  const submit = () => { const m = draft.trim(); if (m && !busy) send.mutate(m); };
+  const submit = (m: string, sent: () => void) => { if (!busy) send.mutate(m, { onSuccess: sent }); };
   const doRename = () => {
     const name = window.prompt("Rename chat", t?.title ?? "");
     if (name && name.trim()) rename.mutate(name.trim());
@@ -280,21 +279,7 @@ export default function ChatView() {
                 ) : (
                   <Stack gap={12}>
                     {(t?.messages ?? []).map((m, i) => (
-                      <div key={i} style={{
-                        alignSelf: m.role === "user" ? "flex-end" : "flex-start",
-                        maxWidth: m.role === "user" ? "72%" : "90%",
-                        background: m.role !== "user" ? "var(--paper)"
-                          : isMine(m.by) ? "var(--machine-weak)" : OTHER_SHADE,
-                        border: "1px solid var(--hairline)", borderRadius: 10, padding: "9px 13px",
-                      }}>
-                        <Group gap={5} mb={3} wrap="nowrap">
-                          {m.role === "user" ? <UserChip username={m.by} /> : <Text size="xs" c="dimmed">PM</Text>}
-                          <Text size="xs" c="dimmed">· <RelTime at={m.at} /></Text>
-                        </Group>
-                        {m.role === "pm"
-                          ? <div className="md-tight"><Md>{m.text}</Md></div>
-                          : <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>{m.text}</Text>}
-                      </div>
+                      <MessageBubble key={i} m={m} mine={isMine(m.by)} />
                     ))}
                     {busy && (
                       <div style={{ alignSelf: "flex-start", maxWidth: "92%", width: "100%",
@@ -308,18 +293,7 @@ export default function ChatView() {
               </Card>
 
               <Card padding="md" radius="md" style={cardStyle}>
-                <Stack gap={8}>
-                  <Textarea
-                    placeholder={busy ? "PM is working — wait for it to finish…" : "Ask the planner… (⌘↵ to send)"}
-                    autosize minRows={2} value={draft} disabled={busy}
-                    onChange={(e) => setDraft(e.currentTarget.value)}
-                    onKeyDown={sendOnCtrlEnter(submit)}
-                  />
-                  <Button color="machine" loading={send.isPending} disabled={busy}
-                          onClick={submit} style={{ alignSelf: "flex-end" }}>
-                    Send{send.isPending ? "" : "  (⌘↵)"}
-                  </Button>
-                </Stack>
+                <Composer busy={busy} sending={send.isPending} onSend={submit} />
               </Card>
           </Stack>
 
@@ -381,6 +355,49 @@ export default function ChatView() {
           )}
         </div>
       )}
+    </Stack>
+  );
+}
+
+/** One message. Memoised: a long thread's markdown takes real time to render, and
+ *  the page re-renders on every poll — only a message that changed should pay it. */
+const MessageBubble = memo(function MessageBubble({ m, mine }: { m: ChatMessage; mine: boolean }) {
+  return (
+    <div style={{
+      alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+      maxWidth: m.role === "user" ? "72%" : "90%",
+      background: m.role !== "user" ? "var(--paper)" : mine ? "var(--machine-weak)" : OTHER_SHADE,
+      border: "1px solid var(--hairline)", borderRadius: 10, padding: "9px 13px",
+    }}>
+      <Group gap={5} mb={3} wrap="nowrap">
+        {m.role === "user" ? <UserChip username={m.by} /> : <Text size="xs" c="dimmed">PM</Text>}
+        <Text size="xs" c="dimmed">· <RelTime at={m.at} /></Text>
+      </Group>
+      {m.role === "pm"
+        ? <div className="md-tight"><Md>{m.text}</Md></div>
+        : <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>{m.text}</Text>}
+    </div>
+  );
+});
+
+/** The message box keeps its own draft, so a keystroke re-renders the box and not
+ *  the thread above it — on a long thread that was seconds of lag per word. */
+function Composer({ busy, sending, onSend }:
+  { busy: boolean; sending: boolean; onSend: (message: string, sent: () => void) => void }) {
+  const [draft, setDraft] = useState("");
+  const submit = () => { const m = draft.trim(); if (m) onSend(m, () => setDraft("")); };
+  return (
+    <Stack gap={8}>
+      <Textarea
+        placeholder={busy ? "PM is working — wait for it to finish…" : "Ask the planner… (⌘↵ to send)"}
+        autosize minRows={2} value={draft} disabled={busy}
+        onChange={(e) => setDraft(e.currentTarget.value)}
+        onKeyDown={sendOnCtrlEnter(submit)}
+      />
+      <Button color="machine" loading={sending} disabled={busy}
+              onClick={submit} style={{ alignSelf: "flex-end" }}>
+        Send{sending ? "" : "  (⌘↵)"}
+      </Button>
     </Stack>
   );
 }

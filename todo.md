@@ -1,7 +1,7 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 194
-last_updated: 2026-09-25
+version: 199
+last_updated: 2026-09-26
 ---
 
 # To QC
@@ -25,71 +25,6 @@ deprecate the old page, not call it removed. The live v1 page still says "remove
 from the platform", which the agent wrote because the old lint told it so; nothing
 rewrites it automatically.
 
-### L1. Write the question set, a few per program
-
-Two programs have question sets, kept outside both repos in the host's platform config directory and passed to the probe with `--questions`.
-
-**Check:** the files hold the questions as written, and nothing under the substrate's
-program directories mentions them — an agent that could read them could write the
-wiki to the test.
-
-### J2. Replace the wiki agent's default system prompt
-
-Decided against: the wiki agent keeps Claude Code's built-in prompt, and the reason is written above `_TOOLS` in `wiki_agent.py`.
-
-**Check:** the comment's numbers — one real ingest re-run from the same starting
-bundle both ways: ~6k of a ~115k per-call context saved, $3.92 lean vs $3.61 stock,
-and a blind page-by-page judgement that the stock run was modestly better. One pair
-is a small sample; the call is that a ≤5% saving is not worth a second one.
-
-### L2. Answer each question with a traced agent
-
-Both question sets were probed on 09-24: 16 questions, $13.23, one report per program under the host's probe cache.
-
-**Check:** each report has an answer, the pages read in order and the searches for
-every question, and flags the three answers that left the wiki for raw results.
-
-### L3. Debrief each agent after it answers
-
-Every answer in both reports carries its debrief: what the agent could not find, what misled it, where pages disagreed.
-
-**Check:** the debriefs name concrete pages and defects rather than generic advice —
-the recurring one is an answer scattered over many concept pages with no page that
-gathers it.
-
-### L5. Generate a question set with agents, and review it
-
-Sonnet wrote 20 questions with answer keys per program from the raw results, plans, goals and workdir docs; after review 37 remain, kept with the human set outside both repos.
-
-**Check:** the review notes in the lab's decision log — three dropped because their
-answers live in sprint plans, not results — and a sample of keys against the result
-files they cite.
-
-### L6. Probe in two modes: free search and click-through
-
-`coscience.wiki_probe --mode nav` answers through `coscience.wiki_nav`, an MCP tool that serves `index.md` and then only pages linked from pages already opened; `--bundle` points the probe at any copy of a wiki.
-
-**Check:** `tests/test_wiki_nav.py`, and a nav-mode report's per-question page list —
-every page after the index is linked from one opened before it.
-
-### L7. Grade answers on path and clarity, with the key as a reference
-
-`--grade <model>` scores each answer's path and clarity (1-5) and classes it against the key; the report opens with a grade table.
-
-**Check:** a baseline report's grade table, and whether the grades match a read of
-two or three answers. The key classes run lenient — an answer naming the wrong
-benchmark version came out "differs-defensibly" — so treat them as flags, not verdicts.
-
-### L8. Organise every wiki around topics, not sprint results
-
-Topics is the platform's current wiki layout (`wiki_topics.py`): topic and background pages that open with the current understanding, and an ingest that rewrites what a result overturns. New wikis start in it; existing ones move by L11's migration.
-
-**Check:** the lab's decision log (outside both repos) — two real wikis migrated to
-copies, probe scores against the old layout, and the ingest test where a result that
-overturned a verdict had the page opening, description, index line and status page
-rewritten. Still open before it is fully comfortable: docs as a source kind, alias
-ownership between background and topic pages.
-
 ### L9. Add a heavy lint: an agent sweep for inconsistencies
 
 The sweep (`wiki_prompts.render_sweep`) is a wiki run kind that runs every 10 wiki runs by default (`COSCIENCE_WIKI_SWEEP_EVERY`, 0 = off), on `coscience wiki --sweep --program <id>`, and after every migration — only once no ingest is pending.
@@ -98,35 +33,41 @@ The sweep (`wiki_prompts.render_sweep`) is a wiki run kind that runs every 10 wi
 fixed a benchmark name wrong on 69 pages, the other a dozen copy errors — against a
 sample of the pages they changed.
 
-### L10. Re-probe after the changes and compare
+### B1. Stop a long chat lagging behind the typing
 
-Both wikis were probed on the same 53 questions as current, current + sweep and topics, in both modes; the table is at the top of the lab's decision log.
+The chat's message box keeps its own draft and each message is memoised, so a keystroke re-renders the box, not the whole thread's markdown.
 
-**Check:** the table against the per-run reports, and the two correctness cases the
-grades cannot show (a wrong layer count, a wrong benchmark name) in the answers
-themselves.
-
-### L11. Version wiki layouts and migrate between them from the platform
-
-Each bundle names its layout on the first line of its CLAUDE.md; `wiki_layouts` holds the current one and the upgrade path, and `wiki_migrate` moves a wiki over as beat-driven runs (map, write batches, finish, swap) while the old one keeps serving. Wiki settings show the layout and offer the migration; `coscience wiki --migrate` does every program. Instructions: `docs/wiki-layouts.md`.
-
-**Check:** `tests/test_wiki_migrate.py`; Wiki settings on a wiki in the old layout
-(the offer, then progress); and one real migration on a copy of the substrate before
-any live wiki is migrated — the lab migrations were run by hand, this code has not yet
-driven a real one.
+**Check:** type fast into a long chat; on a 40-message thread keystroke-to-paint went
+from ~65 ms to ~11 ms in headless Chromium (same as a 2-message chat), and a slower
+machine felt the old cost several times over as keys queued up. Sending clears the
+box; a failed send keeps the text.
 
 # To Do (sprint)
 
-### L4. Read the traces against Oleg's own account
+### L12. Make program documentation a source the wiki can cite and track
 
-Compare what the agents struggled with to where Oleg finds the wiki lacking.
+Add a documentation kind to `sources/`, so a page can cite a program's own docs and an edited doc is re-ingested like a new artifact version.
 
-The point of the exercise is the delta: where the traces confirm the impression,
-where they contradict it, and where they surface problems nobody had noticed.
-Agreement between an independent trace and a held opinion is worth more than
-either alone, and disagreement is where the bias was.
+Background pages are built mostly from the program's workdir docs (README, REPRODUCE,
+RESULTS, scripts), but a footnote can cite only results and artifacts, so migration
+writers named the files in prose. Nothing then notices when a doc changes, and the
+sweep, which checks pages against their sources, cannot check these claims — it missed
+a wrong layer count that the program's REPRODUCE.md contradicts.
+
+### L13. Give every shared alias one owning page
+
+State in the topic schema which page owns a term that fits both a topic and a background page, and have lint name the owner when two pages claim it.
+
+A migrated wiki had 16 near-duplicate warnings from aliases listed on both kinds
+of page (one term on both a model page and a kernel topic); an alias should route a reader to
+one page. Likely rule: the topic page owns it and the background page links to it.
+The sweep can clear the clashes already in migrated wikis.
 
 # To Do (backlog)
+
+## B. UI responsiveness
+
+Every page stays quick to use however much history sits behind it.
 
 ## A. Memory management
 
@@ -216,12 +157,6 @@ needs its planner mid-sprint has only the escalation, which stops the sprint —
 heavy for a question. The inbox is the light path: leave it, keep working, read the
 reply next beat. Needs a delivery rule (does an unread message wake a cycle?) and a
 decision on whether worker-to-worker is in scope. Blocked on F1.
-
-## G. Where capacity is declared
-
-Capacity is declared and edited in the place it actually belongs: how many agent
-processes the platform may run, set once for the platform; real CPUs, memory and
-cards, set on the machine that has them.
 
 ## J. Wiki run cost
 
@@ -376,11 +311,6 @@ target. A read-only job exercises launch, parse, gate and call log end to end, a
 side-by-side comparison says whether Codex is worth routing real work to. Which job
 to pilot is a decision.
 
-## P. UI updates
-
-The dashboard shows a human everything they need to see and change, and uses the
-screen space it takes.
-
 ## Q. Code rot
 
 The platform does what someone decided it should, and never acts on a signal because it
@@ -403,42 +333,42 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
-### P13. Show the app's version in the top-right corner
+### J2. Replace the wiki agent's default system prompt
 
-The header reads "live · v0.1.1", from a `VERSION` file that the build bakes in, `/api/version` reports, and each deploy raises by one.
+The wiki agent keeps Claude Code's built-in system prompt; a lean replacement saved ~5% of tokens and wrote a worse wiki, as the comment above `_TOOLS` in `wiki_agent.py` records.
 
-### P14. Stop the sprint page's Wake now and Clear hold buttons being cut off
+### L4. Read the traces against Oleg's own account
 
-The sprint cards' buttons keep their full width and the text beside them wraps, so no label is clipped.
+Closed; what the probe traces surfaced fed the topic layout, the sweep and L12-L13.
 
-### P1. Redesign the sprint edit dialog
+### L10. Re-probe after the changes and compare
 
-The edit dialog is a wide two-column form — the work on the left, how it runs on the right — and the title, summary and rationale are editable too.
+Both wikis were probed on the same question set in the old layout, after a sweep, and in topics, in both modes; topics scored best and read fewer pages per answer.
 
-### O22. Tidy the edges of the server notes
+### L11. Version wiki layouts and migrate between them from the platform
 
-The planner is no longer shown notes it could never write back, a note can only be started on a usable server, and a note saved over a changed one — by a person or the planner — is refused instead of silently overwriting it.
+Each wiki names its layout, and Wiki settings or `coscience wiki --migrate` move it to the current one as beat-driven runs; tested on a live wiki.
 
-### O23. Stop every program page polling the whole ledger
+### L8. Organise every wiki around topics, not sprint results
 
-Only Compute and the Overview poll the ledger; the notes card gets its servers with the notes, and the rail's pulse reads a small `/api/pulse`.
+Topics is the platform's default wiki layout: pages open with the current understanding, and ingests rewrite what a result overturns.
 
-### G2. Edit every machine's real capacity only on its own card, this one included
+### L7. Grade answers on path and clarity, with the key as a reference
 
-Each server's dialog sets what Co-Science may use beside what the machine has, in one aligned table with a row per resource and an on/off switch per graphics card.
+`--grade <model>` scores each answer's path and clarity and classes it against the key, which is a flag rather than a verdict.
 
-### G1. Make the global capacity editor the platform's own limits, and nothing else
+### L6. Probe in two modes: free search and click-through
 
-The platform's two limits are set only on their own gauges on Compute — steppers, an ∞ that removes the cap, and a "Set a limit" when there is none — through an endpoint that refuses any other name.
+The probe answers in two modes: free search over the bundle, and click-through from `index.md` via `coscience.wiki_nav`.
 
-### P12. Collapse the server notes on the program page
+### L5. Generate a question set with agents, and review it
 
-Each server's note starts collapsed to one line — name, the note's first line and an unread-reports badge — and opens on click.
+Agents wrote question sets with answer keys from the raw results; after review 37 remain, kept with the human set outside both repos.
 
-### P7. Never hide an experiment that is new
+### L3. Debrief each agent after it answers
 
-The done/canceled cap never folds away a row the viewer has not seen yet.
+Every probe answer carries the agent's debrief: what it could not find, what misled it, where pages disagreed.
 
-### P6. Filter the experiments list to just the new ones
+### L2. Answer each question with a traced agent
 
-The experiments card has an "only new (N)" check that shows just the highlighted rows, combined with the status filter.
+Both question sets were probed with traced agents: each answer comes with the pages read in order and the searches made.

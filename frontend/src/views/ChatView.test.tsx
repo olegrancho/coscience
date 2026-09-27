@@ -174,4 +174,34 @@ describe("ChatView chat switcher with a stale list", () => {
     await waitFor(() => expect(screen.getByText("chat 4")).toBeTruthy());
     expect(screen.getByText(/chat with the planner/i)).toBeTruthy();
   });
+
+  describe("the message box", () => {
+    const thread = { id: "c1", title: "t", scope: "read", created_at: 1, turns_done: 0,
+      busy: false, messages: [], live: "", artifacts: [] };
+    async function typeAndSend(text: string) {
+      vi.spyOn(api, "getProgram").mockResolvedValue({ id: "p", title: "P" } as any);
+      vi.spyOn(api, "listChats").mockResolvedValue([{ ...thread, messages: 0, last_at: 1 }] as any);
+      vi.spyOn(api, "getChatThread").mockResolvedValue(thread as any);
+      renderAt();
+      const box = await screen.findByPlaceholderText(/ask the planner/i);
+      fireEvent.change(box, { target: { value: text } });
+      fireEvent.click(screen.getByRole("button", { name: /send/i }));
+      return box as HTMLTextAreaElement;
+    }
+
+    it("clears once the message is sent", async () => {
+      const send = vi.spyOn(api, "sendChatMessage").mockResolvedValue(thread as any);
+      const box = await typeAndSend("  hello  ");
+      await waitFor(() => expect(send).toHaveBeenCalledWith("p", "c1", "hello"));
+      await waitFor(() => expect(box.value).toBe(""));
+    });
+
+    it("keeps the text when the send fails", async () => {
+      const send = vi.spyOn(api, "sendChatMessage").mockRejectedValue(new Error("down"));
+      const box = await typeAndSend("keep me");
+      await waitFor(() => expect(send).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 50));
+      expect(box.value).toBe("keep me");
+    });
+  });
 });
