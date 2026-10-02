@@ -45,8 +45,11 @@ anything.
   built and set up.
 - `syntheses/` — views across topics: where the program stands, open leads, what
   was tried and dropped, and a glossary of the program's terms.
-- `sources/` — grounding pages: one per ingested result or artifact version. They
-  point at the raw object and summarise it; they never hold the knowledge itself.
+- `sources/` — grounding pages: one per ingested result, artifact version or
+  documentation file (the program's own README, reproduction notes, data
+  descriptions). They point at the raw object and summarise it; they never hold
+  the knowledge itself. Background pages cite documentation sources for how things
+  are built.
 
 ## Every page
 
@@ -105,7 +108,9 @@ knows where the answer is.
    for a new area a reader would ask about, not for each finding.
 3. **Name for the reader.** Title a topic by its subject in plain words ("coefficient
    refitting"), never by a conclusion ("coefficient near-optimality"). `aliases`
-   carry the everyday words a reader would type.
+   carry the everyday words a reader would type. **An alias names one page.**
+   When a term fits both a topic and a background page, the topic page carries
+   it, and the background page links to that topic instead of listing the term.
 4. **One value per quantity.** When two measurements of the same thing differ, give
    both in one place with the scope of each (which data, which version), and say
    which one to use.
@@ -152,6 +157,9 @@ RULES = """## Rules that bite
   is how a wiki like this stops answering questions: the answer ends up spread
   across pages nobody reads together.
 - **A source title is never a topic.** "Sprint p3-c14 result" is a source page.
+- **An alias names one page.** Before adding a title or alias, check no other page
+  already carries it. When a term fits both a topic and a background page, the
+  topic page owns it and the background page links to the topic.
 - **Keep the evidence, compress nothing that is still true.** Rewriting the
   current understanding is not licence to drop evidence: evidence stays, filed
   under its sub-question.
@@ -216,6 +224,8 @@ Rules for the map:
   roughly {target} topics; merge small neighbours rather than keep them apart.
 - Background pages cover how the program's main tools, models, benchmarks and
   datasets are built — including what the documentation says and no result does.
+- Each alias appears once across the map. A term that fits a topic and a
+  background page goes on the topic.
 - Always include `syntheses/program-status.md` (where the program stands against
   its goals, what is open, what was tried and dropped) and `syntheses/glossary.md`.
 Reply with one line: how many topics, background pages and syntheses you mapped.

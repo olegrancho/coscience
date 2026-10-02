@@ -374,6 +374,7 @@ class Substrate:
             wiki_model=str(fm.get("wiki_model", "")),
             wiki_enabled=bool(fm.get("wiki_enabled", True)),
             wiki_merge=str(fm.get("wiki_merge", "auto")),
+            wiki_docs=[str(x) for x in (fm.get("wiki_docs") or [])],
             chat_model=str(fm.get("chat_model", "")),
             worker_model=str(fm.get("worker_model", "")),
         )
@@ -399,6 +400,8 @@ class Substrate:
             # written only on the non-default policy, so existing program.md files
             # are untouched
             fm["wiki_merge"] = program.wiki_merge
+        if program.wiki_docs:
+            fm["wiki_docs"] = list(program.wiki_docs)
         d = self.program_dir(program.id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "program.md").write_text(serialize(fm, program.goals.strip() + "\n"))

@@ -77,6 +77,7 @@ def _page_rules(pages: list[wiki_okf.Page], index_body: str,
     page_linked = {p.path: _linked_targets(p.body) for p in pages}
     by_slug: dict[str, list[str]] = {}
     titles: dict[str, str] = {}
+    types = {p.path: p.type for p in pages}
 
     for p in pages:
         if len(p.body.strip()) < STUB_CHARS:
@@ -106,8 +107,14 @@ def _page_rules(pages: list[wiki_okf.Page], index_body: str,
                 continue
             other = titles.get(key)
             if other and other != p.path:
-                out.append(Finding("page/near-duplicate", "warn", p.path,
-                                   f"title or alias '{name}' also names {other}"))
+                msg = f"title or alias '{name}' also names {other}"
+                pair = {types.get(p.path): p.path, types.get(other): other}
+                if "Concept" in pair and "Entity" in pair:
+                    # The topic layout's rule (L13): an alias names one page, and a
+                    # term shared by a topic and a background page belongs to the topic.
+                    msg += (f" — an alias names one page: keep it on the topic "
+                            f"{pair['Concept']} and link there from {pair['Entity']}")
+                out.append(Finding("page/near-duplicate", "warn", p.path, msg))
             titles.setdefault(key, p.path)
 
     for slug, paths in by_slug.items():
@@ -411,10 +418,12 @@ def _source_rules(pages: list[wiki_okf.Page], objects: dict[str, str] | None,
                 # Calling it missing had the agent write "removed from the
                 # platform" onto a page whose version is still on disk.
                 if p.status != "deprecated":
-                    out.append(Finding("src/superseded", "warn", p.path,
-                                       f"`{oid}` was replaced by `{superseded[oid]}`: "
-                                       f"mark this page `status: deprecated` and "
-                                       f"point readers to the current version's page"))
+                    why = (f"`{oid}` was replaced by `{superseded[oid]}`: "
+                           f"mark this page `status: deprecated` and point readers "
+                           f"to the current version's page") if superseded[oid] else (
+                          f"`{oid}` is no longer one of the program's wiki sources: "
+                          f"mark this page `status: deprecated`")
+                    out.append(Finding("src/superseded", "warn", p.path, why))
             elif current is None:
                 out.append(Finding("src/missing", "error", p.path,
                                    f"origin object `{oid}` no longer exists"))
@@ -501,8 +510,10 @@ def run_lint(substrate, program_id: str, *, now: float | None = None,
         index_body = (wiki_store.bundle_dir(substrate, program_id) / "index.md").read_text()
     except OSError:
         index_body = ""
+    superseded = wiki_store.superseded_versions(substrate, program_id)
+    superseded.update(wiki_store.retired_docs(substrate, program_id, pages))
     findings = lint(pages, index_body=index_body, objects=objects,
-                    superseded=wiki_store.superseded_versions(substrate, program_id),
+                    superseded=superseded,
                     previous=wiki_store.previous_bodies(substrate, program_id),
                     now=now)
     return findings, fixed_count

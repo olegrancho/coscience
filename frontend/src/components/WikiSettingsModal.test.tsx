@@ -8,6 +8,11 @@ vi.mock("../api", () => ({
     migrateWiki: vi.fn().mockResolvedValue({}),
     cancelWikiMigration: vi.fn().mockResolvedValue({ cancelled: true }),
     setProgramWikiModel: vi.fn(), setWikiMergePolicy: vi.fn(), setProgramWikiEnabled: vi.fn(),
+    getWikiDocs: vi.fn().mockResolvedValue({ id: "p1", workdir: "/w", files: [
+      { path: "README.md", selected: true, ingested: true },
+      { path: "docs/devlog.md", selected: false, ingested: false },
+      { path: "OLD.md", selected: true, ingested: true, missing: true }] }),
+    setWikiDocs: vi.fn().mockResolvedValue({ id: "p1", workdir: "/w", files: [] }),
   },
 }));
 
@@ -66,5 +71,27 @@ describe("WikiSettingsModal layout", () => {
                 requested_by: "", at: 0 };
     expect(migrationText({ ...m, phase: "map" })).toContain("topic map");
     expect(migrationText({ ...m, phase: "finish" })).toContain("index");
+  });
+});
+
+describe("WikiSettingsModal documentation", () => {
+  it("lists the working folder's files with the ticked ones checked", async () => {
+    open(base);
+    await waitFor(() => expect(screen.getByText("2 of 3 files are wiki sources")).toBeTruthy());
+    expect((screen.getByRole("checkbox", { name: /README\.md/ }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: /devlog/ }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByText(/missing/)).toBeTruthy();
+  });
+
+  it("saves the new choice in list order, and only when it changed", async () => {
+    open(base);
+    await screen.findByText("2 of 3 files are wiki sources");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.setProgramWikiModel).not.toHaveBeenCalled());
+    expect(api.setWikiDocs).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("checkbox", { name: /devlog/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /OLD\.md/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(api.setWikiDocs).toHaveBeenCalledWith("p1", ["README.md", "docs/devlog.md"]));
   });
 });

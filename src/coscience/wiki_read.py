@@ -89,7 +89,14 @@ def provenance_ref(source_id: str, resource: str, program_id: str = "") -> dict:
     r = (resource or "").strip()
     parts = r.lstrip("/").split("/")
     kind, href = "unknown", ""
-    if parts[0] == "results" and len(parts) >= 2:
+    if r.startswith("workdir:"):
+        # Program documentation (L12): the dashboard does not serve the workdir,
+        # so the link goes to the wiki's own page summarising the file.
+        from coscience.wiki_store import doc_slug
+        kind = "doc"
+        if program_id:
+            href = f"/programs/{program_id}/wiki/{doc_slug(r[len('workdir:'):])[:-3]}"
+    elif parts[0] == "results" and len(parts) >= 2:
         kind, href = "result", f"/results/{parts[1].removesuffix('.md')}"
     elif parts[0] == "sprints" and len(parts) >= 2:
         kind, href = "sprint", f"/sprints/{parts[1]}"
@@ -101,6 +108,9 @@ def provenance_ref(source_id: str, resource: str, program_id: str = "") -> dict:
         stem = parts[1].removesuffix(".md")
         if stem.startswith("result-"):
             kind, href = "result", f"/results/{stem[len('result-'):]}"
+        elif stem.startswith("doc-"):
+            kind = "doc"
+            href = f"/programs/{program_id}/wiki/sources/{stem}" if program_id else ""
         elif stem.startswith("artifact-") and program_id and "-" in stem:
             aid = stem[len("artifact-"):].rsplit("-", 1)[0]
             if aid:

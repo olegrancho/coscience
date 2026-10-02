@@ -10,6 +10,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -257,7 +258,8 @@ def is_empty(substrate, program_id: str) -> bool:
 
 @dataclass
 class WikiObject:
-    """One ingestable raw object: a sprint result or an artifact version."""
+    """One ingestable raw object: a sprint result, an artifact version, or a
+    documentation file in the program's workdir."""
     oid: str
     kind: str
     title: str
@@ -291,7 +293,7 @@ def hash_dir(path: Path) -> str:
 
 def object_hash(obj: WikiObject) -> str:
     """"" when the object's bytes are gone — the caller reads that as src/missing."""
-    if obj.kind == "result":
+    if obj.kind in ("result", "doc"):
         return hash_file(obj.paths[0]) if obj.paths else ""
     return hash_dir(obj.paths[0]) if obj.paths else ""
 
@@ -332,7 +334,96 @@ def program_objects(substrate, program_id: str) -> list[WikiObject]:
             paths=[substrate.artifact_dir(program_id, art.id) / vid],
             resource=f"/programs/{program_id}/artifacts/{art.id}/{vid}",
             slug=f"sources/artifact-{art.id}-{vid}.md"))
+    out += doc_objects(substrate, program_id)
     out.sort(key=lambda o: (o.at, o.oid))
+    return out
+
+
+#: How deep under the workdir documentation is offered, and what is never offered:
+#: tool caches and vendored trees hold READMEs nobody wrote for this program.
+DOC_DEPTH = 2
+_DOC_SKIP_DIRS = {"node_modules", "venv", "site-packages", "__pycache__"}
+
+
+def doc_candidates(workdir: str) -> list[str]:
+    """Markdown files in the workdir a person might tick as wiki sources (L12): the
+    top level and one directory down, workdir-relative, sorted. Offered, never
+    ingested on their own — only the files a program lists in `wiki_docs` are."""
+    root = Path(workdir) if workdir else None
+    if root is None or not root.is_dir():
+        return []
+    out = []
+    for path in root.rglob("*.md"):
+        rel = path.relative_to(root)
+        if len(rel.parts) > DOC_DEPTH or not path.is_file():
+            continue
+        if any(part.startswith(".") or part in _DOC_SKIP_DIRS for part in rel.parts[:-1]):
+            continue
+        out.append(rel.as_posix())
+    return sorted(out, key=lambda r: (r.count("/"), r.lower()))
+
+
+def doc_path(workdir: str, rel: str) -> Path | None:
+    """The file a `wiki_docs` entry names, or None when it would leave the workdir."""
+    if not workdir or not rel:
+        return None
+    root = Path(workdir).resolve()
+    path = (root / rel).resolve()
+    return path if path.is_relative_to(root) and path != root else None
+
+
+def doc_slug(rel: str) -> str:
+    stem = re.sub(r"[^a-z0-9]+", "-", rel.lower().removesuffix(".md")).strip("-")
+    return f"sources/doc-{stem}.md"
+
+
+def _doc_title(path: Path, rel: str) -> str:
+    try:
+        for line in path.read_text(errors="replace").splitlines()[:40]:
+            if line.startswith("# "):
+                return f"{line[2:].strip()} ({rel})"[:120]
+    except OSError:
+        pass
+    return rel
+
+
+def retired_docs(substrate, program_id: str, pages) -> dict[str, str]:
+    """Doc source pages whose file still exists but is no longer listed in
+    `wiki_docs`, mapped to "" (no replacement): unticking a doc retires its page,
+    it does not make the page point at nothing. A doc whose file is gone is not
+    here, so lint still calls its page missing."""
+    try:
+        program = substrate.load_program(program_id)
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for p in pages:
+        oid = str(p.extra.get("origin", ""))
+        if not oid.startswith("doc:") or oid[4:] in program.wiki_docs:
+            continue
+        path = doc_path(program.workdir, oid[4:])
+        if path is not None and path.is_file():
+            out[oid] = ""
+    return out
+
+
+def doc_objects(substrate, program_id: str) -> list[WikiObject]:
+    """The documentation files the program lists in `wiki_docs`, as objects. Their
+    hash is the file's, so an edited README is re-ingested like a new artifact
+    version; a listed file that is gone is skipped (lint reports its page)."""
+    try:
+        program = substrate.load_program(program_id)
+    except (OSError, ValueError):
+        return []
+    out = []
+    for rel in program.wiki_docs:
+        path = doc_path(program.workdir, rel)
+        if path is None or not path.is_file():
+            continue
+        out.append(WikiObject(
+            oid=f"doc:{rel}", kind="doc", title=_doc_title(path, rel),
+            at=path.stat().st_mtime, paths=[path],
+            resource=f"workdir:{rel}", slug=doc_slug(rel)))
     return out
 
 

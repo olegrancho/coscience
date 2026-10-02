@@ -262,6 +262,7 @@ class Program:
     wiki_model: str = ""               # Claude model for this program's wiki runs; "" resolves to DEFAULT_MODEL
     wiki_enabled: bool = True          # False opts the program out of wiki ingest entirely
     wiki_merge: str = "auto"           # auto = merge duplicates unattended; propose = queue for a human
+    wiki_docs: list[str] = field(default_factory=list)  # workdir files the wiki ingests as documentation
     chat_model: str = ""               # Claude model chat turns run on; "" resolves to pm_model
     worker_model: str = ""             # model new sprints inherit when proposed; "" resolves to DEFAULT_MODEL
 

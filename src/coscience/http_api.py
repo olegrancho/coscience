@@ -116,6 +116,10 @@ class WikiMergePolicyIn(BaseModel):
     policy: str
 
 
+class WikiDocsIn(BaseModel):
+    paths: list[str]
+
+
 class EscalationAnswerIn(BaseModel):
     action: str
     instructions: str = ""
@@ -1261,6 +1265,22 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def set_program_wiki_merge(program_id: str, body: WikiMergePolicyIn) -> dict:
         try:
             return service.set_program_wiki_merge(program_id, body.policy)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @api.get("/programs/{program_id}/wiki/docs")
+    def get_wiki_docs(program_id: str) -> dict:
+        try:
+            return service.wiki_docs(program_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.put("/programs/{program_id}/wiki/docs")
+    def set_wiki_docs(program_id: str, body: WikiDocsIn) -> dict:
+        try:
+            return service.set_wiki_docs(program_id, body.paths)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
         except ValueError as e:

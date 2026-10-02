@@ -294,6 +294,10 @@ export interface WikiSummary {
   layout_upgrade: string;
   migration: WikiMigration | null;
 }
+/** Workdir files a person may tick as wiki documentation sources (L12). */
+export interface WikiDoc { path: string; selected: boolean; ingested: boolean; missing?: boolean }
+export interface WikiDocs { id: string; workdir: string; files: WikiDoc[] }
+
 export interface WikiMigration {
   from: string; to: string;
   phase: "setup" | "map" | "write" | "finish";
@@ -324,7 +328,7 @@ export interface WikiRelation {
 }
 export interface WikiBacklink { path: string; title: string; type: string; typed: string[] }
 export interface WikiSource {
-  id: string; kind: "result" | "sprint" | "artifact" | "unknown";
+  id: string; kind: "result" | "sprint" | "artifact" | "doc" | "unknown";
   href: string; resource: string; title: string;
 }
 export interface WikiPage extends WikiPageRow {
@@ -809,6 +813,13 @@ export const api = {
   getWikiCitations: (id: string, oid: string) =>
     fetch(`/api/programs/${id}/wiki/citations/${encodeURIComponent(oid)}`)
       .then(j<WikiCitation[]>),
+  getWikiDocs: (id: string) =>
+    fetch(`/api/programs/${id}/wiki/docs`).then(j<WikiDocs>),
+  setWikiDocs: (id: string, paths: string[]) =>
+    fetch(`/api/programs/${id}/wiki/docs`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths }),
+    }).then(j<WikiDocs>),
   setWikiMergePolicy: (id: string, policy: string) =>
     fetch(`/api/programs/${id}/wiki-merge-policy`, {
       method: "POST", headers: { "Content-Type": "application/json" },

@@ -76,6 +76,21 @@ runs by default; `COSCIENCE_WIKI_SWEEP_EVERY` changes the interval, and `0` turn
 schedule off. `coscience wiki --sweep --program <id>` asks for one now. Set the
 variable wherever the dispatch loop reads its environment and restart it.
 
+## Documentation sources
+
+Besides results and artifacts, a wiki can read the program's own documentation — a
+README, reproduction notes, a data description — as sources for how its code, models
+and data are built. Nothing is read until someone chooses it: Wiki settings →
+*Documentation* lists the markdown files at the top of the program's working folder
+and one directory down; tick the ones that describe the program. They are stored as
+`wiki_docs` in the program's `program.md`.
+
+A ticked file is ingested on the next run like any result, gets a page under
+`sources/doc-…`, and is ingested again whenever it changes. Sweeps check the wiki's
+"how it is built" claims against the ticked files. Unticking a file keeps its page,
+and lint asks for it to be marked deprecated; deleting the file makes the page
+`src/missing`, as for any source that is gone.
+
 ## Adding a layout (developers)
 
 1. Write the new schema and ingest rules. The current one's are in

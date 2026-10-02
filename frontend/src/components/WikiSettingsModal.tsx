@@ -1,7 +1,7 @@
-import { Button, Checkbox, Divider, Group, Modal, Stack, Text } from "@mantine/core";
+import { Button, Checkbox, Divider, Group, Modal, ScrollArea, Stack, Text } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type WikiMigration, type WikiSummary } from "../api";
+import { api, type WikiDocs, type WikiMigration, type WikiSummary } from "../api";
 import { MergePolicySelect, ModelSelect } from "./ui";
 
 interface Props {
@@ -48,6 +48,25 @@ export default function WikiSettingsModal(
     wasOpened.current = opened;
   }, [opened, summary]);
 
+  // Documentation sources: fetched when the dialog opens, saved with the rest.
+  const [docs, setDocs] = useState<WikiDocs | null>(null);
+  const [docsError, setDocsError] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+  const seededDocs = useRef<string[]>([]);
+  useEffect(() => {
+    if (!opened) return;
+    let live = true;
+    setDocsError("");
+    api.getWikiDocs(programId).then((d) => {
+      if (!live) return;
+      const on = d.files.filter((f) => f.selected).map((f) => f.path);
+      setDocs(d); setPicked(on); seededDocs.current = on;
+    }).catch((e) => { if (live) setDocsError(String(e)); });
+    return () => { live = false; };
+  }, [opened, programId]);
+  const togglePick = (path: string, on: boolean) =>
+    setPicked((cur) => on ? [...cur, path] : cur.filter((p) => p !== path));
+
   const [migrating, setMigrating] = useState(false);
   const [migrateError, setMigrateError] = useState("");
   const migrationAction = async (act: () => Promise<unknown>) => {
@@ -70,6 +89,13 @@ export default function WikiSettingsModal(
       if (model !== was.model) await api.setProgramWikiModel(programId, model);
       if (merge !== was.merge) await api.setWikiMergePolicy(programId, merge);
       if (enabled !== was.enabled) await api.setProgramWikiEnabled(programId, enabled);
+      const docsChanged = picked.length !== seededDocs.current.length
+        || picked.some((p) => !seededDocs.current.includes(p));
+      if (docs && docsChanged) {
+        // In the order the list shows them, so program.md reads the same way.
+        const order = docs.files.map((f) => f.path);
+        await api.setWikiDocs(programId, [...picked].sort((a, b) => order.indexOf(a) - order.indexOf(b)));
+      }
       onSaved();
       onClose();
     } finally {
@@ -109,6 +135,44 @@ export default function WikiSettingsModal(
           description="Unchecking stops wiki runs entirely — no ingest is launched and no quota is spent on it. Existing pages stay where they are."
           onChange={(e) => setEnabled(e.currentTarget.checked)}
         />
+
+        <Divider />
+
+        <Stack gap={8}>
+          <Group justify="space-between" align="baseline" wrap="nowrap">
+            <Text size="sm">Documentation</Text>
+            {docs && docs.files.length > 0 && (
+              <Text size="xs" c="dimmed">
+                {picked.length} of {docs.files.length} files are wiki sources
+              </Text>
+            )}
+          </Group>
+          <Text size="xs" c="dimmed">
+            Files from the program's working folder that the wiki reads as sources for
+            how its code, models and data are built. A ticked file is ingested on the
+            next run, and again whenever it changes.
+          </Text>
+          {docsError ? <Text size="xs" c="red">{docsError}</Text>
+            : !docs ? null
+            : !docs.workdir ? <Text size="xs" c="dimmed">This program has no working folder.</Text>
+            : docs.files.length === 0
+              ? <Text size="xs" c="dimmed">No markdown files in {docs.workdir}.</Text>
+              : (
+                <ScrollArea.Autosize mah={210} type="auto" offsetScrollbars>
+                  <Stack gap={6}>
+                    {docs.files.map((f) => (
+                      <Checkbox key={f.path} size="xs" disabled={!enabled}
+                        checked={picked.includes(f.path)}
+                        onChange={(e) => togglePick(f.path, e.currentTarget.checked)}
+                        label={<>
+                          <span className="mono">{f.path}</span>
+                          {f.missing && <Text span size="xs" c="red"> — missing</Text>}
+                        </>} />
+                    ))}
+                  </Stack>
+                </ScrollArea.Autosize>
+              )}
+        </Stack>
 
         <Divider />
 

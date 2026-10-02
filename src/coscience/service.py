@@ -3186,6 +3186,52 @@ class Service:
         self.substrate.save_program(program)
         return {"id": program_id, "wiki_merge": policy}
 
+    def wiki_docs(self, program_id: str) -> dict:
+        """The workdir's markdown files a person may tick as wiki sources (L12),
+        which are ticked, and which ticked ones have been ingested."""
+        from coscience import wiki_store
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        program = self.substrate.load_program(program_id)
+        ingested = (wiki_store.load_state(self.substrate, program_id).get("ingested") or {})
+        selected = set(program.wiki_docs)
+        offered = wiki_store.doc_candidates(program.workdir)
+        files = [{"path": rel, "selected": rel in selected,
+                  "ingested": f"doc:{rel}" in ingested}
+                 for rel in offered]
+        # A ticked file that is no longer offered (moved, deleted, or deeper than
+        # the list goes) stays visible so it can be unticked.
+        files += [{"path": rel, "selected": True, "ingested": f"doc:{rel}" in ingested,
+                   "missing": not (p := wiki_store.doc_path(program.workdir, rel))
+                              or not p.is_file()}
+                  for rel in program.wiki_docs if rel not in offered]
+        return {"id": program_id, "workdir": program.workdir, "files": files}
+
+    def set_wiki_docs(self, program_id: str, paths: list[str]) -> dict:
+        """Choose which workdir files the wiki ingests as documentation. Ticking a
+        file queues it for the next ingest; unticking one retires its source page
+        (lint asks for it to be marked deprecated) without deleting anything."""
+        from coscience import wiki_store
+        if not (self.substrate.program_dir(program_id) / "program.md").is_file():
+            raise NotFoundError(program_id)
+        program = self.substrate.load_program(program_id)
+        if not program.workdir:
+            raise ValueError("this program has no working folder")
+        clean: list[str] = []
+        for rel in paths:
+            rel = str(rel).strip()
+            if not rel or rel in clean:
+                continue
+            path = wiki_store.doc_path(program.workdir, rel)
+            if path is None:
+                raise ValueError(f"not inside the working folder: {rel}")
+            if not path.is_file() and rel not in program.wiki_docs:
+                raise ValueError(f"no such file in the working folder: {rel}")
+            clean.append(rel)
+        program.wiki_docs = clean
+        self.substrate.save_program(program)
+        return self.wiki_docs(program_id)
+
     def set_wiki_human_notes(self, program_id: str, slug: str, text: str) -> dict:
         """Replace the protected `# Human notes` section, and nothing else.
 

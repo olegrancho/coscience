@@ -212,6 +212,16 @@ but set its `status: deprecated` and open its `# Summary` with a line naming the
 version that replaced it and linking to its page. The earlier version still
 exists; it is only no longer current, so never describe it as removed.
 
+A documentation object (`doc:<path>`) is a file from the program's own working
+folder — a README, reproduction notes, a data description. It says how the
+program's code, models, data and benchmarks are built and run; it is not a result,
+and it measures nothing. What it states belongs on the pages about those things
+(background pages), cited to its source page like any other source. A doc that is
+already in the wiki has been edited: rewrite its source page, and correct every page
+that relied on what changed. Docs go stale: where a doc and a result disagree about
+what was measured, the result wins and the page says so; where they disagree about
+how something is built, record it in `QUESTIONS.md` rather than pick one.
+
 ## The batch
 
 {_object_block(objects)}
@@ -284,6 +294,13 @@ def render_sweep(program, bundle: Path, run_dir: Path, results_dir: Path | None 
     raw = (f"The raw results the source pages summarise are under `{results_dir}`; "
            f"read one when a source page is too thin to settle a claim."
            if results_dir else "")
+    from coscience import wiki_store
+    docs = [p for rel in getattr(program, "wiki_docs", [])
+            if (p := wiki_store.doc_path(program.workdir, rel)) and p.is_file()]
+    if docs:
+        raw += (" The program's documentation sources are "
+                + ", ".join(f"`{p}`" for p in docs)
+                + "; check how a page says something is built against them.")
     return f"""# Wiki sweep run
 
 You are auditing the knowledge wiki of **{program.title}** (`{program.id}`),

@@ -1,69 +1,64 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 199
-last_updated: 2026-09-26
+version: 206
+last_updated: 2026-10-02
 ---
 
 # To QC
 
-### J3. Choose the batch hold's max-wait, or leave it off
-
-The live dispatch loop holds a short wiki batch 15 minutes (`COSCIENCE_WIKI_MAX_WAIT=900`); the code default stays off.
-
-**Check:** the env file's comment and `batch_max_wait`'s docstring carry the
-measurement (77 runs, 59 single-object at ~$2.6, back-to-back runs 6-8 min apart on
-one program), and over the next days the wiki runs show fewer single-object ingests
-without any program's wiki lagging more than ~15 minutes behind its results.
-
-### D3. Retire the source page of a superseded artifact version
-
-Lint now reads a replaced artifact version as history: no error, and a `src/superseded` warning only while its page is not marked `status: deprecated`.
-
-**Check:** `coscience wiki lint` on the affected program no longer reports the scaling figure's v1/v2
-pages as `src/missing`, and the ingest prompt's new paragraph tells the agent to
-deprecate the old page, not call it removed. The live v1 page still says "removed
-from the platform", which the agent wrote because the old lint told it so; nothing
-rewrites it automatically.
-
-### L9. Add a heavy lint: an agent sweep for inconsistencies
-
-The sweep (`wiki_prompts.render_sweep`) is a wiki run kind that runs every 10 wiki runs by default (`COSCIENCE_WIKI_SWEEP_EVERY`, 0 = off), on `coscience wiki --sweep --program <id>`, and after every migration — only once no ingest is pending.
-
-**Check:** `tests/test_wiki_sweep_run.py`, and the two sweep reports in the lab — one
-fixed a benchmark name wrong on 69 pages, the other a dozen copy errors — against a
-sample of the pages they changed.
-
-### B1. Stop a long chat lagging behind the typing
-
-The chat's message box keeps its own draft and each message is memoised, so a keystroke re-renders the box, not the whole thread's markdown.
-
-**Check:** type fast into a long chat; on a 40-message thread keystroke-to-paint went
-from ~65 ms to ~11 ms in headless Chromium (same as a 2-message chat), and a slower
-machine felt the old cost several times over as keys queued up. Sending clears the
-box; a failed send keeps the text.
-
-# To Do (sprint)
-
 ### L12. Make program documentation a source the wiki can cite and track
 
-Add a documentation kind to `sources/`, so a page can cite a program's own docs and an edited doc is re-ingested like a new artifact version.
+Wiki settings → Documentation lists the workdir's markdown files (top level and one down); ticked ones are stored as `wiki_docs`, ingested as `doc:` sources, re-ingested when edited, cited from background pages and read by sweeps.
 
-Background pages are built mostly from the program's workdir docs (README, REPRODUCE,
-RESULTS, scripts), but a footnote can cite only results and artifacts, so migration
-writers named the files in prose. Nothing then notices when a doc changes, and the
-sweep, which checks pages against their sources, cannot check these claims — it missed
-a wrong layer count that the program's REPRODUCE.md contradicts.
+**Check:** tick a program's README and reproduction notes; after the next ingest the
+wiki has `sources/doc-…` pages and the background pages cite them, and the next sweep's
+report checks how-it-is-built claims against them. Nothing is ticked on any
+program yet, so nothing ingests until you choose. Docs: `docs/wiki-layouts.md`.
 
 ### L13. Give every shared alias one owning page
 
-State in the topic schema which page owns a term that fits both a topic and a background page, and have lint name the owner when two pages claim it.
+The topic schema, the ingest rules and the migration map now say an alias names one page and a term shared by a topic and a background page belongs to the topic; lint's near-duplicate warning names which page keeps it.
 
-A migrated wiki had 16 near-duplicate warnings from aliases listed on both kinds
-of page (one term on both a model page and a kernel topic); an alias should route a reader to
-one page. Likely rule: the topic page owns it and the background page links to it.
-The sweep can clear the clashes already in migrated wikis.
+**Check:** `tests/test_wiki_docs.py` (the last test), and the rule in `wiki_topics.py`.
+The live migrated wikis have no alias clashes today, so this guards against new ones;
+a live bundle's own `CLAUDE.md` keeps its old text, and the rule reaches ingests
+through the prompt.
+
+# To Do (sprint)
 
 # To Do (backlog)
+
+## E. Substrate history
+
+The substrate's git history records work and decisions, not the loops' heartbeat.
+
+### E1. Stop the dispatch loop committing every few seconds
+
+Find what makes a dispatch cycle commit on a beat where nothing was decided, and stop it; keep sprint logs out of git.
+
+On a busy day the substrate took over a thousand "dispatch cycle" commits, one every
+six seconds, each only moving lease expiry times in `.coscience/leases.json` and
+appending to a running sprint's `.out` training log. Some condition in the cycle
+report (`dispatcher.py`, the `substrate.commit("dispatch cycle")` guard) is true every
+beat, and lease renewal alone rewrites the file each time. The churn also commits a
+wiki run's edits half-way through, which a sweep reported in its notes. Separately, ~4,500 `.out`
+and `.log` files are tracked, most under two sprints' `work/prep`; `.gitignore` could
+exclude sprint logs and the history already written stays as it is.
+
+## G. Usage budget
+
+Whoever runs the platform decides how much of the Claude usage windows each kind of
+agent may spend, from the dashboard, without touching code.
+
+### G1. Edit the usage thresholds from Compute → Claude usage
+
+Add a config control to the Claude usage card that sets, per agent kind (PM, worker, wiki), the 5-hour and weekly percentage at which it stops launching.
+
+Today they are constants in code: the PM stops at 80% of the 5-hour window, workers at
+90%, wiki runs at 70%, and all three at 99% of the week (`worker.py`, `wiki.py`). The
+PM and dispatch loops are separate processes, so the values belong in a substrate file
+they read each beat (as `resources.yaml` is), not in the backend's memory, and the
+card should show each gate's line on its gauge. Changing one should need no restart.
 
 ## B. UI responsiveness
 
@@ -333,6 +328,22 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### L9. Add a heavy lint: an agent sweep for inconsistencies
+
+A sweep runs every 10 wiki runs and after each migration; the first scheduled ones fixed scope slips and stale openings the mechanical lint could not see.
+
+### D3. Retire the source page of a superseded artifact version
+
+Lint reads a replaced artifact version as history, and the ingest marks its page deprecated with a link to the current version instead of calling it removed.
+
+### J3. Choose the batch hold's max-wait, or leave it off
+
+The live dispatch loop holds a short wiki batch 15 minutes: over its first four days 6 of 26 ingests carried more than one result, saving 7 runs, and the hold never added more than its 15 minutes.
+
+### B1. Stop a long chat lagging behind the typing
+
+The chat's message box keeps its own draft and each message is memoised, so typing into a long thread no longer re-renders it.
+
 ### J2. Replace the wiki agent's default system prompt
 
 The wiki agent keeps Claude Code's built-in system prompt; a lean replacement saved ~5% of tokens and wrote a worse wiki, as the comment above `_TOOLS` in `wiki_agent.py` records.
@@ -356,19 +367,3 @@ Topics is the platform's default wiki layout: pages open with the current unders
 ### L7. Grade answers on path and clarity, with the key as a reference
 
 `--grade <model>` scores each answer's path and clarity and classes it against the key, which is a flag rather than a verdict.
-
-### L6. Probe in two modes: free search and click-through
-
-The probe answers in two modes: free search over the bundle, and click-through from `index.md` via `coscience.wiki_nav`.
-
-### L5. Generate a question set with agents, and review it
-
-Agents wrote question sets with answer keys from the raw results; after review 37 remain, kept with the human set outside both repos.
-
-### L3. Debrief each agent after it answers
-
-Every probe answer carries the agent's debrief: what it could not find, what misled it, where pages disagreed.
-
-### L2. Answer each question with a traced agent
-
-Both question sets were probed with traced agents: each answer comes with the pages read in order and the searches made.
