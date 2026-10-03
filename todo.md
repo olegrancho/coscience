@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 217
+version: 218
 last_updated: 2026-10-03
 ---
 
@@ -47,27 +47,16 @@ Lineage nodes for the sprints the experiments list highlights carry a pulsing ri
 lineage graph has the ring until you open the sprint. The ring is per browser, like the
 list. At full-graph zoom the ring shrinks with the node; it reads best expanded.
 
-# To Do (sprint)
-
 ### I1. Write catch-up reports, and give them a page
 
-The PM writes a catch-up report — what happened since the last one — on a schedule and on demand, and a button at the top of the program opens the catch-up page that lists them.
+A "Catch up" button opens each program's catch-up page: reports newest first, each a read-only planner chat opened by the catch-up request, with "Continue in chat", "Write one now" (from the last report, or the last 7/14/30 days) and the schedule (every 7 days, at least 10 finished sprints, editable there).
 
-A report is a brief for someone who has forgotten the last week: recent developments,
-new experimental results, new avenues of research, with links to the sprints and ideas
-it names. One is due when a period has passed (weekly by default) and more than N
-sprints have finished since the last report (10 by default); both are program settings.
-The page has a "Write one now" button. Reports belong in the substrate under the
-program, so they survive and other instances serve them; the PM's report run should
-pass the usage gate like any PM beat.
+**Check:** the first scheduled reports — a program with none yet looks back one period, so
+the busiest programs should get one within ten minutes of the deploy, past the planner's
+usage gate — read like the hand-written "Update <date>" chats: bottom line, numbers table,
+numbered next steps, sprints linked by title. The button shows "· N new" until opened.
 
-Model it on the weekly "Update <date>" chats already held with the planner by hand:
-bottom line first, a numbers table, numbered next steps, and a "continue in chat".
-
-Decided: the check runs once a period; a report is written only if at least N sprints
-finished since the last one, so a quiet week produces nothing.
-
-Details: [todo_i1_catchup_reports.md](todo_i1_catchup_reports.md)
+# To Do (sprint)
 
 ### M1. Let a human grant the PM bounded approval authority
 

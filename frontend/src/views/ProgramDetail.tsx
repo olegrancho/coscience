@@ -16,6 +16,7 @@ import HostNotesCard, { noteRows } from "../components/HostNotesCard";
 import type { ArtifactRow, WikiSummary } from "../api";
 import { TYPE_HUE } from "../components/wikiGraphStyle";
 import { isUnseen, seedIfNew } from "../sprintSeen";
+import { isReportSeen } from "../catchupSeen";
 import { takeReturnRow } from "../returnRow";
 import { experimentRows } from "./experimentsList";
 import PageToc, { type TocEntry } from "../components/PageToc";
@@ -63,6 +64,7 @@ export default function ProgramDetail() {
   const [pastCycle, setPastCycle] = useState<number | null>(null);
 
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
+  const catchupPage = useQuery({ queryKey: ["catchup", id], queryFn: () => api.getCatchup(id) });
   const past = useQuery({
     queryKey: ["program-report", id, pastCycle],
     queryFn: () => api.getProgramReport(id, pastCycle as number),
@@ -228,6 +230,9 @@ export default function ProgramDetail() {
     } catch (e) { notifications.show({ color: "red", title: "Couldn't set folder", message: String(e) }); }
   };
 
+  const unreadReports = (catchupPage.data?.reports ?? [])
+    .filter((r) => r.text && !isReportSeen(r.id)).length;
+
   return (
     <Stack gap="lg">
       <PageToc entries={tocEntries} />
@@ -236,6 +241,11 @@ export default function ProgramDetail() {
         <Group justify="space-between" align="flex-start" wrap="nowrap">
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: 0 }}>{p.title || p.id}</h1>
           <Group gap={8} wrap="nowrap">
+            {/* I1: first, because it is where you start after time away. */}
+            <Button variant={unreadReports ? "filled" : "light"} color="machine"
+                    component={Link} to={`/programs/${id}/catchup`}>
+              Catch up{unreadReports ? ` · ${unreadReports} new` : ""}
+            </Button>
             {p.status !== "active" && <Button variant="light" color="machine" onClick={() => setStatus("active", "Resumed")}>Resume</Button>}
             {p.status === "active" && <Button variant="light" color="signal" onClick={() => setStatus("paused", "Paused")}>Pause</Button>}
             {p.status !== "closed" && <Button variant="default" onClick={() => setStatus("closed", "Closed")}>Close</Button>}

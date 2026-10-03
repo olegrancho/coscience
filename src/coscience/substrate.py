@@ -375,6 +375,8 @@ class Substrate:
             wiki_enabled=bool(fm.get("wiki_enabled", True)),
             wiki_merge=str(fm.get("wiki_merge", "auto")),
             wiki_docs=[str(x) for x in (fm.get("wiki_docs") or [])],
+            catchup_every_days=float(fm.get("catchup_every_days", 7.0)),
+            catchup_min_sprints=int(fm.get("catchup_min_sprints", 10)),
             chat_model=str(fm.get("chat_model", "")),
             worker_model=str(fm.get("worker_model", "")),
         )
@@ -402,6 +404,11 @@ class Substrate:
             fm["wiki_merge"] = program.wiki_merge
         if program.wiki_docs:
             fm["wiki_docs"] = list(program.wiki_docs)
+        # Written only off the defaults, so existing program.md files are untouched.
+        if program.catchup_every_days != 7.0:
+            fm["catchup_every_days"] = program.catchup_every_days
+        if program.catchup_min_sprints != 10:
+            fm["catchup_min_sprints"] = program.catchup_min_sprints
         d = self.program_dir(program.id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "program.md").write_text(serialize(fm, program.goals.strip() + "\n"))
@@ -716,6 +723,7 @@ class Substrate:
                        "at": _ts(m.get("at")), "by": str(m.get("by", ""))}
                       for m in fm.get("messages", [])],
             artifacts=[str(a) for a in fm.get("artifacts", [])],
+            catchup=dict(fm.get("catchup") or {}),
         )
 
     def _save_thread_at(self, d: Path, thread: ChatThread) -> None:
@@ -727,6 +735,8 @@ class Substrate:
               "agent_token": thread.agent_token, "agent_call": thread.agent_call,
               "artifacts": list(thread.artifacts),
               "messages": thread.messages}
+        if thread.catchup:
+            fm["catchup"] = dict(thread.catchup)
         (d / "thread.md").write_text(serialize(fm, f"# Chat {thread.id}\n"))
 
     # --- host surveys (an agent's survey of a compute server, O11) ---

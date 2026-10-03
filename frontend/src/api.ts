@@ -294,6 +294,18 @@ export interface WikiSummary {
   layout_upgrade: string;
   migration: WikiMigration | null;
 }
+/** A catch-up report (I1): a read-only planner chat opened by the catch-up request;
+ *  `text` is the planner's first reply, the report itself. */
+export interface CatchupReport {
+  id: string; title: string; created_at: number; since: number; sprints: string[];
+  trigger: string; by: string; busy: boolean; text: string; followups: number;
+}
+export interface CatchupPage {
+  reports: CatchupReport[];
+  schedule: { every_days: number; min_sprints: number; last_at: number | null; since: number;
+              finished_since: number; next_check_at: number | null };
+}
+
 /** Workdir files a person may tick as wiki documentation sources (L12). */
 export interface WikiDoc { path: string; selected: boolean; ingested: boolean; missing?: boolean }
 export interface WikiDocs { id: string; workdir: string; files: WikiDoc[] }
@@ -813,6 +825,18 @@ export const api = {
   getWikiCitations: (id: string, oid: string) =>
     fetch(`/api/programs/${id}/wiki/citations/${encodeURIComponent(oid)}`)
       .then(j<WikiCitation[]>),
+  getCatchup: (id: string) =>
+    fetch(`/api/programs/${id}/catchup`).then(j<CatchupPage>),
+  startCatchup: (id: string, since?: number) =>
+    fetch(`/api/programs/${id}/catchup`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ since: since ?? null }),
+    }).then(j<unknown>),
+  setCatchupSchedule: (id: string, every_days: number, min_sprints: number) =>
+    fetch(`/api/programs/${id}/catchup/schedule`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ every_days, min_sprints }),
+    }).then(j<CatchupPage>),
   getWikiDocs: (id: string) =>
     fetch(`/api/programs/${id}/wiki/docs`).then(j<WikiDocs>),
   setWikiDocs: (id: string, paths: string[]) =>

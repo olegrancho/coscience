@@ -1394,6 +1394,54 @@ class Service:
         self.substrate.commit(f"program {program_id}: chat {thread_id} message")
         return self._chat_public(thread)
 
+    def catchup_page(self, program_id: str) -> dict:
+        """The catch-up page (I1): every report, newest first, and the schedule —
+        how often one is considered, how many finished sprints it needs, and how
+        many have finished since the last."""
+        from coscience import catchup
+        self._require_program(program_id)
+        program = self.substrate.load_program(program_id)
+        out = []
+        for t in catchup.reports(self.substrate, program_id):
+            t = self._collect_if_ready(program_id, t)
+            replies = [m for m in t.messages if m.get("role") == "pm"]
+            out.append({"id": t.id, "title": t.title, "created_at": t.created_at,
+                        "since": float(t.catchup.get("since") or 0.0),
+                        "sprints": list(t.catchup.get("sprints") or []),
+                        "trigger": str(t.catchup.get("trigger") or ""),
+                        "by": str(t.catchup.get("by") or ""), "busy": t.pending,
+                        "text": replies[0]["text"] if replies else "",
+                        "followups": max(0, len(replies) - 1)})
+        now = time.time()
+        since = catchup.window(self.substrate, program, now)
+        last = out[0]["created_at"] if out else None
+        return {"reports": out, "schedule": {
+            "every_days": program.catchup_every_days,
+            "min_sprints": program.catchup_min_sprints,
+            "last_at": last, "since": since,
+            "finished_since": len(catchup.finished_since(self.substrate, program_id, since)),
+            "next_check_at": (last + program.catchup_every_days * catchup.DAY)
+                             if last and program.catchup_every_days > 0 else None}}
+
+    def start_catchup(self, program_id: str, by: str = "", since: float | None = None) -> dict:
+        """Write a catch-up report now, from `since` (default: the last report)."""
+        from coscience import catchup
+        self._require_program(program_id)
+        return catchup.start(self.substrate, program_id, by=by, trigger="on demand",
+                             since=since, service=self)
+
+    def set_catchup_schedule(self, program_id: str, every_days: float, min_sprints: int) -> dict:
+        self._require_program(program_id)
+        if every_days < 0 or min_sprints < 0:
+            raise ValueError("the period and the sprint count cannot be negative")
+        program = self.substrate.load_program(program_id)
+        program.catchup_every_days = float(every_days)
+        program.catchup_min_sprints = int(min_sprints)
+        self.substrate.save_program(program)
+        self.substrate.commit(f"program {program_id}: catch-up every {every_days:g} days, "
+                              f"at least {min_sprints} sprints")
+        return self.catchup_page(program_id)
+
     def list_guidance(self, program_id: str) -> list[dict]:
         self._require_program(program_id)
         return [threads.public(t) for t in self.substrate.load_guidance(program_id)]

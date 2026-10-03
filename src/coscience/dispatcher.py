@@ -22,6 +22,12 @@ from coscience import artifacts, host_health, host_removal, wiki
 _ELIGIBLE = (SprintStatus.QUEUED, SprintStatus.EXECUTING, SprintStatus.HIBERNATED, SprintStatus.ESCALATED)
 
 
+def _planner_usage_ok(repo_root) -> bool:
+    from coscience.worker import AUTONOMOUS_THRESHOLD, WEEKLY_WORKER_THRESHOLD, claude_usage_ok
+    return bool(claude_usage_ok(AUTONOMOUS_THRESHOLD, weekly_threshold=WEEKLY_WORKER_THRESHOLD,
+                                fail_open=False, repo_root=repo_root))
+
+
 @dataclass
 class CycleReport:
     granted: int = 0
@@ -144,7 +150,7 @@ def low_disk_hosts(pool, entries: dict, repo_root) -> dict[str, str]:
 class Dispatcher:
     def __init__(self, substrate: Substrate, agent,
                  pool: ResourcePool, policy: SchedulerPolicy | None = None,
-                 usage_gate=None, wiki_agent=None, host_runner=None):
+                 usage_gate=None, wiki_agent=None, host_runner=None, catchup_gate=None):
         self.substrate = substrate
         self.agent = agent
         self.policy = policy or SchedulerPolicy()
@@ -156,6 +162,11 @@ class Dispatcher:
         self._queue_path = cos / "queue.json"
         self._wiki_agent = wiki_agent      # None -> built lazily on first use
         self._host_runner = host_runner
+        # A catch-up report is a planner call nobody asked for at that moment, so it
+        # passes the planner loop's own gate (pause first, then usage); unknown usage
+        # is a no, as for the wiki.
+        self._catchup_gate = catchup_gate or (lambda: _planner_usage_ok(substrate.repo_root))
+        self._catchup_checked: dict[str, float] = {}
 
     def _load_queue(self) -> dict[str, float]:
         if self._queue_path.is_file():
@@ -495,6 +506,7 @@ class Dispatcher:
                 line = self._wiki_beat(program, now)
                 if line and line not in wiki.STATUS_ONLY:
                     report.wiki.append(line)
+                self._catchup_beat(program, now)
 
         self._collect_surveys()
 
@@ -504,6 +516,22 @@ class Dispatcher:
                 or report.removed_hosts):
             self.substrate.commit("dispatch cycle")
         return report
+
+    CATCHUP_CHECK_EVERY = 600.0   # a report is due at most weekly; no need to look each beat
+
+    def _catchup_beat(self, program, now: float) -> None:
+        """Start a catch-up report when one is due (I1). Like the wiki beat, never
+        allowed to break sprint supervision; it commits on its own (it opens a chat)."""
+        from coscience import catchup
+        if now - self._catchup_checked.get(program.id, 0.0) < self.CATCHUP_CHECK_EVERY:
+            return
+        self._catchup_checked[program.id] = now
+        try:
+            is_due, _since, _done = catchup.due(self.substrate, program, now)
+            if is_due and self._catchup_gate():
+                catchup.start(self.substrate, program.id, by="", trigger="schedule", now=now)
+        except Exception:
+            pass
 
     def _wiki_beat(self, program, now: float) -> str:
         """Wiki maintenance is the lowest-priority thing this loop does, so it is

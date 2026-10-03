@@ -120,6 +120,15 @@ class WikiDocsIn(BaseModel):
     paths: list[str]
 
 
+class CatchupIn(BaseModel):
+    since: float | None = None
+
+
+class CatchupScheduleIn(BaseModel):
+    every_days: float
+    min_sprints: int
+
+
 class EscalationAnswerIn(BaseModel):
     action: str
     instructions: str = ""
@@ -1265,6 +1274,33 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def set_program_wiki_merge(program_id: str, body: WikiMergePolicyIn) -> dict:
         try:
             return service.set_program_wiki_merge(program_id, body.policy)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @api.get("/programs/{program_id}/catchup")
+    def get_catchup(program_id: str) -> dict:
+        try:
+            return service.catchup_page(program_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+
+    @api.post("/programs/{program_id}/catchup")
+    def start_catchup(program_id: str, body: CatchupIn,
+                      user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return service.start_catchup(program_id, by=user.username if user else "",
+                                         since=body.since)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @api.put("/programs/{program_id}/catchup/schedule")
+    def set_catchup_schedule(program_id: str, body: CatchupScheduleIn) -> dict:
+        try:
+            return service.set_catchup_schedule(program_id, body.every_days, body.min_sprints)
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
         except ValueError as e:

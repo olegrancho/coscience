@@ -15,6 +15,7 @@ import Programs from "./views/ProgramsOverview";
 import ProgramDetail from "./views/ProgramDetail";
 import IdeasView from "./views/IdeasView";
 import ChatView from "./views/ChatView";
+import CatchupView from "./views/CatchupView";
 import SprintDetail from "./views/SprintDetail";
 import ResultDetail from "./views/ResultDetail";
 import ArtifactDetail from "./views/ArtifactDetail";
@@ -283,6 +284,7 @@ export default function App() {
               <Route path="/programs/:id" element={<InProgram><ProgramDetail /></InProgram>} />
               <Route path="/programs/:id/ideas" element={<InProgram><IdeasView /></InProgram>} />
               <Route path="/programs/:id/chat" element={<InProgram><ChatView /></InProgram>} />
+              <Route path="/programs/:id/catchup" element={<InProgram><CatchupView /></InProgram>} />
               <Route path="/sprints/:id" element={<SprintDetail />} />
               <Route path="/results/:id" element={<ResultDetail />} />
               <Route path="/programs/:id/artifacts" element={<InProgram><ArtifactsView /></InProgram>} />

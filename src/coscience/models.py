@@ -153,6 +153,7 @@ class ChatThread:
     agent_call: str = ""               # open call-log id for the turn in flight; "" = none
     messages: list[dict] = field(default_factory=list)  # [{role, text, at}]
     artifacts: list[str] = field(default_factory=list)  # bound artifact ids (chat edits their work/); sized 1 for now
+    catchup: dict = field(default_factory=dict)  # set on a catch-up report's chat (I1): since, sprints, trigger, by
 
 
 @dataclass
@@ -263,6 +264,8 @@ class Program:
     wiki_enabled: bool = True          # False opts the program out of wiki ingest entirely
     wiki_merge: str = "auto"           # auto = merge duplicates unattended; propose = queue for a human
     wiki_docs: list[str] = field(default_factory=list)  # workdir files the wiki ingests as documentation
+    catchup_every_days: float = 7.0    # how often a catch-up report is considered (I1); 0 = never on schedule
+    catchup_min_sprints: int = 10      # ...and written only if at least this many sprints finished since the last
     chat_model: str = ""               # Claude model chat turns run on; "" resolves to pm_model
     worker_model: str = ""             # model new sprints inherit when proposed; "" resolves to DEFAULT_MODEL
 
