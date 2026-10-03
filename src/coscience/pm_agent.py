@@ -161,8 +161,8 @@ def touched_sprints(actions: dict) -> list[str]:
     the sprint the planner tried and failed to move is exactly the one whose record
     needs to say why something was attempted."""
     ids: list[str] = []
-    for key in ("released", "held", "submitted", "dropped", "adopted",
-                "escalations_answered",
+    for key in ("approved", "released", "held", "submitted", "dropped", "adopted",
+                "escalations_answered", "approve_skipped",
                 "release_skipped", "hold_skipped", "adopt_skipped", "escalation_skipped"):
         for item in actions.get(key) or ():
             ids.append(_action_id(item))
@@ -235,7 +235,8 @@ def actions_ledger(actions: dict) -> str:
         return ", ".join(str(i) for i in actions.get(key) or ())
 
     lines = []
-    for label, key in (("Released", "released"), ("Held back", "held"),
+    for label, key in (("Approved under the grant", "approved"),
+                       ("Released", "released"), ("Held back", "held"),
                        ("Proposed", "submitted"), ("Adopted", "adopted")):
         if actions.get(key):
             lines.append(f"- {label}: {_ids(key)}")
@@ -248,7 +249,8 @@ def actions_ledger(actions: dict) -> str:
         lines.append(f"- Host notes updated: {_ids('host_notes_updated')}")
     for sid, action in actions.get("escalations_answered") or ():
         lines.append(f"- Escalation answered: `{sid}` ({action})")
-    for key, label in (("release_skipped", "Release FAILED"), ("hold_skipped", "Hold FAILED"),
+    for key, label in (("approve_skipped", "Approve FAILED"),
+                       ("release_skipped", "Release FAILED"), ("hold_skipped", "Hold FAILED"),
                        ("adopt_skipped", "Adopt FAILED"),
                        ("escalation_skipped", "Escalation answer FAILED"),
                        ("host_note_skipped", "Host note FAILED")):
@@ -292,6 +294,10 @@ def _context_payload(context: PMContext) -> dict:
     # "change" nobody made — the payload is a wire format, not just a local dict.
     if context.instructions:
         payload["instructions"] = context.instructions
+    # A new grant is news the planner must act on — proposals it may now approve —
+    # and, like instructions, the key exists only while a grant is live.
+    if context.grant:
+        payload["grant"] = context.grant.get("id", "")
     # Same reasoning: a program with no escalations must not gain a new fingerprint
     # key, or every existing program wakes once this ships. Keyed on (sprint_id,
     # thread_id) — the fields inside an escalation are static once raised, so the
@@ -316,6 +322,7 @@ def context_fingerprint(context: PMContext) -> str:
 _TRIGGER_LABELS = {
     "goals": "goals edited",
     "instructions": "instructions edited",
+    "grant": "approval authority granted",
     "guidance": "guidance changed",
     "active": "sprint approved / state change",
     "completed": "a result completed",
@@ -354,6 +361,17 @@ def _finished_at(sprint) -> float:
         return float(hist[-1].get("at") or 0.0)
     except (AttributeError, TypeError, ValueError):
         return 0.0
+
+
+def _live_grant(substrate, program_id: str) -> dict:
+    """The program's approval grant while it is live, with what is left of it in words;
+    {} otherwise. Refreshing first writes down a grant that has just run out."""
+    from coscience import grant as _grant
+    now = time.time()
+    g = _grant.refresh(substrate, program_id, now)
+    if not _grant.is_live(g, now):
+        return {}
+    return {**g, "remaining": _grant.remaining(g, now)}
 
 
 def gather_context(substrate, program_id: str) -> PMContext:
@@ -491,6 +509,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
     return PMContext(
         program_id=program_id, goals=program.goals, cycle=pm.cycle,
         instructions=substrate.load_instructions(program_id),
+        grant=_live_grant(substrate, program_id),
         open_sprints=open_sprints, completed=completed, failed=failed,
         sprint_feedback=sprint_feedback,
         prior_proposals=list(pm.proposed_ids),
@@ -659,6 +678,7 @@ def write_staging(substrate, program_id: str, cycle: int, output: PMCycleOutput,
         "sprint_edits": list(output.sprint_edits),
         "holds": list(output.holds),
         "release_ids": list(output.release_ids),
+        "approve_ids": list(output.approve_ids),
         "thread_replies": list(output.thread_replies),
         "escalation_answers": list(output.escalation_answers),
         "host_notes": list(output.host_notes),
@@ -693,6 +713,7 @@ def read_staging(substrate, program_id: str) -> "StagedCycle | None":
         sprint_edits=list(data.get("sprint_edits", [])),
         holds=list(data.get("holds", [])),
         release_ids=list(data.get("release_ids", [])),
+        approve_ids=list(data.get("approve_ids", [])),
         thread_replies=list(data.get("thread_replies", [])),
         escalation_answers=list(data.get("escalation_answers", [])),
         host_notes=list(data.get("host_notes", [])),
@@ -1310,6 +1331,42 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             # same staged cycle every beat and wedge the program's planner for good.
             host_note_skipped.append({"id": host, "why": f"could not be written: {exc}"})
 
+    # --- approve: proposed -> approved, ONLY under a live approval grant (M1). The
+    # grant is re-checked before every approval, here, not trusted to the planner: an
+    # approval past the limit is refused and said so. Before release, so a sprint can
+    # be approved and released in one cycle. ---
+    approved: list[str] = []
+    approve_skipped: list[dict] = []
+    if staged.output.approve_ids:
+        from coscience import grant as _grant
+        prog = substrate.load_program(program_id)
+        g = prog.approval_grant
+        for sid in staged.output.approve_ids:
+            sid = str(sid)
+            over = _grant.end_reason(g, time.time()) if g else "there is none"
+            if over:
+                approve_skipped.append({"id": sid, "why": f"no live approval grant: {over}"})
+                continue
+            if not (substrate.sprint_dir(sid) / "sprint.md").is_file():
+                approve_skipped.append({"id": sid, "why": "no such sprint"})
+                continue
+            sp = substrate.load_sprint(sid)
+            if sp.program != program_id:
+                approve_skipped.append({"id": sid, "why": f"belongs to program {sp.program}"})
+                continue
+            if sp.status != SprintStatus.PROPOSED:
+                approve_skipped.append({"id": sid, "why": f"status is {sp.status.value}, not proposed"})
+                continue
+            set_status(sp, SprintStatus.APPROVED, by="pm", action="approve (grant)")
+            substrate.save_sprint(sp)
+            g.setdefault("approved", []).append(sid)
+            approved.append(sid)
+        if g:
+            over = _grant.end_reason(g, time.time())
+            if over:
+                _grant.close(g, time.time(), over)
+            substrate.save_program(prog)
+
     # --- release: put an APPROVED sprint into production (-> queued). The approved
     # pool is the PM's managed queue; it releases items here as it sees need, and the
     # dispatcher runs queued sprints by priority as compute frees. Guarded to this
@@ -1371,7 +1428,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         substrate.save_sprint(sp)
         held.append(sid)
 
-    actions = {"released": released, "held": held, "submitted": submitted,
+    actions = {"approved": approved, "approve_skipped": approve_skipped,
+               "released": released, "held": held, "submitted": submitted,
                "dropped": dropped, "adopted": adopted,
                "ideas_added": ideas_added, "ideas_removed": ideas_removed,
                "release_skipped": release_skipped, "hold_skipped": hold_skipped,
@@ -1402,6 +1460,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         if sid not in pm.proposed_ids:
             pm.proposed_ids.append(sid)
     pm.log.append(f"cycle {cycle}: proposed {proposed}"
+                  + (f", approved under grant {approved}" if approved else "")
                   + (f", released {released}" if released else "")
                   + (f", held {held}" if held else "")
                   + (f", dropped {dropped} (cap)" if dropped else "")
@@ -1420,6 +1479,8 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         pm.activations.append({
             "at": now_ts, "cycle": cycle, "triggers": trigger_labels,
             "submitted": list(submitted), "forced": bool(force),
+            "approved": list(approved),
+            "approve_skipped": [dict(s) for s in approve_skipped],
             "released": list(released), "held": list(held),
             "release_skipped": [dict(s) for s in release_skipped],
             "hold_skipped": [dict(s) for s in hold_skipped],
@@ -1437,6 +1498,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             "ideas_added": ideas_added, "ideas_removed": ideas_removed,
             "pool_size": len(ideas_by_id), "adopted": adopted,
             "edges_added": edges_added, "edges_removed": edges_removed,
+            "approved": approved, "approve_skipped": approve_skipped,
             "released": released, "held": held,
             "release_skipped": release_skipped, "hold_skipped": hold_skipped,
             "adopt_skipped": adopt_skipped,

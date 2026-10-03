@@ -14,7 +14,7 @@ Three actors move sprints, and they own different edges:
 | State | Meaning |
 |---|---|
 | `proposed` | PM or human suggested it; awaiting review. Counts against the PM's cap (`Program.max_proposed`, falling back to `MAX_PROPOSED`, 4, when unset). |
-| `approved` | A human authorized it. **Authorized ≠ scheduled** — it is held here until released. |
+| `approved` | A human authorized it — or the PM did, under a human's approval grant. **Authorized ≠ scheduled** — it is held here until released. |
 | `queued` | Released to the scheduler. Runs when a resource slot frees. |
 | `executing` | Lease granted; the worker agent is running. |
 | `parked` | Human shelved a proposed sprint. Inert, and off the PM's cap. |
@@ -27,7 +27,8 @@ Three actors move sprints, and they own different edges:
 |---|---|---|
 | — → `proposed` | PM | `proposals` field in the cycle JSON |
 | — → `proposed` | human | create sprint in the dashboard |
-| `proposed` → `approved` | human only | `approve_sprint` (`service.py:89`) |
+| `proposed` → `approved` | human | `approve_sprint` (`service.py`) |
+| `proposed` → `approved` | PM, **only under a live approval grant** | `approve_ids` in the cycle JSON; recorded on the sprint as `approve (grant)` — see below |
 | **`approved` → `queued`** | **PM** | **`release_ids` in the cycle JSON (`pm_agent.py:780-802`)** |
 | `approved` → `queued` | human (override) | `run_sprint` (`service.py:98`), POST `/api/sprints/<id>/run` |
 | `proposed` → `queued` | human | `run_sprint` — one-step authorize+run |
@@ -40,6 +41,21 @@ Three actors move sprints, and they own different edges:
 | `proposed` / `approved` / `queued` → `canceled` | human | `reject_sprint` |
 | `done` / `failed` → `queued` | human | `resume_sprint` — drops results, resets counters, re-queues |
 | `canceled` → where it was canceled from | **human only** | `restore_sprint` — undoes a cancel; a sprint canceled mid-run returns to `queued` as a fresh run, and one demoted to an idea is refused |
+
+## Approval grants: the one way the PM approves
+
+Approving is a human decision. A human can lend it to the PM for a bounded stretch with an
+**approval grant** (Supercharge on the program page; `grant.py`): until the limit they chose
+— a number of approvals, a deadline, or the current 5-hour or weekly usage window — the PM
+may approve any proposed sprint in that program, a human's draft included, by listing it in
+`approve_ids`. The PM's prompt shows the grant and what is left of it only while it is live.
+
+The bound is enforced, not trusted: applying the cycle (`pm_agent.py`) re-checks the grant before every
+approval and refuses those past the limit (reported as "Approve FAILED" in the cycle's
+actions). A grant ends on its own when its limit is reached and says so — the end and its
+reason stay on the program page until someone dismisses them — and a human can revoke it at
+any time. An approval under a grant still does not schedule: the PM releases it with
+`release_ids` like any other.
 
 ## The part that surprises people
 

@@ -934,6 +934,7 @@ class Service:
             "wiki_merge": p.wiki_merge, "chat_model": p.chat_model,
             "worker_model": p.worker_model,
             "max_proposed": p.max_proposed,
+            "approval_grant": self._grant_view(program_id),
             "instructions": self.substrate.load_instructions(program_id),
             "report": self.substrate.load_report(program_id),
             # Which earlier cycles' reports are still readable (E2). The current one is
@@ -1393,6 +1394,56 @@ class Service:
         self.substrate.save_chat_thread(program_id, thread)
         self.substrate.commit(f"program {program_id}: chat {thread_id} message")
         return self._chat_public(thread)
+
+    # --- delegated approval (M1): the planner approves within a bound a person sets ---
+    def _grant_view(self, program_id: str) -> dict | None:
+        """The program's approval grant as the dashboard shows it: live, with what is
+        left; or ended, with why, until dismissed. Reading it is also what records a
+        grant's end the moment it is over (grant.refresh)."""
+        from coscience import grant as _grant
+        now = time.time()
+        g = _grant.refresh(self.substrate, program_id, now)
+        if not g or g.get("dismissed"):
+            return None
+        live = _grant.is_live(g, now)
+        return {**g, "live": live, "remaining": _grant.remaining(g, now) if live else ""}
+
+    def grant_approval(self, program_id: str, by: str, limit: str, *, sprints: int = 0,
+                       until: float = 0.0) -> dict | None:
+        from coscience import grant as _grant
+        self._require_program(program_id)
+        program = self.substrate.load_program(program_id)
+        g = program.approval_grant
+        if g and _grant.is_live(g, time.time()):
+            raise ValueError("a grant is already live; revoke it first")
+        program.approval_grant = _grant.new(by, limit, sprints=sprints, until=until)
+        self.substrate.save_program(program)
+        self.substrate.commit(f"program {program_id}: {by or 'someone'} granted the planner "
+                              f"approval authority ({limit})")
+        return self._grant_view(program_id)
+
+    def revoke_approval(self, program_id: str, by: str) -> dict | None:
+        from coscience import grant as _grant
+        self._require_program(program_id)
+        program = self.substrate.load_program(program_id)
+        g = program.approval_grant
+        if not g or g.get("ended_at"):
+            raise ValueError("there is no live grant to revoke")
+        _grant.close(g, time.time(), f"revoked by {by}" if by else "revoked")
+        self.substrate.save_program(program)
+        self.substrate.commit(f"program {program_id}: approval grant revoked")
+        return self._grant_view(program_id)
+
+    def dismiss_grant_notice(self, program_id: str) -> None:
+        """Hide an ENDED grant's notice. A live grant cannot be dismissed, only revoked."""
+        self._require_program(program_id)
+        program = self.substrate.load_program(program_id)
+        g = program.approval_grant
+        if not g or not g.get("ended_at"):
+            raise ValueError("only an ended grant's notice can be dismissed")
+        g["dismissed"] = True
+        self.substrate.save_program(program)
+        self.substrate.commit(f"program {program_id}: approval grant notice dismissed")
 
     def catchup_page(self, program_id: str) -> dict:
         """The catch-up page (I1): every report, newest first, and the schedule —

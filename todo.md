@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 218
+version: 219
 last_updated: 2026-10-03
 ---
 
@@ -56,35 +56,22 @@ the busiest programs should get one within ten minutes of the deploy, past the p
 usage gate — read like the hand-written "Update <date>" chats: bottom line, numbers table,
 numbered next steps, sprints linked by title. The button shows "· N new" until opened.
 
-# To Do (sprint)
-
 ### M1. Let a human grant the PM bounded approval authority
 
-Add a grant that lets the PM approve its own proposals until a stated limit is
-reached, then lapses on its own.
+A program can hold one approval grant (`grant.py`, in `program.md`): until its limit — N approvals, a deadline, or the current 5-hour or weekly usage window — the PM approves any proposed sprint by `approve_ids`, re-checked against the grant at every approval; it ends on its own and says why. `docs/sprint-lifecycle.md` has the new edge.
 
-Four limits, all measurable with what exists: the 5h window exhausted, the weekly
-window exhausted (both from `usage_meter`), a wall-clock deadline, or N sprints
-approved. The grant belongs on the program beside `activations`, which is already
-the dashboard's record of what changed and when. Note this edits the state
-machine: `docs/sprint-lifecycle.md` currently says `proposed → approved` is
-**human only**, so that table and its rationale are part of this work, not a
-footnote to it. It should also be revocable mid-flight, and it must lapse loudly
-enough that nobody discovers weeks later that it expired.
-
-Decided: the grant covers any proposed sprint in the program, a human-drafted one
-included, and each approval made under it is marked as such on the sprint.
+**Check:** grant 2 approvals on a program with proposals waiting; the next cycle (a grant
+wakes the planner) approves at most two, each recorded on the sprint as `approve (grant)`
+and in the cycle's actions, a third is "Approve FAILED", and the grant shows as ended.
 
 ### M2. Build the supercharge control
 
-A button on the program that opens a modal for choosing the limit, and shows the
-grant while it is live.
+"⚡ Supercharge" on the program page opens the grant dialog (approvals, hours, or a usage window); a live grant puts a banner at the top with what is left, what it approved and Revoke; an ended one stays with its reason until dismissed.
 
-The modal is the whole UI: pick one of the four limits, confirm, and see what is
-left of it afterwards — sprints remaining, time remaining, or which usage window
-it is riding on. While a grant is live the program needs to say so unmistakably,
-because a program approving its own work is the one state where a glance at the
-dashboard must not be ambiguous. Depends on M1.
+**Check:** the banner is impossible to miss while live and gone only after Dismiss; Revoke
+ends it at once, and the planner's next prompt no longer offers `approve_ids`.
+
+# To Do (sprint)
 
 # To Do (backlog)
 

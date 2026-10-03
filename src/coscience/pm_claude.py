@@ -54,6 +54,23 @@ link whose visible text is the sprint's name, quoted after its id in the lists h
 [Pocket-water rescoring](/sprints/<sprint-id>). Never show a bare id or slug as the text."""
 
 
+def render_grant(g: dict) -> str:
+    """The planner's approval authority while a grant is live (M1); "" otherwise, so
+    a program without one sees no change at all."""
+    if not g:
+        return ""
+    who = g.get("by") or "a person"
+    return f"""
+
+APPROVAL AUTHORITY — granted by {who}, {g.get("remaining", "")}. Until it ends you may
+approve proposed sprints in this program yourself: put each one's exact id in
+"approve_ids". Any proposed sprint qualifies, a human's draft included. Approving is what
+a person would otherwise do, so approve only what you would be ready to release, and say
+why in the report; each approval is recorded on the sprint as yours. An approved sprint
+still waits for "release_ids" — list it there too, in the same cycle, if it should run
+now. The platform enforces the limit: approvals past it are refused."""
+
+
 def idea_links(program_id: str) -> str:
     """How the planner and chat link an idea from the pool (K1). The ideas list puts
     an anchor on every idea, so the link scrolls to it and outlines it."""
@@ -100,6 +117,13 @@ def _history_block(items: list[dict], recent_fmt) -> str:
 
 
 def render_prompt(context: PMContext) -> str:
+    # Under an approval grant (M1) only: a program without one sees no new field.
+    approve_action = ("\n  approve a proposed sprint (grant)         -> its exact id in \"approve_ids\""
+                      if context.grant else "")
+    approve_schema = ("""
+  "approve_ids": ["<id of a PROPOSED sprint you approve under your approval authority;
+                  it becomes 'approved'. Omit/empty if none.>"],""" if context.grant else "")
+
     def _lines(items, fmt):
         return "\n".join(fmt(i) for i in items) or "(none)"
 
@@ -149,7 +173,7 @@ def render_prompt(context: PMContext) -> str:
     prior_block = ", ".join(prior[-PRIOR_SHOWN:]) or "(none)"
     if len(prior) > PRIOR_SHOWN:
         prior_block += f" (+{len(prior) - PRIOR_SHOWN} earlier, omitted)"
-    instructions_block = render_instructions(context.instructions)
+    instructions_block = render_instructions(context.instructions) + render_grant(context.grant)
     guidance_block = ""
     if context.human_guidance:
         notes = "\n".join(f"- {g}" for g in context.human_guidance)
@@ -345,7 +369,7 @@ HOW TO ACT — read this before you write anything. You act ONLY by filling fiel
 JSON object below. Prose is not an action: "report" is stored verbatim for a human to read
 and is NEVER parsed, so describing a change there does not perform it. Each thing you can
 do maps to exactly one field:
-  release an approved sprint into production -> its exact id in "release_ids"
+  release an approved sprint into production -> its exact id in "release_ids"{approve_action}
   hold an approved sprint back for now       -> its id + why in "holds"
   revise or reprioritise a proposed sprint   -> an entry in "sprint_edits"
   propose a new experiment                   -> an entry in "proposals"
@@ -387,7 +411,7 @@ Respond with ONLY a JSON object (no prose outside it) of this shape:
                  the reason stays current rather than going stale.>"}}],
   "release_ids": ["<id of an APPROVED sprint to release into production now — it becomes
                  'queued' and the scheduler runs it as compute frees. Release the ones whose
-                 time has come; hold the rest. Only approved sprints. Omit/empty if none.>"],
+                 time has come; hold the rest. Only approved sprints. Omit/empty if none.>"],{approve_schema}
   "thread_replies": [{{"thread_id": "<id of an open feedback thread shown above,
                        whether on a sprint, a pool idea, or standing guidance>",
                        "text": "<short reply: what you did in response, or why you can't>"}}],
@@ -627,6 +651,7 @@ def parse_response(text: str) -> PMCycleOutput:
                for h in data.get("holds", [])
                if isinstance(h, dict) and str(h.get("id") or "").strip()],
         release_ids=[str(s) for s in data.get("release_ids", [])],
+        approve_ids=[str(s) for s in data.get("approve_ids", [])],
         thread_replies=[dict(r) for r in data.get("thread_replies", [])
                         if isinstance(r, dict) and r.get("thread_id")],
         escalation_answers=[

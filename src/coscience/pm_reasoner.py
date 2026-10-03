@@ -46,6 +46,7 @@ class PMContext:
     goals: str
     cycle: int
     instructions: str = ""                             # standing house rules from the human; always in the prompt
+    grant: dict = field(default_factory=dict)          # a LIVE approval grant (M1) plus "remaining"; {} = none
     open_sprints: list[dict] = field(default_factory=list)
     completed: list[dict] = field(default_factory=list)
     failed: list[dict] = field(default_factory=list)   # sprints that failed, with why
@@ -120,6 +121,7 @@ class PMCycleOutput:
     # a sprint back to proposed destroyed an authorization it had no power to restore.
     holds: list[dict] = field(default_factory=list)
     release_ids: list[str] = field(default_factory=list)     # approved sprints to release into production (-> queued)
+    approve_ids: list[str] = field(default_factory=list)     # proposed sprints to approve — honoured only under a live grant (M1)
     thread_replies: list[dict] = field(default_factory=list)  # [{thread_id, text}] PM answers to open feedback threads
     escalation_answers: list[dict] = field(default_factory=list)  # [{sprint_id, action, instructions, host}]
     # [{host, text?}] — one entry per server whose pending reports the PM has read; a

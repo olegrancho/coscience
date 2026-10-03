@@ -17,6 +17,7 @@ import type { ArtifactRow, WikiSummary } from "../api";
 import { TYPE_HUE } from "../components/wikiGraphStyle";
 import { isUnseen, seedIfNew } from "../sprintSeen";
 import { isReportSeen } from "../catchupSeen";
+import { GrantBanner, SuperchargeModal } from "../components/Supercharge";
 import { takeReturnRow } from "../returnRow";
 import { experimentRows } from "./experimentsList";
 import PageToc, { type TocEntry } from "../components/PageToc";
@@ -60,6 +61,7 @@ export default function ProgramDetail() {
   const [pmExpanded, setPmExpanded] = useState(false);
   const [browsing, setBrowsing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [superchargeOpen, setSuperchargeOpen] = useState(false);
   // null = the current report; a number = an earlier cycle's, kept since E2.
   const [pastCycle, setPastCycle] = useState<number | null>(null);
 
@@ -252,6 +254,11 @@ export default function ProgramDetail() {
             <Button variant="light" color="machine" loading={replanning} onClick={replan}
                     title="Run the PM planner now instead of waiting for its next cycle">Replan now</Button>
             <Button color="machine" onClick={() => setProposing(true)}>Propose experiment</Button>
+            {!p.approval_grant?.live && (
+              <Tooltip label="Let the planner approve proposed sprints itself, up to a limit you set" withArrow>
+                <Button variant="light" color="signal" onClick={() => setSuperchargeOpen(true)}>⚡ Supercharge</Button>
+              </Tooltip>
+            )}
             <Tooltip label="Program settings" withArrow>
               <ActionIcon variant="light" color="gray" size="lg" radius="md"
                           onClick={() => setSettingsOpen(true)} aria-label="program settings">
@@ -266,6 +273,13 @@ export default function ProgramDetail() {
             </Tooltip>
           </Group>
         </Group>
+        <SuperchargeModal programId={id} opened={superchargeOpen}
+                          onClose={() => setSuperchargeOpen(false)} onDone={refresh} />
+        {p.approval_grant && (
+          <div style={{ marginTop: 12 }}>
+            <GrantBanner programId={id} grant={p.approval_grant} onChange={refresh} />
+          </div>
+        )}
         <ProgramSettingsModal
           opened={settingsOpen}
           onClose={() => setSettingsOpen(false)}

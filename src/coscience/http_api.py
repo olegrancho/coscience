@@ -120,6 +120,12 @@ class WikiDocsIn(BaseModel):
     paths: list[str]
 
 
+class GrantIn(BaseModel):
+    limit: str
+    sprints: int = 0
+    until: float = 0.0
+
+
 class CatchupIn(BaseModel):
     since: float | None = None
 
@@ -1274,6 +1280,38 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     def set_program_wiki_merge(program_id: str, body: WikiMergePolicyIn) -> dict:
         try:
             return service.set_program_wiki_merge(program_id, body.policy)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @api.post("/programs/{program_id}/grant")
+    def grant_approval(program_id: str, body: GrantIn,
+                       user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return {"grant": service.grant_approval(
+                program_id, user.username if user else "", body.limit,
+                sprints=body.sprints, until=body.until)}
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @api.delete("/programs/{program_id}/grant")
+    def revoke_approval(program_id: str,
+                        user: "auth.User | None" = Depends(current_user)) -> dict:
+        try:
+            return {"grant": service.revoke_approval(program_id, user.username if user else "")}
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @api.post("/programs/{program_id}/grant/dismiss")
+    def dismiss_grant_notice(program_id: str) -> dict:
+        try:
+            service.dismiss_grant_notice(program_id)
+            return {"ok": True}
         except NotFoundError:
             raise HTTPException(status_code=404, detail=f"program not found: {program_id}")
         except ValueError as e:

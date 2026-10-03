@@ -266,6 +266,7 @@ class Program:
     wiki_docs: list[str] = field(default_factory=list)  # workdir files the wiki ingests as documentation
     catchup_every_days: float = 7.0    # how often a catch-up report is considered (I1); 0 = never on schedule
     catchup_min_sprints: int = 10      # ...and written only if at least this many sprints finished since the last
+    approval_grant: dict = field(default_factory=dict)  # the planner's bounded approval authority (M1, grant.py)
     chat_model: str = ""               # Claude model chat turns run on; "" resolves to pm_model
     worker_model: str = ""             # model new sprints inherit when proposed; "" resolves to DEFAULT_MODEL
 

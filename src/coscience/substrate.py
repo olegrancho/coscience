@@ -377,6 +377,7 @@ class Substrate:
             wiki_docs=[str(x) for x in (fm.get("wiki_docs") or [])],
             catchup_every_days=float(fm.get("catchup_every_days", 7.0)),
             catchup_min_sprints=int(fm.get("catchup_min_sprints", 10)),
+            approval_grant=dict(fm.get("approval_grant") or {}),
             chat_model=str(fm.get("chat_model", "")),
             worker_model=str(fm.get("worker_model", "")),
         )
@@ -409,6 +410,8 @@ class Substrate:
             fm["catchup_every_days"] = program.catchup_every_days
         if program.catchup_min_sprints != 10:
             fm["catchup_min_sprints"] = program.catchup_min_sprints
+        if program.approval_grant:
+            fm["approval_grant"] = dict(program.approval_grant)
         d = self.program_dir(program.id)
         d.mkdir(parents=True, exist_ok=True)
         (d / "program.md").write_text(serialize(fm, program.goals.strip() + "\n"))

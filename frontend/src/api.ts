@@ -13,6 +13,14 @@ export interface PMNote { cycle: number; at: number; text: string }
 export interface SprintRef { id: string; status: string; goals: string; title: string; results: string[]; model: string; last_status_at: number | null; last_status_by?: StatusActor;
   hold?: SprintHold; votes: VoteTally; escalation_level: "" | "pm" | "human" }
 export interface PMActivation { at: number; cycle: number; triggers: string[]; submitted: string[]; forced: boolean }
+/** A human's grant of approval authority to the planner (M1): live until its limit,
+ *  then ended with a reason that stays until dismissed. */
+export interface ApprovalGrant {
+  id: string; by: string; at: number; limit: "sprints" | "until" | "window5h" | "week";
+  sprints?: number; until?: number; approved: string[];
+  ended_at: number | null; end_reason: string; live: boolean; remaining: string;
+}
+
 export interface Program extends ProgramRow {
   report: string; report_cycles?: number[]; cycle: number; sprints: SprintRef[]; pm_model: string; workdir: string;
   wiki_model: string;     // model for this program's wiki runs; separate from pm_model
@@ -21,6 +29,7 @@ export interface Program extends ProgramRow {
   wiki_enabled: boolean;  // false opts the program out of wiki ingest entirely
   wiki_merge: "auto" | "propose";  // auto = merge duplicates unattended; propose = queue for a human
   instructions: string;   // standing house rules, in every PM prompt
+  approval_grant: ApprovalGrant | null;  // the planner's approval authority (M1); null = none, or dismissed
   max_proposed: number;   // cap on sprints awaiting review; 0 = platform default
   activations: PMActivation[]; last_run: number | null;
 }
@@ -825,6 +834,14 @@ export const api = {
   getWikiCitations: (id: string, oid: string) =>
     fetch(`/api/programs/${id}/wiki/citations/${encodeURIComponent(oid)}`)
       .then(j<WikiCitation[]>),
+  grantApproval: (id: string, body: { limit: string; sprints?: number; until?: number }) =>
+    fetch(`/api/programs/${id}/grant`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).then(j<{ grant: ApprovalGrant | null }>),
+  revokeApproval: (id: string) =>
+    fetch(`/api/programs/${id}/grant`, { method: "DELETE" }).then(j<{ grant: ApprovalGrant | null }>),
+  dismissGrantNotice: (id: string) =>
+    fetch(`/api/programs/${id}/grant/dismiss`, { method: "POST" }).then(j<{ ok: boolean }>),
   getCatchup: (id: string) =>
     fetch(`/api/programs/${id}/catchup`).then(j<CatchupPage>),
   startCatchup: (id: string, since?: number) =>
