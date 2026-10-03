@@ -1,32 +1,58 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 206
-last_updated: 2026-10-02
+version: 210
+last_updated: 2026-10-03
 ---
 
 # To QC
 
-### L12. Make program documentation a source the wiki can cite and track
-
-Wiki settings → Documentation lists the workdir's markdown files (top level and one down); ticked ones are stored as `wiki_docs`, ingested as `doc:` sources, re-ingested when edited, cited from background pages and read by sweeps.
-
-**Check:** tick a program's README and reproduction notes; after the next ingest the
-wiki has `sources/doc-…` pages and the background pages cite them, and the next sweep's
-report checks how-it-is-built claims against them. Nothing is ticked on any
-program yet, so nothing ingests until you choose. Docs: `docs/wiki-layouts.md`.
-
-### L13. Give every shared alias one owning page
-
-The topic schema, the ingest rules and the migration map now say an alias names one page and a term shared by a topic and a background page belongs to the topic; lint's near-duplicate warning names which page keeps it.
-
-**Check:** `tests/test_wiki_docs.py` (the last test), and the rule in `wiki_topics.py`.
-The live migrated wikis have no alias clashes today, so this guards against new ones;
-a live bundle's own `CLAUDE.md` keeps its old text, and the rule reaches ingests
-through the prompt.
-
 # To Do (sprint)
 
 # To Do (backlog)
+
+## I. Catching up on a program
+
+Someone returning to a program after days away sees what changed, in one read,
+without hunting through sprints and results.
+
+### I1. Write catch-up reports, and give them a page
+
+The PM writes a catch-up report — what happened since the last one — on a schedule and on demand, and a button at the top of the program opens the catch-up page that lists them.
+
+A report is a brief for someone who has forgotten the last week: recent developments,
+new experimental results, new avenues of research, with links to the sprints and ideas
+it names. One is due when a period has passed (weekly by default) and more than N
+sprints have finished since the last report (10 by default); both are program settings.
+The page has a "Write one now" button. Reports belong in the substrate under the
+program, so they survive and other instances serve them; the PM's report run should
+pass the usage gate like any PM beat.
+
+Model it on the weekly "Update <date>" chats already held with the planner by hand:
+bottom line first, a numbers table, numbered next steps, and a "continue in chat".
+
+Details: [todo_i1_catchup_reports.md](todo_i1_catchup_reports.md)
+
+### I2. Highlight new sprint events on the lineage graph
+
+On the lineage graph, mark the sprints that changed since this browser last looked, the way the experiments list marks new rows.
+
+Per browser, like the experiments list (`sprintSeen.ts` keeps what each browser has
+seen in local storage): a sprint that appeared or changed state since the last visit is
+highlighted until it has been seen. The graph is `LineageGraph.tsx`.
+
+## K. Cross-references
+
+Every mention of a sprint or an idea, wherever it is written, is one click from it.
+
+### K1. Make every sprint and idea reference a link
+
+In PM reports, chat replies and artifacts, a sprint or idea that is referenced links to it, whatever its state (proposed, approved, done).
+
+Sprint ids (`<program>-c<n>-…`) are recognisable, so the markdown renderer (`Md.tsx`) can link
+them wherever they appear, without relying on agents. Ideas have random short ids and
+are usually named by title, so the PM, chat and worker instructions need a rule to
+write idea references in one link form, and ideas need an address to link to — today
+there is only the program's ideas list, no page or anchor per idea.
 
 ## E. Substrate history
 
@@ -328,6 +354,14 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### L13. Give every shared alias one owning page
+
+The topic schema, ingest rules and migration map give a shared alias to the topic page, and lint's near-duplicate warning names which page keeps it.
+
+### L12. Make program documentation a source the wiki can cite and track
+
+Workdir docs ticked in Wiki settings are ingested as `doc:` sources, re-ingested when edited, cited from background pages, and checked by sweeps.
+
 ### L9. Add a heavy lint: an agent sweep for inconsistencies
 
 A sweep runs every 10 wiki runs and after each migration; the first scheduled ones fixed scope slips and stale openings the mechanical lint could not see.
@@ -359,11 +393,3 @@ Both wikis were probed on the same question set in the old layout, after a sweep
 ### L11. Version wiki layouts and migrate between them from the platform
 
 Each wiki names its layout, and Wiki settings or `coscience wiki --migrate` move it to the current one as beat-driven runs; tested on a live wiki.
-
-### L8. Organise every wiki around topics, not sprint results
-
-Topics is the platform's default wiki layout: pages open with the current understanding, and ingests rewrite what a result overturns.
-
-### L7. Grade answers on path and clarity, with the key as a reference
-
-`--grade <model>` scores each answer's path and clarity and classes it against the key, which is a flag rather than a verdict.
