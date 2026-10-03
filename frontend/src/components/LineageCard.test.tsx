@@ -10,7 +10,9 @@ vi.mock("../api", () => ({
 }));
 
 // React Flow needs layout APIs jsdom lacks; the card's own controls are what is tested.
-vi.mock("./LineageGraph", () => ({ default: () => <div>lineage graph</div> }));
+vi.mock("./LineageGraph", () => ({ default: ({ unseen }: { unseen?: ReadonlySet<string> }) => (
+  <><div>lineage graph</div><div data-testid="unseen">{[...(unseen ?? [])].join(",")}</div></>
+) }));
 
 import { api } from "../api";
 import LineageCard from "./LineageCard";
@@ -24,13 +26,13 @@ beforeAll(() => {
   })) as unknown as typeof window.matchMedia);
 });
 
-function renderCard() {
+function renderCard(unseen?: ReadonlySet<string>) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <MantineProvider>
       <QueryClientProvider client={qc}>
         <MemoryRouter>
-          <LineageCard programId="p1" />
+          <LineageCard programId="p1" unseen={unseen} />
         </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
@@ -57,5 +59,16 @@ describe("LineageCard auto-layout (P10)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Auto-layout" }));
     expect(localStorage.getItem("lineage-pos:p1")).toBeNull();
     expect(await screen.findByText("lineage graph")).toBeTruthy();   // remounted, not gone
+  });
+});
+
+describe("LineageCard new sprints (I2)", () => {
+  it("hands the graph the sprints this browser has not seen, and names the highlight", async () => {
+    vi.mocked(api.getGraph).mockResolvedValueOnce({
+      nodes: [{ id: "p1-c1", kind: "sprint", label: "A", status: "done" }], edges: [],
+    } as never);
+    renderCard(new Set(["p1-c1"]));
+    expect((await screen.findByTestId("unseen")).textContent).toBe("p1-c1");
+    expect(screen.getByText("new since you last looked")).toBeTruthy();
   });
 });

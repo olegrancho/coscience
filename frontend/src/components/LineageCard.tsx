@@ -37,11 +37,17 @@ function Legend() {
       <Swatch color={stageColor("result")} fill={stageFill("result")} label="result" />
       <Line dashed={false} label="lineage" />
       <Line dashed label="evidential" />
+      <Group gap={4} wrap="nowrap">
+        <span className="lineage-unseen" style={{ width: 10, height: 10, borderRadius: 3,
+          border: "2px solid var(--hairline)" }} />
+        <Text size="xs" c="dimmed">new since you last looked</Text>
+      </Group>
     </Group>
   );
 }
 
-export default function LineageCard({ programId }: { programId: string }) {
+export default function LineageCard({ programId, unseen }:
+  { programId: string; unseen?: ReadonlySet<string> }) {
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<LayoutMode>("box");
@@ -70,7 +76,7 @@ export default function LineageCard({ programId }: { programId: string }) {
   const go = (nodeId: string) => {
     const n = graph.data?.nodes.find((x) => x.id === nodeId);
     if (!n) return;
-    if (n.kind === "idea") nav(`/programs/${programId}/ideas`);
+    if (n.kind === "idea") nav(`/programs/${programId}/ideas#${nodeId}`);
     else nav(`/sprints/${nodeId}`);
   };
 
@@ -103,7 +109,7 @@ export default function LineageCard({ programId }: { programId: string }) {
         <>
           <div style={{ height: 320 }}>
             <Suspense fallback={<Loader size="sm" />}>
-              <LineageGraph key={`inline-${resetKey}`} graph={graph.data} programId={programId} mode={mode} onNodeClick={go} />
+              <LineageGraph key={`inline-${resetKey}`} graph={graph.data} programId={programId} mode={mode} onNodeClick={go} unseen={unseen} />
             </Suspense>
           </div>
           <Legend />
@@ -116,7 +122,7 @@ export default function LineageCard({ programId }: { programId: string }) {
             <Group justify="flex-end" mb="xs">{controls}</Group>
             <div style={{ height: "80vh" }}>
               <Suspense fallback={<Loader size="sm" />}>
-                <LineageGraph key={`modal-${resetKey}`} graph={graph.data!} programId={programId} mode={mode} onNodeClick={(id) => { setOpen(false); go(id); }} />
+                <LineageGraph key={`modal-${resetKey}`} graph={graph.data!} programId={programId} mode={mode} onNodeClick={(id) => { setOpen(false); go(id); }} unseen={unseen} />
               </Suspense>
             </div>
             <Legend />

@@ -12,7 +12,7 @@ import { loadPositions, savePosition } from "./graphPositions";
 
 export type LayoutMode = "box" | "dot";
 
-type NodeData = { label: string; stage: string; kind: string; status: string };
+type NodeData = { label: string; stage: string; kind: string; status: string; unseen?: boolean };
 
 function edgeTitle(ge: GraphEdge): string {
   return [
@@ -30,6 +30,7 @@ function BoxNode({ data }: NodeProps) {
   return (
     <div
       title={parked ? "parked" : undefined}
+      className={d.unseen ? "lineage-unseen" : undefined}
       style={{
         border: `2px ${parked ? "dashed" : "solid"} ${stageColor(d.stage)}`,
         borderRadius: 8,
@@ -62,6 +63,7 @@ function DotNode({ data }: NodeProps) {
       <Handle type="target" position={Position.Top} style={{ visibility: "hidden" }} />
       <span
         title={d.label}
+        className={d.unseen ? "lineage-unseen" : undefined}
         style={{
           width: 12, height: 12, borderRadius: "50%",
           background: stageColor(d.stage), flex: "0 0 auto",
@@ -123,11 +125,14 @@ export default function LineageGraph({
   programId,
   mode = "box",
   onNodeClick,
+  unseen,
 }: {
   graph: Graph;
   programId: string;
   mode?: LayoutMode;
   onNodeClick?: (nodeId: string) => void;
+  /** Sprints this browser has not seen since they changed (I2), lit like the list's rows. */
+  unseen?: ReadonlySet<string>;
 }) {
   // Base dagre layout (positions computed from graph structure).
   const base = useMemo(() => {
@@ -146,6 +151,10 @@ export default function LineageGraph({
     [graph],
   );
 
+  // A stable key for the unseen set, so a parent re-render with the same sprints does
+  // not rebuild every node (and reset a drag in progress).
+  const unseenKey = [...(unseen ?? [])].sort().join(",");
+
   // Build the render nodes: saved position (if the user moved it) overrides dagre.
   const buildNodes = useCallback(
     (m: LayoutMode): Node[] => {
@@ -154,10 +163,10 @@ export default function LineageGraph({
         id: n.id,
         type: m,
         position: saved[n.id] ?? n.position,
-        data: n.data,
+        data: { ...n.data, unseen: !!unseen?.has(n.id) },
       }));
     },
-    [base, programId],
+    [base, programId, unseenKey],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(buildNodes(mode));

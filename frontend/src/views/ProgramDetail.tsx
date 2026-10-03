@@ -548,7 +548,11 @@ export default function ProgramDetail() {
         )}
       </Card>
 
-      <div id="sec-lineage"><LineageCard programId={id} /></div>
+      {/* I2: the graph lights up the same sprints the experiments list does, and they
+          clear together, when the sprint is opened. */}
+      <div id="sec-lineage"><LineageCard programId={id} unseen={new Set(
+        p.sprints.filter((s) => isUnseen(s.id, s.last_status_at, s.last_status_by))
+          .map((s) => s.id))} /></div>
 
       {p.activations?.length > 0 && (
         <Card id="sec-activity" padding="lg" radius="md" style={cardStyle}>

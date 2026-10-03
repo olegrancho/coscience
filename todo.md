@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 216
+version: 217
 last_updated: 2026-10-03
 ---
 
@@ -39,6 +39,14 @@ Markdown everywhere links every known sprint id, and its short `<program>-c<n>` 
 pool summary names ideas by id — clicking one jumps to that idea. A short form two sprints
 share (the planner reused some numbers) stays plain text on purpose.
 
+### I2. Highlight new sprint events on the lineage graph
+
+Lineage nodes for the sprints the experiments list highlights carry a pulsing ring in the same colour, and clear with them when the sprint is opened; an idea node now opens that idea in the list.
+
+**Check:** after a sprint finishes or the PM proposes one, its node on the program's
+lineage graph has the ring until you open the sprint. The ring is per browser, like the
+list. At full-graph zoom the ring shrinks with the node; it reads best expanded.
+
 # To Do (sprint)
 
 ### I1. Write catch-up reports, and give them a page
@@ -60,14 +68,6 @@ Decided: the check runs once a period; a report is written only if at least N sp
 finished since the last one, so a quiet week produces nothing.
 
 Details: [todo_i1_catchup_reports.md](todo_i1_catchup_reports.md)
-
-### I2. Highlight new sprint events on the lineage graph
-
-On the lineage graph, mark the sprints that changed since this browser last looked, the way the experiments list marks new rows.
-
-Per browser, like the experiments list (`sprintSeen.ts` keeps what each browser has
-seen in local storage): a sprint that appeared or changed state since the last visit is
-highlighted until it has been seen. The graph is `LineageGraph.tsx`.
 
 ### M1. Let a human grant the PM bounded approval authority
 

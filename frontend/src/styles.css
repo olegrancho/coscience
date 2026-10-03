@@ -362,10 +362,19 @@ a { color: inherit; }
 @keyframes unseen-pulse {
   50% { background: color-mix(in srgb, var(--machine) 20%, var(--card)); }
 }
+/* A lineage-graph node new since this browser last looked (I2): the experiments
+   list's colour, as a ring, so the node keeps its stage colour inside it. */
+.lineage-unseen {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--machine) 55%, transparent);
+  animation: lineage-unseen-pulse 2s ease-in-out 3;
+}
+@keyframes lineage-unseen-pulse {
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--machine) 30%, transparent); }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .heartbeat::after { animation: none; }
-  .sprint-unseen, .sprint-returned { animation: none; }
+  .sprint-unseen, .sprint-returned, .lineage-unseen { animation: none; }
   * { scroll-behavior: auto !important; }
 }
 
