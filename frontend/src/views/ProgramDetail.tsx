@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Button, Card, Group, Loader, Select, Stack, Text, Textarea, TextInput, Tooltip } from "@mantine/core";
+import { ActionIcon, Badge, Button, Card, Group, Indicator, Loader, Select, Stack, Text, Textarea, TextInput, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -243,20 +243,33 @@ export default function ProgramDetail() {
         <Group justify="space-between" align="flex-start" wrap="nowrap">
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: 0 }}>{p.title || p.id}</h1>
           <Group gap={8} wrap="nowrap">
-            {/* I1: first, because it is where you start after time away. */}
-            <Button variant={unreadReports ? "filled" : "light"} color="machine"
-                    component={Link} to={`/programs/${id}/catchup`}>
-              Catch up{unreadReports ? ` · ${unreadReports} new` : ""}
-            </Button>
-            {p.status !== "active" && <Button variant="light" color="machine" onClick={() => setStatus("active", "Resumed")}>Resume</Button>}
+            {/* Lifecycle, one step at a time: an active program offers only Pause; Close
+                appears once it is paused, so stopping is never one stray click away. */}
             {p.status === "active" && <Button variant="light" color="signal" onClick={() => setStatus("paused", "Paused")}>Pause</Button>}
-            {p.status !== "closed" && <Button variant="default" onClick={() => setStatus("closed", "Closed")}>Close</Button>}
-            <Button variant="light" color="machine" loading={replanning} onClick={replan}
-                    title="Run the PM planner now instead of waiting for its next cycle">Replan now</Button>
-            <Button color="machine" onClick={() => setProposing(true)}>Propose experiment</Button>
+            {p.status !== "active" && <Button variant="light" color="machine" onClick={() => setStatus("active", "Resumed")}>Resume</Button>}
+            {p.status === "paused" && <Button variant="default" onClick={() => setStatus("closed", "Closed")}>Close</Button>}
+            {/* I1: where you start after time away; the dot counts reports not yet read. */}
+            <Tooltip label={unreadReports ? `Catch up — ${unreadReports} new report${unreadReports === 1 ? "" : "s"}`
+                                          : "Catch up on what happened since the last report"} withArrow>
+              <Indicator label={unreadReports} size={16} color="signal" disabled={!unreadReports} offset={4}>
+                <ActionIcon variant={unreadReports ? "filled" : "light"} color="machine" size="lg" radius="md"
+                            component={Link} to={`/programs/${id}/catchup`} aria-label="catch up">
+                  📰
+                </ActionIcon>
+              </Indicator>
+            </Tooltip>
+            <Tooltip label="Replan now: run the planner instead of waiting for its next cycle" withArrow>
+              <ActionIcon variant="light" color="machine" size="lg" radius="md" loading={replanning}
+                          onClick={replan} aria-label="replan now">
+                ↻
+              </ActionIcon>
+            </Tooltip>
             {!p.approval_grant?.live && (
-              <Tooltip label="Let the planner approve proposed sprints itself, up to a limit you set" withArrow>
-                <Button variant="light" color="signal" onClick={() => setSuperchargeOpen(true)}>⚡ Supercharge</Button>
+              <Tooltip label="Supercharge: let the planner approve proposed sprints itself, up to a limit you set" withArrow>
+                <ActionIcon variant="light" color="signal" size="lg" radius="md"
+                            onClick={() => setSuperchargeOpen(true)} aria-label="supercharge">
+                  ⚡
+                </ActionIcon>
               </Tooltip>
             )}
             <Tooltip label="Program settings" withArrow>
@@ -433,6 +446,8 @@ export default function ProgramDetail() {
                   <option key={st} value={st}>{st} ({counts[st]})</option>
                 ))}
               </select>
+              {/* With the list it adds to, not in the page header. */}
+              <Button size="xs" color="machine" onClick={() => setProposing(true)}>Propose experiment</Button>
               </Group>
             </Group>
             {p.sprints.length === 0 ? (

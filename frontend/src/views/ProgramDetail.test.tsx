@@ -113,7 +113,7 @@ describe("replan", () => {
       { program: "p", cycle: 3, submitted: [], ...reply } as any);
     const show = vi.spyOn(notifications, "show").mockImplementation(() => "" as any);
     renderAt();
-    fireEvent.click(await screen.findByText("Replan now"));
+    fireEvent.click(await screen.findByLabelText("replan now"));
     await waitFor(() => expect(show).toHaveBeenCalled());
     // Not .at(-1): tsconfig targets ES2020, and `npm run build` typechecks tests.
     return show.mock.calls[show.mock.calls.length - 1][0] as { color?: string; message?: string };
