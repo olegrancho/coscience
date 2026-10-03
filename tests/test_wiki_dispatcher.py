@@ -40,3 +40,20 @@ def test_a_raising_wiki_beat_does_not_break_the_cycle(substrate, agent, monkeypa
     monkeypatch.setattr(dmod.wiki, "beat", boom)
     report = _dispatcher(substrate, agent, FakeWikiAgent()).run_one_cycle()
     assert report.wiki == ["wiki: error — wiki exploded"]
+
+
+def test_a_wiki_run_in_flight_gives_the_cycle_nothing_to_commit(substrate, agent, monkeypatch):
+    # E1: the loop beats every few seconds and commits when the report has anything
+    # in it; "wiki: running" every beat made a commit per beat for every wiki run.
+    substrate.save_program(Program(id="p1", title="P1", goals="g"))
+    import coscience.dispatcher as dmod
+    commits = []
+    monkeypatch.setattr(substrate, "commit", lambda msg: commits.append(msg) or "")
+    for line in ("wiki: running", "wiki: collecting"):
+        monkeypatch.setattr(dmod.wiki, "beat", lambda *a, _l=line, **kw: _l)
+        report = _dispatcher(substrate, agent, FakeWikiAgent()).run_one_cycle()
+        assert report.wiki == []
+    assert commits == []
+    monkeypatch.setattr(dmod.wiki, "beat", lambda *a, **kw: "wiki p1: ingest r0002 ok")
+    _dispatcher(substrate, agent, FakeWikiAgent()).run_one_cycle()
+    assert commits == ["dispatch cycle"]

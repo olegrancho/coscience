@@ -542,6 +542,13 @@ def _handle_merges(substrate, program, state, report, run_id, now) -> list[dict]
     return merged
 
 
+#: Lines that report a run still in flight. They say nothing changed, so the
+#: dispatch loop must not commit on them (E1): it beats every few seconds, and
+#: committing on "running" made a commit per beat for the length of every wiki
+#: run — 94% of the substrate's commits — and captured the run's half-written pages.
+STATUS_ONLY = ("wiki: running", "wiki: collecting")
+
+
 def _collect(substrate, program, now, agent, state, run) -> str:
     run_id, kind = run.get("id", ""), run.get("kind", "ingest")
     run_dir = wiki_store.run_dir(substrate, program.id, run_id)

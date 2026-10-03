@@ -493,7 +493,7 @@ class Dispatcher:
                 self.substrate, program.id, now, holder_busy=self._chat_busy(program.id)))
             if program.status == ProgramStatus.ACTIVE:
                 line = self._wiki_beat(program, now)
-                if line:
+                if line and line not in wiki.STATUS_ONLY:
                     report.wiki.append(line)
 
         self._collect_surveys()

@@ -245,7 +245,12 @@ def test_the_agent_is_told_how_to_work_on_its_host():
                            host_facts="Example Linux 9 · 12 threads", host_notes="nights only")
     text = build_instructions(sprint, ctx, Path("/tmp/s1/scratchpad.md"))
     assert "## Where this sprint's heavy work runs" in text
-    assert "ssh gpu1 'mkdir -p ~/runs/s1/work && cd ~/runs/s1 && setsid nohup" in text
+    # O21: the launch call holds nothing but the backgrounded command, so ssh returns
+    # at once; an `&&` chain in front of the `&` kept the channel open until timeout.
+    assert "ssh gpu1 'mkdir -p ~/runs/s1/work && cat > ~/runs/s1/run.sh'" in text
+    assert ("ssh -n gpu1 'setsid nohup bash ~/runs/s1/run.sh > ~/runs/s1/work/<out_file> "
+            "2>&1 < /dev/null & echo $!'") in text
+    assert "&& setsid" not in text
     assert '"host": "gpu1"' in text and '"collect": ["~/runs/s1/work"]' in text
     assert "Example Linux 9 · 12 threads" in text and "nights only" in text
 

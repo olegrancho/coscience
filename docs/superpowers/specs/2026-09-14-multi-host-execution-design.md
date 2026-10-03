@@ -201,8 +201,14 @@ paths on the host to bring back.
 The instructions give the launch form verbatim:
 
 ```bash
-ssh gpu1 'cd ~/coscience-runs/<sprint-id> && setsid nohup python train.py --fold 0 > work/train.out 2>&1 < /dev/null & echo $!'
+ssh gpu1 'mkdir -p ~/coscience-runs/<sprint-id>/work && cat > ~/coscience-runs/<sprint-id>/run.sh' < run.sh
+ssh -n gpu1 'setsid nohup bash ~/coscience-runs/<sprint-id>/run.sh > ~/coscience-runs/<sprint-id>/work/train.out 2>&1 < /dev/null & echo $!'
 ```
+
+The launch is two calls, and the second holds nothing but the backgrounded command
+(todo O21). With `cd … && setsid nohup … &` in one call, the `&` backgrounds the
+whole chain as a subshell that keeps the ssh connection open, and the call hangs
+until it times out although the job started.
 
 ### 6.3 What the dispatcher does
 

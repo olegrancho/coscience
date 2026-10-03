@@ -108,9 +108,13 @@ and run quick commands here, and run anything heavy on the host over SSH (`ssh {
 Use {context.host_run_dir} on the host as this sprint's working directory. Paths, environments and
 installed software there differ from this machine, and nothing is shared unless you copy it there:
 a job only sees what is on the host when it starts.{facts}{notes}{program_notes}
-Long jobs on the host follow the DETACHED-JOB PROTOCOL below with two changes. Launch with
-`ssh {context.host_ssh} 'mkdir -p {context.host_run_dir}/work && cd {context.host_run_dir} && setsid nohup <cmd> > work/<out_file> 2>&1 < /dev/null & echo $!'`
-and add `"host": "{context.host_name}"` and `"collect": ["{context.host_run_dir}/work"]` to job.json (out_file is
+Long jobs on the host follow the DETACHED-JOB PROTOCOL below with two changes. Launch in two
+separate ssh calls. First write the job as a script — `ssh {context.host_ssh} 'mkdir -p {context.host_run_dir}/work && cat > {context.host_run_dir}/run.sh'`
+with the script on stdin (start it with `cd {context.host_run_dir}`). Then start it with a call that does nothing else:
+`ssh -n {context.host_ssh} 'setsid nohup bash {context.host_run_dir}/run.sh > {context.host_run_dir}/work/<out_file> 2>&1 < /dev/null & echo $!'`
+It prints the pid and returns at once. Never put `cd … &&` or any other `&&` chain in front of the
+backgrounded command: the `&` then backgrounds the whole chain as a subshell that keeps the ssh
+connection open, and the call hangs until it times out although the job started. Then add `"host": "{context.host_name}"` and `"collect": ["{context.host_run_dir}/work"]` to job.json (out_file is
 then the path on the host). Before waking you, the platform copies each collect path into this sprint's
 `collected/` folder — that folder is a scratch copy not kept in the sprint's history, so copy or summarise
 anything you need from it elsewhere in the sprint folder. Before you finish, make sure the results you need
