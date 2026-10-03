@@ -31,6 +31,29 @@ PRIOR_SHOWN = 20        # prior proposal ids rendered; the full list stays in pm
 HOLD_WHY_CHARS = 200    # a hold's reason, shown back to the planner that wrote it
 
 
+def sprint_name(s: dict) -> str:
+    """What a person sees a sprint called — its title, as the experiments list shows
+    it, else the start of its goals (K2). The id is for links, not for reading."""
+    title = " ".join(str(s.get("title") or "").split())
+    if title:
+        return title
+    goals = " ".join(str(s.get("goals") or "").split())
+    return (goals[:77].rstrip() + "…") if len(goals) > 80 else (goals or str(s.get("id", "")))
+
+
+def sprint_head(s: dict) -> str:
+    """A sprint's opening on every context line: its id, then its name in quotes."""
+    return f'{s["id"]} "{sprint_name(s)}"'
+
+
+#: How the planner and chat write a sprint into anything a person reads (K2). The
+#: dashboard shows sprints by title, so a bare slug reads as noise beside it.
+SPRINT_LINKS = """SPRINT REFERENCES: whenever text a person will read mentions a sprint — a reply,
+the report, a proposal's goals or rationale, an idea, an artifact — write it as a markdown
+link whose visible text is the sprint's name, quoted after its id in the lists here:
+[Pocket-water rescoring](/sprints/<sprint-id>). Never show a bare id or slug as the text."""
+
+
 def _clip(text: str, limit: int, source: str = "") -> str:
     """Excerpt `text`, naming where the full copy lives when we know. In production
     every result summary is clipped, so the marker is the PM's only route back to the
@@ -76,16 +99,16 @@ def render_prompt(context: PMContext) -> str:
         # A held sprint says so, and says what YOU said: the hold is the planner's own
         # note to its next cycle, and it is useless if the next cycle cannot read it.
         held = f', HELD by PM: "{_clip(s["hold"], HOLD_WHY_CHARS)}"' if s.get("hold") else ""
-        return f"- {s['id']} [{s['status']}, priority {s.get('priority', 0)}{held}]: {s['goals']}"
+        return f"- {sprint_head(s)} [{s['status']}, priority {s.get('priority', 0)}{held}]: {s['goals']}"
 
     open_block = _lines(context.open_sprints, _open_line)
     done_block = _history_block(
         context.completed,
-        lambda s: (f"- {s['id']}: {_clip(s['goals'], GOAL_CHARS)}"
+        lambda s: (f"- {sprint_head(s)}: {_clip(s['goals'], GOAL_CHARS)}"
                    f" -> result: {_clip(s['result'], RESULT_CHARS, _result_path(context, s))}"))
     failed_block = _history_block(
         context.failed,
-        lambda s: (f"- {s['id']}: {_clip(s['goals'], GOAL_CHARS)}"
+        lambda s: (f"- {sprint_head(s)}: {_clip(s['goals'], GOAL_CHARS)}"
                    f" -> FAILED: {_clip(s['error'], RESULT_CHARS)}"))
     def _feedback_line(f):
         history = " | ".join(f"{m['role']}: {m['text']}" for m in f["messages"])
@@ -306,6 +329,8 @@ pending now, so you have {context.free_slots} free slot(s). Propose/promote AT M
 if that is 0, propose nothing and instead curate the idea pool.
 
 {render_compute(context)}{host_notes_block}
+
+{SPRINT_LINKS}
 
 HOW TO ACT — read this before you write anything. You act ONLY by filling fields in the
 JSON object below. Prose is not an action: "report" is stored verbatim for a human to read
@@ -755,8 +780,8 @@ def render_chat_prompt(context: PMContext, history: list[dict], message: str) ->
     with full context. Answer-only — it does not act (the human acts via the UI)."""
     def _lines(items, fmt):
         return "\n".join(fmt(i) for i in items) or "(none)"
-    open_block = _lines(context.open_sprints, lambda s: f"- {s['id']} [{s['status']}]: {s['goals']}")
-    done_block = _lines(context.completed, lambda s: f"- {s['id']}: {s['goals']} -> {s['result']}")
+    open_block = _lines(context.open_sprints, lambda s: f"- {sprint_head(s)} [{s['status']}]: {s['goals']}")
+    done_block = _lines(context.completed, lambda s: f"- {sprint_head(s)}: {s['goals']} -> {s['result']}")
     ideas_block = _lines(context.ideas, lambda i: f"- {i['text']}")
     guidance_block = _lines(context.human_guidance, lambda g: f"- {g}")
     convo = "\n".join(f"{'PM' if m['role'] == 'pm' else 'Human'}: {m['text']}" for m in history) \
@@ -766,6 +791,8 @@ human overseer. Answer their questions about the program clearly and concisely. 
 explain your reasoning, discuss trade-offs, and suggest what could be done next — but you
 do NOT take actions here; the human acts via the dashboard (approve/propose/comment/guide).
 Reply in plain prose or markdown. Do NOT output JSON.
+
+{SPRINT_LINKS}
 
 Your session runs in this program's working directory; "this folder"/"the data here"
 means your current working directory — inspect it there, don't search the wider tree.
@@ -814,13 +841,15 @@ def render_draft_prompt(context: PMContext, idea_text: str) -> str:
     the cycle: no pool curation, no report, no edits."""
     def _lines(items, fmt):
         return "\n".join(fmt(i) for i in items) or "(none)"
-    open_block = _lines(context.open_sprints, lambda s: f"- {s['id']} [{s['status']}]: {s['goals']}")
-    done_block = _lines(context.completed, lambda s: f"- {s['id']}: {s['goals']} -> {s['result']}")
+    open_block = _lines(context.open_sprints, lambda s: f"- {sprint_head(s)} [{s['status']}]: {s['goals']}")
+    done_block = _lines(context.completed, lambda s: f"- {sprint_head(s)}: {s['goals']} -> {s['result']}")
     return f"""You are the PM (planning) agent for a research program. A human picked an idea from
 the pool and wants it turned into ONE sprint proposal. Draft it as you would draft a proposal
 of your own; the human reviews and edits it before submitting, so do not ask questions.
 
 Your session runs in this program's working directory; look there only if the idea needs it.
+
+{SPRINT_LINKS}
 Full results live in {context.results_dir or "(not given)"}.
 
 PROGRAM GOALS:

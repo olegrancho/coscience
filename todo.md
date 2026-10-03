@@ -1,19 +1,37 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 210
+version: 215
 last_updated: 2026-10-03
 ---
 
 # To QC
 
+### O21. Show the agent a launch command that lets go of the ssh channel
+
+The worker's remote instructions launch in two ssh calls — write `run.sh`, then a call holding only `setsid nohup bash run.sh … & echo $!` — and say why an `&&` chain in front of the `&` hangs.
+
+**Check:** the next remote sprint's launch returns at once instead of after the 60-second
+timeout, and `tests/test_remote_jobs.py` pins the new form. Reproduced first: against a
+held pipe the old form blocked for the job's whole length, the new one returned in 3 ms.
+
+### E1. Stop the dispatch loop committing every few seconds
+
+A wiki run in flight no longer makes every dispatch cycle commit (`wiki.STATUS_ONLY`), and the substrate ignores sprint job logs; 4,204 tracked `.out`/`.log` files were untracked and stay on disk.
+
+**Check:** over a day with wiki runs, `git log --format=%s | grep -c '^dispatch cycle$'` in
+the substrate drops from hundreds to tens — 94% of them fell inside wiki runs — and a
+wiki run's pages land in one commit at its end, not half-written across many. The
+platform's own `agent.out` and `feedback.out` are still tracked.
+
+### K2. Show the planner sprint titles, and have it link with them
+
+Every sprint line the PM and chat agents see now reads `id "title"` (the goals' start when untitled), and their prompts tell them to write a sprint as `[title](/sprints/<id>)`.
+
+**Check:** the next PM report and the next chat reply name sprints by title, as links that
+open the sprint. Titles are not fingerprint inputs, so the deploy woke no program
+(`tests/test_sprint_titles_in_prompts.py`).
+
 # To Do (sprint)
-
-# To Do (backlog)
-
-## I. Catching up on a program
-
-Someone returning to a program after days away sees what changed, in one read,
-without hunting through sprints and results.
 
 ### I1. Write catch-up reports, and give them a page
 
@@ -30,6 +48,9 @@ pass the usage gate like any PM beat.
 Model it on the weekly "Update <date>" chats already held with the planner by hand:
 bottom line first, a numbers table, numbered next steps, and a "continue in chat".
 
+Decided: the check runs once a period; a report is written only if at least N sprints
+finished since the last one, so a quiet week produces nothing.
+
 Details: [todo_i1_catchup_reports.md](todo_i1_catchup_reports.md)
 
 ### I2. Highlight new sprint events on the lineage graph
@@ -39,10 +60,6 @@ On the lineage graph, mark the sprints that changed since this browser last look
 Per browser, like the experiments list (`sprintSeen.ts` keeps what each browser has
 seen in local storage): a sprint that appeared or changed state since the last visit is
 highlighted until it has been seen. The graph is `LineageGraph.tsx`.
-
-## K. Cross-references
-
-Every mention of a sprint or an idea, wherever it is written, is one click from it.
 
 ### K1. Make every sprint and idea reference a link
 
@@ -54,22 +71,51 @@ are usually named by title, so the PM, chat and worker instructions need a rule 
 write idea references in one link form, and ideas need an address to link to — today
 there is only the program's ideas list, no page or anchor per idea.
 
+Decided: an idea link is an anchor in the ideas list, `/programs/<id>/ideas#<idea-id>`,
+which scrolls to the idea and highlights it.
+
+### M1. Let a human grant the PM bounded approval authority
+
+Add a grant that lets the PM approve its own proposals until a stated limit is
+reached, then lapses on its own.
+
+Four limits, all measurable with what exists: the 5h window exhausted, the weekly
+window exhausted (both from `usage_meter`), a wall-clock deadline, or N sprints
+approved. The grant belongs on the program beside `activations`, which is already
+the dashboard's record of what changed and when. Note this edits the state
+machine: `docs/sprint-lifecycle.md` currently says `proposed → approved` is
+**human only**, so that table and its rationale are part of this work, not a
+footnote to it. It should also be revocable mid-flight, and it must lapse loudly
+enough that nobody discovers weeks later that it expired.
+
+Decided: the grant covers any proposed sprint in the program, a human-drafted one
+included, and each approval made under it is marked as such on the sprint.
+
+### M2. Build the supercharge control
+
+A button on the program that opens a modal for choosing the limit, and shows the
+grant while it is live.
+
+The modal is the whole UI: pick one of the four limits, confirm, and see what is
+left of it afterwards — sprints remaining, time remaining, or which usage window
+it is riding on. While a grant is live the program needs to say so unmistakably,
+because a program approving its own work is the one state where a glance at the
+dashboard must not be ambiguous. Depends on M1.
+
+# To Do (backlog)
+
+## I. Catching up on a program
+
+Someone returning to a program after days away sees what changed, in one read,
+without hunting through sprints and results.
+
+## K. Cross-references
+
+Every mention of a sprint or an idea, wherever it is written, is one click from it.
+
 ## E. Substrate history
 
 The substrate's git history records work and decisions, not the loops' heartbeat.
-
-### E1. Stop the dispatch loop committing every few seconds
-
-Find what makes a dispatch cycle commit on a beat where nothing was decided, and stop it; keep sprint logs out of git.
-
-On a busy day the substrate took over a thousand "dispatch cycle" commits, one every
-six seconds, each only moving lease expiry times in `.coscience/leases.json` and
-appending to a running sprint's `.out` training log. Some condition in the cycle
-report (`dispatcher.py`, the `substrate.commit("dispatch cycle")` guard) is true every
-beat, and lease renewal alone rewrites the file each time. The churn also commits a
-wiki run's edits half-way through, which a sweep reported in its notes. Separately, ~4,500 `.out`
-and `.log` files are tracked, most under two sprints' `work/prep`; `.gitignore` could
-exclude sprint logs and the history already written stays as it is.
 
 ## G. Usage budget
 
@@ -194,31 +240,6 @@ evidence rather than impression.
 Work does not stall waiting on human review: the PM can hold approval authority
 for a stretch the human bounds, and the bound is enforced rather than trusted.
 
-### M1. Let a human grant the PM bounded approval authority
-
-Add a grant that lets the PM approve its own proposals until a stated limit is
-reached, then lapses on its own.
-
-Four limits, all measurable with what exists: the 5h window exhausted, the weekly
-window exhausted (both from `usage_meter`), a wall-clock deadline, or N sprints
-approved. The grant belongs on the program beside `activations`, which is already
-the dashboard's record of what changed and when. Note this edits the state
-machine: `docs/sprint-lifecycle.md` currently says `proposed → approved` is
-**human only**, so that table and its rationale are part of this work, not a
-footnote to it. It should also be revocable mid-flight, and it must lapse loudly
-enough that nobody discovers weeks later that it expired.
-
-### M2. Build the supercharge control
-
-A button on the program that opens a modal for choosing the limit, and shows the
-grant while it is live.
-
-The modal is the whole UI: pick one of the four limits, confirm, and see what is
-left of it afterwards — sprints remaining, time remaining, or which usage window
-it is riding on. While a grant is live the program needs to say so unmistakably,
-because a program approving its own work is the one state where a glance at the
-dashboard must not be ambiguous. Depends on M1.
-
 ## H. Agent backends and models
 
 Agent work is not locked to one CLI or one model, so the platform can follow
@@ -248,20 +269,6 @@ are the cheap ones before wiring it.
 Any server someone onboards becomes schedulable compute — its CPUs, memory and each
 GPU with its VRAM join one pool — and every sprint lands on a machine its request
 actually fits.
-
-### O21. Show the agent a launch command that lets go of the ssh channel
-
-Put a launch line in the worker's instructions that returns at once, instead of leaving
-each agent to discover why its ssh call hangs.
-
-Three remote sprints in a row have hit the same thing: backgrounding a whole
-`cd … && … && setsid nohup … &` list runs the list in one subshell, which holds the ssh
-channel until the 60-second timeout even when every stream is redirected. The job itself
-starts fine, so this costs a minute and a confusing report rather than the run — but the
-last two sprints only avoided it because their goals carried a paragraph of warning,
-which is a sign the instructions are wrong, not the agents. The remote section of
-`claude_executor.build_instructions` already shows a launch command; it should show one
-that works, with the write-the-script call and the launch call kept separate.
 
 ## C. Codex as a second agent backend
 

@@ -15,6 +15,7 @@ from pathlib import Path
 
 from coscience import agent_stream, usage_meter
 from coscience.executor import launch_detached
+from coscience.pm_claude import SPRINT_LINKS, sprint_head
 from coscience.pm_reasoner import render_instructions
 
 # Read-only scope: explore + read, no writes/bash. Anything else needs a
@@ -37,8 +38,8 @@ def render_preamble(context, scope: str) -> str:
     the PM role, the program context, and what tools the session may use."""
     def _lines(items, fmt):
         return "\n".join(fmt(i) for i in items) or "(none)"
-    open_block = _lines(context.open_sprints, lambda s: f"- {s['id']} [{s['status']}]: {s['goals']}")
-    done_block = _lines(context.completed, lambda s: f"- {s['id']}: {s['goals']} -> {s['result']}")
+    open_block = _lines(context.open_sprints, lambda s: f"- {sprint_head(s)} [{s['status']}]: {s['goals']}")
+    done_block = _lines(context.completed, lambda s: f"- {sprint_head(s)}: {s['goals']} -> {s['result']}")
     ideas_block = _lines(context.ideas, lambda i: f"- {i['text']}")
     guidance_block = _lines(context.human_guidance, lambda g: f"- {g}")
     scope_note = (
@@ -76,6 +77,7 @@ this program's working directory.
 
 {scope_note}
 {longrun_note}
+{SPRINT_LINKS}
 
 PROGRAM GOALS:
 {context.goals}{render_instructions(context.instructions)}

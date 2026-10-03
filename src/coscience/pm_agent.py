@@ -408,7 +408,7 @@ def gather_context(substrate, program_id: str) -> PMContext:
                           SprintStatus.QUEUED, SprintStatus.EXECUTING,
                           SprintStatus.HIBERNATED):
             open_sprints.append({"id": s.id, "status": s.status.value, "goals": s.goals,
-                                 "priority": s.priority,
+                                 "title": s.title, "priority": s.priority,
                                  # A hold the PM itself set last cycle. Without it the
                                  # planner cannot tell a sprint it is already waiting on
                                  # from one it has never considered — so it would either
