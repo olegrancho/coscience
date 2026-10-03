@@ -165,6 +165,9 @@ Objective:
 {steps}
 
 ## Prior results in this program (read before redoing anything)
+When your result or an artifact mentions one of these sprints, link it by its title:
+[title](/sprints/<sprint-id>), with the id from its heading. Never leave a bare id as the text.
+
 {prior}
 
 ## How to work (autonomous mode)

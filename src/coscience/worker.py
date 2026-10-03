@@ -312,7 +312,10 @@ class Worker:
                     summary = self.substrate.load_result(rid).summary.strip()
                 except OSError:
                     continue
-                prior.append(f"## {s.title or s.id}\n{summary[:1000]}")
+                # Title for the reader, id for the link (K1): a result or artifact
+                # that names an earlier sprint links it as [title](/sprints/<id>).
+                prior.append(f"## {s.title} — {s.id}\n{summary[:1000]}" if s.title
+                             else f"## {s.id}\n{summary[:1000]}")
         feedback_threads = []
         for t in sprint.threads:
             if t.get("target") != "worker" or t.get("status") != "open":

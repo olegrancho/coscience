@@ -1,8 +1,10 @@
-import { lazy, Suspense, type ReactNode } from "react";
+import { lazy, Suspense, useMemo, type ReactNode } from "react";
 import { AppShell, Group, Text, Tooltip } from "@mantine/core";
-import { Link, Route, Routes, useLocation } from "react-router-dom";
+import { Link, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
+import { LinkTargetsContext, sprintNames } from "./sprintLinks";
+import ProgramLinks from "./components/ProgramLinks";
 import { useMe, UserChip } from "./auth";
 import LiveAgents from "./components/LiveAgents";
 import AttentionBadge from "./components/AttentionBadge";
@@ -221,10 +223,20 @@ function UserMenu() {
 // it the page collapses to ~448px. See .wiki-panes for where 1360 comes from.
 const WIDE_ROUTE = /^\/programs\/[^/]+\/wiki(\/|$)/;
 
+/** A program's pages link that program's idea ids wherever markdown names them (K1). */
+function InProgram({ children }: { children: ReactNode }) {
+  const { id = "" } = useParams();
+  return <ProgramLinks programId={id}>{children}</ProgramLinks>;
+}
+
 export default function App() {
   const { pathname } = useLocation();
   const active = activeSection(pathname);
   const canvas = WIDE_ROUTE.test(pathname) ? 1360 : 980;
+  // The same query the rail already polls, so naming sprints in markdown costs no
+  // extra request: every page's Md links the sprint ids it finds (K1).
+  const sprints = useQuery({ queryKey: ["sprints"], queryFn: api.listSprints });
+  const sprintIds = useMemo(() => sprintNames((sprints.data ?? []).map((s) => s.id)), [sprints.data]);
   return (
     <AppShell header={{ height: 52 }} navbar={{ width: 232, breakpoint: "sm" }} padding={0}>
       <AppShell.Header style={{ background: "var(--card)", borderBottom: "1px solid var(--hairline)" }}>
@@ -264,16 +276,17 @@ export default function App() {
       <AppShell.Main>
         <div className="app-canvas" style={{ minHeight: "calc(100vh - 52px)", padding: "26px 30px" }}>
           <div style={{ maxWidth: canvas, margin: "0 auto" }}>
+            <LinkTargetsContext.Provider value={sprintIds}>
             <Routes>
               <Route path="/" element={<Overview />} />
               <Route path="/programs" element={<Programs />} />
-              <Route path="/programs/:id" element={<ProgramDetail />} />
-              <Route path="/programs/:id/ideas" element={<IdeasView />} />
-              <Route path="/programs/:id/chat" element={<ChatView />} />
+              <Route path="/programs/:id" element={<InProgram><ProgramDetail /></InProgram>} />
+              <Route path="/programs/:id/ideas" element={<InProgram><IdeasView /></InProgram>} />
+              <Route path="/programs/:id/chat" element={<InProgram><ChatView /></InProgram>} />
               <Route path="/sprints/:id" element={<SprintDetail />} />
               <Route path="/results/:id" element={<ResultDetail />} />
-              <Route path="/programs/:id/artifacts" element={<ArtifactsView />} />
-              <Route path="/programs/:id/artifacts/:aid" element={<ArtifactDetail />} />
+              <Route path="/programs/:id/artifacts" element={<InProgram><ArtifactsView /></InProgram>} />
+              <Route path="/programs/:id/artifacts/:aid" element={<InProgram><ArtifactDetail /></InProgram>} />
               <Route path="/programs/:id/wiki" element={<WikiView />} />
               <Route path="/programs/:id/wiki/lint" element={<WikiLintView />} />
               {/* React Router v6 ranks sibling routes by path specificity (a
@@ -287,6 +300,7 @@ export default function App() {
               <Route path="/programs/:id/wiki/*" element={<WikiView />} />
               <Route path="/ledger" element={<Ledger />} />
             </Routes>
+            </LinkTargetsContext.Provider>
           </div>
         </div>
       </AppShell.Main>

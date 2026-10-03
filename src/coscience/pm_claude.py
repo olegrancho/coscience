@@ -54,6 +54,14 @@ link whose visible text is the sprint's name, quoted after its id in the lists h
 [Pocket-water rescoring](/sprints/<sprint-id>). Never show a bare id or slug as the text."""
 
 
+def idea_links(program_id: str) -> str:
+    """How the planner and chat link an idea from the pool (K1). The ideas list puts
+    an anchor on every idea, so the link scrolls to it and outlines it."""
+    return f"""IDEA REFERENCES: link an idea from the pool the same way, with a few words of the
+idea as the text and its id, shown in brackets in the IDEA POOL list, as the anchor:
+[rescoring with crystal waters](/programs/{program_id}/ideas#<idea-id>)."""
+
+
 def _clip(text: str, limit: int, source: str = "") -> str:
     """Excerpt `text`, naming where the full copy lives when we know. In production
     every result summary is clipped, so the marker is the PM's only route back to the
@@ -331,6 +339,7 @@ if that is 0, propose nothing and instead curate the idea pool.
 {render_compute(context)}{host_notes_block}
 
 {SPRINT_LINKS}
+{idea_links(context.program_id)}
 
 HOW TO ACT — read this before you write anything. You act ONLY by filling fields in the
 JSON object below. Prose is not an action: "report" is stored verbatim for a human to read
@@ -782,7 +791,7 @@ def render_chat_prompt(context: PMContext, history: list[dict], message: str) ->
         return "\n".join(fmt(i) for i in items) or "(none)"
     open_block = _lines(context.open_sprints, lambda s: f"- {sprint_head(s)} [{s['status']}]: {s['goals']}")
     done_block = _lines(context.completed, lambda s: f"- {sprint_head(s)}: {s['goals']} -> {s['result']}")
-    ideas_block = _lines(context.ideas, lambda i: f"- {i['text']}")
+    ideas_block = _lines(context.ideas, lambda i: f"- [{i['id']}] {i['text']}")
     guidance_block = _lines(context.human_guidance, lambda g: f"- {g}")
     convo = "\n".join(f"{'PM' if m['role'] == 'pm' else 'Human'}: {m['text']}" for m in history) \
         or "(start of conversation)"
@@ -793,6 +802,7 @@ do NOT take actions here; the human acts via the dashboard (approve/propose/comm
 Reply in plain prose or markdown. Do NOT output JSON.
 
 {SPRINT_LINKS}
+{idea_links(context.program_id)}
 
 Your session runs in this program's working directory; "this folder"/"the data here"
 means your current working directory — inspect it there, don't search the wider tree.

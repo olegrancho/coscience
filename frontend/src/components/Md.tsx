@@ -1,5 +1,7 @@
+import { useContext, useMemo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { LinkTargetsContext, remarkLinkTargets } from "../sprintLinks";
 import { ZoomableImg } from "./ui";
 
 /** Images embedded in markdown are laid out at column width, which for a plot is
@@ -19,13 +21,15 @@ const imgRenderer = (resolveSrc?: (src: string) => string): Components => ({
 /** Project-wide markdown renderer. Always enables GitHub-flavoured markdown so
  *  tables, strikethrough, autolinks and task lists render instead of leaking
  *  through as raw `| … |` text. `resolveSrc` maps a document-relative image path
- *  to a URL that serves it. */
+ *  to a URL that serves it. Any sprint id the app knows becomes a link (K1). */
 export default function Md(
   { children, components, resolveSrc }:
   { children: string; components?: Components; resolveSrc?: (src: string) => string },
 ) {
+  const targets = useContext(LinkTargetsContext);
+  const plugins = useMemo(() => [remarkGfm, remarkLinkTargets(targets)], [targets]);
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]}
+    <ReactMarkdown remarkPlugins={plugins}
                    components={{ ...imgRenderer(resolveSrc), ...components }}>
       {children}
     </ReactMarkdown>

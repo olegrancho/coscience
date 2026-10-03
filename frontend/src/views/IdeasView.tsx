@@ -1,8 +1,8 @@
 import { ActionIcon, Button, Card, Group, Loader, Stack, Text, Textarea, TextInput } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useLocation, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { api, type Idea, type IdeaPool } from "../api";
 import { AbsTime, BackLink, EmptyState } from "../components/ui";
@@ -34,7 +34,8 @@ function PersonChip({ username }: { username?: string }) {
   return <span title={`Proposed by ${name}`} style={circleStyle}>{initials}</span>;
 }
 
-function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea; onChange: () => void }) {
+function IdeaRow({ programId, idea, onChange, linked = false }:
+  { programId: string; idea: Idea; onChange: () => void; linked?: boolean }) {
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState("");
   const [promoting, setPromoting] = useState(false);
@@ -87,7 +88,9 @@ function IdeaRow({ programId, idea, onChange }: { programId: string; idea: Idea;
     : "Pin — protect from AI pruning.";
 
   return (
-    <div style={{
+    // The anchor a link to this idea lands on (K1): /programs/<id>/ideas#<idea-id>.
+    <div id={idea.id} style={{
+      ...(linked ? { outline: "2px solid var(--machine)", outlineOffset: 2 } : {}),
       border: `1px solid ${idea.pinned ? "var(--signal)" : "var(--hairline)"}`,
       background: idea.pinned ? "var(--signal-weak)" : undefined,
       borderRadius: 8, overflow: "hidden",
@@ -169,6 +172,16 @@ export default function IdeasView() {
   const program = useQuery({ queryKey: ["program", id], queryFn: () => api.getProgram(id) });
   const pool = useQuery({ queryKey: ["ideas", id], queryFn: () => api.listIdeas(id) });
   const refresh = () => qc.invalidateQueries({ queryKey: ["ideas", id] });
+
+  // A link to one idea (K1) lands here with #<idea-id>: scroll it into view once the
+  // pool has loaded, and outline it so the eye finds it among the others.
+  const { hash } = useLocation();
+  const linkedId = decodeURIComponent(hash.replace(/^#/, ""));
+  const loaded = !!pool.data;
+  useEffect(() => {
+    if (!linkedId || !loaded) return;
+    document.getElementById(linkedId)?.scrollIntoView({ block: "center" });
+  }, [linkedId, loaded]);
 
   // "Your feedback" reuses the same standing-guidance stream as the program page
   // (shared query key), so edits here and there stay in sync.
@@ -302,7 +315,8 @@ export default function IdeasView() {
           ? <Text size="sm" c="dimmed">No ideas yet. Add one above, or let the AI seed the pool next cycle.</Text>
           : (
             <Stack gap={8}>
-              {ideas.map((i) => <IdeaRow key={i.id} programId={id} idea={i} onChange={refresh} />)}
+              {ideas.map((i) => <IdeaRow key={i.id} programId={id} idea={i} onChange={refresh}
+                                         linked={i.id === linkedId} />)}
             </Stack>
           )}
       </Card>

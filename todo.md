@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 215
+version: 216
 last_updated: 2026-10-03
 ---
 
@@ -31,6 +31,14 @@ Every sprint line the PM and chat agents see now reads `id "title"` (the goals' 
 open the sprint. Titles are not fingerprint inputs, so the deploy woke no program
 (`tests/test_sprint_titles_in_prompts.py`).
 
+### K1. Make every sprint and idea reference a link
+
+Markdown everywhere links every known sprint id, and its short `<program>-c<n>` form when only one sprint has it; on a program's pages its idea ids link to the idea, which the ideas list scrolls to and outlines. Agents are told to link ideas, and workers sprints, by name.
+
+**Check:** an older chat names sprints as `p2-c28` — each is now a link; the ideas page's
+pool summary names ideas by id — clicking one jumps to that idea. A short form two sprints
+share (the planner reused some numbers) stays plain text on purpose.
+
 # To Do (sprint)
 
 ### I1. Write catch-up reports, and give them a page
@@ -60,19 +68,6 @@ On the lineage graph, mark the sprints that changed since this browser last look
 Per browser, like the experiments list (`sprintSeen.ts` keeps what each browser has
 seen in local storage): a sprint that appeared or changed state since the last visit is
 highlighted until it has been seen. The graph is `LineageGraph.tsx`.
-
-### K1. Make every sprint and idea reference a link
-
-In PM reports, chat replies and artifacts, a sprint or idea that is referenced links to it, whatever its state (proposed, approved, done).
-
-Sprint ids (`<program>-c<n>-…`) are recognisable, so the markdown renderer (`Md.tsx`) can link
-them wherever they appear, without relying on agents. Ideas have random short ids and
-are usually named by title, so the PM, chat and worker instructions need a rule to
-write idea references in one link form, and ideas need an address to link to — today
-there is only the program's ideas list, no page or anchor per idea.
-
-Decided: an idea link is an anchor in the ideas list, `/programs/<id>/ideas#<idea-id>`,
-which scrolls to the idea and highlights it.
 
 ### M1. Let a human grant the PM bounded approval authority
 
