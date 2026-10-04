@@ -1,35 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 219
-last_updated: 2026-10-03
+version: 228
+last_updated: 2026-10-04
 ---
 
 # To QC
-
-### O21. Show the agent a launch command that lets go of the ssh channel
-
-The worker's remote instructions launch in two ssh calls — write `run.sh`, then a call holding only `setsid nohup bash run.sh … & echo $!` — and say why an `&&` chain in front of the `&` hangs.
-
-**Check:** the next remote sprint's launch returns at once instead of after the 60-second
-timeout, and `tests/test_remote_jobs.py` pins the new form. Reproduced first: against a
-held pipe the old form blocked for the job's whole length, the new one returned in 3 ms.
-
-### E1. Stop the dispatch loop committing every few seconds
-
-A wiki run in flight no longer makes every dispatch cycle commit (`wiki.STATUS_ONLY`), and the substrate ignores sprint job logs; 4,204 tracked `.out`/`.log` files were untracked and stay on disk.
-
-**Check:** over a day with wiki runs, `git log --format=%s | grep -c '^dispatch cycle$'` in
-the substrate drops from hundreds to tens — 94% of them fell inside wiki runs — and a
-wiki run's pages land in one commit at its end, not half-written across many. The
-platform's own `agent.out` and `feedback.out` are still tracked.
-
-### K2. Show the planner sprint titles, and have it link with them
-
-Every sprint line the PM and chat agents see now reads `id "title"` (the goals' start when untitled), and their prompts tell them to write a sprint as `[title](/sprints/<id>)`.
-
-**Check:** the next PM report and the next chat reply name sprints by title, as links that
-open the sprint. Titles are not fingerprint inputs, so the deploy woke no program
-(`tests/test_sprint_titles_in_prompts.py`).
 
 ### K1. Make every sprint and idea reference a link
 
@@ -39,37 +14,13 @@ Markdown everywhere links every known sprint id, and its short `<program>-c<n>` 
 pool summary names ideas by id — clicking one jumps to that idea. A short form two sprints
 share (the planner reused some numbers) stays plain text on purpose.
 
-### I2. Highlight new sprint events on the lineage graph
+### O21. Show the agent a launch command that lets go of the ssh channel
 
-Lineage nodes for the sprints the experiments list highlights carry a pulsing ring in the same colour, and clear with them when the sprint is opened; an idea node now opens that idea in the list.
+The worker's remote instructions launch in two ssh calls — write `run.sh`, then a call holding only `setsid nohup bash run.sh … & echo $!` — and say why an `&&` chain in front of the `&` hangs.
 
-**Check:** after a sprint finishes or the PM proposes one, its node on the program's
-lineage graph has the ring until you open the sprint. The ring is per browser, like the
-list. At full-graph zoom the ring shrinks with the node; it reads best expanded.
-
-### I1. Write catch-up reports, and give them a page
-
-A "Catch up" button opens each program's catch-up page: reports newest first, each a read-only planner chat opened by the catch-up request, with "Continue in chat", "Write one now" (from the last report, or the last 7/14/30 days) and the schedule (every 7 days, at least 10 finished sprints, editable there).
-
-**Check:** the first scheduled reports — a program with none yet looks back one period, so
-the busiest programs should get one within ten minutes of the deploy, past the planner's
-usage gate — read like the hand-written "Update <date>" chats: bottom line, numbers table,
-numbered next steps, sprints linked by title. The button shows "· N new" until opened.
-
-### M1. Let a human grant the PM bounded approval authority
-
-A program can hold one approval grant (`grant.py`, in `program.md`): until its limit — N approvals, a deadline, or the current 5-hour or weekly usage window — the PM approves any proposed sprint by `approve_ids`, re-checked against the grant at every approval; it ends on its own and says why. `docs/sprint-lifecycle.md` has the new edge.
-
-**Check:** grant 2 approvals on a program with proposals waiting; the next cycle (a grant
-wakes the planner) approves at most two, each recorded on the sprint as `approve (grant)`
-and in the cycle's actions, a third is "Approve FAILED", and the grant shows as ended.
-
-### M2. Build the supercharge control
-
-"⚡ Supercharge" on the program page opens the grant dialog (approvals, hours, or a usage window); a live grant puts a banner at the top with what is left, what it approved and Revoke; an ended one stays with its reason until dismissed.
-
-**Check:** the banner is impossible to miss while live and gone only after Dismiss; Revoke
-ends it at once, and the planner's next prompt no longer offers `approve_ids`.
+**Check:** the next remote sprint's launch returns at once instead of after the 60-second
+timeout, and `tests/test_remote_jobs.py` pins the new form. Reproduced first: against a
+held pipe the old form blocked for the job's whole length, the new one returned in 3 ms.
 
 # To Do (sprint)
 
@@ -80,9 +31,43 @@ ends it at once, and the planner's next prompt no longer offers `approve_ids`.
 Someone returning to a program after days away sees what changed, in one read,
 without hunting through sprints and results.
 
+### I3. Add a day-by-day narrative to the catch-up report
+
+The catch-up request asks for what happened each day since the previous report, at most two paragraphs per day.
+
+The report's sections today (`request_text` in `catchup.py`) summarise the period as a
+whole, so the order things happened in, and which result led to which decision, is
+lost. A dated narrative from the previous report to now restores it, in the shape of a
+lab diary. Days with nothing finished are skipped rather than given an empty paragraph.
+
 ## K. Cross-references
 
 Every mention of a sprint or an idea, wherever it is written, is one click from it.
+
+### K3. Give every sprint a number no other sprint in its program has
+
+New sprint ids carry a per-program sprint number instead of the planner's cycle number.
+
+The `c<n>` in `<program>-c<n>-<slug>` is the planner cycle that proposed the sprint
+(`proposal_id` in `pm_agent.py`), and one cycle often proposes several, so 54 short
+forms are shared today, some by two unrelated sprints. A short form is how chats and
+reports name a sprint, and K1 deliberately leaves an ambiguous one unlinked, so these
+mentions identify nothing. Existing ids stay as they are, since renaming would break
+links and the substrate history; the K2 rule that prose names sprints by title covers them.
+
+## N. Experiment context
+
+Reading one experiment shows where it came from and what followed it, without opening the graph.
+
+### N1. Show each experiment's lineage below its results
+
+The sprint page gains a Lineage section under Results, generated from the lineage graph's edges.
+
+Today an experiment's place in the program is visible only on the program's lineage graph,
+so a reader on a sprint page cannot see what it built on, what it superseded, or what later
+confirmed, refuted or built on it. The section is built live from the graph edges
+(`graph.py`), not written into the sprint, so it stays current as new sprints link back.
+Each entry names the edge type and links to the other sprint or idea by title.
 
 ## E. Substrate history
 
@@ -106,6 +91,26 @@ card should show each gate's line on its gauge. Changing one should need no rest
 ## B. UI responsiveness
 
 Every page stays quick to use however much history sits behind it.
+
+### B2. Keep the experiments list's filters across a visit to an experiment
+
+"Only new" and the status selector on the program page survive opening an experiment and coming back.
+
+Both are plain component state in `ProgramDetail.tsx`, so opening an experiment and
+returning resets them to "all" and unticked, and the reader re-applies them every time.
+Keep them per program for the browser session (or in the URL, which also makes the
+back button restore them); "show all" belongs with them.
+
+### B3. Keep a chat's agent running between replies for a while
+
+A chat's `claude` process stays up for an idle window after replying and takes the next message on its input, instead of exiting and being resumed.
+
+Every turn today is a fresh `claude -p --resume` (`chat_agent.py`), so each reply pays
+for process start-up, the session hooks and re-reading the conversation before it
+begins, and a quick back-and-forth feels slow. A long-lived process fed through
+`--input-format stream-json` would answer follow-ups at once; it exits after the idle
+window (or on a deploy restart) and the next message falls back to `--resume` as now.
+Needs care that a held process still counts against the usage gate and shows on Compute.
 
 ## A. Memory management
 
@@ -195,11 +200,6 @@ needs its planner mid-sprint has only the escalation, which stops the sprint —
 heavy for a question. The inbox is the light path: leave it, keep working, read the
 reply next beat. Needs a delivery rule (does an unread message wake a cycle?) and a
 decision on whether worker-to-worker is in scope. Blocked on F1.
-
-## J. Wiki run cost
-
-A wiki run's token bill is proportional to the material it ingests, not to the
-harness wrapped around it.
 
 ## L. Wiki quality improvement
 
@@ -332,6 +332,30 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### M2. Build the supercharge control
+
+The ⚡ button on the program page opens the grant dialog, and a live or ended grant shows as a banner with what it approved, Revoke and Dismiss.
+
+### M1. Let a human grant the PM bounded approval authority
+
+Under a live approval grant, limited by approvals, a deadline or a usage window, the planner approves proposed sprints itself; each approval is checked against the limit and recorded on the sprint.
+
+### I2. Highlight new sprint events on the lineage graph
+
+Lineage nodes whose sprints changed since this browser last looked are ringed until they are seen.
+
+### I1. Write catch-up reports, and give them a page
+
+The planner writes a catch-up report weekly once enough sprints have finished, or on demand, and each program has a Catch-up page listing them.
+
+### K2. Show the planner sprint titles, and have it link with them
+
+The planner, chat and worker prompts now carry each sprint's title next to its id, and tell the agent to link sprints by title.
+
+### E1. Stop the dispatch loop committing every few seconds
+
+The substrate's dispatch commits now follow real events (340 a day before, 26 in the 20 hours after), wiki runs land in one commit each, and sprint job logs are untracked.
+
 ### L13. Give every shared alias one owning page
 
 The topic schema, ingest rules and migration map give a shared alias to the topic page, and lint's near-duplicate warning names which page keeps it.
@@ -347,27 +371,3 @@ A sweep runs every 10 wiki runs and after each migration; the first scheduled on
 ### D3. Retire the source page of a superseded artifact version
 
 Lint reads a replaced artifact version as history, and the ingest marks its page deprecated with a link to the current version instead of calling it removed.
-
-### J3. Choose the batch hold's max-wait, or leave it off
-
-The live dispatch loop holds a short wiki batch 15 minutes: over its first four days 6 of 26 ingests carried more than one result, saving 7 runs, and the hold never added more than its 15 minutes.
-
-### B1. Stop a long chat lagging behind the typing
-
-The chat's message box keeps its own draft and each message is memoised, so typing into a long thread no longer re-renders it.
-
-### J2. Replace the wiki agent's default system prompt
-
-The wiki agent keeps Claude Code's built-in system prompt; a lean replacement saved ~5% of tokens and wrote a worse wiki, as the comment above `_TOOLS` in `wiki_agent.py` records.
-
-### L4. Read the traces against Oleg's own account
-
-Closed; what the probe traces surfaced fed the topic layout, the sweep and L12-L13.
-
-### L10. Re-probe after the changes and compare
-
-Both wikis were probed on the same question set in the old layout, after a sweep, and in topics, in both modes; topics scored best and read fewer pages per answer.
-
-### L11. Version wiki layouts and migrate between them from the platform
-
-Each wiki names its layout, and Wiki settings or `coscience wiki --migrate` move it to the current one as beat-driven runs; tested on a live wiki.
