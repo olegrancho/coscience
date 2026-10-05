@@ -130,3 +130,20 @@ def test_compute_lists_the_agents_kept_up(tmp_path, fake_claude):
     assert [(r["program"], r["thread"], r["title"], r["state"]) for r in rows] == [
         ("p1", tid, "Kernel questions", "idle")]
     terminate_detached(tok)
+
+
+def test_deleting_a_chat_ends_its_waiting_agent(tmp_path, fake_claude):
+    from coscience.models import Program
+    from coscience.service import Service
+    from coscience.substrate import Substrate
+    claude, _ = fake_claude
+    s = Substrate(tmp_path)
+    s.save_program(Program(id="p1", title="P", goals="g"))
+    svc = Service(tmp_path)
+    tid = svc.create_chat("p1", title="t")["id"]
+    tdir = s.chat_thread_dir("p1", tid)
+    tok = _turn(tdir, tmp_path, "hello", claude)
+    _reply(tdir)
+    svc.delete_chat("p1", tid)
+    assert not is_running(tok)
+    assert chat_session.read_meta(tdir) == {}

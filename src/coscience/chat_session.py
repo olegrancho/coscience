@@ -208,6 +208,18 @@ def deliver(thread_dir: Path, prompt: str, *, workdir: str, scope: str, session_
     return None
 
 
+def stop(thread_dir: Path) -> None:
+    """End the thread's waiting agent, if it has one (the chat is being deleted)."""
+    from coscience.executor import is_running, terminate_detached
+    meta = read_meta(thread_dir)
+    token = meta.get("token", "")
+    if token and is_running(token):
+        terminate_detached(token)
+    with locked(thread_dir):
+        (control_dir(thread_dir) / META).unlink(missing_ok=True)
+        (control_dir(thread_dir) / INBOX).unlink(missing_ok=True)
+
+
 def live_sessions() -> list[dict]:
     """Every chat agent this machine is keeping up (for Compute): its thread folder,
     whether it is answering or waiting, and since when."""

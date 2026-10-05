@@ -1318,6 +1318,9 @@ class Service:
         if thread.artifacts:
             _art.release_lock(self.substrate, program_id, list(thread.artifacts),
                               time.time(), created_by=f"chat:{thread_id}")
+        # Its agent may still be waiting for a next message (B3); there will be none.
+        from coscience import chat_session
+        chat_session.stop(self.substrate.chat_thread_dir(program_id, thread_id))
         self.substrate.delete_chat_thread(program_id, thread_id)
         self.substrate.commit(f"program {program_id}: delete chat {thread_id}")
 
