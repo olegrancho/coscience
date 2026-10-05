@@ -40,3 +40,40 @@ const e = (source: string, target: string): FlowEdge => ({
   id: `${source}->${target}`, source, target, label: "",
   data: { edge: {} as never }, animated: false, style: {},
 });
+
+const typed = (source: string, target: string, type: string): FlowEdge => ({
+  id: `${source}-${type}-${target}`, source, target, label: type,
+  data: { edge: {} as never }, animated: false, style: {},
+});
+const box = (out: FlowNode[]) => {
+  const xs = out.map((o) => o.position.x), ys = out.map((o) => o.position.y);
+  return { w: Math.max(...xs) - Math.min(...xs) + 160, h: Math.max(...ys) - Math.min(...ys) + 44 };
+};
+
+describe("compact layout (D1)", () => {
+  it("places by one parent per node, so long evidence edges do not widen every rank", () => {
+    // A trunk of 30 experiments, each building on the last, with every one also
+    // confirming the experiment ten back: drawn, but not what places them.
+    const ids = Array.from({ length: 30 }, (_, i) => `s${i}`);
+    const edges = ids.slice(1).map((id, i) => typed(id, ids[i], "builds_on"));
+    for (let i = 10; i < 30; i++) edges.push(typed(ids[i], ids[i - 10], "confirms"));
+    const { w } = box(layout(ids.map(n), edges));
+    expect(w).toBeLessThan(400);          // one column, not a band
+  });
+
+  it("gathers nodes with no edges into a grid rather than one long row", () => {
+    const { w, h } = box(layout(Array.from({ length: 16 }, (_, i) => n(`i${i}`)), []));
+    expect(w / h).toBeLessThan(4);
+  });
+
+  it("packs separate clusters into rows instead of side by side", () => {
+    const nodes: FlowNode[] = [], edges: FlowEdge[] = [];
+    for (let c = 0; c < 8; c++) {
+      for (let k = 0; k < 4; k++) nodes.push(n(`c${c}-${k}`));
+      for (let k = 1; k < 4; k++) edges.push(typed(`c${c}-${k}`, `c${c}-${k - 1}`, "builds_on"));
+    }
+    const { w, h } = box(layout(nodes, edges));
+    expect(w / h).toBeLessThan(4);        // side by side, eight of them would be ~12 wide per 1 tall
+    expect(new Set(layout(nodes, edges).map((o) => o.position.x)).size).toBeGreaterThan(1);
+  });
+});
