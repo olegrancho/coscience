@@ -8,6 +8,7 @@ import ProgramDetail from "./ProgramDetail";
 import { api, type SprintRef } from "../api";
 
 beforeEach(() => {
+  sessionStorage.clear();
   window.matchMedia = window.matchMedia || ((q: string) => ({
     matches: false, media: q, onchange: null, addListener: () => {}, removeListener: () => {},
     addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
@@ -293,6 +294,20 @@ describe("experiments list", () => {
     expect(screen.getByText("Seen already")).toBeTruthy();
     fireEvent.click(box);
     expect(screen.getByText("Proposed overnight")).toBeTruthy();
+    expect(screen.queryByText("Seen already")).toBeNull();
+  });
+
+  it("keeps the filters when the page is left and come back to (B2)", async () => {
+    visitedBefore({ "p-old": later });
+    mockProgramWithSprints([
+      row({ id: "p-new", title: "Proposed overnight", status: "proposed", last_status_by: "pm" }),
+      row({ id: "p-old", title: "Seen already", status: "proposed", last_status_by: "pm" }),
+    ]);
+    const first = renderAt();
+    fireEvent.click(await screen.findByLabelText("only new (1)"));
+    first.unmount();
+    renderAt();
+    expect(((await screen.findByLabelText("only new (1)")) as HTMLInputElement).checked).toBe(true);
     expect(screen.queryByText("Seen already")).toBeNull();
   });
 

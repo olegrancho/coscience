@@ -15,6 +15,7 @@ import LineageCard from "../components/LineageCard";
 import HostNotesCard, { noteRows } from "../components/HostNotesCard";
 import type { ArtifactRow, WikiSummary } from "../api";
 import { TYPE_HUE } from "../components/wikiGraphStyle";
+import { loadFilters, saveFilters, type ListFilters } from "../listFilters";
 import { isUnseen, seedIfNew } from "../sprintSeen";
 import { isReportSeen } from "../catchupSeen";
 import { GrantBanner, SuperchargeModal } from "../components/Supercharge";
@@ -50,9 +51,19 @@ export default function ProgramDetail() {
   const [draft, setDraft] = useState<string | null>(null);
   const [proposing, setProposing] = useState(false);
   const [replanning, setReplanning] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [showAll, setShowAll] = useState(false);
-  const [onlyNew, setOnlyNew] = useState(false);
+  // Kept for the tab, so opening an experiment and coming back keeps them (B2).
+  const [filters, setFilters] = useState<ListFilters>(() => loadFilters(id));
+  const [filtersFor, setFiltersFor] = useState(id);
+  if (filtersFor !== id) { setFiltersFor(id); setFilters(loadFilters(id)); }
+  const { statusFilter, showAll, onlyNew } = filters;
+  const setFilter = (patch: Partial<ListFilters>) => setFilters((f) => {
+    const next = { ...f, ...patch };
+    saveFilters(id, next);
+    return next;
+  });
+  const setStatusFilter = (v: string) => setFilter({ statusFilter: v });
+  const setShowAll = (v: boolean) => setFilter({ showAll: v });
+  const setOnlyNew = (v: boolean) => setFilter({ onlyNew: v });
   // The experiment this page was left for, when it is reached by going back (P5).
   const [returned, setReturned] = useState<string | null>(null);
   const location = useLocation();
@@ -494,7 +505,7 @@ export default function ProgramDetail() {
                 ))}
                 {(hidden.size > 0 || showAll) && (
                   <button type="button" className="linklike" style={{ alignSelf: "flex-start", marginTop: 8 }}
-                    onClick={() => setShowAll((v) => !v)}>
+                    onClick={() => setShowAll(!showAll)}>
                     {showAll ? "Show fewer" : `Show all (${hidden.size} more)`}
                   </button>
                 )}
