@@ -27,7 +27,7 @@ def test_promotion_transfers_idea_edges_onto_sprint(tmp_path):
                                                   plan=["x"], from_idea="A")])
     pm_beat(svc.substrate, "p1", FakeReasoner([out]), force=True)
 
-    sid = "p1-c0-go"
+    sid = "p1-s1-go"
     sprint = svc.substrate.load_sprint(sid)
     # A's outbound edge now belongs to the sprint, repointed as its source.
     assert [(e["src"], e["dst"]) for e in sprint.edges] == [(sid, "X")]

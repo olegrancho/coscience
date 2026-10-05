@@ -46,8 +46,8 @@ def test_apply_enforces_the_program_cap(substrate):
     substrate.save_program(Program(id="p1", title="A", goals="x", max_proposed=1))
     out = PMCycleOutput(proposals=[_prop("a"), _prop("b")], report="r")
     summary = pm_beat(substrate, "p1", FakeReasoner([out]))
-    assert summary["submitted"] == ["p1-c0-a"]
-    assert summary["dropped"] == ["p1-c0-b"]
+    assert summary["submitted"] == ["p1-s1-a"]
+    assert summary["dropped"] == ["p1-s2-b"]
 
 
 def test_cap_holds_on_a_resumed_staged_cycle(substrate):
@@ -57,8 +57,8 @@ def test_cap_holds_on_a_resumed_staged_cycle(substrate):
     out = PMCycleOutput(proposals=[_prop("a"), _prop("b")], report="r")
     write_staging(substrate, "p1", 0, out)                 # already reasoned; only apply remains
     summary = pm_beat(substrate, "p1", FakeReasoner([]))   # the reasoner must not be consulted
-    assert summary["submitted"] == ["p1-c0-a"]
-    assert summary["dropped"] == ["p1-c0-b"]
+    assert summary["submitted"] == ["p1-s1-a"]
+    assert summary["dropped"] == ["p1-s2-b"]
 
 
 def test_program_cap_below_the_existing_queue_proposes_nothing(substrate):
@@ -67,4 +67,4 @@ def test_program_cap_below_the_existing_queue_proposes_nothing(substrate):
                                  goals="g", plan=[], program="p1"))
     out = PMCycleOutput(proposals=[_prop("a")], report="r")
     summary = pm_beat(substrate, "p1", FakeReasoner([out]))
-    assert summary["submitted"] == [] and summary["dropped"] == ["p1-c0-a"]
+    assert summary["submitted"] == [] and summary["dropped"] == ["p1-s1-a"]

@@ -22,7 +22,7 @@ def test_canned_transcript_flows_through_pm_beat(substrate):
 
     summary = pm_beat(substrate, "p1", reasoner)
 
-    sid = "p1-c0-dose-response"
+    sid = "p1-s1-dose-response"
     assert summary["submitted"] == [sid]
     sprint = substrate.load_sprint(sid)
     assert sprint.status == SprintStatus.PROPOSED       # propose-only

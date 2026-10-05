@@ -27,15 +27,15 @@ def test_fresh_beat_proposes_and_reports(substrate):
     from coscience.pm_reasoner import FakeReasoner
     summary = pm_beat(substrate, "p1", FakeReasoner([_out("a", "report-0")]))
 
-    assert summary["submitted"] == ["p1-c0-a"]
-    sprint = substrate.load_sprint("p1-c0-a")
+    assert summary["submitted"] == ["p1-s1-a"]
+    sprint = substrate.load_sprint("p1-s1-a")
     assert sprint.status == SprintStatus.PROPOSED      # propose-only
     assert sprint.program == "p1"
     assert sprint.priority == 1
     assert "report-0" in substrate.load_report("p1")
     pm = substrate.load_pm_state("p1")
     assert pm.cycle == 1                                # bumped
-    assert pm.proposed_ids == ["p1-c0-a"]
+    assert pm.proposed_ids == ["p1-s1-a"]
     assert read_staging(substrate, "p1") is None        # cleared
 
 
@@ -48,7 +48,7 @@ def test_beat_tolerates_non_numeric_resources(substrate):
         suffix="x", goals="g", plan=[{"id": "s", "run": "true"}],
         resources_required={"gpu": 2, "note": "CPU-bound; ~30 min wall clock"})])
     pm_beat(substrate, "p1", FakeReasoner([out]))
-    assert substrate.load_sprint("p1-c0-x").resources_required == {"gpu": 2.0}
+    assert substrate.load_sprint("p1-s1-x").resources_required == {"gpu": 2.0}
 
 
 def test_second_beat_uses_next_cycle(substrate):
@@ -58,9 +58,9 @@ def test_second_beat_uses_next_cycle(substrate):
     pm_beat(substrate, "p1", fake)
     substrate.save_program(Program(id="p1", title="C", goals="cure FAST"))  # goal edit -> re-reason
     summary = pm_beat(substrate, "p1", fake)
-    assert summary["submitted"] == ["p1-c1-b"]
+    assert summary["submitted"] == ["p1-s2-b"]
     assert substrate.load_pm_state("p1").cycle == 2
-    assert substrate.load_pm_state("p1").proposed_ids == ["p1-c0-a", "p1-c1-b"]
+    assert substrate.load_pm_state("p1").proposed_ids == ["p1-s1-a", "p1-s2-b"]
 
 
 def test_beat_skips_when_nothing_changed(substrate):
@@ -81,14 +81,14 @@ def test_beat_reasons_again_after_a_result_lands(substrate):
     _prog(substrate)
     pm_beat(substrate, "p1", FakeReasoner([_out("a")]))
     # a worker finishes the sprint and writes a result -> input changed
-    sp = substrate.load_sprint("p1-c0-a")
+    sp = substrate.load_sprint("p1-s1-a")
     sp.status = SprintStatus.DONE
     sp.results = ["r1"]
     substrate.save_sprint(sp)
-    substrate.save_result(Result(id="r1", sprint="p1-c0-a", summary="found"))
+    substrate.save_result(Result(id="r1", sprint="p1-s1-a", summary="found"))
     summary = pm_beat(substrate, "p1", FakeReasoner([_out("b")]))
     assert summary["skipped"] is False
-    assert summary["submitted"] == ["p1-c1-b"]
+    assert summary["submitted"] == ["p1-s2-b"]
 
 
 def test_beat_reasons_again_after_idea_comment(substrate):
@@ -106,7 +106,7 @@ def test_beat_reasons_again_after_idea_comment(substrate):
         threads=[threads.new_thread("pm", "promising — pursue it", "", now=1.0)])])
     summary = pm_beat(substrate, "p1", FakeReasoner([_out("b")]))
     assert summary["skipped"] is False
-    assert summary["submitted"] == ["p1-c1-b"]
+    assert summary["submitted"] == ["p1-s2-b"]
 
 
 def test_the_result_file_pointer_is_not_a_fingerprint_input(substrate):
@@ -116,9 +116,9 @@ def test_the_result_file_pointer_is_not_a_fingerprint_input(substrate):
     from coscience.models import Result, Sprint
     from coscience.pm_agent import context_fingerprint, context_signals, gather_context
     _prog(substrate)
-    substrate.save_result(Result(id="p1-c0-a-result", sprint="p1-c0-a", summary="found"))
-    substrate.save_sprint(Sprint(id="p1-c0-a", status=SprintStatus.DONE, goals="g",
-                                 plan=["x"], program="p1", results=["p1-c0-a-result"]))
+    substrate.save_result(Result(id="p1-s1-a-result", sprint="p1-s1-a", summary="found"))
+    substrate.save_sprint(Sprint(id="p1-s1-a", status=SprintStatus.DONE, goals="g",
+                                 plan=["x"], program="p1", results=["p1-s1-a-result"]))
     ctx = gather_context(substrate, "p1")
     assert ctx.results_dir and ctx.completed[0]["result_id"]      # they ARE populated
 
@@ -192,12 +192,12 @@ def test_rerun_same_cycle_is_idempotent(substrate):
     _prog(substrate)
     write_staging(substrate, "p1", 0, _out("a", "staged-report"))
     s1 = pm_beat(substrate, "p1", BoomReasoner())   # resumes from staging
-    assert s1["submitted"] == ["p1-c0-a"]
+    assert s1["submitted"] == ["p1-s1-a"]
     # Re-stage the same cycle 0 (as if the bump didn't persist) and re-run:
     write_staging(substrate, "p1", 0, _out("a", "staged-report"))
     s2 = pm_beat(substrate, "p1", BoomReasoner())
     assert s2["submitted"] == []                     # already exists -> skipped
-    assert len([s for s in substrate.iter_sprints() if s.id == "p1-c0-a"]) == 1
+    assert len([s for s in substrate.iter_sprints() if s.id == "p1-s1-a"]) == 1
 
 
 def test_resume_after_cycle_bump_does_not_shift_ids(substrate):
@@ -207,11 +207,11 @@ def test_resume_after_cycle_bump_does_not_shift_ids(substrate):
     from coscience.models import PMState
     write_staging(substrate, "p1", 0, _out("a"))
     substrate.save_pm_state(PMState(program_id="p1", cycle=1,
-                                    proposed_ids=["p1-c0-a"]))
+                                    proposed_ids=["p1-s1-a"]))
     summary = pm_beat(substrate, "p1", BoomReasoner())
     assert summary["cycle"] == 0
-    assert summary["submitted"] == []                # p1-c0-a already proposed
-    assert substrate.load_sprint("p1-c0-a").status == SprintStatus.PROPOSED
+    assert summary["submitted"] == []                # p1-s1-a already proposed
+    assert substrate.load_sprint("p1-s1-a").status == SprintStatus.PROPOSED
     assert read_staging(substrate, "p1") is None
 
 
@@ -331,7 +331,7 @@ def test_a_forced_beat_that_works_after_a_backoff_proposes(substrate):
     assert substrate.load_pm_state("p1").consecutive_failures == 3
 
     summary = pm_beat(substrate, "p1", FakeReasoner([_out("a")]), force=True)
-    assert summary["submitted"] == ["p1-c0-a"]
+    assert summary["submitted"] == ["p1-s1-a"]
     assert not summary.get("backoff")
     assert substrate.load_pm_state("p1").consecutive_failures == 0
 

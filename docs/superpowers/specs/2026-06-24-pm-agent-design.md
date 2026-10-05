@@ -118,7 +118,7 @@ Kill anywhere; the next beat resumes correctly:
 - killed **after** staging, mid-submit → resume reads the *staged* output and finishes submitting — **no re-reasoning, so no drift**.
 - killed after submit, before report → re-submits skipped (ids exist); report written.
 
-The LLM runs **at most once per cycle**; every write is idempotent. The deterministic id (`<program>-c<cycle>-<suffix>`) is the idempotency key. Submission uses an **existence check in the PM** (skip if the sprint id already exists) so the `Service`/`submit_sprint` contract stays unchanged.
+The LLM runs **at most once per cycle**; every write is idempotent. The deterministic id (`<program>-c<cycle>-<suffix>`) is the idempotency key. *(Since K3, ids are `<program>-s<n>-<suffix>` with a per-program number; the key is the sprint's recorded `proposed_cycle` plus its suffix.)* Submission uses an **existence check in the PM** (skip if the sprint id already exists) so the `Service`/`submit_sprint` contract stays unchanged.
 
 ## 6. Runner & wiring
 

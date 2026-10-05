@@ -40,6 +40,13 @@ describe("sprint ids in markdown become links (K1)", () => {
     expect(links[0].textContent).toBe("p1-c3");
   });
 
+  it("links the numbered short form of a new sprint (K3)", () => {
+    const known = sprintNames(["p1-s12-kernel", "p1-c12-other"]);
+    const links = html("see p1-s12 and p1-c12", known).querySelectorAll("a");
+    expect([...links].map((a) => a.getAttribute("href")))
+      .toEqual(["/sprints/p1-s12-kernel", "/sprints/p1-c12-other"]);
+  });
+
   it("links an idea id to its anchor where the page provides it", () => {
     const known = new Map(ids).set("3301b981", "/programs/p1/ideas#3301b981");
     const a = html("family-robust training (3301b981)", known).querySelector("a")!;

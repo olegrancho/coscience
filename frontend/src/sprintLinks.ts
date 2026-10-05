@@ -6,14 +6,15 @@ import { createContext } from "react";
  *  exactly as before. */
 export const LinkTargetsContext = createContext<ReadonlyMap<string, string>>(new Map());
 
-/** The sprint names to link: each full id, and its short form `<program>-c<n>` — the way
- *  people and agents usually write it — when exactly one sprint has that prefix. */
+/** The sprint names to link: each full id, and its short form — `<program>-s<n>`, or the
+ *  legacy `<program>-c<n>` — the way people and agents usually write it, when exactly one
+ *  sprint has that prefix. A legacy cycle number can be shared, so that one may not link. */
 export function sprintNames(ids: Iterable<string>): Map<string, string> {
   const names = new Map<string, string>();
   const short = new Map<string, string[]>();
   for (const id of ids) {
     names.set(id, `/sprints/${id}`);
-    const m = /^(.+?-c\d+)-/.exec(id);
+    const m = /^(.+?-[cs]\d+)-/.exec(id);
     if (m) short.set(m[1], [...(short.get(m[1]) ?? []), id]);
   }
   for (const [s, full] of short) {

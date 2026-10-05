@@ -94,7 +94,7 @@ def test_a_proposal_with_distributed_creates_a_distributed_sprint(substrate):
     out = PMCycleOutput(proposals=[ProposedSprint(
         suffix="x", goals="g", plan=["a"], distributed=True)])
     pm_beat(substrate, "p1", FakeReasoner([out]))
-    assert substrate.load_sprint("p1-c0-x").distributed is True
+    assert substrate.load_sprint("p1-s1-x").distributed is True
 
 
 def test_a_sprint_edit_may_set_distributed(substrate):

@@ -103,6 +103,7 @@ class Substrate:
             artifacts_create=[dict(c) for c in fm.get("artifacts_create", [])],
             hold=dict(fm.get("hold") or {}),
             pm_notes=[dict(n) for n in fm.get("pm_notes", []) if isinstance(n, dict)],
+            proposed_cycle=(int(fm["proposed_cycle"]) if fm.get("proposed_cycle") is not None else None),
         )
 
     def save_sprint(self, sprint: Sprint) -> None:
@@ -170,6 +171,8 @@ class Substrate:
             fm["hold"] = dict(sprint.hold)
         if sprint.pm_notes:
             fm["pm_notes"] = [dict(n) for n in sprint.pm_notes]
+        if sprint.proposed_cycle is not None:
+            fm["proposed_cycle"] = int(sprint.proposed_cycle)
         d.mkdir(parents=True, exist_ok=True)
         (d / "sprint.md").write_text(serialize(fm, f"# Sprint {sprint.id}\n"))
 

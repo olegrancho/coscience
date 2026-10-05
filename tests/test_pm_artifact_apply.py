@@ -15,7 +15,7 @@ def test_artifact_task_becomes_proposed_bound_sprint(substrate):
         {"suffix": "tighten-intro", "artifact_ids": ["doc"], "create": [],
          "instructions": "Tighten the introduction."}])
     pm_beat(substrate, "p", FakeReasoner([out]), now=1.0)
-    sid = "p-c0-tighten-intro"
+    sid = "p-s1-tighten-intro"
     s = substrate.load_sprint(sid)
     assert s.status == SprintStatus.PROPOSED
     assert s.artifacts_bound == ["doc"]
@@ -31,7 +31,7 @@ def test_artifact_task_honors_pm_title(substrate):
          "artifact_ids": ["doc"], "create": [],
          "instructions": "Tighten the introduction."}])
     pm_beat(substrate, "p", FakeReasoner([out]), now=1.0)
-    s = substrate.load_sprint("p-c0-tighten-intro")
+    s = substrate.load_sprint("p-s1-tighten-intro")
     assert s.title == "Tighten the intro"
 
 
@@ -42,7 +42,7 @@ def test_artifact_task_create_new_artifact_sprint(substrate):
          "create": [{"title": "Manuscript", "kind": "md"}],
          "instructions": "Write a manuscript from the results."}])
     pm_beat(substrate, "p", FakeReasoner([out]), now=1.0)
-    s = substrate.load_sprint("p-c0-write-manuscript")
+    s = substrate.load_sprint("p-s1-write-manuscript")
     assert s.artifacts_create and s.artifacts_create[0]["title"] == "Manuscript"
     assert s.artifacts_create[0]["kind"] == "md"
     assert s.artifacts_create[0]["aid"]      # a slug was assigned

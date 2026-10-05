@@ -27,8 +27,8 @@ def test_cap_blocks_proposing_when_full(substrate):
     out = PMCycleOutput(proposals=[_prop("new")], report="r")
     summary = pm_beat(substrate, "p1", FakeReasoner([out]))
     assert summary["submitted"] == []
-    assert summary["dropped"] == ["p1-c0-new"]
-    assert not (substrate.sprint_dir("p1-c0-new") / "sprint.md").is_file()
+    assert summary["dropped"] == ["p1-s1-new"]
+    assert not (substrate.sprint_dir("p1-s1-new") / "sprint.md").is_file()
 
 
 def test_cap_allows_only_free_slots(substrate):
@@ -36,8 +36,8 @@ def test_cap_allows_only_free_slots(substrate):
     _proposed(substrate, MAX_PROPOSED - 1)             # one slot free
     out = PMCycleOutput(proposals=[_prop("a"), _prop("b")], report="r")
     summary = pm_beat(substrate, "p1", FakeReasoner([out]))
-    assert summary["submitted"] == ["p1-c0-a"]         # only the first fits
-    assert summary["dropped"] == ["p1-c0-b"]
+    assert summary["submitted"] == ["p1-s1-a"]         # only the first fits
+    assert summary["dropped"] == ["p1-s2-b"]
 
 
 # --- idea pool ---
@@ -85,7 +85,7 @@ def test_demoted_idea_is_not_promotable(substrate):
     out = PMCycleOutput(proposals=[_prop("from-seed", from_idea="seed")])
     summary = pm_beat(substrate, "p1", FakeReasoner([out]))
     assert summary["submitted"] == []                           # promotion blocked
-    assert not (substrate.sprint_dir("p1-c0-from-seed") / "sprint.md").is_file()
+    assert not (substrate.sprint_dir("p1-s1-from-seed") / "sprint.md").is_file()
     _s, ideas = substrate.load_ideas("p1")
     assert [i.id for i in ideas] == ["seed"]                    # idea stays in the pool
     assert ideas[0].protected is True                           # and PM can't delete it (pinned)
@@ -96,8 +96,8 @@ def test_promotion_creates_sprint_and_removes_idea(substrate):
     substrate.save_ideas("p1", "", [Idea(id="seed", text="big idea", source="pm")])
     out = PMCycleOutput(proposals=[_prop("from-seed", from_idea="seed")])
     summary = pm_beat(substrate, "p1", FakeReasoner([out]))
-    assert summary["submitted"] == ["p1-c0-from-seed"]
-    assert substrate.load_sprint("p1-c0-from-seed").status == SprintStatus.PROPOSED
+    assert summary["submitted"] == ["p1-s1-from-seed"]
+    assert substrate.load_sprint("p1-s1-from-seed").status == SprintStatus.PROPOSED
     _summary, ideas = substrate.load_ideas("p1")
     assert ideas == []                                  # the seed left the pool
 
@@ -109,7 +109,7 @@ def test_activation_log_records_trigger_and_submitted(substrate):
     acts = substrate.load_pm_state("p1").activations
     assert len(acts) == 1
     assert acts[0]["triggers"] == ["first cycle"]
-    assert acts[0]["submitted"] == ["p1-c0-a"]
+    assert acts[0]["submitted"] == ["p1-s1-a"]
     # add guidance -> next activation names guidance as the trigger
     from coscience import threads as _threads
     substrate.save_guidance("p1", [_threads.new_thread("pm", "focus on X", "u", now=1.0, tid="g1")])

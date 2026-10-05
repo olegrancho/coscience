@@ -621,17 +621,69 @@ class StagedCycle:
     host_notes_seen: dict | None = None
 
 
-def proposal_id(program_id: str, cycle: int, suffix: str) -> str:
+def proposal_suffix(program_id: str, suffix: str) -> str:
     # The model sometimes returns a suffix that already carries the program and/or
-    # cycle prefix (e.g. "c2-foo" or "p1-c3-bar"), which would otherwise produce
-    # doubled ids like "p1-c2-c2-foo". Strip any such leading prefixes first.
+    # number prefix (e.g. "c2-foo", "s14-foo" or "p1-c3-bar"), which would otherwise
+    # produce doubled ids like "p1-s2-c2-foo". Strip any such leading prefixes first.
     s = suffix.strip().strip("-/ ")
     prev = None
     while prev != s:
         prev = s
         s = re.sub(rf"^{re.escape(program_id)}-", "", s)
-        s = re.sub(r"^c\d+-", "", s)
-    return f"{program_id}-c{cycle}-{s}"
+        s = re.sub(r"^[cs]\d+-", "", s)
+    return s
+
+
+def proposal_id(program_id: str, cycle: int, suffix: str) -> str:
+    """The id a cycle's proposal had before K3: `<program>-c<cycle>-<suffix>`. Kept so a
+    cycle staged before the change, and re-applied after it, finds what it made."""
+    return f"{program_id}-c{cycle}-{proposal_suffix(program_id, suffix)}"
+
+
+def sprint_number(program_id: str, sprint_id: str) -> int | None:
+    """The number in `<program>-s<n>-…` (or the cycle in a legacy `-c<n>-` id)."""
+    m = re.match(rf"^{re.escape(program_id)}-[cs](\d+)-", sprint_id)
+    return int(m.group(1)) if m else None
+
+
+class SprintIds:
+    """Mints `<program>-s<n>-<suffix>` for a cycle's proposals (K3). The number counts
+    up per program, so no two sprints share a short form `<program>-s<n>`; the old
+    `-c<cycle>-` form gave every proposal of one cycle the same one. It starts above
+    every number already used, legacy cycle numbers included, so ids keep sorting in
+    the order sprints appeared.
+
+    Minting must stay idempotent: a staged cycle is re-applied after a crash, and must
+    find the sprints it already wrote rather than make new ones. Each sprint records
+    `proposed_cycle`, and (cycle, suffix) names one proposal."""
+
+    def __init__(self, substrate, program_id: str):
+        self.program_id = program_id
+        self.made: dict[tuple[int, str], str] = {}
+        top = 0
+        for s in substrate.iter_sprints():
+            if s.program != program_id and not s.id.startswith(f"{program_id}-"):
+                continue
+            n = sprint_number(program_id, s.id)
+            if n is not None:
+                top = max(top, n)
+            if s.proposed_cycle is not None:
+                tail = re.sub(rf"^{re.escape(program_id)}-[cs]\d+-", "", s.id)
+                self.made[(int(s.proposed_cycle), tail)] = s.id
+        self.next = top + 1
+        self.substrate = substrate
+
+    def mint(self, cycle: int, suffix: str) -> str:
+        s = proposal_suffix(self.program_id, suffix)
+        if (cycle, s) in self.made:
+            return self.made[(cycle, s)]
+        legacy = proposal_id(self.program_id, cycle, s)
+        if (self.substrate.sprint_dir(legacy) / "sprint.md").is_file():
+            return legacy
+        sid = f"{self.program_id}-s{self.next}-{s}"
+        self.next += 1
+        self.made[(cycle, s)] = sid
+        return sid
 
 
 def _artifact_slug(title: str) -> str:
@@ -996,6 +1048,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
     slots = program_cap(substrate.load_program(program_id)) - open_proposed
     # A proposal that names no model inherits the program's default worker model.
     worker_model = substrate.load_program(program_id).worker_model
+    ids = SprintIds(substrate, program_id)
     for prop in staged.output.proposals:
         # A demoted idea is a human "do not pursue as a sprint" — the PM may not
         # promote it back, whatever the reasoner returns.
@@ -1003,7 +1056,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             src = ideas_by_id.get(prop.from_idea)
             if src is not None and src.demoted:
                 continue
-        sid = proposal_id(program_id, cycle, prop.suffix)
+        sid = ids.mint(cycle, prop.suffix)
         exists = (substrate.sprint_dir(sid) / "sprint.md").is_file()
         if not exists:
             if slots <= 0:
@@ -1019,6 +1072,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 title=prop.title,
                 summary=prop.summary,
                 model=prop.model or worker_model,
+                proposed_cycle=cycle,
             )))
             slots -= 1
         proposed.append(sid)
@@ -1035,7 +1089,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         if not isinstance(task, dict):
             continue
         suffix = str(task.get("suffix") or "artifact-update")
-        sid = proposal_id(program_id, cycle, suffix)
+        sid = ids.mint(cycle, suffix)
         if (substrate.sprint_dir(sid) / "sprint.md").is_file():
             if sid not in proposed:
                 proposed.append(sid)
@@ -1057,7 +1111,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             id=sid, status=SprintStatus.PROPOSED, title=title,
             goals=str(task.get("instructions") or "Update the artifact."),
             plan=[], program=program_id, model=worker_model,
-            artifacts_bound=bound, artifacts_create=create)))
+            artifacts_bound=bound, artifacts_create=create, proposed_cycle=cycle)))
         slots -= 1
         proposed.append(sid)
         if sid not in pm.proposed_ids:

@@ -84,6 +84,9 @@ class Sprint:
     # oldest first (E2). The program's report.md is overwritten every cycle, so without
     # this a status change outlives the reasoning that produced it by minutes.
     pm_notes: list[dict] = field(default_factory=list)
+    # The planner cycle that proposed it (K3). Sprint ids carry a per-program number,
+    # not the cycle, so this is how re-applying a staged cycle finds what it made.
+    proposed_cycle: int | None = None
 
     def __post_init__(self) -> None:
         if not self.model:

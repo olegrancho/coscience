@@ -16,7 +16,7 @@ def test_run_once_beats_only_active_programs(substrate):
     fake = FakeReasoner([_out("z"), _out("z")])
     summaries = pm_run_once(substrate, fake)
     assert [s["program"] for s in summaries] == ["a"]      # only the active one
-    assert substrate.load_sprint("a-c0-z").program == "a"
+    assert substrate.load_sprint("a-s1-z").program == "a"
 
 
 def test_pm_throttles_instead_of_calling_when_usage_exhausted(substrate):
@@ -52,7 +52,7 @@ def test_one_failing_program_does_not_starve_the_others(substrate):
     reasoner = _ExplodesOnFirstProgram()
     summaries = pm_run_once(substrate, reasoner)
     assert reasoner.seen == ["a-broken", "b-fine"]           # kept going
-    assert substrate.load_sprint("b-fine-c0-z").program == "b-fine"
+    assert substrate.load_sprint("b-fine-s1-z").program == "b-fine"
     broken = [s for s in summaries if s["program"] == "a-broken"]
     assert "Argument list too long" in broken[0]["error"]
 

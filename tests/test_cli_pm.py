@@ -21,7 +21,7 @@ def test_pm_once_proposes(tmp_path, monkeypatch, capsys):
 
     rc = cli.main(["pm", "--repo", str(tmp_path), "--once"])
     assert rc == 0
-    sprint = Substrate(tmp_path).load_sprint("p1-c0-a")
+    sprint = Substrate(tmp_path).load_sprint("p1-s1-a")
     assert sprint.goals == "do a"
     assert "p1" in capsys.readouterr().out          # printed a summary line
 
