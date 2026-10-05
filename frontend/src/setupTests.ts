@@ -62,3 +62,8 @@ if (!("PointerEvent" in globalThis)) {
   (globalThis as unknown as { window?: Record<string, unknown> }).window!.PointerEvent =
     MouseEvent;
 }
+
+// jsdom has no scrollIntoView. Mantine's Select scrolls its selected option into view
+// on a timer, which then threw after the test that opened it had finished — an
+// unhandled error charged to whichever test ran next.
+if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
