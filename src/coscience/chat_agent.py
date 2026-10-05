@@ -147,10 +147,25 @@ def _write_prompt_file(prompt: str) -> str:
     return path
 
 
+def keepalive_seconds() -> float:
+    """How long a chat's agent waits for the next message after replying (B3).
+    COSCIENCE_CHAT_KEEPALIVE in seconds; 0 turns it off, back to one process a turn."""
+    try:
+        return max(0.0, float(os.environ.get("COSCIENCE_CHAT_KEEPALIVE", "600")))
+    except ValueError:
+        return 600.0
+
+
 def launch_turn(thread_dir: Path, workdir: str, prompt: str, scope: str,
                 session_id: str, resume: bool, model: str = "",
                 claude_bin: str = "claude") -> str:
-    """Launch one detached chat turn; return its process token."""
+    """Launch one detached chat turn; return its process token. With the keepalive on
+    (B3), a message goes to the thread's agent if it is still up and idle, and a new
+    agent otherwise stays up after replying — see coscience.chat_session."""
+    idle = keepalive_seconds()
+    if idle > 0:
+        return _launch_kept(thread_dir, workdir, prompt, scope, session_id, resume, model,
+                            claude_bin, idle)
     thread_dir.mkdir(parents=True, exist_ok=True)
     out, exitf = thread_dir / "turn.out", thread_dir / "turn.exit"
     for f in (out, exitf):
@@ -162,6 +177,37 @@ def launch_turn(thread_dir: Path, workdir: str, prompt: str, scope: str,
         return launch_detached(cmd, cwd=workdir)
     except BaseException:
         os.unlink(promptf)   # nothing will ever run the `rm` in the shell line
+        raise
+
+
+def _launch_kept(thread_dir, workdir, prompt, scope, session_id, resume, model, claude_bin,
+                 idle) -> str:
+    import sys
+    from coscience import chat_session
+    token = chat_session.deliver(thread_dir, prompt, workdir=workdir, scope=scope,
+                                 session_id=session_id, model=model)
+    if token:
+        return token
+    thread_dir.mkdir(parents=True, exist_ok=True)
+    for f in (thread_dir / "turn.out", thread_dir / "turn.exit"):
+        if f.exists():
+            f.unlink()
+    promptf = _write_prompt_file(prompt)
+    argv = [sys.executable, "-m", "coscience.chat_session", str(thread_dir),
+            "--prompt-file", promptf, "--workdir", workdir, "--scope", scope,
+            "--session-id", session_id, "--idle", str(idle), "--claude-bin", claude_bin]
+    if resume:
+        argv.append("--resume")
+    if model:
+        argv += ["--model", model]
+    log = chat_session.control_dir(thread_dir) / "host.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    # exec, so the token is the host's own process and stopping it reaches its group.
+    cmd = "exec " + shlex.join(argv) + f" 2>> {shlex.quote(str(log))}"
+    try:
+        return launch_detached(cmd, cwd=workdir)
+    except BaseException:
+        os.unlink(promptf)
         raise
 
 

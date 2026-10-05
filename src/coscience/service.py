@@ -5,6 +5,7 @@ can hand results straight to clients.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -726,7 +727,28 @@ class Service:
         from coscience import usage_gates, usage_meter
         return {"budget": usage_meter.read_budget(),
                 "runs": usage_meter.run_stats(self.repo_root),
-                "gates": usage_gates.load(self.repo_root)}
+                "gates": usage_gates.load(self.repo_root),
+                "chat_sessions": self._chat_sessions()}
+
+    def _chat_sessions(self) -> list[dict]:
+        """Chat agents kept up between replies (B3), named by program and chat. They use
+        no usage while they wait; each reply is a call in the ledger like any other."""
+        from coscience import chat_session
+        out = []
+        for s in chat_session.live_sessions():
+            parts = Path(s["thread_dir"]).parts
+            if "chats" in parts and parts.index("chats") >= 1:
+                i = parts.index("chats")
+                program, thread = parts[i - 1], parts[i + 1] if i + 1 < len(parts) else ""
+            else:
+                program, thread = "", ""
+            title = ""
+            if program and thread:
+                with contextlib.suppress(Exception):
+                    title = self.substrate.load_chat_thread(program, thread).title
+            out.append({"program": program, "thread": thread, "title": title,
+                        "state": s["state"], "since": s["since"], "idle_limit": s["idle_limit"]})
+        return out
 
     def set_usage_gates(self, gates: dict) -> dict:
         """Set where each kind of agent stops launching (G1). The loops read the file

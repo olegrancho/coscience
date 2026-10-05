@@ -66,6 +66,15 @@ usage-gated and idle beats make no Claude call.
    (`docs/wiki-layouts.md`) — raises the second number instead:
    `scripts/bump-version --minor` (0.1.4 → 0.2.0).
 
+### Chat agents stay up between replies
+
+A program chat's agent keeps running after it replies and takes the next message on
+its input, then closes after 10 idle minutes (`COSCIENCE_CHAT_KEEPALIVE` seconds on
+`coscience-http`; `0` = one process per turn, as before). A waiting one holds no usage
+and is listed under Compute → Claude usage. Restarting the backend ends them, which is
+harmless: the next message resumes the session in a fresh process. An idle one does
+show up as a `claude` process under `coscience-http`.
+
 ### Remote servers (off unless a deployment turns them on)
 
 Two environment switches control whether the platform reaches other machines. Both

@@ -89,6 +89,12 @@ export interface Usage {
   runs: Record<string, RunAgg>;
   /** Where each kind of agent stops launching, per window (G1). */
   gates?: UsageGates;
+  /** Chat agents kept up between replies on this machine (B3). */
+  chat_sessions?: ChatSessionT[];
+}
+export interface ChatSessionT {
+  program: string; thread: string; title: string; state: string;
+  since: number | null; idle_limit: number | null;
 }
 export type GateKind = "pm" | "worker" | "wiki";
 export type UsageGates = Record<GateKind, { "5h": number; week: number }>;

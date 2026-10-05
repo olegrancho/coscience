@@ -135,6 +135,20 @@ export default function Ledger() {
         <div className="eyebrow" style={{ marginBottom: 16 }}>Claude usage</div>
         {usage.data ? <UsagePanel usage={usage.data} onEditGates={() => setEditGates(true)} />
           : <Text size="sm" c="dimmed">Usage reading unavailable.</Text>}
+        {(usage.data?.chat_sessions?.length ?? 0) > 0 && (
+          <Text size="xs" c="dimmed" mt={10}>
+            Chat agents kept open between replies:{" "}
+            {usage.data!.chat_sessions!.map((c, i) => (
+              <span key={`${c.program}/${c.thread}`}>
+                {i > 0 && ", "}
+                <Link to={`/programs/${c.program}/chat?c=${c.thread}`} className="view">{c.title || c.thread}</Link>
+                {c.state === "idle" ? " (waiting)" : " (answering)"}
+              </span>
+            ))}
+            . They use nothing while waiting and close after{" "}
+            {Math.round((usage.data!.chat_sessions![0].idle_limit ?? 600) / 60)} idle minutes.
+          </Text>
+        )}
         {usage.data?.gates && (
           <UsageGatesModal gates={usage.data.gates} opened={editGates} onClose={() => setEditGates(false)} />
         )}

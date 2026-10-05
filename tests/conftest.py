@@ -53,6 +53,15 @@ def _permissive_usage(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _one_process_a_chat_turn(monkeypatch, tmp_path):
+    """Chat turns as one process each by default: a kept-alive agent (B3) would
+    outlive the test that started it. tests/test_chat_session.py turns it on. Its
+    control files go to the test's own folder, not the machine's temp dir."""
+    monkeypatch.setenv("COSCIENCE_CHAT_KEEPALIVE", "0")
+    monkeypatch.setenv("COSCIENCE_CHAT_CONTROL_DIR", str(tmp_path / "chat-control"))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_usage_reading(tmp_path):
     """Keep the gate away from this host's own state: the recorded rate-limit reading
     (a real file under ~/.cache once anything has run Claude here) and the throttled
