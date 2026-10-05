@@ -1,19 +1,12 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 231
+version: 232
 last_updated: 2026-10-04
 ---
 
 # To QC
 
 # To Do (sprint)
-
-# To Do (backlog)
-
-## I. Catching up on a program
-
-Someone returning to a program after days away sees what changed, in one read,
-without hunting through sprints and results.
 
 ### I3. Add a day-by-day narrative to the catch-up report
 
@@ -23,10 +16,6 @@ The report's sections today (`request_text` in `catchup.py`) summarise the perio
 whole, so the order things happened in, and which result led to which decision, is
 lost. A dated narrative from the previous report to now restores it, in the shape of a
 lab diary. Days with nothing finished are skipped rather than given an empty paragraph.
-
-## K. Cross-references
-
-Every mention of a sprint or an idea, wherever it is written, is one click from it.
 
 ### K3. Give every sprint a number no other sprint in its program has
 
@@ -51,10 +40,6 @@ Record `from_idea` on the sprint, map promoted ids to their sprint in `ProgramLi
 have the Ideas page forward such an anchor; past promotions can be recovered from the
 human ones' commit messages, the planner's need a scan of its staged cycles.
 
-## N. Experiment context
-
-Reading one experiment shows where it came from and what followed it, without opening the graph.
-
 ### N1. Show each experiment's lineage below its results
 
 The sprint page gains a Lineage section under Results, generated from the lineage graph's edges.
@@ -64,10 +49,6 @@ so a reader on a sprint page cannot see what it built on, what it superseded, or
 confirmed, refuted or built on it. The section is built live from the graph edges
 (`graph.py`), not written into the sprint, so it stays current as new sprints link back.
 Each entry names the edge type and links to the other sprint or idea by title.
-
-## D. Lineage graph
-
-A program's lineage reads at a glance on one screen, without panning sideways to find its parts.
 
 ### D1. Lay the lineage graph out compactly instead of in one wide band
 
@@ -80,15 +61,6 @@ wider the band. Options: pack disconnected components into a grid, wrap long ran
 tighten spacing, or try ELK's layered layout with an aspect-ratio target. Positions a
 person has dragged by hand still win.
 
-## E. Substrate history
-
-The substrate's git history records work and decisions, not the loops' heartbeat.
-
-## G. Usage budget
-
-Whoever runs the platform decides how much of the Claude usage windows each kind of
-agent may spend, from the dashboard, without touching code.
-
 ### G1. Edit the usage thresholds from Compute → Claude usage
 
 Add a config control to the Claude usage card that sets, per agent kind (PM, worker, wiki), the 5-hour and weekly percentage at which it stops launching.
@@ -98,10 +70,6 @@ Today they are constants in code: the PM stops at 80% of the 5-hour window, work
 PM and dispatch loops are separate processes, so the values belong in a substrate file
 they read each beat (as `resources.yaml` is), not in the backend's memory, and the
 card should show each gate's line on its gauge. Changing one should need no restart.
-
-## B. UI responsiveness
-
-Every page stays quick to use however much history sits behind it.
 
 ### B2. Keep the experiments list's filters across a visit to an experiment
 
@@ -122,6 +90,38 @@ begins, and a quick back-and-forth feels slow. A long-lived process fed through
 `--input-format stream-json` would answer follow-ups at once; it exits after the idle
 window (or on a deploy restart) and the next message falls back to `--resume` as now.
 Needs care that a held process still counts against the usage gate and shows on Compute.
+
+# To Do (backlog)
+
+## I. Catching up on a program
+
+Someone returning to a program after days away sees what changed, in one read,
+without hunting through sprints and results.
+
+## K. Cross-references
+
+Every mention of a sprint or an idea, wherever it is written, is one click from it.
+
+## N. Experiment context
+
+Reading one experiment shows where it came from and what followed it, without opening the graph.
+
+## D. Lineage graph
+
+A program's lineage reads at a glance on one screen, without panning sideways to find its parts.
+
+## E. Substrate history
+
+The substrate's git history records work and decisions, not the loops' heartbeat.
+
+## G. Usage budget
+
+Whoever runs the platform decides how much of the Claude usage windows each kind of
+agent may spend, from the dashboard, without touching code.
+
+## B. UI responsiveness
+
+Every page stays quick to use however much history sits behind it.
 
 ## A. Memory management
 
