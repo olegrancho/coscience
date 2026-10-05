@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 233
+version: 234
 last_updated: 2026-10-04
 ---
 
@@ -37,38 +37,33 @@ says was "promoted to a sprint" is a link and opens that sprint; an old planner 
 link to that idea does the same. The backfill matched by wording where the history held
 no exact record, so a wrong pairing is possible but none showed against the 13 exact ones.
 
-# To Do (sprint)
-
 ### N1. Show each experiment's lineage below its results
 
-The sprint page gains a Lineage section under Results, generated from the lineage graph's edges.
+An experiment's page has a Lineage card under Results: "Where it came from" (its own edges) and "What followed" (edges pointing at it), one row per other experiment or idea, read live from the program's graph.
 
-Today an experiment's place in the program is visible only on the program's lineage graph,
-so a reader on a sprint page cannot see what it built on, what it superseded, or what later
-confirmed, refuted or built on it. The section is built live from the graph edges
-(`graph.py`), not written into the sprint, so it stays current as new sprints link back.
-Each entry names the edge type and links to the other sprint or idea by title.
+**Check:** open an experiment with several links (one with both incoming and outgoing
+edges); the card names each related experiment by title with how it is linked, and
+"on the graph →" lands on the program page's lineage. It shows direct relations only,
+not ancestors further back.
 
 ### D1. Lay the lineage graph out compactly instead of in one wide band
 
-The auto-layout produces a graph far wider than tall; make it fit the screen's shape.
+The auto-layout places each node by one parent edge (a tree) and still draws every edge; separate clusters and edgeless nodes are packed into rows instead of one band.
 
-The layout is a single dagre pass (`graphLayout.ts`, top-to-bottom, fixed spacing), so
-every node without a parent lands on the first rank and every disconnected cluster is
-placed side by side: the more unlinked ideas and separate threads a program has, the
-wider the band. Options: pack disconnected components into a grid, wrap long ranks,
-tighten spacing, or try ELK's layered layout with an aspect-ratio target. Positions a
-person has dragged by hand still win.
+**Check:** "Auto-layout" on the largest program's lineage card, and on a small one
+with several loose ideas: the large one needs far less sideways panning, the small one
+fits the card. The card's zoom still stops at 50%, so a big graph still pans; nodes you
+dragged by hand keep their places until Auto-layout.
 
 ### G1. Edit the usage thresholds from Compute → Claude usage
 
-Add a config control to the Claude usage card that sets, per agent kind (PM, worker, wiki), the 5-hour and weekly percentage at which it stops launching.
+Each kind of agent's stop line in the 5-hour and weekly windows is set from Compute ("Change them" under the usage bars) and kept in one substrate file the loops read on every check; the bars mark each line.
 
-Today they are constants in code: the PM stops at 80% of the 5-hour window, workers at
-90%, wiki runs at 70%, and all three at 99% of the week (`worker.py`, `wiki.py`). The
-PM and dispatch loops are separate processes, so the values belong in a substrate file
-they read each beat (as `resources.yaml` is), not in the backend's memory, and the
-card should show each gate's line on its gauge. Changing one should need no restart.
+**Check:** on Compute, lower the wiki 5-hour line below current usage and save; the
+mark moves, and the next wiki batch waits (the dispatch log says usage) without any
+restart. Put it back after. Chats are not gated by these.
+
+# To Do (sprint)
 
 ### B3. Keep a chat's agent running between replies for a while
 
