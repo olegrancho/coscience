@@ -38,7 +38,11 @@ export interface Idea {
   pinned: boolean; protected: boolean; threads: FeedbackThreadT[]; created_at: number;
   demoted: boolean;
 }
-export interface IdeaPool { summary: string; ideas: Idea[] }
+export interface IdeaPool {
+  summary: string; ideas: Idea[];
+  /** Ideas that became sprints: idea id -> sprint id (K4). */
+  promoted?: Record<string, string>;
+}
 export interface ChatMessage { role: "user" | "pm"; text: string; at: number; by?: string }
 export type ChatScope = "read" | "full";
 export interface ChatThreadSummary {

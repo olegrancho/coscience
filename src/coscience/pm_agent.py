@@ -1073,6 +1073,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
                 summary=prop.summary,
                 model=prop.model or worker_model,
                 proposed_cycle=cycle,
+                from_idea=prop.from_idea if prop.from_idea in ideas_by_id else "",
             )))
             slots -= 1
         proposed.append(sid)

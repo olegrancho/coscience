@@ -28,6 +28,8 @@ def test_a_promotion_makes_the_sprint_and_moves_the_idea_lineage_onto_it(tmp_pat
     assert [i.id for i in ideas] == ["i2"]          # the idea became the sprint
     edges = svc.substrate.load_sprint("p1-h1").edges
     assert [(e["type"], e["src"], e["dst"]) for e in edges] == [("inspired_by", "p1-h1", "SB")]
+    assert svc.substrate.load_sprint("p1-h1").from_idea == "i1"     # K4
+    assert svc.list_ideas("p1")["promoted"] == {"i1": "p1-h1"}
 
 
 def test_promoting_an_idea_that_is_not_in_the_pool_creates_nothing(tmp_path):

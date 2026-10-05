@@ -115,3 +115,21 @@ describe("draft a promotion with the planner", () => {
     expect((screen.getByLabelText("Sprint id") as HTMLInputElement).value).toBe("p-waters");
   });
 });
+
+describe("a link to an idea that became a sprint (K4)", () => {
+  it("goes on to the sprint", async () => {
+    vi.spyOn(api, "listIdeas").mockResolvedValue(
+      { summary: "", ideas: [], promoted: { fc4f2825: "p-s7-run-context" } } as any);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}><MantineProvider>
+        <MemoryRouter initialEntries={["/programs/p/ideas#fc4f2825"]}>
+          <Routes>
+            <Route path="/programs/:id/ideas" element={<IdeasView />} />
+            <Route path="/sprints/:sid" element={<div>sprint page</div>} />
+          </Routes>
+        </MemoryRouter>
+      </MantineProvider></QueryClientProvider>);
+    expect(await screen.findByText("sprint page")).toBeTruthy();
+  });
+});

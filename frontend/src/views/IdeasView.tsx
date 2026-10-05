@@ -2,7 +2,7 @@ import { ActionIcon, Button, Card, Group, Loader, Stack, Text, Textarea, TextInp
 import { notifications } from "@mantine/notifications";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { useLocation, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import Md from "../components/Md";
 import { api, type Idea, type IdeaPool } from "../api";
 import { AbsTime, BackLink, EmptyState } from "../components/ui";
@@ -178,10 +178,17 @@ export default function IdeasView() {
   const { hash } = useLocation();
   const linkedId = decodeURIComponent(hash.replace(/^#/, ""));
   const loaded = !!pool.data;
+  const navigate = useNavigate();
+  // An idea that has since become a sprint has no row here: go on to the sprint (K4).
+  const becameSprint = linkedId ? pool.data?.promoted?.[linkedId] : undefined;
   useEffect(() => {
     if (!linkedId || !loaded) return;
+    if (becameSprint && !pool.data?.ideas.some((i) => i.id === linkedId)) {
+      navigate(`/sprints/${becameSprint}`, { replace: true });
+      return;
+    }
     document.getElementById(linkedId)?.scrollIntoView({ block: "center" });
-  }, [linkedId, loaded]);
+  }, [linkedId, loaded, becameSprint]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // "Your feedback" reuses the same standing-guidance stream as the program page
   // (shared query key), so edits here and there stay in sync.

@@ -87,6 +87,9 @@ class Sprint:
     # The planner cycle that proposed it (K3). Sprint ids carry a per-program number,
     # not the cycle, so this is how re-applying a staged cycle finds what it made.
     proposed_cycle: int | None = None
+    # The pool idea this sprint was promoted from (K4). The idea leaves the pool on
+    # promotion, so this is what lets a mention of its id still lead somewhere.
+    from_idea: str = ""
 
     def __post_init__(self) -> None:
         if not self.model:

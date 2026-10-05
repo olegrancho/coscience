@@ -138,6 +138,7 @@ class Service:
             artifacts_create=[dict(c) for c in (artifacts_create or [])],
             model=self._worker_default(program),
             title=str(title or ""), summary=str(summary or ""), rationale=str(rationale or ""),
+            from_idea=str(from_idea or ""),
         )
         # Record who wrote it, so the program page can tell a proposal the viewer made
         # from one the PM brought them (P3). save_sprint only backfills a history entry
@@ -1611,7 +1612,11 @@ class Service:
     def list_ideas(self, program_id: str) -> dict:
         self._require_program(program_id)
         summary, ideas = self.substrate.load_ideas(program_id)
-        return {"summary": summary, "ideas": [self._idea_public(i) for i in ideas]}
+        # Ideas that became sprints, so their ids still lead somewhere (K4).
+        promoted = {s.from_idea: s.id for s in self.substrate.iter_sprints()
+                    if s.program == program_id and s.from_idea}
+        return {"summary": summary, "ideas": [self._idea_public(i) for i in ideas],
+                "promoted": promoted}
 
     # --- lineage graph ---
     def _program_nodes(self, program_id: str):

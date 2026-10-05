@@ -100,6 +100,10 @@ def test_promotion_creates_sprint_and_removes_idea(substrate):
     assert substrate.load_sprint("p1-s1-from-seed").status == SprintStatus.PROPOSED
     _summary, ideas = substrate.load_ideas("p1")
     assert ideas == []                                  # the seed left the pool
+    # ...and its id still leads somewhere: the sprint records it (K4).
+    assert substrate.load_sprint("p1-s1-from-seed").from_idea == "seed"
+    from coscience.service import Service
+    assert Service(substrate.repo_root).list_ideas("p1")["promoted"] == {"seed": "p1-s1-from-seed"}
 
 
 def test_activation_log_records_trigger_and_submitted(substrate):
