@@ -1,6 +1,6 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 234
+version: 235
 last_updated: 2026-10-04
 ---
 
@@ -63,18 +63,17 @@ Each kind of agent's stop line in the 5-hour and weekly windows is set from Comp
 mark moves, and the next wiki batch waits (the dispatch log says usage) without any
 restart. Put it back after. Chats are not gated by these.
 
-# To Do (sprint)
-
 ### B3. Keep a chat's agent running between replies for a while
 
-A chat's `claude` process stays up for an idle window after replying and takes the next message on its input, instead of exiting and being resumed.
+A chat's agent now stays up after replying and takes the next message on its input, closing after 10 idle minutes (`COSCIENCE_CHAT_KEEPALIVE`, 0 = off); Compute → Claude usage lists the ones kept open.
 
-Every turn today is a fresh `claude -p --resume` (`chat_agent.py`), so each reply pays
-for process start-up, the session hooks and re-reading the conversation before it
-begins, and a quick back-and-forth feels slow. A long-lived process fed through
-`--input-format stream-json` would answer follow-ups at once; it exits after the idle
-window (or on a deploy restart) and the next message falls back to `--resume` as now.
-Needs care that a held process still counts against the usage gate and shows on Compute.
+**Check:** in a chat, send a message, then a follow-up within a few minutes: the
+follow-up's reply starts noticeably sooner, and Compute names the chat as waiting
+in between. After 10 quiet minutes it drops off Compute, and the next message still
+continues the same conversation. A backend restart ends waiting agents; the next
+message resumes as before.
+
+# To Do (sprint)
 
 # To Do (backlog)
 
