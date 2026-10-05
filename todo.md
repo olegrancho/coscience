@@ -1,44 +1,43 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 232
+version: 233
 last_updated: 2026-10-04
 ---
 
 # To QC
 
-# To Do (sprint)
+### B2. Keep the experiments list's filters across a visit to an experiment
+
+"Only new", the status selector and "show all" on the program page are kept per program for the browser tab.
+
+**Check:** set a status and tick "only new" on a program, open an experiment, come back
+by Back and again from the nav: both settings hold. A new tab starts unfiltered.
 
 ### I3. Add a day-by-day narrative to the catch-up report
 
-The catch-up request asks for what happened each day since the previous report, at most two paragraphs per day.
+The catch-up request asks for a "Day by day" section, after the key numbers: a dated heading per day since the last report, at most two short paragraphs, quiet days skipped.
 
-The report's sections today (`request_text` in `catchup.py`) summarise the period as a
-whole, so the order things happened in, and which result led to which decision, is
-lost. A dated narrative from the previous report to now restores it, in the shape of a
-lab diary. Days with nothing finished are skipped rather than given an empty paragraph.
+**Check:** "Write one now" on a program's Catch-up page; the report has the section, in
+date order, and no day runs past two paragraphs.
 
 ### K3. Give every sprint a number no other sprint in its program has
 
-New sprint ids carry a per-program sprint number instead of the planner's cycle number.
+New planner sprints are `<program>-s<n>-<slug>`, numbered per program from above every number already used; a sprint records the cycle that proposed it, so re-applying a staged cycle finds it again.
 
-The `c<n>` in `<program>-c<n>-<slug>` is the planner cycle that proposed the sprint
-(`proposal_id` in `pm_agent.py`), and one cycle often proposes several, so 54 short
-forms are shared today, some by two unrelated sprints. A short form is how chats and
-reports name a sprint, and K1 deliberately leaves an ambiguous one unlinked, so these
-mentions identify nothing. Existing ids stay as they are, since renaming would break
-links and the substrate history; the K2 rule that prose names sprints by title covers them.
+**Check:** the next planner proposals in a live program carry `-s<n>-` numbers that
+differ from each other, and a short form like `<program>-s<n>` in a chat links to its
+sprint. Proposals a person makes keep their unnumbered ids.
 
 ### K4. Link a promoted idea's id to the sprint it became
 
-A promotion records its source idea on the sprint, and the idea's id then links to that sprint wherever it is mentioned.
+Promoted sprints record `from_idea`; an idea id mentioned after its promotion links to the sprint, and an old Ideas-page link to it forwards there. Past promotions were backfilled from history (118 sprints).
 
-Promoting an idea (by the planner or a person) moves its lineage edges onto the new
-sprint but records nowhere which idea it came from, and the idea leaves the pool. So a
-bare id in a summary written after the promotion is left unlinked, and a link written
-before it (`/programs/<id>/ideas#<idea>`) opens the Ideas page with no row to scroll to.
-Record `from_idea` on the sprint, map promoted ids to their sprint in `ProgramLinks`, and
-have the Ideas page forward such an anchor; past promotions can be recovered from the
-human ones' commit messages, the planner's need a scan of its staged cycles.
+**Check:** in the summary at the top of a program's Ideas page, an id the summary
+says was "promoted to a sprint" is a link and opens that sprint; an old planner report's
+link to that idea does the same. The backfill matched by wording where the history held
+no exact record, so a wrong pairing is possible but none showed against the 13 exact ones.
+
+# To Do (sprint)
 
 ### N1. Show each experiment's lineage below its results
 
@@ -70,15 +69,6 @@ Today they are constants in code: the PM stops at 80% of the 5-hour window, work
 PM and dispatch loops are separate processes, so the values belong in a substrate file
 they read each beat (as `resources.yaml` is), not in the backend's memory, and the
 card should show each gate's line on its gauge. Changing one should need no restart.
-
-### B2. Keep the experiments list's filters across a visit to an experiment
-
-"Only new" and the status selector on the program page survive opening an experiment and coming back.
-
-Both are plain component state in `ProgramDetail.tsx`, so opening an experiment and
-returning resets them to "all" and unticked, and the reader re-applies them every time.
-Keep them per program for the browser session (or in the URL, which also makes the
-back button restore them); "show all" belongs with them.
 
 ### B3. Keep a chat's agent running between replies for a while
 
