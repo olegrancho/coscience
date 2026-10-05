@@ -79,7 +79,7 @@ def _day(ts: float) -> str:
 def request_text(program, since: float, sprints: list, results_dir) -> str:
     """The catch-up request, posted as the chat's first message. Its shape is the one
     the hand-written "Update <date>" chats converged on: bottom line first, one table
-    of numbers, numbered next steps a follow-up can point at."""
+    of numbers, a dated narrative (I3), numbered next steps a follow-up can point at."""
     if sprints:
         listed = "\n".join(
             f"- [{s.title or s.id}](/sprints/{s.id}) — {s.status.value}, "
@@ -96,12 +96,16 @@ the details. Plain words, no jargon, self-contained. Use these sections, in orde
    said earlier that no longer holds.
 2. **Key numbers** — one table of the main measurements against the baseline the
    program measures itself by, saying whether each difference is significant.
-3. **What this period delivered** — results that moved things, clean negatives that
+3. **Day by day** — what happened each day from {_day(since)} to today, in order: a
+   dated heading per day and at most two short paragraphs under it — what finished,
+   what it showed, and what was decided or started because of it. Skip days when
+   nothing happened.
+4. **What this period delivered** — results that moved things, clean negatives that
    narrowed the search, and blockers, each linked to its sprints.
-4. **Where the program stands** — against its goals.
-5. **What to do next** — numbered and in order, each with why and roughly what it
+5. **Where the program stands** — against its goals.
+6. **What to do next** — numbered and in order, each with why and roughly what it
    costs, so the reader can answer "promote #3".
-6. **Housekeeping** — stuck or stale sprints, and artifacts or docs the new results
+7. **Housekeeping** — stuck or stale sprints, and artifacts or docs the new results
    have made out of date.
 
 Keep it short if little happened. Read a full result under {results_dir} when its

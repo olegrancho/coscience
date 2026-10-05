@@ -56,6 +56,8 @@ def test_a_report_opens_a_read_only_chat_holding_the_request(substrate):
     assert t.catchup["trigger"] == "on demand" and t.catchup["by"] == "oleg"
     request = t.messages[0]["text"]
     assert "**Bottom line**" in request and "**What to do next**" in request
+    # I3: a narrative per day from the last report to now, two paragraphs at most.
+    assert "**Day by day**" in request and "at most two short paragraphs" in request
     assert "[Sprint 0](/sprints/p1-c0-x)" in request
 
 
