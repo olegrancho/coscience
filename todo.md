@@ -1,26 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 228
+version: 231
 last_updated: 2026-10-04
 ---
 
 # To QC
-
-### K1. Make every sprint and idea reference a link
-
-Markdown everywhere links every known sprint id, and its short `<program>-c<n>` form when only one sprint has it; on a program's pages its idea ids link to the idea, which the ideas list scrolls to and outlines. Agents are told to link ideas, and workers sprints, by name.
-
-**Check:** an older chat names sprints as `p2-c28` — each is now a link; the ideas page's
-pool summary names ideas by id — clicking one jumps to that idea. A short form two sprints
-share (the planner reused some numbers) stays plain text on purpose.
-
-### O21. Show the agent a launch command that lets go of the ssh channel
-
-The worker's remote instructions launch in two ssh calls — write `run.sh`, then a call holding only `setsid nohup bash run.sh … & echo $!` — and say why an `&&` chain in front of the `&` hangs.
-
-**Check:** the next remote sprint's launch returns at once instead of after the 60-second
-timeout, and `tests/test_remote_jobs.py` pins the new form. Reproduced first: against a
-held pipe the old form blocked for the job's whole length, the new one returned in 3 ms.
 
 # To Do (sprint)
 
@@ -55,6 +39,18 @@ reports name a sprint, and K1 deliberately leaves an ambiguous one unlinked, so 
 mentions identify nothing. Existing ids stay as they are, since renaming would break
 links and the substrate history; the K2 rule that prose names sprints by title covers them.
 
+### K4. Link a promoted idea's id to the sprint it became
+
+A promotion records its source idea on the sprint, and the idea's id then links to that sprint wherever it is mentioned.
+
+Promoting an idea (by the planner or a person) moves its lineage edges onto the new
+sprint but records nowhere which idea it came from, and the idea leaves the pool. So a
+bare id in a summary written after the promotion is left unlinked, and a link written
+before it (`/programs/<id>/ideas#<idea>`) opens the Ideas page with no row to scroll to.
+Record `from_idea` on the sprint, map promoted ids to their sprint in `ProgramLinks`, and
+have the Ideas page forward such an anchor; past promotions can be recovered from the
+human ones' commit messages, the planner's need a scan of its staged cycles.
+
 ## N. Experiment context
 
 Reading one experiment shows where it came from and what followed it, without opening the graph.
@@ -68,6 +64,21 @@ so a reader on a sprint page cannot see what it built on, what it superseded, or
 confirmed, refuted or built on it. The section is built live from the graph edges
 (`graph.py`), not written into the sprint, so it stays current as new sprints link back.
 Each entry names the edge type and links to the other sprint or idea by title.
+
+## D. Lineage graph
+
+A program's lineage reads at a glance on one screen, without panning sideways to find its parts.
+
+### D1. Lay the lineage graph out compactly instead of in one wide band
+
+The auto-layout produces a graph far wider than tall; make it fit the screen's shape.
+
+The layout is a single dagre pass (`graphLayout.ts`, top-to-bottom, fixed spacing), so
+every node without a parent lands on the first rank and every disconnected cluster is
+placed side by side: the more unlinked ideas and separate threads a program has, the
+wider the band. Options: pack disconnected components into a grid, wrap long ranks,
+tighten spacing, or try ELK's layered layout with an aspect-ratio target. Positions a
+person has dragged by hand still win.
 
 ## E. Substrate history
 
@@ -141,11 +152,6 @@ carry a GPU section naming the cards and VRAM share. Memory gets the same treatm
 trust, with no enforcement: nothing stops a job from using more. Enforcing it (a cgroup
 or `MemoryMax`) and checking free memory at grant time stay unplanned until a job
 actually runs a server out of memory. Written up as O17 before this block existed.
-
-## D. Wiki content health
-
-Every program wiki is accurate about itself: it passes lint, and a run's report
-matches what that run actually changed.
 
 ## F. Agents' messageboard
 
@@ -332,6 +338,14 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### K1. Make every sprint and idea reference a link
+
+Sprint ids, short forms and idea ids written in chats, reports and pages render as links; an idea link opens the Ideas page at that idea.
+
+### O21. Show the agent a launch command that lets go of the ssh channel
+
+Workers launch remote jobs in the two-call form, and a live launch returned in seconds with the job running on.
+
 ### M2. Build the supercharge control
 
 The ⚡ button on the program page opens the grant dialog, and a live or ended grant shows as a banner with what it approved, Revoke and Dismiss.
@@ -363,11 +377,3 @@ The topic schema, ingest rules and migration map give a shared alias to the topi
 ### L12. Make program documentation a source the wiki can cite and track
 
 Workdir docs ticked in Wiki settings are ingested as `doc:` sources, re-ingested when edited, cited from background pages, and checked by sweeps.
-
-### L9. Add a heavy lint: an agent sweep for inconsistencies
-
-A sweep runs every 10 wiki runs and after each migration; the first scheduled ones fixed scope slips and stale openings the mechanical lint could not see.
-
-### D3. Retire the source page of a superseded artifact version
-
-Lint reads a replaced artifact version as history, and the ingest marks its page deprecated with a link to the current version instead of calling it removed.
