@@ -2,7 +2,7 @@ import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { useState } from "react";
 import { Modal, Stack, Text, Tooltip } from "@mantine/core";
 import { Link } from "react-router-dom";
-import type { ArtifactLock, LeaseT, RunAgg, SprintActivity, Usage, VoteTally } from "../api";
+import type { ArtifactLock, GateKind, LeaseT, RunAgg, SprintActivity, Usage, UsageGates, VoteTally } from "../api";
 import { SPRINT_STATE_ORDER, statusVar } from "./status";
 import { dayMonth, dayMonthYear, fullTime } from "./timefmt";
 
@@ -380,9 +380,37 @@ export function WindowTick({ elapsed }: { elapsed: number | null }) {
   );
 }
 
+export const GATE_NAMES: Record<GateKind, string> = { pm: "PM", worker: "worker", wiki: "wiki" };
+
+/** The lines on one window where agents stop launching (G1), merged where kinds share
+ *  a value: [{pct, kinds}]. */
+export function gateMarks(gates: UsageGates | undefined, window: "5h" | "week") {
+  if (!gates) return [];
+  const by = new Map<number, string[]>();
+  for (const k of Object.keys(GATE_NAMES) as GateKind[]) {
+    const v = gates[k]?.[window];
+    if (v != null) by.set(v, [...(by.get(v) ?? []), GATE_NAMES[k]]);
+  }
+  return [...by.entries()].sort((a, b) => a[0] - b[0]).map(([pct, kinds]) => ({ pct, kinds }));
+}
+
+function GateMark({ pct, kinds }: { pct: number; kinds: string[] }) {
+  return (
+    <Tooltip label={`${kinds.join(", ")} stop${kinds.length === 1 ? "s" : ""} launching at ${pct}%`} withArrow>
+      <span data-testid="gate-mark" style={{ position: "absolute", left: `${Math.min(100, pct)}%`, top: 10,
+        transform: "translateX(-50%)", fontSize: 10, lineHeight: 1, color: "var(--ink-faint)",
+        whiteSpace: "nowrap", cursor: "default" }} className="mono">
+        <span style={{ display: "block", width: 1, height: 5, margin: "0 auto 2px", background: "var(--ink-faint)" }} />
+        {kinds.length === 3 ? "all" : kinds.join("·")}
+      </span>
+    </Tooltip>
+  );
+}
+
 /** One Claude-usage window bar (5-hour / weekly), tinted by pressure. */
-export function UsageBar({ label, pct, resets, elapsed = null }: {
+export function UsageBar({ label, pct, resets, elapsed = null, marks = [] }: {
   label: string; pct: number; resets: string; elapsed?: number | null;
+  marks?: { pct: number; kinds: string[] }[];
 }) {
   const color = pct >= 85 ? "var(--signal)" : pct >= 60 ? "#caa12a" : "var(--machine)";
   return (
@@ -396,7 +424,9 @@ export function UsageBar({ label, pct, resets, elapsed = null }: {
           <div style={{ height: "100%", width: `${Math.min(100, pct)}%`, background: color }} />
         </div>
         <WindowTick elapsed={elapsed} />
+        {marks.map((m) => <GateMark key={m.pct} {...m} />)}
       </div>
+      {marks.length > 0 && <div style={{ height: 16 }} />}
     </div>
   );
 }
@@ -582,16 +612,22 @@ export function MergePolicySelect(
 }
 
 /** Claude usage: the rolling 5h/weekly budget plus PM and worker call counts. */
-export function UsagePanel({ usage }: { usage: Usage }) {
+export function UsagePanel({ usage, onEditGates }: { usage: Usage; onEditGates?: () => void }) {
   const w = usage.budget?.windows ?? {};
   return (
     <Stack gap={16}>
       {usage.budget ? (
         <Stack gap={10}>
           {w["5h"] && <UsageBar label="5-hour" pct={w["5h"].pct} resets={w["5h"].resets}
-            elapsed={windowElapsed("5h", w["5h"].resets_at)} />}
+            elapsed={windowElapsed("5h", w["5h"].resets_at)} marks={gateMarks(usage.gates, "5h")} />}
           {w["week"] && <UsageBar label="weekly" pct={w["week"].pct} resets={w["week"].resets}
-            elapsed={windowElapsed("week", w["week"].resets_at)} />}
+            elapsed={windowElapsed("week", w["week"].resets_at)} marks={gateMarks(usage.gates, "week")} />}
+          {onEditGates && usage.gates && (
+            <Text size="xs" c="dimmed">
+              Marks show where each kind of agent stops launching.{" "}
+              <button type="button" className="linklike" onClick={onEditGates}>Change them</button>
+            </Text>
+          )}
           {!usage.budget.live && <Text size="xs" c="dimmed">showing last cached reading</Text>}
         </Stack>
       ) : <Text size="sm" c="dimmed">Usage reading unavailable.</Text>}

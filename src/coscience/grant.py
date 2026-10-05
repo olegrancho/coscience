@@ -25,9 +25,13 @@ LIMITS = ("sprints", "until", "window5h", "week")
 WINDOW_KEY = {"window5h": "5h", "week": "week"}
 
 
-def _stops() -> dict[str, float]:
-    from coscience.worker import AUTONOMOUS_THRESHOLD, WEEKLY_WORKER_THRESHOLD
-    return {"5h": AUTONOMOUS_THRESHOLD, "week": WEEKLY_WORKER_THRESHOLD}
+def _stops(repo_root=None) -> dict[str, float]:
+    """The planner's own lines (G1): a window grant ends where the planner would stop."""
+    from coscience import usage_gates
+    if repo_root is None:
+        return dict(usage_gates.DEFAULTS["pm"])
+    five, week = usage_gates.limits(repo_root, "pm")
+    return {"5h": five, "week": week}
 
 
 def _windows() -> dict:
@@ -61,7 +65,7 @@ def new(by: str, limit: str, *, sprints: int = 0, until: float = 0.0,
     return g
 
 
-def end_reason(g: dict, now: float, windows: dict | None = None) -> str:
+def end_reason(g: dict, now: float, windows: dict | None = None, repo_root=None) -> str:
     """Why this grant is over now, or "" while it is live."""
     if not g:
         return "no grant"
@@ -76,14 +80,14 @@ def end_reason(g: dict, now: float, windows: dict | None = None) -> str:
     if limit in WINDOW_KEY:
         key = WINDOW_KEY[limit]
         w = (windows if windows is not None else _windows()).get(key) or {}
-        stop = _stops()[key]
+        stop = _stops(repo_root)[key]
         if w.get("pct") is not None and float(w["pct"]) >= stop:
             return f"the {'5-hour' if key == '5h' else 'weekly'} usage window reached {stop:g}%"
     return ""
 
 
-def is_live(g: dict, now: float, windows: dict | None = None) -> bool:
-    return bool(g) and not end_reason(g, now, windows)
+def is_live(g: dict, now: float, windows: dict | None = None, repo_root=None) -> bool:
+    return bool(g) and not end_reason(g, now, windows, repo_root)
 
 
 def close(g: dict, now: float, reason: str) -> dict:
@@ -101,7 +105,7 @@ def refresh(substrate, program_id: str, now: float | None = None,
     program = substrate.load_program(program_id)
     g = program.approval_grant
     if g and not g.get("ended_at"):
-        why = end_reason(g, now, windows)
+        why = end_reason(g, now, windows, substrate.repo_root)
         if why:
             close(g, now, why)
             substrate.save_program(program)

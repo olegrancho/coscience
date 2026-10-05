@@ -723,9 +723,16 @@ class Service:
     def usage_stats(self) -> dict:
         """Claude usage for the dashboard: the rolling 5h/weekly budget plus how
         many calls the PM and worker have each made (total / last hour / last day)."""
-        from coscience import usage_meter
+        from coscience import usage_gates, usage_meter
         return {"budget": usage_meter.read_budget(),
-                "runs": usage_meter.run_stats(self.repo_root)}
+                "runs": usage_meter.run_stats(self.repo_root),
+                "gates": usage_gates.load(self.repo_root)}
+
+    def set_usage_gates(self, gates: dict) -> dict:
+        """Set where each kind of agent stops launching (G1). The loops read the file
+        on their next check, so nothing needs restarting."""
+        from coscience import usage_gates
+        return {"gates": usage_gates.save(self.repo_root, gates)}
 
     def call_log(self, limit: int = 200) -> dict:
         """Every Claude call this host has made for this substrate, newest first —
@@ -1406,7 +1413,7 @@ class Service:
         g = _grant.refresh(self.substrate, program_id, now)
         if not g or g.get("dismissed"):
             return None
-        live = _grant.is_live(g, now)
+        live = _grant.is_live(g, now, repo_root=self.substrate.repo_root)
         return {**g, "live": live, "remaining": _grant.remaining(g, now) if live else ""}
 
     def grant_approval(self, program_id: str, by: str, limit: str, *, sprints: int = 0,
@@ -1415,7 +1422,7 @@ class Service:
         self._require_program(program_id)
         program = self.substrate.load_program(program_id)
         g = program.approval_grant
-        if g and _grant.is_live(g, time.time()):
+        if g and _grant.is_live(g, time.time(), repo_root=self.substrate.repo_root):
             raise ValueError("a grant is already live; revoke it first")
         program.approval_grant = _grant.new(by, limit, sprints=sprints, until=until)
         self.substrate.save_program(program)

@@ -128,12 +128,18 @@ def _usage_ok_from_output(out: str, now: "datetime.datetime | None" = None,
     return max(pcts, default=0.0) < min(threshold, weekly_threshold)
 
 
-# Usage is a fixed subscription window, not a bill: the scarce thing is the share
-# left for a human who wants a chat or a forced replan. Autonomous loops stand down
-# early and leave the top band for them; human-triggered paths keep the full 100.
+# The defaults of the lines set in Compute (usage_gates, G1); the gates read the file.
 AUTONOMOUS_THRESHOLD = 80.0     # PM loop beats
 WORKER_THRESHOLD = 90.0         # worker agent launches
 WEEKLY_WORKER_THRESHOLD = 99.0  # weekly window is less scarce — don't block agents over it
+
+
+def gate_ok(repo_root, kind: str) -> bool:
+    """May an agent of this kind launch now, by the lines set for it (G1)? Fails
+    closed when there is no usage reading, as the autonomous loops always have."""
+    from coscience import usage_gates
+    five, week = usage_gates.limits(repo_root, kind)
+    return bool(claude_usage_ok(five, weekly_threshold=week, fail_open=False, repo_root=repo_root))
 
 
 def claude_usage_ok(threshold: float = 100.0, *, weekly_threshold: float | None = None,
@@ -403,10 +409,7 @@ class Worker:
 
     def _usage_ok(self) -> bool:
         return (self._usage_gate or
-                (lambda: claude_usage_ok(WORKER_THRESHOLD,
-                                         weekly_threshold=WEEKLY_WORKER_THRESHOLD,
-                                         fail_open=False,
-                                         repo_root=self.substrate.repo_root)))()
+                (lambda: gate_ok(self.substrate.repo_root, "worker")))()
 
     def _disk_ok(self) -> bool:
         """False when THIS machine is too low on disk to start an agent (B2).

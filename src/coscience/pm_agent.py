@@ -369,7 +369,7 @@ def _live_grant(substrate, program_id: str) -> dict:
     from coscience import grant as _grant
     now = time.time()
     g = _grant.refresh(substrate, program_id, now)
-    if not _grant.is_live(g, now):
+    if not _grant.is_live(g, now, repo_root=substrate.repo_root):
         return {}
     return {**g, "remaining": _grant.remaining(g, now)}
 
@@ -1398,7 +1398,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
         g = prog.approval_grant
         for sid in staged.output.approve_ids:
             sid = str(sid)
-            over = _grant.end_reason(g, time.time()) if g else "there is none"
+            over = _grant.end_reason(g, time.time(), repo_root=substrate.repo_root) if g else "there is none"
             if over:
                 approve_skipped.append({"id": sid, "why": f"no live approval grant: {over}"})
                 continue
@@ -1417,7 +1417,7 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             g.setdefault("approved", []).append(sid)
             approved.append(sid)
         if g:
-            over = _grant.end_reason(g, time.time())
+            over = _grant.end_reason(g, time.time(), repo_root=substrate.repo_root)
             if over:
                 _grant.close(g, time.time(), over)
             substrate.save_program(prog)

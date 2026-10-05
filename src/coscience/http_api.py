@@ -227,6 +227,11 @@ class ProgramHostsIn(BaseModel):
     hosts: list[str] = Field(default_factory=list)
 
 
+class UsageGatesIn(BaseModel):
+    # {kind: {"5h": pct, "week": pct}} for kind in pm, worker, wiki (G1)
+    gates: dict = {}
+
+
 class PauseUpdate(BaseModel):
     paused: bool
 
@@ -1165,6 +1170,13 @@ def build_app(service: Service, title: str = "Co-Science Platform") -> FastAPI:
     @api.get("/usage")
     def usage_stats() -> dict:
         return service.usage_stats()
+
+    @api.put("/usage/gates")
+    def set_usage_gates(body: UsageGatesIn) -> dict:
+        try:
+            return service.set_usage_gates(body.gates)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     @api.get("/usage/calls")
     def call_log(limit: int = 200) -> dict:

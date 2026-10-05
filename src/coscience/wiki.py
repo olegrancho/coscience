@@ -95,9 +95,8 @@ def default_usage_gate(substrate) -> Callable[[], bool]:
     """fail_open=False on purpose: an unmetered autonomous loop is exactly what
     burns a usage window unattended, and a wiki run is never urgent enough to be
     worth that risk. repo_root so the global pause is honoured first."""
-    return lambda: claude_usage_ok(WIKI_THRESHOLD,
-                                   weekly_threshold=WEEKLY_WORKER_THRESHOLD,
-                                   fail_open=False, repo_root=substrate.repo_root)
+    from coscience.worker import gate_ok
+    return lambda: gate_ok(substrate.repo_root, "wiki")
 
 
 def _hold_batch(state: dict, pending: int, now: float) -> str | None:

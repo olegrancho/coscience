@@ -87,7 +87,11 @@ export interface Usage {
   // Keyed by kind — pm, worker, wiki-ingest, wiki-lint, chat. `pm` and `worker`
   // are always present; the rest appear once they have a call.
   runs: Record<string, RunAgg>;
+  /** Where each kind of agent stops launching, per window (G1). */
+  gates?: UsageGates;
 }
+export type GateKind = "pm" | "worker" | "wiki";
+export type UsageGates = Record<GateKind, { "5h": number; week: number }>;
 
 /** One Claude call, folded from its launch and collect events. */
 export interface CallRow {
@@ -731,6 +735,11 @@ export const api = {
   keepHost: (name: string) =>
     fetch(`/api/hosts/${encodeURIComponent(name)}/keep`, { method: "POST" }).then(j<Ledger>),
   getUsage: () => fetch("/api/usage").then(j<Usage>),
+  setUsageGates: (gates: UsageGates) =>
+    fetch("/api/usage/gates", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ gates }),
+    }).then(j<{ gates: UsageGates }>),
   getCallLog: (limit = 200) =>
     fetch(`/api/usage/calls?limit=${limit}`).then(j<{ calls: CallRow[] }>),
   listArtifacts: (pid: string, includeArchived = false) =>

@@ -23,9 +23,8 @@ _ELIGIBLE = (SprintStatus.QUEUED, SprintStatus.EXECUTING, SprintStatus.HIBERNATE
 
 
 def _planner_usage_ok(repo_root) -> bool:
-    from coscience.worker import AUTONOMOUS_THRESHOLD, WEEKLY_WORKER_THRESHOLD, claude_usage_ok
-    return bool(claude_usage_ok(AUTONOMOUS_THRESHOLD, weekly_threshold=WEEKLY_WORKER_THRESHOLD,
-                                fail_open=False, repo_root=repo_root))
+    from coscience.worker import gate_ok
+    return gate_ok(repo_root, "pm")
 
 
 @dataclass

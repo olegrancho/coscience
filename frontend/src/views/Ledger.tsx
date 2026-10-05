@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import CallLog from "../components/CallLog";
 import HostsCard from "../components/HostsCard";
+import UsageGatesModal from "../components/UsageGatesModal";
 import { EmptyState, Gauge, UsagePanel, formatDuration, gaugeUsers } from "../components/ui";
 import { fullTime } from "../components/timefmt";
 
@@ -20,6 +21,7 @@ export default function Ledger() {
   const qc = useQueryClient();
   const ledger = useQuery({ queryKey: ["ledger"], queryFn: api.getLedger });
   const usage = useQuery({ queryKey: ["usage"], queryFn: api.getUsage });
+  const [editGates, setEditGates] = useState(false);
   // Locally adjusted capacities, layered over the server's. The 10s ledger poll
   // would otherwise snap a half-finished adjustment back mid-click.
   const [pending, setPending] = useState<Record<string, number>>({});
@@ -131,8 +133,11 @@ export default function Ledger() {
 
       <Card padding="lg" radius="md" style={cardStyle}>
         <div className="eyebrow" style={{ marginBottom: 16 }}>Claude usage</div>
-        {usage.data ? <UsagePanel usage={usage.data} />
+        {usage.data ? <UsagePanel usage={usage.data} onEditGates={() => setEditGates(true)} />
           : <Text size="sm" c="dimmed">Usage reading unavailable.</Text>}
+        {usage.data?.gates && (
+          <UsageGatesModal gates={usage.data.gates} opened={editGates} onClose={() => setEditGates(false)} />
+        )}
       </Card>
 
       <Card padding="lg" radius="md" style={cardStyle}>
