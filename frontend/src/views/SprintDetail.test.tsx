@@ -282,3 +282,20 @@ describe("the planner's hold", () => {
     expect(await screen.findByRole("button", { name: "Run" })).toBeTruthy();
   });
 });
+
+describe("lineage card (N1)", () => {
+  it("shows where the experiment came from and what followed, from the live graph", async () => {
+    const n = (id: string, label: string) => ({ id, kind: "experiment", stage: "result", label, status: "done" });
+    const e = (id: string, type: string, src: string, dst: string) =>
+      ({ id, type, src, dst, source: "pm", by: "pm", at: 0, rationale: "", confidence: "", evidence: "" });
+    vi.spyOn(api, "getGraph").mockResolvedValue({
+      nodes: [n("sp1", "Train the model"), n("sp0", "Collect the data"), n("sp2", "Check on new families")],
+      edges: [e("e1", "builds_on", "sp1", "sp0"), e("e2", "confirms", "sp2", "sp1")],
+    } as never);
+    renderSprintPage(sprint({ status: "done", agent_running: false }));
+    expect((await screen.findByText("Collect the data")).closest("a")?.getAttribute("href")).toBe("/sprints/sp0");
+    expect(screen.getByText("builds on")).toBeTruthy();
+    expect(screen.getByText("Check on new families").closest("a")?.getAttribute("href")).toBe("/sprints/sp2");
+    expect(screen.getByText("confirms this")).toBeTruthy();
+  });
+});

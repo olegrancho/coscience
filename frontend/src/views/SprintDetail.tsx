@@ -7,6 +7,8 @@ import Md from "../components/Md";
 import { Transcript } from "../components/Transcript";
 import { FeedbackThread } from "../components/FeedbackThread";
 import EscalationPanel from "../components/EscalationPanel";
+import ExperimentLineageCard from "../components/ExperimentLineageCard";
+import { experimentLineage } from "../experimentLineage";
 import { api, type SprintFile } from "../api";
 import { availableActions, type SprintStatus } from "../sprintActions";
 import { AbsTime, BackLink, EmptyState, LiveActivity, ModelSelect, RelTime, StatusBadge, VoteControl, ZoomableImg, describeCompute, isImageName, voterId } from "../components/ui";
@@ -224,6 +226,12 @@ export default function SprintDetail() {
   // So going back to the program lands on this row (P5).
   useEffect(() => { if (prog) rememberOpened(prog, id); }, [prog, id]);
 
+  // The lineage card's own query, by the same key, so the contents list knows whether
+  // the card will draw (N1).
+  const graph = useQuery({ queryKey: ["graph", prog], queryFn: () => api.getGraph(prog as string),
+                           enabled: !!prog });
+  const lineage = experimentLineage(graph.data, id);
+  const hasLineage = lineage.from.length + lineage.followed.length > 0;
   const tocEntries = useMemo<TocEntry[]>(() => {
     const d = sprint.data;
     if (!d) return [];
@@ -235,12 +243,13 @@ export default function SprintDetail() {
       ...(d.status === "failed" ? [{ id: "sec-failed", label: "Failed" }] : []),
       { id: "sec-feedback", label: "Feedback" },
       ...(d.results.length > 0 ? [{ id: "sec-results", label: "Results" }] : []),
+      ...(hasLineage ? [{ id: "sec-lineage", label: "Lineage" }] : []),
       ...(d.artifacts_bound?.length > 0 || d.artifacts_create?.length > 0 ? [{ id: "sec-artifacts", label: "Artifacts" }] : []),
       { id: "sec-docs", label: "Working docs" },
       { id: "sec-glance", label: "At a glance" },
       ...(d.plan.length > 0 ? [{ id: "sec-plan", label: "Plan" }] : []),
     ];
-  }, [sprint.data]);
+  }, [sprint.data, hasLineage]);
 
   if (sprint.isLoading) return <Loader color="machine" />;
   // A failed poll must NEVER replace loaded content: every query polls on a 10s
@@ -647,6 +656,8 @@ export default function SprintDetail() {
           </Stack>
         </Card>
       )}
+
+      {prog && <ExperimentLineageCard programId={prog} sprintId={s.id} />}
 
       {(s.artifacts_bound?.length > 0 || s.artifacts_create?.length > 0) && (
         <Card id="sec-artifacts" padding="lg" radius="md" style={cardStyle}>

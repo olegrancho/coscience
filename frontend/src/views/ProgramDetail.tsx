@@ -93,6 +93,17 @@ export default function ProgramDetail() {
   // come with the notes (O23); this page no longer polls the ledger at all.
   const hostNotes = useQuery({ queryKey: ["host-notes", id], queryFn: () => api.getHostNotes(id) });
   const hasServerNotes = !!hostNotes.data && noteRows(hostNotes.data).length > 0;
+  // A link to one section of this page (an experiment's "on the graph →", N1) lands
+  // with #<section>: bring it into view once the page has drawn.
+  const loadedProgram = !!program.data;
+  useEffect(() => {
+    if (!loadedProgram || !location.hash) return;
+    const go = () => document.getElementById(decodeURIComponent(location.hash.slice(1)))
+      ?.scrollIntoView({ block: "start" });
+    // Again once the cards above have loaded and pushed it down.
+    const t = [setTimeout(go, 50), setTimeout(go, 1200)];
+    return () => t.forEach(clearTimeout);
+  }, [loadedProgram, location.hash]);
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["program", id] });
     qc.invalidateQueries({ queryKey: ["guidance", id] });
