@@ -57,6 +57,14 @@ reason stay on the program page until someone dismisses them — and a human can
 any time. An approval under a grant still does not schedule: the PM releases it with
 `release_ids` like any other.
 
+One kind of grant has no end of its own: **paced** (M3). It lets the PM approve only while
+weekly usage is below the share of the weekly window that has passed — 30% used with half
+the week gone may approve, 60% may not. While usage is ahead, the grant is paused rather
+than ended: the PM's prompt carries no approval authority, approvals it lists anyway are
+refused as "paused", and when the week catches up the authority comes back, which wakes the
+PM. It runs until revoked, and bounds new approvals only; released work runs under the
+usual usage gates.
+
 ## The part that surprises people
 
 **Approve does not schedule.** The approved pool is the PM's managed queue: the human says

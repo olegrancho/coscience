@@ -60,4 +60,19 @@ describe("Supercharge (M2)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(api.dismissGrantNotice).toHaveBeenCalledWith("p1"));
   });
+
+  it("grants a paced grant, and shows it paused while usage is ahead of the week (M3)", async () => {
+    wrap(<SuperchargeModal programId="p1" opened onClose={() => {}} onDone={() => {}} />);
+    fireEvent.click(screen.getByRole("radio", { name: /Paced to the week/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Grant" }));
+    await waitFor(() => expect(vi.mocked(api.grantApproval)).toHaveBeenLastCalledWith("p1", { limit: "paced" }));
+  });
+
+  it("names a paused paced grant and draws its pace", () => {
+    wrap(<GrantBanner programId="p1" onChange={() => {}} grant={{ ...live, limit: "paced",
+      held: "weekly usage (60%) is ahead of the week (50% gone)", pace: { used: 60, elapsed: 50 },
+      remaining: "paced to the week" }} />);
+    expect(screen.getByText(/approval is paused/)).toBeTruthy();
+    expect(screen.getByTestId("pace-bar").textContent).toContain("weekly usage 60% · 50% of the week gone");
+  });
 });

@@ -371,6 +371,11 @@ def _live_grant(substrate, program_id: str) -> dict:
     g = _grant.refresh(substrate, program_id, now)
     if not _grant.is_live(g, now, repo_root=substrate.repo_root):
         return {}
+    # A paced grant that is ahead of the week offers the planner nothing to approve
+    # with (M3). Its id leaves the fingerprint while held and returns when the week
+    # catches up, which is what wakes the planner to approve again.
+    if _grant.hold_reason(g, now):
+        return {}
     return {**g, "remaining": _grant.remaining(g, now)}
 
 
@@ -1401,6 +1406,10 @@ def _run_pm_cycle(substrate, program_id: str, reasoner, now: float | None = None
             over = _grant.end_reason(g, time.time(), repo_root=substrate.repo_root) if g else "there is none"
             if over:
                 approve_skipped.append({"id": sid, "why": f"no live approval grant: {over}"})
+                continue
+            held = _grant.hold_reason(g, time.time())       # a paced grant, ahead of the week (M3)
+            if held:
+                approve_skipped.append({"id": sid, "why": f"the approval grant is paused: {held}"})
                 continue
             if not (substrate.sprint_dir(sid) / "sprint.md").is_file():
                 approve_skipped.append({"id": sid, "why": "no such sprint"})

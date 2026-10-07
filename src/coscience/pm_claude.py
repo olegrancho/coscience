@@ -68,7 +68,14 @@ approve proposed sprints in this program yourself: put each one's exact id in
 a person would otherwise do, so approve only what you would be ready to release, and say
 why in the report; each approval is recorded on the sprint as yours. An approved sprint
 still waits for "release_ids" — list it there too, in the same cycle, if it should run
-now. The platform enforces the limit: approvals past it are refused."""
+now. The platform enforces the limit: approvals past it are refused.{_PACED if g.get("limit") == "paced" else ""}"""
+
+
+_PACED = """
+This grant is paced to the week: it lets you approve only while weekly usage stays
+below the share of the weekly window that has passed, and it is withdrawn whenever
+usage gets ahead, until time catches up. So spend it where it buys the most — approve
+what the program most needs next, not everything that is ready."""
 
 
 def idea_links(program_id: str) -> str:

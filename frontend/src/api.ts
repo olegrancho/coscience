@@ -16,9 +16,12 @@ export interface PMActivation { at: number; cycle: number; triggers: string[]; s
 /** A human's grant of approval authority to the planner (M1): live until its limit,
  *  then ended with a reason that stays until dismissed. */
 export interface ApprovalGrant {
-  id: string; by: string; at: number; limit: "sprints" | "until" | "window5h" | "week";
+  id: string; by: string; at: number; limit: "sprints" | "until" | "window5h" | "week" | "paced";
   sprints?: number; until?: number; approved: string[];
   ended_at: number | null; end_reason: string; live: boolean; remaining: string;
+  /** A paced grant (M3): why it may not approve right now ("" when it may), and the
+   *  weekly usage against the week's progress, in percent. */
+  held?: string; pace?: { used: number; elapsed: number } | null;
 }
 
 export interface Program extends ProgramRow {

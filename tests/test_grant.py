@@ -96,3 +96,49 @@ def test_revoke_and_dismiss(substrate):
     assert svc.get_program("p1")["approval_grant"]["end_reason"] == "revoked by oleg"
     svc.dismiss_grant_notice("p1")
     assert svc.get_program("p1")["approval_grant"] is None
+
+
+# --- M3: a grant paced to the week ---------------------------------------------------
+
+def _week(used, elapsed_pct, now=NOW):
+    """A weekly reading with `used`% spent and `elapsed_pct`% of the window gone."""
+    return {"week": {"pct": used, "resets_at": now + grant.WEEK * (1 - elapsed_pct / 100)}}
+
+
+def test_a_paced_grant_approves_only_while_usage_is_behind_the_week():
+    g = grant.new("oleg", "paced", now=NOW)
+    assert grant.is_live(g, NOW, _week(90, 10))              # never ends on its own...
+    assert grant.hold_reason(g, NOW, _week(30, 40)) == ""     # ...behind the week: may approve
+    assert "ahead of the week" in grant.hold_reason(g, NOW, _week(45, 40))
+    assert "no weekly usage reading" in grant.hold_reason(g, NOW, {})
+    assert "on pace" in grant.remaining(g, NOW, _week(30, 40))
+    assert grant.hold_reason(grant.new("oleg", "sprints", sprints=1, now=NOW), NOW, _week(99, 1)) == ""
+
+
+def test_ahead_of_pace_the_planner_is_offered_nothing_and_approvals_are_refused(substrate, monkeypatch):
+    _program_with(substrate, grant.new("oleg", "paced", now=time.time()))
+    reading = {}
+    monkeypatch.setattr(grant, "_windows", lambda: reading)
+    reading.update(_week(60, 50, time.time()))                # ahead of the week
+    assert "approve_ids" not in render_prompt(gather_context(substrate, "p1"))
+    out = pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="r", approve_ids=["p1-a"])]),
+                  force=True)
+    assert substrate.load_sprint("p1-a").status == SprintStatus.PROPOSED
+    assert "paused" in out["approve_skipped"][0]["why"]
+    assert grant.is_live(substrate.load_program("p1").approval_grant, time.time())   # not ended
+
+    reading.update(_week(30, 50, time.time()))                # the week has caught up
+    prompt = render_prompt(gather_context(substrate, "p1"))
+    assert "approve_ids" in prompt and "paced to the week" in prompt
+    out = pm_beat(substrate, "p1", FakeReasoner([PMCycleOutput(report="r", approve_ids=["p1-a"])]),
+                  force=True)
+    assert out["approved"] == ["p1-a"]
+
+
+def test_the_dashboard_shows_the_pace(substrate, monkeypatch):
+    monkeypatch.setattr(grant, "_windows", lambda: _week(30, 50, time.time()))
+    svc = Service(substrate.repo_root)
+    substrate.save_program(Program(id="p1", title="P", goals="g"))
+    view = svc.grant_approval("p1", "oleg", "paced")
+    assert view["live"] and view["held"] == ""
+    assert round(view["pace"]["used"]) == 30 and round(view["pace"]["elapsed"]) == 50

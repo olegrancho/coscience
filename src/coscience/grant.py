@@ -10,6 +10,9 @@ enforced here, at every approval, not trusted to the planner. Four limits:
     window5h  the current 5-hour usage window: it ends when the window resets or
               when its use reaches the planner's own stop (80%), whichever is first
     week      the same for the weekly window (its stop is 99%)
+    paced     no end of its own (M3): approvals are allowed only while weekly usage is
+              below the share of the weekly window that has passed, so a busy stretch
+              pauses them until time catches up; it runs until revoked
 
 The grant lives in program.md as `approval_grant`; one at a time per program. When it
 ends, it says so — `ended_at` and `end_reason` stay on the program and the dashboard
@@ -21,8 +24,9 @@ from __future__ import annotations
 import time
 import uuid
 
-LIMITS = ("sprints", "until", "window5h", "week")
+LIMITS = ("sprints", "until", "window5h", "week", "paced")
 WINDOW_KEY = {"window5h": "5h", "week": "week"}
+WEEK = 7 * 86400.0
 
 
 def _stops(repo_root=None) -> dict[str, float]:
@@ -55,6 +59,8 @@ def new(by: str, limit: str, *, sprints: int = 0, until: float = 0.0,
         if float(until) <= now:
             raise ValueError("the deadline must be in the future")
         g["until"] = float(until)
+    elif limit == "paced":
+        pass                      # bounded per approval by the pace, not by an end
     else:
         # Ride the window that is open now: record when it resets, so the grant ends
         # then even if the usage never reaches the stop.
@@ -86,6 +92,31 @@ def end_reason(g: dict, now: float, windows: dict | None = None, repo_root=None)
     return ""
 
 
+def pace(now: float, windows: dict | None = None) -> dict | None:
+    """Weekly usage against the week's progress, both in percent: {used, elapsed}. None
+    without a weekly reading that says when the window resets."""
+    w = (windows if windows is not None else _windows()).get("week") or {}
+    if w.get("pct") is None or not w.get("resets_at"):
+        return None
+    left = float(w["resets_at"]) - now
+    elapsed = min(100.0, max(0.0, (1.0 - left / WEEK) * 100.0))
+    return {"used": float(w["pct"]), "elapsed": elapsed}
+
+
+def hold_reason(g: dict, now: float, windows: dict | None = None) -> str:
+    """Why a live grant may not approve right now, or "" when it may. Only a paced grant
+    is ever held: while weekly usage is at or ahead of the week's progress (M3)."""
+    if not g or g.get("limit") != "paced":
+        return ""
+    p = pace(now, windows)
+    if p is None:
+        return "there is no weekly usage reading to pace against"
+    if p["used"] >= p["elapsed"]:
+        return (f"weekly usage ({p['used']:.0f}%) is ahead of the week "
+                f"({p['elapsed']:.0f}% gone)")
+    return ""
+
+
 def is_live(g: dict, now: float, windows: dict | None = None, repo_root=None) -> bool:
     return bool(g) and not end_reason(g, now, windows, repo_root)
 
@@ -112,9 +143,17 @@ def refresh(substrate, program_id: str, now: float | None = None,
     return g
 
 
-def remaining(g: dict, now: float) -> str:
+def remaining(g: dict, now: float, windows: dict | None = None) -> str:
     """What is left of a live grant, in words, for the dashboard and the planner."""
     limit = g.get("limit")
+    if limit == "paced":
+        p = pace(now, windows)
+        if p is None:
+            return "paced to the week, but there is no weekly usage reading now"
+        state = ("on pace, so approving" if p["used"] < p["elapsed"]
+                 else "ahead of pace, so not approving until the week catches up")
+        return (f"paced to the week: {p['used']:.0f}% of weekly usage used, "
+                f"{p['elapsed']:.0f}% of the week gone — {state}")
     if limit == "sprints":
         left = int(g.get("sprints") or 0) - len(g.get("approved") or [])
         return f"{left} of {int(g.get('sprints') or 0)} approvals left"

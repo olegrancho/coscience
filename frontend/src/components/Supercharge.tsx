@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 import { api, type ApprovalGrant } from "../api";
 import { RelTime } from "./ui";
 
-type Limit = "sprints" | "until" | "window5h" | "week";
+type Limit = "sprints" | "until" | "window5h" | "week" | "paced";
 
 /** The dialog that lends the planner approval authority (M2): pick one limit, grant. */
 export function SuperchargeModal({ programId, opened, onClose, onDone }:
@@ -55,6 +55,8 @@ export function SuperchargeModal({ programId, opened, onClose, onDone }:
             </Group>
             <Radio value="window5h" label="Until the current 5-hour usage window resets or runs low" />
             <Radio value="week" label="Until the current weekly usage window resets or runs low" />
+            <Radio value="paced" label="Paced to the week, until revoked"
+                   description="Approves only while weekly usage is below the share of the week gone; pauses when ahead and resumes as the week catches up." />
           </Stack>
         </Radio.Group>
         <Group justify="flex-end" gap={8}>
@@ -63,6 +65,25 @@ export function SuperchargeModal({ programId, opened, onClose, onDone }:
         </Group>
       </Stack>
     </Modal>
+  );
+}
+
+/** Weekly usage against the week's progress (M3): approving while the fill stays left
+ *  of the mark. */
+function PaceBar({ used, elapsed }: { used: number; elapsed: number }) {
+  const ahead = used >= elapsed;
+  return (
+    <div style={{ marginTop: 8, maxWidth: 420 }} data-testid="pace-bar">
+      <div style={{ position: "relative", height: 8, borderRadius: 999, background: "var(--paper-2)" }}>
+        <div style={{ height: "100%", width: `${Math.min(100, used)}%`, borderRadius: 999,
+                      background: ahead ? "var(--signal)" : "var(--machine)" }} />
+        <span style={{ position: "absolute", left: `${elapsed}%`, top: -3, bottom: -3, width: 2,
+                       marginLeft: -1, background: "var(--ink)" }} />
+      </div>
+      <Text size="xs" c="dimmed" mt={4} className="mono">
+        weekly usage {Math.round(used)}% · {Math.round(elapsed)}% of the week gone
+      </Text>
+    </div>
   );
 }
 
@@ -94,8 +115,9 @@ export function GrantBanner({ programId, grant, onChange }:
       <Group justify="space-between" align="flex-start" wrap="nowrap" gap="md">
         <div>
           <Text size="sm" fw={600}>
-            {live ? "⚡ The planner is approving sprints on its own"
-                  : "The planner's approval grant has ended"}
+            {!live ? "The planner's approval grant has ended"
+              : grant.held ? "⚡ The planner's approval is paused — usage is ahead of the week"
+              : "⚡ The planner is approving sprints on its own"}
           </Text>
           <Text size="sm" mt={4}>
             {live
@@ -103,6 +125,7 @@ export function GrantBanner({ programId, grant, onChange }:
               : <>It ended <RelTime at={grant.ended_at} />: {grant.end_reason}. </>}
             <Approved ids={grant.approved} />
           </Text>
+          {live && grant.pace && <PaceBar used={grant.pace.used} elapsed={grant.pace.elapsed} />}
         </div>
         {live
           ? <Button size="xs" variant="white" color="signal"

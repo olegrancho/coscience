@@ -1439,7 +1439,9 @@ class Service:
         if not g or g.get("dismissed"):
             return None
         live = _grant.is_live(g, now, repo_root=self.substrate.repo_root)
-        return {**g, "live": live, "remaining": _grant.remaining(g, now) if live else ""}
+        held = _grant.hold_reason(g, now) if live else ""
+        return {**g, "live": live, "remaining": _grant.remaining(g, now) if live else "",
+                "held": held, "pace": _grant.pace(now) if live and g.get("limit") == "paced" else None}
 
     def grant_approval(self, program_id: str, by: str, limit: str, *, sprints: int = 0,
                        until: float = 0.0) -> dict | None:
