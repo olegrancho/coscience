@@ -1,17 +1,10 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 235
-last_updated: 2026-10-04
+version: 238
+last_updated: 2026-10-06
 ---
 
 # To QC
-
-### B2. Keep the experiments list's filters across a visit to an experiment
-
-"Only new", the status selector and "show all" on the program page are kept per program for the browser tab.
-
-**Check:** set a status and tick "only new" on a program, open an experiment, come back
-by Back and again from the nav: both settings hold. A new tab starts unfiltered.
 
 ### I3. Add a day-by-day narrative to the catch-up report
 
@@ -36,15 +29,6 @@ Promoted sprints record `from_idea`; an idea id mentioned after its promotion li
 says was "promoted to a sprint" is a link and opens that sprint; an old planner report's
 link to that idea does the same. The backfill matched by wording where the history held
 no exact record, so a wrong pairing is possible but none showed against the 13 exact ones.
-
-### N1. Show each experiment's lineage below its results
-
-An experiment's page has a Lineage card under Results: "Where it came from" (its own edges) and "What followed" (edges pointing at it), one row per other experiment or idea, read live from the program's graph.
-
-**Check:** open an experiment with several links (one with both incoming and outgoing
-edges); the card names each related experiment by title with how it is linked, and
-"on the graph →" lands on the program page's lineage. It shows direct relations only,
-not ancestors further back.
 
 ### D1. Lay the lineage graph out compactly instead of in one wide band
 
@@ -72,6 +56,15 @@ follow-up's reply starts noticeably sooner, and Compute names the chat as waitin
 in between. After 10 quiet minutes it drops off Compute, and the next message still
 continues the same conversation. A backend restart ends waiting agents; the next
 message resumes as before.
+
+### M3. Add a paced approval mode that keeps weekly usage on schedule
+
+Supercharge has a fifth limit, "Paced to the week, until revoked": the planner may approve only while weekly usage is below the share of the week gone; ahead of pace the grant pauses (banner says so, with a pace bar) and resumes as the week catches up.
+
+**Check:** grant "paced" on a program while usage is behind the week: the banner shows
+the pace bar and the planner approves. When usage is ahead, the banner reads "paused",
+the next PM cycle's actions show approvals refused as "paused", and the grant has not
+ended. Revoke works as for the other limits.
 
 # To Do (sprint)
 
@@ -190,11 +183,6 @@ needs its planner mid-sprint has only the escalation, which stops the sprint —
 heavy for a question. The inbox is the light path: leave it, keep working, read the
 reply next beat. Needs a delivery rule (does an unread message wake a cycle?) and a
 decision on whether worker-to-worker is in scope. Blocked on F1.
-
-## L. Wiki quality improvement
-
-The wiki answers the questions actually brought to it, and we know that from
-evidence rather than impression.
 
 ## M. Delegated approval
 
@@ -322,6 +310,14 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### N1. Show each experiment's lineage below its results
+
+Each experiment's page has a Lineage card under Results, read live from the program's graph: where it came from and what followed.
+
+### B2. Keep the experiments list's filters across a visit to an experiment
+
+The experiments list's "only new", status and "show all" filters are kept per program for the browser tab.
+
 ### K1. Make every sprint and idea reference a link
 
 Sprint ids, short forms and idea ids written in chats, reports and pages render as links; an idea link opens the Ideas page at that idea.
@@ -353,11 +349,3 @@ The planner, chat and worker prompts now carry each sprint's title next to its i
 ### E1. Stop the dispatch loop committing every few seconds
 
 The substrate's dispatch commits now follow real events (340 a day before, 26 in the 20 hours after), wiki runs land in one commit each, and sprint job logs are untracked.
-
-### L13. Give every shared alias one owning page
-
-The topic schema, ingest rules and migration map give a shared alias to the topic page, and lint's near-duplicate warning names which page keeps it.
-
-### L12. Make program documentation a source the wiki can cite and track
-
-Workdir docs ticked in Wiki settings are ingested as `doc:` sources, re-ingested when edited, cited from background pages, and checked by sweeps.
