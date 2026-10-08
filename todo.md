@@ -1,70 +1,19 @@
 ---
 scope: Co-Science platform — development work on wiki ingest reliability and LLM cost visibility.
-version: 238
-last_updated: 2026-10-06
+version: 243
+last_updated: 2026-10-08
 ---
 
 # To QC
 
-### I3. Add a day-by-day narrative to the catch-up report
-
-The catch-up request asks for a "Day by day" section, after the key numbers: a dated heading per day since the last report, at most two short paragraphs, quiet days skipped.
-
-**Check:** "Write one now" on a program's Catch-up page; the report has the section, in
-date order, and no day runs past two paragraphs.
-
-### K3. Give every sprint a number no other sprint in its program has
-
-New planner sprints are `<program>-s<n>-<slug>`, numbered per program from above every number already used; a sprint records the cycle that proposed it, so re-applying a staged cycle finds it again.
-
-**Check:** the next planner proposals in a live program carry `-s<n>-` numbers that
-differ from each other, and a short form like `<program>-s<n>` in a chat links to its
-sprint. Proposals a person makes keep their unnumbered ids.
-
-### K4. Link a promoted idea's id to the sprint it became
-
-Promoted sprints record `from_idea`; an idea id mentioned after its promotion links to the sprint, and an old Ideas-page link to it forwards there. Past promotions were backfilled from history (118 sprints).
-
-**Check:** in the summary at the top of a program's Ideas page, an id the summary
-says was "promoted to a sprint" is a link and opens that sprint; an old planner report's
-link to that idea does the same. The backfill matched by wording where the history held
-no exact record, so a wrong pairing is possible but none showed against the 13 exact ones.
-
-### D1. Lay the lineage graph out compactly instead of in one wide band
-
-The auto-layout places each node by one parent edge (a tree) and still draws every edge; separate clusters and edgeless nodes are packed into rows instead of one band.
-
-**Check:** "Auto-layout" on the largest program's lineage card, and on a small one
-with several loose ideas: the large one needs far less sideways panning, the small one
-fits the card. The card's zoom still stops at 50%, so a big graph still pans; nodes you
-dragged by hand keep their places until Auto-layout.
-
-### G1. Edit the usage thresholds from Compute → Claude usage
-
-Each kind of agent's stop line in the 5-hour and weekly windows is set from Compute ("Change them" under the usage bars) and kept in one substrate file the loops read on every check; the bars mark each line.
-
-**Check:** on Compute, lower the wiki 5-hour line below current usage and save; the
-mark moves, and the next wiki batch waits (the dispatch log says usage) without any
-restart. Put it back after. Chats are not gated by these.
-
 ### B3. Keep a chat's agent running between replies for a while
 
-A chat's agent now stays up after replying and takes the next message on its input, closing after 10 idle minutes (`COSCIENCE_CHAT_KEEPALIVE`, 0 = off); Compute → Claude usage lists the ones kept open.
+A chat's agent stays up for 10 idle minutes after replying and takes the next message on its input; a follow-up to it now reads "Thinking…" instead of "Starting up", and the side panel says "N chat(s) waiting for you" while one is open.
 
-**Check:** in a chat, send a message, then a follow-up within a few minutes: the
-follow-up's reply starts noticeably sooner, and Compute names the chat as waiting
-in between. After 10 quiet minutes it drops off Compute, and the next message still
-continues the same conversation. A backend restart ends waiting agents; the next
-message resumes as before.
-
-### M3. Add a paced approval mode that keeps weekly usage on schedule
-
-Supercharge has a fifth limit, "Paced to the week, until revoked": the planner may approve only while weekly usage is below the share of the week gone; ahead of pace the grant pauses (banner says so, with a pace bar) and resumes as the week catches up.
-
-**Check:** grant "paced" on a program while usage is behind the week: the banner shows
-the pace bar and the planner approves. When usage is ahead, the banner reads "paused",
-the next PM cycle's actions show approvals refused as "paused", and the grant has not
-ended. Revoke works as for the other limits.
+**Check:** send a message, then a follow-up within a few minutes: between them the side
+panel shows "1 chat waiting for you · <program>"; while the follow-up is answered the
+chat says "Thinking…". Ten quiet minutes later the line is gone. Expect seconds saved,
+not a faster model: a thinking model's reply time is unchanged.
 
 # To Do (sprint)
 
@@ -86,10 +35,6 @@ Reading one experiment shows where it came from and what followed it, without op
 ## D. Lineage graph
 
 A program's lineage reads at a glance on one screen, without panning sideways to find its parts.
-
-## E. Substrate history
-
-The substrate's git history records work and decisions, not the loops' heartbeat.
 
 ## G. Usage budget
 
@@ -310,6 +255,30 @@ short note in `CLAUDE.md` says what not to reintroduce.
 
 # Done
 
+### K4. Link a promoted idea's id to the sprint it became
+
+Promoted sprints record `from_idea` (118 past ones backfilled), so a promoted idea's id and old links to it lead to its sprint.
+
+### K3. Give every sprint a number no other sprint in its program has
+
+New planner sprints are `<program>-s<n>-<slug>`, numbered per program, so every short id names one sprint.
+
+### M3. Add a paced approval mode that keeps weekly usage on schedule
+
+A paced grant lets the planner approve only while weekly usage is behind the week's progress, pausing and resuming on its own until revoked.
+
+### G1. Edit the usage thresholds from Compute → Claude usage
+
+Each agent kind's 5-hour and weekly stop lines are set from Compute, kept in a substrate file the loops read each check, and marked on the usage bars.
+
+### D1. Lay the lineage graph out compactly instead of in one wide band
+
+The lineage auto-layout places nodes by one parent edge, draws every edge, and packs clusters and loose nodes into rows.
+
+### I3. Add a day-by-day narrative to the catch-up report
+
+Catch-up reports carry a dated "Day by day" section, at most two paragraphs a day, quiet days skipped.
+
 ### N1. Show each experiment's lineage below its results
 
 Each experiment's page has a Lineage card under Results, read live from the program's graph: where it came from and what followed.
@@ -325,27 +294,3 @@ Sprint ids, short forms and idea ids written in chats, reports and pages render 
 ### O21. Show the agent a launch command that lets go of the ssh channel
 
 Workers launch remote jobs in the two-call form, and a live launch returned in seconds with the job running on.
-
-### M2. Build the supercharge control
-
-The ⚡ button on the program page opens the grant dialog, and a live or ended grant shows as a banner with what it approved, Revoke and Dismiss.
-
-### M1. Let a human grant the PM bounded approval authority
-
-Under a live approval grant, limited by approvals, a deadline or a usage window, the planner approves proposed sprints itself; each approval is checked against the limit and recorded on the sprint.
-
-### I2. Highlight new sprint events on the lineage graph
-
-Lineage nodes whose sprints changed since this browser last looked are ringed until they are seen.
-
-### I1. Write catch-up reports, and give them a page
-
-The planner writes a catch-up report weekly once enough sprints have finished, or on demand, and each program has a Catch-up page listing them.
-
-### K2. Show the planner sprint titles, and have it link with them
-
-The planner, chat and worker prompts now carry each sprint's title next to its id, and tell the agent to link sprints by title.
-
-### E1. Stop the dispatch loop committing every few seconds
-
-The substrate's dispatch commits now follow real events (340 a day before, 26 in the 20 hours after), wiki runs land in one commit each, and sprint job logs are untracked.
