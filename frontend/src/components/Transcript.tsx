@@ -42,17 +42,18 @@ function hasJsonEvents(raw: string): boolean {
   return false;
 }
 
-export function Transcript({ raw }: { raw: string }) {
+export function Transcript({ raw, waiting = "Starting up — no agent activity yet." }:
+  { raw: string; waiting?: string }) {
   const turns = parseTranscript(raw);
   if (!turns.length) {
     // A valid event stream with nothing to show yet (e.g. only the init event on the
     // first poll) — show a placeholder, NOT the raw JSON. Only fall back to verbatim
     // for genuine plain-text logs with no JSON events at all.
-    if (hasJsonEvents(raw)) return <Text size="sm" c="dimmed">Starting up — no agent activity yet.</Text>;
+    if (hasJsonEvents(raw)) return <Text size="sm" c="dimmed">{waiting}</Text>;
     return raw.trim()
       ? <pre className="mono" style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word",
              fontSize: 12.5, lineHeight: 1.5, maxHeight: 440, overflow: "auto" }}>{raw}</pre>
-      : <Text size="sm" c="dimmed">Starting up — no agent activity yet.</Text>;
+      : <Text size="sm" c="dimmed">{waiting}</Text>;
   }
   return (
     <Stack gap={7} style={{ maxHeight: 460, overflowY: "auto", overflowX: "hidden" }}>

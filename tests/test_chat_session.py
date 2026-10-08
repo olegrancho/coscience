@@ -147,3 +147,15 @@ def test_deleting_a_chat_ends_its_waiting_agent(tmp_path, fake_claude):
     svc.delete_chat("p1", tid)
     assert not is_running(tok)
     assert chat_session.read_meta(tdir) == {}
+
+
+def test_a_reused_agent_is_warm_and_a_fresh_one_is_not(tmp_path, fake_claude):
+    claude, _ = fake_claude
+    tdir = tmp_path / "thread"
+    tok = _turn(tdir, tmp_path, "hello", claude)
+    _reply(tdir)
+    assert not chat_session.warm(tdir)               # its first turn was a start-up
+    _turn(tdir, tmp_path, "again", claude, resume=True)
+    _reply(tdir)
+    assert chat_session.warm(tdir)                   # the follow-up went to it running
+    terminate_detached(tok)

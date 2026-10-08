@@ -1203,11 +1203,11 @@ class Service:
 
     # --- PM chat (ask the planner clarifying questions; answer-only) ---
     @staticmethod
-    def _chat_public(thread: ChatThread, live: str = "") -> dict:
+    def _chat_public(thread: ChatThread, live: str = "", warm: bool = False) -> dict:
         return {"id": thread.id, "title": thread.title, "scope": thread.scope,
                 "created_at": thread.created_at, "turns_done": thread.turns_done,
                 "busy": thread.pending, "messages": list(thread.messages), "live": live,
-                "artifacts": list(thread.artifacts)}
+                "warm": warm, "artifacts": list(thread.artifacts)}
 
     def _migrate_legacy_chat(self, program_id: str) -> None:
         """One-time: fold a pre-threads chat.md into a single imported thread."""
@@ -1274,11 +1274,14 @@ class Service:
 
     def get_chat_thread(self, program_id: str, thread_id: str) -> dict:
         thread = self._collect_if_ready(program_id, self._thread_or_404(program_id, thread_id))
-        live = ""
+        live, warm = "", False
         if thread.pending:
-            out = self.substrate.chat_thread_dir(program_id, thread_id) / "turn.out"
+            tdir = self.substrate.chat_thread_dir(program_id, thread_id)
+            out = tdir / "turn.out"
             live = out.read_text() if out.exists() else ""
-        return self._chat_public(thread, live=live)
+            from coscience import chat_session
+            warm = chat_session.warm(tdir)
+        return self._chat_public(thread, live=live, warm=warm)
 
     def rename_chat(self, program_id: str, thread_id: str, title: str) -> dict:
         thread = self._thread_or_404(program_id, thread_id)

@@ -55,6 +55,8 @@ export interface ChatThreadSummary {
 export interface ChatThread {
   id: string; title: string; scope: ChatScope; created_at: number;
   turns_done: number; busy: boolean; messages: ChatMessage[]; live: string; artifacts: string[];
+  /** The turn in flight went to an agent that was already running (B3). */
+  warm?: boolean;
 }
 export interface FeedbackMessage { role: "human" | "pm" | "worker"; text: string; by?: string; at: number }
 export interface FeedbackThreadT { id: string; target: "pm" | "worker"; status: "open" | "complete"; agent_unseen: boolean; created_at: number; messages: FeedbackMessage[] }

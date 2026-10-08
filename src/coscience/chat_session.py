@@ -115,10 +115,12 @@ def _run_turn(proc, thread_dir: Path, prompt: str) -> int | None:
     return None
 
 
-def _set_state(thread_dir: Path, state: str) -> None:
+def _set_state(thread_dir: Path, state: str, next_turn: bool = False) -> None:
     meta = read_meta(thread_dir)
     if meta:
         meta["state"] = state
+        if next_turn:
+            meta["turns"] = int(meta.get("turns", 1)) + 1
         meta["at"] = time.time()
         _write_json(control_dir(thread_dir) / META, meta)
 
@@ -137,7 +139,7 @@ def _next_message(thread_dir: Path, idle: float) -> str | None:
                     except (OSError, ValueError):
                         prompt = ""
                     inbox.unlink(missing_ok=True)
-                    _set_state(thread_dir, "busy")
+                    _set_state(thread_dir, "busy", next_turn=True)
                     return prompt
                 if time.monotonic() >= deadline:
                     _set_state(thread_dir, "closing")
@@ -155,7 +157,7 @@ def host(thread_dir: Path, prompt: str, *, workdir: str, scope: str, session_id:
         _write_json(control_dir(thread_dir) / META, {
             "token": process_token(os.getpid()), "scope": scope, "model": model,
             "workdir": workdir, "session_id": session_id, "state": "busy", "at": time.time(),
-            "thread_dir": str(thread_dir), "idle_limit": idle})
+            "thread_dir": str(thread_dir), "idle_limit": idle, "turns": 1})
     code = 1
     try:
         while prompt is not None:
@@ -218,6 +220,15 @@ def stop(thread_dir: Path) -> None:
     with locked(thread_dir):
         (control_dir(thread_dir) / META).unlink(missing_ok=True)
         (control_dir(thread_dir) / INBOX).unlink(missing_ok=True)
+
+
+def warm(thread_dir: Path) -> bool:
+    """Is this thread's current turn going to an agent that was already running (B3)?
+    The chat then says it is thinking, not starting up."""
+    from coscience.executor import is_running
+    meta = read_meta(thread_dir)
+    return (int(meta.get("turns", 1)) > 1 and bool(meta.get("token"))
+            and is_running(meta["token"]))
 
 
 def live_sessions() -> list[dict]:

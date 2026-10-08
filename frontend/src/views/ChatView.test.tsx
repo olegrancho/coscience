@@ -205,3 +205,27 @@ describe("ChatView chat switcher with a stale list", () => {
     });
   });
 });
+
+describe("a reply under way (B3)", () => {
+  const init = JSON.stringify({ type: "system", subtype: "init", session_id: "s" });
+  const busy = (warm: boolean) => {
+    vi.spyOn(api, "getProgram").mockResolvedValue({ id: "p", title: "P" } as any);
+    vi.spyOn(api, "listChats").mockResolvedValue([
+      { id: "c1", title: "t", scope: "read", created_at: 1, busy: true, messages: 1, last_at: 1, artifacts: [] }] as any);
+    vi.spyOn(api, "getChatThread").mockResolvedValue({
+      id: "c1", title: "t", scope: "read", created_at: 1, turns_done: 1, busy: true,
+      messages: [{ role: "user", text: "and then?", at: 1 }], live: init, warm, artifacts: [] } as any);
+  };
+
+  it("says Thinking when the agent was already running", async () => {
+    busy(true);
+    renderAt();
+    expect(await screen.findByText("Thinking…")).toBeTruthy();
+  });
+
+  it("says Starting up when it had to start one", async () => {
+    busy(false);
+    renderAt();
+    expect(await screen.findByText(/Starting up/)).toBeTruthy();
+  });
+});

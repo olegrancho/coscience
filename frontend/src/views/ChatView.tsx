@@ -285,7 +285,9 @@ export default function ChatView() {
                       <div style={{ alignSelf: "flex-start", maxWidth: "92%", width: "100%",
                         background: "var(--paper)", border: "1px dashed var(--hairline)", borderRadius: 10, padding: "10px 13px" }}>
                         <Group gap={7} mb={6}><Loader size="xs" color="machine" /><Text size="xs" c="dimmed">PM is working…</Text></Group>
-                        <Transcript raw={t?.live ?? ""} />
+                        {/* A follow-up to an agent kept running (B3) is not a start-up. */}
+                        <Transcript raw={t?.live ?? ""}
+                                    waiting={t?.warm ? "Thinking…" : undefined} />
                       </div>
                     )}
                   </Stack>

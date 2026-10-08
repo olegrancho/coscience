@@ -6,8 +6,10 @@ import { MantineProvider } from "@mantine/core";
 const callLog = vi.fn();
 const programs = vi.fn();
 const sprints = vi.fn();
+const usage = vi.fn();
 vi.mock("../api", () => ({ api: {
   getCallLog: () => callLog(), listPrograms: () => programs(), listSprints: () => sprints(),
+  getUsage: () => usage(),
 } }));
 
 beforeAll(() => {
@@ -42,6 +44,22 @@ beforeEach(() => {
   programs.mockResolvedValue([]);
   sprints.mockReset();
   sprints.mockResolvedValue([]);
+  usage.mockReset();
+  usage.mockResolvedValue({ budget: null, runs: {}, chat_sessions: [] });
+});
+
+describe("chats kept open between replies (B3)", () => {
+  it("names the ones waiting, but not one mid-reply (that is a call above)", async () => {
+    callLog.mockResolvedValue({ calls: [] });
+    usage.mockResolvedValue({ budget: null, runs: {}, chat_sessions: [
+      { program: "p6", thread: "t1", title: "Catch-up", state: "idle", since: 1, idle_limit: 600 },
+      { program: "p2", thread: "t2", title: "Busy", state: "busy", since: 1, idle_limit: 600 },
+    ] });
+    renderIt();
+    const line = await screen.findByTestId("waiting-chats");
+    expect(line.textContent).toBe("1 chat waiting for you · p6");
+    expect(screen.getByText("no agents running")).toBeTruthy();
+  });
 });
 
 describe("LiveAgents in the rail", () => {

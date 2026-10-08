@@ -44,6 +44,9 @@ export default function LiveAgents() {
   });
   // Same keys the rest of the app uses, so the rail reads the cached lists.
   const programs = useQuery({ queryKey: ["programs"], queryFn: api.listPrograms });
+  // Chats whose agent is kept up between replies (B3): no call, so not "calling
+  // Claude", but a running agent all the same — said here so it is not invisible.
+  const usage = useQuery({ queryKey: ["usage"], queryFn: api.getUsage, refetchInterval: 30_000 });
   const sprints = useQuery({ queryKey: ["sprints"], queryFn: api.listSprints });
 
   if (log.isError || !log.data) return null;
@@ -57,6 +60,8 @@ export default function LiveAgents() {
     .sort((a, b) => (a.started_at ?? 0) - (b.started_at ?? 0));
 
   const now = Date.now();
+  // A chat mid-reply already shows as a call above; list only the ones waiting.
+  const waiting = (usage.data?.chat_sessions ?? []).filter((w) => w.state === "idle");
 
   return (
     <div style={{ display: "grid", gap: 6, marginTop: 4 }}>
@@ -78,6 +83,20 @@ export default function LiveAgents() {
           </Tooltip>
         )}
       </div>
+
+      {waiting.length > 0 && (
+        <Tooltip withArrow multiline maw={340} openDelay={120} position="right"
+                 transitionProps={{ duration: 0 }}
+                 label={<div>{waiting.map((w) => (
+                   <div key={`${w.program}/${w.thread}`}>{w.title || w.thread} · {titles.get(w.program) ?? w.program}</div>
+                 ))}Kept open for a quick follow-up; uses nothing while it waits.</div>}>
+          <div data-testid="waiting-chats" style={{ fontSize: 11, paddingLeft: 17, color: "var(--ink-faint)", cursor: "help" }}>
+            <span className="mono">{waiting.length}</span>
+            {waiting.length === 1 ? " chat" : " chats"} waiting for you
+            {" · "}<span className="mono">{[...new Set(waiting.map((w) => w.program))].join(", ")}</span>
+          </div>
+        </Tooltip>
+      )}
 
       {live.map((c) => (
         <Tooltip key={c.id} label={hover(c)} withArrow multiline maw={340} openDelay={120}
